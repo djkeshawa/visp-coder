@@ -146,4 +146,4 @@ On VISP's own benchmark (`bench/`: four tasks with hidden checks, Claude Haiku 4
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE). Copyright 2026 Dineth Keshawa Jayathilaka; see [NOTICE](NOTICE).
