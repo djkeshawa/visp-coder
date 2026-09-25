@@ -74,3 +74,36 @@ it("adds the given check to a slice that has none", async () => {
   expect(work.ok, JSON.stringify(work)).toBe(true);
   expect(work.ok && work.value.checks.map((check) => check.id)).toEqual(["T001-C1"]);
 });
+
+it("leaves slices that already have checks unchanged", async () => {
+  const fixture = await productWorkspace();
+  workspace = fixture.workspace;
+  const work = await runProductWork(await workspace.state(), {
+    task: "T001",
+    check: `${process.execPath} --test test/other.test.mjs`,
+  });
+  expect(work.ok, JSON.stringify(work)).toBe(true);
+  expect(work.ok && work.value.checks.map((check) => check.id)).toEqual(["C001"]);
+});
+
+// Checks run without a shell, so shell syntax is refused before anything is authorized.
+it("refuses a light-path check the brief cannot hold, and a feature that does not exist", async () => {
+  const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+  const { TestWorkspace } = await import("../../support/workspace.js");
+  workspace = await TestWorkspace.create({ "src/value.mjs": "export const value = 1;\n" });
+  await workspace.installFoundation();
+  workspace.commit("install foundation");
+  const feature = await createProductFeature(await workspace.state(), { goal: "Return two" });
+  if (!feature.ok) throw new Error(feature.error.message);
+  const shell = await runProductWork(await workspace.state(), {
+    check: "npm test && npm run lint",
+  });
+  expect(shell.ok).toBe(false);
+  if (!shell.ok) expect(shell.error.message).toContain("shell syntax");
+  const missing = await runProductWork(await workspace.state(), {
+    feature: "999-missing",
+    check: "npm test",
+  });
+  expect(missing.ok).toBe(false);
+  if (!missing.ok) expect(missing.error.code).toBe("ARTIFACT_MISSING");
+});

@@ -6,6 +6,7 @@ import {
   CLAUDE_SETTINGS_FILE,
   hookCommand,
   PRE_TOOL_USE_MATCHER,
+  planPreToolUseRegistration,
   planPreToolUseUnregistration,
   preToolUseRegistration,
   registerPreToolUseHook,
@@ -157,6 +158,30 @@ describe("registerPreToolUseHook", () => {
     const result = await registerPreToolUseHook(root, HOOK_PATH, false);
     expect(result.ok && result.value).toBe("added");
   });
+
+  /** Parseable settings whose hooks Claude Code could not read either. */
+  it.each([
+    ["hooks is an array", { hooks: [] }],
+    ["PreToolUse is not an array", { hooks: { PreToolUse: { matcher: "Edit" } } }],
+    ["a PreToolUse entry is not an object", { hooks: { PreToolUse: ["./audit.sh"] } }],
+  ])("refuses to rewrite settings when %s", async (_shape, settings) => {
+    const content = JSON.stringify(settings);
+    await write(content);
+
+    const result = await registerPreToolUseHook(root, HOOK_PATH, false);
+    expect(result.ok && result.value).toBe("malformed");
+    expect(await readFile(join(root, CLAUDE_SETTINGS_FILE), "utf8")).toBe(content);
+  });
+
+  it("replaces malformed hooks when forced and keeps other settings", async () => {
+    await write(JSON.stringify({ model: "opus", hooks: { PreToolUse: "./audit.sh" } }));
+
+    const result = await registerPreToolUseHook(root, HOOK_PATH, true);
+    expect(result.ok && result.value).toBe("replaced");
+    const next = await read();
+    expect(next.model).toBe("opus");
+    expect(next.hooks?.PreToolUse?.[0]?.matcher).toBe(PRE_TOOL_USE_MATCHER);
+  });
 });
 
 describe("preToolUseRegistration", () => {
@@ -258,6 +283,65 @@ describe("planPreToolUseUnregistration", () => {
     const planned = planPreToolUseUnregistration(current, HOOK_PATH);
 
     expect(planned).toEqual({ status: "customized" });
+  });
+
+  it("reports absent when there is no settings file", () => {
+    expect(planPreToolUseUnregistration(undefined, HOOK_PATH)).toEqual({ status: "absent" });
+  });
+
+  it.each([
+    ["unparseable", "{ not json"],
+    ["hooks is not an object", JSON.stringify({ hooks: "none" })],
+    ["PreToolUse is not an array", JSON.stringify({ hooks: { PreToolUse: {} } })],
+  ])("leaves %s settings alone", (_shape, current) => {
+    expect(planPreToolUseUnregistration(current, HOOK_PATH)).toEqual({ status: "malformed" });
+  });
+});
+
+// Installs from before the session hooks have only the edit hook; projects keep their own.
+describe("session hooks", () => {
+  const editOnly = {
+    matcher: PRE_TOOL_USE_MATCHER,
+    hooks: [{ type: "command", command: hookCommand(HOOK_PATH) }],
+  };
+  const notify = { hooks: [{ type: "command", command: "./notify.sh" }] };
+  const staleStop = { hooks: [{ type: "command", command: hookCommand(HOOK_PATH), timeout: 5 }] };
+
+  it("adds the prompt, Stop and shell hooks to an older install without touching the project's", () => {
+    const current = JSON.stringify({
+      hooks: { PreToolUse: [editOnly], Stop: [notify, staleStop], PostToolUse: [notify] },
+    });
+    const planned = planPreToolUseRegistration(current, HOOK_PATH, false);
+    if (!planned.ok) throw new Error(planned.error.message);
+    expect(planned.value.status).toBe("replaced");
+    const next = JSON.parse(planned.value.content ?? "null") as {
+      hooks: Record<"PreToolUse" | "PostToolUse" | "Stop" | "UserPromptSubmit", HookEntry[]>;
+    };
+    expect(next.hooks.PostToolUse).toEqual([notify]);
+    expect(next.hooks.Stop).toHaveLength(2);
+    expect(next.hooks.Stop[0]).toEqual(notify);
+    expect(next.hooks.Stop[1]).not.toEqual(staleStop);
+    expect(next.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(next.hooks.PreToolUse.map((entry) => entry.matcher)).toEqual([
+      PRE_TOOL_USE_MATCHER,
+      "Bash",
+    ]);
+    const again = planPreToolUseRegistration(planned.value.content, HOOK_PATH, false);
+    expect(again.ok && again.value).toEqual({ status: "current" });
+  });
+
+  it("removes only VISP's session hooks", () => {
+    const planned = planPreToolUseRegistration(
+      JSON.stringify({ hooks: { PreToolUse: [editOnly], Stop: [notify] } }),
+      HOOK_PATH,
+      false,
+    );
+    if (!planned.ok) throw new Error(planned.error.message);
+    const removed = planPreToolUseUnregistration(planned.value.content, HOOK_PATH);
+    expect(removed.status).toBe("removed");
+    expect(JSON.parse(removed.content ?? "null")).toEqual({
+      hooks: { PreToolUse: [], Stop: [notify] },
+    });
   });
 });
 
