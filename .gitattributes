@@ -1,0 +1,2 @@
+# Check out text with LF everywhere: fixtures and generated-block hashes are byte-exact.
+* text=auto eol=lf

@@ -197,7 +197,9 @@ describe("quality-first comparison preparation", () => {
     const toolHash = prepared.tools[0]?.sha256;
     if (!toolHash) throw new Error("Expected pinned tool");
     const original = fileSystem.lstat;
-    let oversized = join(output, "objects", toolHash);
+    // The reader resolves the directory (macOS temporary paths sit under the /var symlink).
+    const objects = join(await fileSystem.realpath(output), "objects");
+    let oversized = join(objects, toolHash);
     let bytes = 300 * 1024 * 1024;
     vi.spyOn(fileSystem, "lstat").mockImplementation((async (
       path: Parameters<typeof original>[0],
@@ -209,7 +211,7 @@ describe("quality-first comparison preparation", () => {
     expect(await readPreparedComparison(output)).toEqual(prepared);
     bytes = 513 * 1024 * 1024;
     await expect(readPreparedComparison(output)).rejects.toThrow("object integrity");
-    oversized = join(output, "objects", prepared.legacy.archiveSha256);
+    oversized = join(objects, prepared.legacy.archiveSha256);
     bytes = 300 * 1024 * 1024;
     await expect(readPreparedComparison(output)).rejects.toThrow("object integrity");
   });

@@ -1,5 +1,5 @@
 import { mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { vispError } from "../../../src/core/errors.js";
 import { exists, ProjectFileSystem } from "../../../src/core/fs.js";
@@ -55,11 +55,13 @@ describe("transactional harness installation", () => {
       this: ProjectFileSystem,
       path,
     ) {
-      const relativePath = relative(workspace.root, path);
+      // The file system resolves relative paths against the project root, not the process.
+      const target = resolve(workspace.root, path);
+      const relativePath = relative(workspace.root, target);
       if (
         !relativePath.startsWith(`..${sep}`) &&
         relativePath.split(sep).length > 1 &&
-        !(await exists(dirname(path)))
+        !(await exists(dirname(target)))
       ) {
         return err(
           vispError("IO_ERROR", `ENOENT: no such file or directory, mkdir '${relativePath}'`),
@@ -183,7 +185,9 @@ describe("transactional harness installation", () => {
 
   it("refuses a hostile nested parent symlink before creating any asset", async () => {
     const state = await workspace.state();
-    await symlink("/tmp", join(workspace.root, ".agents"), "dir");
+    // An absolute target outside the project; Windows reads "/tmp" back with its drive.
+    const outside = resolve("/tmp");
+    await symlink(outside, join(workspace.root, ".agents"), "dir");
 
     const result = await installHarness(state.paths, {
       harness: "codex",
@@ -194,7 +198,7 @@ describe("transactional harness installation", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toContain("symlink component");
-    expect(await readlink(join(workspace.root, ".agents"))).toBe("/tmp");
+    expect(await readlink(join(workspace.root, ".agents"))).toBe(outside);
     expect(await exists(join(workspace.root, "AGENTS.visp.md"))).toBe(false);
   });
 

@@ -678,7 +678,8 @@ async function runBaseline(root: string, command: string[], extra: Record<string
     const child = spawn(file, args, {
       cwd: root,
       env: { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra },
-      detached: true,
+      // Its own process group on POSIX; on Windows detached would open a new console.
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
     const collect = (chunk: Buffer) => {
@@ -688,7 +689,9 @@ async function runBaseline(root: string, command: string[], extra: Record<string
     child.stderr.on("data", collect);
     const endGroup = () => {
       try {
-        if (child.pid) process.kill(-child.pid, "SIGKILL");
+        // Windows has no process groups to signal; there the child itself is ended.
+        if (process.platform === "win32") child.kill("SIGKILL");
+        else if (child.pid) process.kill(-child.pid, "SIGKILL");
       } catch {
         // The group already exited.
       }

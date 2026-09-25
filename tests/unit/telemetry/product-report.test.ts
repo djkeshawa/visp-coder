@@ -55,7 +55,8 @@ describe("current product reporting", () => {
     const statePath = join(workspace.root, ".visp/features", feature ?? "", "product-state.json");
     const before = await readFile(statePath);
     const summary = value(await capabilityUtilization(state));
-    expect(summary.product).toMatchObject({
+    // On failure, show the recorded executions: their status says why a check did not count.
+    expect(summary.product, before.toString("utf8").slice(0, 6000)).toMatchObject({
       features: 1,
       executions: { recorded: 2, passed: 1, failed: 1, current: 1, stale: 1 },
       reviews: { recorded: 1, current: 1, stale: 0 },

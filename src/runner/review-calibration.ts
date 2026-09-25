@@ -1,5 +1,5 @@
-import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { canonicalJson, hashValue, sha256 } from "../core/hash.js";
 import { criticConfigSchema } from "../workflow/product/critic-model.js";
@@ -45,8 +45,10 @@ export async function prepareReviewCalibration(directory: string, input: unknown
   )
     throw new Error("Calibration requires three scenarios with defective and control variants");
   const objects = join(directory, "objects");
+  // lstat refuses a symlinked file; symlinked parent directories are ordinary (macOS keeps
+  // temporary directories under the /var symlink) and do not change the pinned bytes.
   const pin = async (path: string) => {
-    if ((await realpath(path)) !== resolve(path) || !(await lstat(path)).isFile())
+    if (!(await lstat(path)).isFile())
       throw new Error("Calibration inputs must be regular, non-symlinked files");
     const bytes = await readFile(path);
     if (bytes.length > 16 * 1024 * 1024) throw new Error("Calibration input exceeds 16 MiB");

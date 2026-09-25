@@ -102,7 +102,7 @@ export function recursiveCheckMutation(check: string): VispError {
 
 /** Guard before acquiring a lock; never make a child wait for its own parent verifier. */
 export async function checkMutationGuard(canonicalRoot: string): Promise<VispError | undefined> {
-  const context = inheritedChecks().find((entry) => entry.root === canonicalRoot);
+  const context = await inheritedCheckFor(canonicalRoot);
   if (!context) return undefined;
   const rejected = recursiveCheckMutation(context.check);
   if (context.receipt) {
@@ -118,6 +118,18 @@ export async function checkMutationGuard(canonicalRoot: string): Promise<VispErr
     }
   }
   return rejected;
+}
+
+/**
+ * An inherited root may name the project through a symlink or, on Windows, a short name
+ * (macOS temporary directories live under the /var symlink), so both sides are resolved.
+ */
+async function inheritedCheckFor(canonicalRoot: string): Promise<CheckContext | undefined> {
+  for (const entry of inheritedChecks()) {
+    if (entry.root === canonicalRoot) return entry;
+    if ((await realpath(entry.root).catch(() => undefined)) === canonicalRoot) return entry;
+  }
+  return undefined;
 }
 
 function receiptHeader(context: CheckContext): string {
