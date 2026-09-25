@@ -5,7 +5,7 @@
     "tag": "beta"
   },
   "description": "Accuracy harness for AI coding agents: bounded scope, repository intelligence, and checkable evidence.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=22.16.0"

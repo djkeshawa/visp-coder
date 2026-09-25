@@ -14,6 +14,7 @@
 - `visp work` refuses a slice with a functional outcome that no check exercises and shows a one-patch fix: without a runnable check, `done` had nothing to execute and the reviewer no evidence.
 
 ### Changed
+- The license is now Apache-2.0 (was MIT), which adds an explicit patent grant and states the terms contributions are made under.
 - The loop always ends: in acceptance, or, once the review budget is spent with findings open, in a handoff (`visp next` returns `completion: handoff` and routes to `visp pr`).
 - Review packets list open findings by ID, and a fresh reviewer may close a functional finding by re-checking it against current passing executions when no failing reproduction was recorded. Findings are required only for departures from the stated request, including a regression of behavior the repository documents. After a clean review, middle slices skip review until the slice that completes the feature.
 - The default critic budget is 3 reviews per feature (was 6; `maxCalls` allows up to 6): in weak-worker runs the first three found every contract gap the hidden tests checked. `visp init --harness codex` sets the reviewer's `reasoningEffort: medium`, which matched `high` on hidden tests and cut runs from 14.2 to 12.0 minutes on average.

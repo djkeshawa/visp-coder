@@ -146,4 +146,4 @@ On VISP's own benchmark (`bench/`: four tasks with hidden checks, Claude Haiku 4
 
 ## License
 
-MIT.
+[Apache License 2.0](LICENSE).
