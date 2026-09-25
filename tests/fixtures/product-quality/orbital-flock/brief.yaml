@@ -1,0 +1,239 @@
+version: 2
+feature: 001-make-a-browser-game-like
+incomplete: false
+originalRequest: use visp-coder cli ( global installed) and Make a browser game
+  like Angry Birds.. runs by opening a html file in a browser. Make it fun.
+goal: Make a browser game like Angry Birds.. runs by opening a html file in a
+  browser. Make it fun.
+outcomes:
+  - id: playableLoop
+    kind: functional
+    statement: Opening index.html directly in a browser presents a playable
+      slingshot game without a server, build step, network request, or external
+      asset.
+    priority: must
+    provenance: user-stated
+    source: original request
+    sourceQuote: runs by opening a html file in a browser
+    reviewRequired: false
+    expectations:
+      - id: playableLaunch
+        statement: The first level is ready for aiming immediately after the page loads.
+        provenance: agent-proposed
+      - id: directFile
+        statement: The game works from a file:// URL with no console-blocking startup
+          error.
+        provenance: agent-proposed
+  - id: physicsAndTargets
+    kind: functional
+    statement: The player can pull and release a bird from the slingshot to launch
+      it through a physics-driven scene where impacts damage structures and pop
+      target critters.
+    priority: must
+    provenance: agent-proposed
+    source: gameplay interpretation
+    reviewRequired: false
+    expectations:
+      - id: dragLaunch
+        statement: Dragging the bird shows a constrained aim position and releasing it
+          launches along the opposite vector.
+        provenance: agent-proposed
+      - id: impactFeedback
+        statement: Collisions create visible hit feedback, debris, and a score change.
+        provenance: agent-proposed
+  - id: scoreAndProgress
+    kind: functional
+    statement: The game tracks score, remaining birds, and target progress, then
+      offers a clear win state and a reliable retry path.
+    priority: must
+    provenance: agent-proposed
+    source: gameplay interpretation
+    reviewRequired: false
+    expectations:
+      - id: hudState
+        statement: The HUD updates score, bird count, and target count while playing.
+        provenance: agent-proposed
+      - id: winRetry
+        statement: Clearing the targets shows a celebration with next-level and replay
+          actions; replay restores a fresh level.
+        provenance: agent-proposed
+  - id: arcadeIdentity
+    kind: experience
+    statement: The game feels like a compact replayable arcade toy with a memorable
+      twilight palette, punchy feedback, and readable controls.
+    priority: must
+    provenance: agent-proposed
+    source: make it fun
+    target: A first-time player can understand the goal and launch interaction
+      without instructions outside the page.
+    reviewRequired: true
+    expectations:
+      - id: visualTone
+        statement: The interface uses an ink-blue night sky, peach horizon, coral bird
+          accents, and chunky storybook type with a coherent hierarchy.
+        provenance: agent-proposed
+      - id: responsiveStage
+        statement: The game stage remains usable on narrow screens and respects
+          reduced-motion preferences.
+        provenance: agent-proposed
+  - id: accessibleControls
+    kind: quality
+    statement: Core actions remain discoverable and operable by pointer, touch, and
+      keyboard, with visible focus and non-color-only status feedback.
+    priority: must
+    provenance: agent-proposed
+    source: browser game quality baseline
+    target: Launch, replay, and next-level controls are native buttons with
+      accessible names; keyboard help is visible in the page.
+    reviewRequired: false
+    expectations:
+      - id: keyboardPath
+        statement: The page provides a keyboard reset shortcut and keyboard-focusable
+          action buttons.
+        provenance: agent-proposed
+      - id: statusText
+        statement: Status text exposes the current turn and outcome in addition to
+          canvas visuals.
+        provenance: agent-proposed
+examples:
+  - id: openReady
+    title: Open the game
+    given:
+      - The user double-clicks index.html or opens its file URL in a browser.
+    when: The page finishes loading.
+    expected:
+      - A ready-to-play game board, score HUD, goal text, and launch hint are
+        visible.
+    outcomes:
+      - playableLoop
+      - arcadeIdentity
+      - accessibleControls
+  - id: aimAndLaunch
+    title: Aim and launch a bird
+    given:
+      - A bird is seated in the slingshot and targets are standing on the stage.
+    when: The user drags the bird backward and releases it.
+    expected:
+      - The aim position stays within the sling radius, a dotted trajectory
+        appears, and the bird follows a parabolic flight.
+    outcomes:
+      - physicsAndTargets
+      - arcadeIdentity
+  - id: clearAndReplay
+    title: Clear a level and replay
+    given:
+      - The user has popped every target in the level.
+    when: The scene settles.
+    expected:
+      - A celebration overlay shows the score and actions to play the next level
+        or replay.
+    outcomes:
+      - scoreAndProgress
+      - accessibleControls
+      - arcadeIdentity
+decisions:
+  - id: singleFileDelivery
+    statement: Ship the first playable version as one index.html with inline CSS and
+      JavaScript.
+    rationale: The user explicitly wants a game that runs by opening an HTML file; a
+      single artifact removes setup and network assumptions.
+    evidence:
+      - original request
+    implications:
+      - No external fonts, images, libraries, or audio files.
+      - Keep the physics and rendering modules as small named functions inside
+        the file.
+    outcomes:
+      - playableLoop
+      - accessibleControls
+  - id: sunsetArcadeDirection
+    statement: "Use a twilight orchard arcade direction named Orbital Flock: dark
+      ink sky, warm horizon, coral launch hero, and mint targets."
+    rationale: A specific palette and voice makes the game feel authored instead of
+      like generic demo chrome.
+    evidence:
+      - make it fun
+    implications:
+      - Canvas art and UI share the same palette and rounded geometry.
+      - Feedback uses brief particles and screen shake, with reduced-motion
+        fallbacks.
+    outcomes:
+      - arcadeIdentity
+uncertainties:
+  - Exact target device and browser are unspecified; implement pointer events
+    with touch support and keep the board responsive.
+  - No art direction was supplied beyond Angry Birds-like physics; use original
+    abstract birds, critters, and structures rather than copied branding or
+    assets.
+checks:
+  - id: smokeLaunch
+    command:
+      kind: browser-journey
+      journey:
+        url: file:///absolute/project/index.html
+        viewport:
+          width: 1280
+          height: 820
+        actions:
+          - kind: wait-for
+            text: Ready when you are. Drag the bird back, then release.
+            visibility: visible
+            selector: "#gameStatus"
+            capture: true
+          - kind: scroll
+            selector: "#quickShot"
+            block: center
+            capture: true
+          - kind: click
+            selector: "#quickShot"
+            capture: true
+          - kind: wait-for
+            text: Flock in flight! Watch the chain reaction.
+            visibility: visible
+            timeoutMs: 1200
+            selector: "#gameStatus"
+            capture: false
+    outcomes:
+      - playableLoop
+      - physicsAndTargets
+      - scoreAndProgress
+      - accessibleControls
+    files:
+      - index.html
+    environment: browser
+slices:
+  - id: T001
+    goal: Open index.html directly and complete one full aim, launch, collision,
+      score, win, and retry loop.
+    outcomes:
+      - playableLoop
+      - physicsAndTargets
+      - scoreAndProgress
+      - arcadeIdentity
+      - accessibleControls
+    dependsOn: []
+    scope:
+      allowed:
+        - index.html
+      expected:
+        - index.html
+      forbidden:
+        - .git
+        - .visp
+        - .visp-git
+        - node_modules
+        - dist
+        - build
+    checks:
+      - smokeLaunch
+    approach: Build a self-contained canvas game with a small physics loop,
+      declarative level data, DOM HUD overlays, and native action buttons.
+acceptanceBaseline: []
+design:
+  description: "Orbital Flock is a sunset arcade postcard: an ink-blue sky and
+    apricot horizon frame a compact stage, while a coral slingshot and mint
+    targets provide the memorable action color. Headline type uses a warm serif
+    for storybook energy; controls use a sturdy system sans for legibility. The
+    page keeps the canvas visually dominant and the surrounding chrome quiet."
+  references: []
+  refinementCycles: 2

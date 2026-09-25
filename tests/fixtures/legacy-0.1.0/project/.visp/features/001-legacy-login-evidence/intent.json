@@ -1,0 +1,11 @@
+{
+  "kind": "intent",
+  "createdAt": "2026-09-04T18:23:33.688Z",
+  "id": "001-legacy-login-evidence",
+  "goal": "Legacy login evidence",
+  "sourceBrief": "Legacy login evidence",
+  "sourceBriefHash": "19c58b1d9872ce5fcdcadf22e355cdcd8f53cec40621be0a7da7ff1963376eef",
+  "riskLevel": "low",
+  "researchRequired": true,
+  "branch": "main"
+}

@@ -1,0 +1,10 @@
+node_modules/
+.bin/
+.visp/cache/
+.visp/graph/
+.visp/session/
+.visp/state/
+.visp/prompts/
+.visp/reports/
+.visp/status.json
+.visp/telemetry.json

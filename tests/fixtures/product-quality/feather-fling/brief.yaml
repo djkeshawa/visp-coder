@@ -1,0 +1,211 @@
+version: 2
+feature: 001-build-a-self-contained-browser
+incomplete: false
+originalRequest: use visp-coder cli ( global installed) and Make a browser game
+  like Angry Birds.. runs by opening a html file in a browser. Make it fun.
+goal: Build a self-contained browser game like Angry Birds that runs by opening
+  an HTML file in a browser and feels fun to play.
+outcomes:
+  - id: O001
+    kind: functional
+    statement: A player can aim and launch a bird with a slingshot, and the shot
+      follows responsive arcade physics with collisions against structures and
+      targets.
+    priority: must
+    provenance: user-stated
+    source: User request
+    sourceQuote: Make a browser game like Angry Birds
+    reviewRequired: false
+    expectations:
+      - id: O001_AC1
+        statement: Dragging the bird changes the aim preview and releasing it starts a
+          shot.
+        provenance: agent-proposed
+      - id: O001_AC2
+        statement: Birds, blocks, and targets visibly react to gravity and impact
+          strength.
+        provenance: agent-proposed
+  - id: O002
+    kind: functional
+    statement: The game offers a complete playable loop with level progress, score,
+      reset, win, and lose states.
+    priority: must
+    provenance: agent-proposed
+    reviewRequired: false
+    expectations:
+      - id: O002_AC1
+        statement: A successful clear advances the level and records the best score
+          locally.
+        provenance: agent-proposed
+      - id: O002_AC2
+        statement: A failed attempt can be reset without reloading the page.
+        provenance: agent-proposed
+  - id: O003
+    kind: quality
+    statement: The game runs by opening a local HTML file with no build step,
+      server, external assets, or network dependency.
+    priority: must
+    provenance: user-stated
+    source: User request
+    sourceQuote: runs by opening a html file in a browser
+    reviewRequired: false
+    expectations:
+      - id: O003_AC1
+        statement: All game code, styles, art, and audio feedback live in the project
+          files and work from a file URL.
+        provenance: agent-proposed
+  - id: O004
+    kind: experience
+    statement: The game feels playful and polished through a distinctive
+      paper-cutout sky, clear feedback, responsive layout, keyboard support, and
+      cheeky copy.
+    priority: should
+    provenance: agent-proposed
+    reviewRequired: false
+    expectations:
+      - id: O004_AC1
+        statement: The main playfield and controls remain usable on desktop and narrow
+          mobile viewports.
+        provenance: agent-proposed
+        viewport:
+          width: 390
+          height: 844
+      - id: O004_AC2
+        statement: A player can understand the next action from visible status text and
+          controls without reading documentation.
+        provenance: agent-proposed
+examples:
+  - id: SCN001
+    title: Fling a bird
+    given:
+      - The level is ready and the bird is resting in the sling
+    when: The player drags the bird backward and releases it toward a target
+    expected:
+      - An aim guide appears while dragging
+      - The bird flies and the world reacts
+      - The score changes when an object is hit
+    outcomes:
+      - O001
+      - O004
+  - id: SCN002
+    title: Recover from a miss
+    given:
+      - The current bird misses the targets
+    when: The player clicks the reset control
+    expected:
+      - The level returns to its starting arrangement
+      - The player can try again without refreshing the page
+    outcomes:
+      - O002
+      - O003
+decisions:
+  - id: D001
+    statement: Use a single self-contained index.html with inline Canvas rendering,
+      game logic, CSS, and Web Audio feedback.
+    rationale: Opening one HTML file should be enough to play, and inline code
+      avoids build tooling or network requests.
+    evidence: []
+    implications:
+      - All assets must be drawn procedurally or represented with CSS and
+        emoji-safe text.
+      - The runtime should avoid module imports and external fonts.
+    outcomes:
+      - O003
+  - id: D002
+    statement: Use an arcade physics model with a small fixed roster of bodies
+      instead of a full physics engine.
+    rationale: The game needs satisfying launch, bounce, break, and knockback
+      behavior while staying easy to run from a local file.
+    evidence: []
+    implications:
+      - Collision resolution must be deterministic and tuned for a short level.
+      - Materials can expose simple hit points and damage thresholds.
+    outcomes:
+      - O001
+      - O002
+  - id: D003
+    statement: "Give the game an original Feather Fling identity: indigo dusk, lime
+      targets, coral birds, and layered paper-cutout scenery."
+    rationale: A clear visual hook makes the experience feel authored rather than
+      like a generic clone.
+    evidence: []
+    implications:
+      - The UI should prioritize one memorable silhouette and a compact control
+        rail.
+      - Copy can be playful, but the action labels must stay clear.
+    outcomes:
+      - O004
+uncertainties: []
+checks:
+  - id: C001
+    command:
+      - node
+      - tests/smoke.mjs
+    outcomes:
+      - O003
+      - O002
+    files:
+      - index.html
+      - tests/smoke.mjs
+    environment: node
+  - id: C002
+    command:
+      kind: browser-journey
+      journey:
+        url: file:///absolute/project/index.html
+        viewport:
+          width: 1280
+          height: 900
+        actions:
+          - kind: wait-for
+            visibility: visible
+            selector: "#game-shell"
+            capture: true
+          - kind: click
+            selector: "#reset-level"
+            capture: true
+    outcomes:
+      - O001
+      - O002
+      - O004
+    files:
+      - index.html
+    environment: browser
+slices:
+  - id: T001
+    goal: Build the Feather Fling game and verify a playable local-file loop.
+    outcomes:
+      - O001
+      - O002
+      - O003
+      - O004
+    dependsOn: []
+    scope:
+      allowed:
+        - index.html
+        - tests/smoke.mjs
+      expected:
+        - index.html
+        - tests/smoke.mjs
+      forbidden:
+        - node_modules/**
+        - dist/**
+    checks:
+      - C001
+      - C002
+    approach: Implement a small fixed-timestep Canvas game with procedural
+      paper-cutout scenery, simple material-aware physics, a slingshot input
+      layer, and a crisp HUD. Keep all runtime assets inline so opening
+      index.html is sufficient.
+acceptanceBaseline: []
+design:
+  description: "Feather Fling uses a midnight-indigo sky and warm parchment card
+    as a tiny arcade poster. Coral birds and lime targets cut through layered
+    teal hills; one slingshot silhouette is the memorable anchor. Display text
+    uses Impact or Arial Narrow with Trebuchet MS for readable controls. The
+    playfield sits above a compact control rail and score ribbon, with generous
+    touch targets and visible focus rings. Motion is purposeful: drifting cloud
+    parallax, a held aim line, and short impact bursts. Reduced motion removes
+    ambient drift and particle trails."
+  references: []
+  refinementCycles: 2

@@ -1,0 +1,41 @@
+{
+  "kind": "plan",
+  "createdAt": "2026-09-04T18:27:18.540Z",
+  "feature": "001-legacy-login-evidence",
+  "approach": "Keep credential validation and token creation inside a small auth module, with public behavior covered through the repository test command.",
+  "researchFindings": [
+    "FND001"
+  ],
+  "decisions": [],
+  "modules": [
+    {
+      "name": "auth",
+      "paths": [
+        "src/auth/**/*.js"
+      ],
+      "responsibility": "Own credential validation and session creation",
+      "owns": [
+        "login flow"
+      ],
+      "dependsOn": [],
+      "publicInterfaces": [
+        "login"
+      ]
+    }
+  ],
+  "invariants": [],
+  "testStrategy": [
+    {
+      "layer": "functional",
+      "covers": [
+        "REQ001",
+        "NFR001",
+        "SCN001"
+      ],
+      "approach": "Exercise login through the public auth module and assert a token is returned"
+    }
+  ],
+  "risks": [],
+  "newDependencies": [],
+  "draft": false
+}

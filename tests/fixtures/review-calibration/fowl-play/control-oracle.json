@@ -1,0 +1,9 @@
+{
+  "variant": "control",
+  "expectedDefects": [],
+  "counterevidence": {
+    "release": "The same down-left pull generates negative vertical velocity, producing an initial up-right trajectory.",
+    "supports": "The floor touches the ground, pillars touch the floor and roof, the cap touches the roof, and targets rest on a surface."
+  },
+  "evaluationScope": "A narrowly repaired reference for initial supports and the recorded pull/release, not a fully corrected game. Optional aesthetic preferences should not be scored as objective defects. Unobserved score/resize behavior remains outside these images."
+}

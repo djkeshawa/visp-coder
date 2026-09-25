@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#16204f">
+  <title>Flockshot — Cloudbreakers</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #18234c;
+      --ink-soft: #536080;
+      --paper: #fff9ef;
+      --paper-deep: #f5ead9;
+      --coral: #ee6d52;
+      --coral-dark: #bd493e;
+      --sun: #ffc857;
+      --mint: #9ed9b5;
+      --sky: #16204f;
+      --sky-mid: #4d5a9b;
+      --line: rgba(24, 35, 76, 0.13);
+      --shadow: 0 18px 45px rgba(9, 16, 51, 0.22);
+      --round-lg: 28px;
+      --round-md: 18px;
+      --round-sm: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; background: var(--sky); }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Avenir Next", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 8% 14%, rgba(255, 200, 87, 0.19) 0 2px, transparent 3px),
+        radial-gradient(circle at 88% 18%, rgba(255, 255, 255, 0.18) 0 1px, transparent 2px),
+        linear-gradient(160deg, #19245a 0%, #252f6b 47%, #db725f 100%);
+    }
+
+    body::before,
+    body::after {
+      position: fixed;
+      z-index: -1;
+      display: block;
+      content: "";
+      border-radius: 999px;
+      filter: blur(2px);
+      opacity: 0.48;
+      pointer-events: none;
+    }
+
+    body::before {
+      width: 280px;
+      height: 280px;
+      top: -110px;
+      right: 12%;
+      background: var(--sun);
+      box-shadow: 0 0 90px rgba(255, 200, 87, 0.34);
+    }
+
+    body::after {
+      width: 420px;
+      height: 120px;
+      bottom: -56px;
+      left: 6%;
+      background: rgba(111, 206, 175, 0.24);
+      transform: rotate(-7deg);
+    }
+
+    button,
+    canvas { -webkit-tap-highlight-color: transparent; }
+
+    button {
+      border: 0;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    canvas:focus-visible {
+      outline: 4px solid var(--sun);
+      outline-offset: 4px;
+    }
+
+    .app {
+      width: min(1240px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 22px 0 30px;
+    }
+
+    .topbar,
+    .intro-row,
+    .play-meta,
+    .play-footer,
+    .stat-heading,
+    .brand-lockup,
+    .top-actions,
+    .ribbon-copy,
+    .phase-pill,
+    .tip-line,
+    .legend,
+    .button-row {
+      display: flex;
+      align-items: center;
+    }
+
+    .topbar {
+      justify-content: space-between;
+      gap: 18px;
+      color: var(--paper);
+    }
+
+    .brand-lockup { gap: 13px; }
+
+    .brand-mark {
+      position: relative;
+      width: 54px;
+      height: 54px;
+      flex: 0 0 auto;
+      border: 3px solid var(--paper);
+      border-radius: 19px 24px 19px 24px;
+      background: var(--coral);
+      box-shadow: 5px 5px 0 rgba(9, 16, 51, 0.3);
+      transform: rotate(-6deg);
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      position: absolute;
+      bottom: 11px;
+      width: 9px;
+      height: 9px;
+      content: "";
+      border: 2px solid var(--ink);
+      border-radius: 50%;
+      background: var(--paper);
+    }
+
+    .brand-mark::before { left: 12px; }
+    .brand-mark::after { right: 12px; }
+
+    .brand-mark span {
+      position: absolute;
+      top: 11px;
+      left: 19px;
+      width: 14px;
+      height: 14px;
+      border-right: 3px solid var(--paper);
+      border-bottom: 3px solid var(--paper);
+      transform: rotate(45deg);
+    }
+
+    .eyebrow,
+    .section-kicker {
+      margin: 0 0 3px;
+      color: rgba(255, 249, 239, 0.69);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    .brand-name {
+      margin: 0;
+      color: var(--paper);
+      font-size: clamp(1.55rem, 2.4vw, 2.15rem);
+      font-weight: 900;
+      letter-spacing: -0.06em;
+      line-height: 0.9;
+    }
+
+    .top-actions { gap: 10px; }
+
+    .button {
+      min-height: 42px;
+      padding: 0 16px;
+      border: 2px solid transparent;
+      border-radius: 999px;
+      color: var(--paper);
+      background: rgba(255, 249, 239, 0.12);
+      box-shadow: inset 0 0 0 1px rgba(255, 249, 239, 0.1);
+      font-size: 0.82rem;
+      font-weight: 800;
+      transition: transform 140ms ease, background 140ms ease, color 140ms ease;
+    }
+
+    .button:hover { background: rgba(255, 249, 239, 0.2); transform: translateY(-2px); }
+    .button:active { transform: translateY(1px); }
+
+    .button.icon-button {
+      width: 42px;
+      padding: 0;
+      font-size: 1.08rem;
+    }
+
+    .button.icon-button[aria-pressed="false"] { opacity: 0.62; }
+
+    .intro-row {
+      justify-content: space-between;
+      gap: 20px;
+      padding: 42px 10px 28px;
+      color: var(--paper);
+    }
+
+    .intro-copy { max-width: 650px; }
+
+    .intro-copy .section-kicker { color: var(--sun); }
+
+    .intro-copy h2 {
+      max-width: 600px;
+      margin: 0;
+      font-size: clamp(2.5rem, 6vw, 5.7rem);
+      font-weight: 900;
+      letter-spacing: -0.085em;
+      line-height: 0.86;
+    }
+
+    .intro-copy p:last-child {
+      max-width: 520px;
+      margin: 18px 0 0;
+      color: rgba(255, 249, 239, 0.74);
+      font-size: clamp(0.9rem, 1.6vw, 1.04rem);
+      line-height: 1.55;
+    }
+
+    .mission-ribbon {
+      min-width: 224px;
+      padding: 15px 16px;
+      border: 2px solid rgba(255, 249, 239, 0.23);
+      border-radius: 20px 10px 20px 10px;
+      background: rgba(11, 18, 59, 0.24);
+      box-shadow: 7px 7px 0 rgba(9, 16, 51, 0.17);
+      transform: rotate(2deg);
+    }
+
+    .ribbon-copy { justify-content: space-between; gap: 16px; }
+
+    .ribbon-label {
+      color: rgba(255, 249, 239, 0.62);
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+
+    .ribbon-value {
+      color: var(--sun);
+      font-size: 1.65rem;
+      font-weight: 900;
+      letter-spacing: -0.07em;
+    }
+
+    .mission-ribbon p {
+      margin: 7px 0 0;
+      color: var(--paper);
+      font-size: 0.87rem;
+      line-height: 1.35;
+    }
+
+    .game-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 248px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .play-card,
+    .side-card,
+    .score-card {
+      border: 2px solid rgba(255, 249, 239, 0.25);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .play-card {
+      overflow: hidden;
+      border-radius: var(--round-lg);
+    }
+
+    .play-meta {
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 58px;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    .level-copy { color: var(--ink-soft); font-size: 0.78rem; font-weight: 800; }
+
+    .level-copy strong {
+      display: inline-block;
+      margin-left: 5px;
+      color: var(--ink);
+      font-size: 1rem;
+    }
+
+    .phase-pill {
+      gap: 7px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: var(--coral-dark);
+      background: #ffe1ce;
+      font-size: 0.73rem;
+      font-weight: 900;
+    }
+
+    .phase-pill::before {
+      width: 7px;
+      height: 7px;
+      content: "";
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 3px rgba(189, 73, 62, 0.12);
+    }
+
+    .game-frame {
+      position: relative;
+      overflow: hidden;
+      background: #1b245a;
+    }
+
+    #game {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 1000 / 560;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .canvas-hint {
+      position: absolute;
+      right: 18px;
+      bottom: 16px;
+      max-width: 245px;
+      padding: 8px 11px;
+      border: 1px solid rgba(255, 249, 239, 0.25);
+      border-radius: 10px 10px 3px 10px;
+      color: rgba(255, 249, 239, 0.86);
+      background: rgba(17, 27, 70, 0.42);
+      font-size: 0.72rem;
+      font-weight: 700;
+      line-height: 1.3;
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+
+    .canvas-hint.is-hidden { opacity: 0; transform: translateY(5px); }
+
+    .game-overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      justify-items: center;
+      padding: 24px;
+      text-align: center;
+      background: rgba(18, 27, 73, 0.66);
+      backdrop-filter: blur(5px);
+    }
+
+    .game-overlay[hidden] { display: none; }
+
+    .overlay-card {
+      max-width: 390px;
+      padding: 25px 28px 27px;
+      border: 3px solid var(--paper);
+      border-radius: 25px 16px 25px 16px;
+      background: var(--coral);
+      box-shadow: 9px 9px 0 rgba(9, 16, 51, 0.3);
+      transform: rotate(-1deg);
+    }
+
+    .overlay-kicker {
+      margin: 0 0 8px;
+      color: rgba(255, 249, 239, 0.78);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+
+    .overlay-card h3 {
+      margin: 0;
+      color: var(--paper);
+      font-size: clamp(1.65rem, 4vw, 2.35rem);
+      font-weight: 900;
+      letter-spacing: -0.075em;
+      line-height: 0.94;
+    }
+
+    .overlay-card p {
+      margin: 12px auto 18px;
+      color: rgba(255, 249, 239, 0.86);
+      font-size: 0.87rem;
+      line-height: 1.45;
+    }
+
+    .overlay-card .button-row { justify-content: center; gap: 8px; }
+
+    .button.button-light {
+      color: var(--ink);
+      background: var(--paper);
+      box-shadow: none;
+    }
+
+    .button.button-light:hover { background: #fff; }
+
+    .button.button-quiet {
+      border-color: rgba(255, 249, 239, 0.4);
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .play-footer {
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 59px;
+      padding: 10px 18px;
+      border-top: 1px solid var(--line);
+      color: var(--ink-soft);
+      font-size: 0.75rem;
+    }
+
+    .tip-line { gap: 8px; }
+
+    .tip-icon {
+      display: grid;
+      width: 25px;
+      height: 25px;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--sun);
+      font-size: 0.9rem;
+    }
+
+    #status-text { color: var(--ink); font-weight: 800; }
+
+    .legend { gap: 11px; white-space: nowrap; }
+
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+
+    .legend i {
+      width: 9px;
+      height: 9px;
+      display: inline-block;
+      border-radius: 3px;
+    }
+
+    .legend .legend-bird { background: var(--coral); }
+    .legend .legend-block { background: #9a6846; }
+    .legend .legend-target { background: var(--mint); }
+
+    .side-stack { display: grid; gap: 14px; }
+
+    .score-card,
+    .side-card { border-color: rgba(255, 249, 239, 0.28); border-radius: var(--round-md); }
+
+    .score-card {
+      position: relative;
+      overflow: hidden;
+      padding: 19px 19px 17px;
+      background: var(--sun);
+      transform: rotate(1.2deg);
+    }
+
+    .score-card::after {
+      position: absolute;
+      right: -28px;
+      bottom: -35px;
+      width: 112px;
+      height: 112px;
+      content: "";
+      border: 15px solid rgba(255, 249, 239, 0.27);
+      border-radius: 50%;
+    }
+
+    .score-label {
+      color: rgba(24, 35, 76, 0.68);
+      font-size: 0.74rem;
+      font-weight: 900;
+    }
+
+    #score {
+      position: relative;
+      z-index: 1;
+      display: block;
+      margin: 6px 0 2px;
+      color: var(--ink);
+      font-size: clamp(2rem, 4vw, 3rem);
+      font-weight: 900;
+      letter-spacing: -0.09em;
+      line-height: 0.95;
+    }
+
+    .score-note {
+      position: relative;
+      z-index: 1;
+      color: rgba(24, 35, 76, 0.73);
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .side-card { padding: 17px; background: var(--paper); }
+
+    .side-card h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 0.97rem;
+      letter-spacing: -0.03em;
+    }
+
+    .stat-heading {
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--ink-soft);
+      font-size: 0.74rem;
+      font-weight: 800;
+    }
+
+    #shots-left {
+      color: var(--coral-dark);
+      font-size: 0.88rem;
+      font-weight: 900;
+    }
+
+    .shot-pips {
+      display: flex;
+      gap: 7px;
+      margin: 14px 0 10px;
+    }
+
+    .shot-pip {
+      position: relative;
+      width: 29px;
+      height: 29px;
+      border: 2px solid var(--coral-dark);
+      border-radius: 50% 45% 50% 45%;
+      background: var(--coral);
+      box-shadow: 3px 3px 0 rgba(189, 73, 62, 0.16);
+      transform: rotate(-7deg);
+    }
+
+    .shot-pip::after {
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      width: 5px;
+      height: 5px;
+      content: "";
+      border-radius: 50%;
+      background: rgba(255, 249, 239, 0.85);
+    }
+
+    .shot-pip.is-used {
+      border-color: #d8caba;
+      background: #dfd3c3;
+      box-shadow: none;
+      opacity: 0.7;
+    }
+
+    .shot-pip.is-used::after { background: rgba(255, 249, 239, 0.65); }
+
+    .side-note {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 0.72rem;
+      line-height: 1.42;
+    }
+
+    .how-to { background: #e7f3eb; }
+
+    .how-to ol {
+      display: grid;
+      gap: 12px;
+      margin: 15px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .how-to li {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      gap: 9px;
+      align-items: start;
+    }
+
+    .step-number {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--paper);
+      background: var(--ink);
+      font-size: 0.73rem;
+      font-weight: 900;
+    }
+
+    .how-to strong { display: block; font-size: 0.78rem; }
+    .how-to li p { margin: 2px 0 0; }
+
+    .keyboard-note {
+      margin-top: 15px;
+      padding-top: 13px;
+      border-top: 1px dashed rgba(24, 35, 76, 0.22);
+      color: var(--ink-soft);
+      font-size: 0.7rem;
+      line-height: 1.45;
+    }
+
+    kbd {
+      padding: 2px 5px;
+      border: 1px solid rgba(24, 35, 76, 0.2);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      color: var(--ink);
+      background: rgba(255, 249, 239, 0.68);
+      font-size: 0.66rem;
+      font-weight: 900;
+    }
+
+    .footer-note {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 24px 9px 0;
+      color: rgba(255, 249, 239, 0.54);
+      font-size: 0.7rem;
+      line-height: 1.4;
+    }
+
+    .footer-note p { margin: 0; }
+
+    [hidden] { display: none !important; }
+
+    @media (max-width: 900px) {
+      .game-layout { grid-template-columns: 1fr; }
+      .side-stack { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .how-to { grid-column: span 2; }
+    }
+
+    @media (max-width: 650px) {
+      .app { width: min(100% - 20px, 540px); padding-top: 12px; }
+      .topbar { align-items: flex-start; }
+      .top-actions { gap: 6px; }
+      .top-actions .button:not(.icon-button) { padding: 0 11px; font-size: 0.72rem; }
+      .intro-row { display: block; padding: 34px 5px 22px; }
+      .intro-copy h2 { font-size: clamp(2.7rem, 15vw, 4.6rem); }
+      .mission-ribbon { width: min(100%, 240px); margin: 23px 0 0 auto; }
+      .play-card { border-radius: 20px; }
+      .play-meta { padding-inline: 13px; }
+      .play-footer { display: block; padding: 12px 13px; }
+      .legend { margin-top: 10px; }
+      .side-stack { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .how-to { grid-column: span 2; }
+      .score-card { grid-column: span 2; }
+      .footer-note { display: block; padding-inline: 5px; }
+      .footer-note p + p { margin-top: 7px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true"><span></span></div>
+        <div>
+          <p class="eyebrow">Sky island arcade</p>
+          <h1 class="brand-name">Flockshot</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="button icon-button" id="sound-toggle" type="button" aria-label="Turn sound off" aria-pressed="true">♫</button>
+        <button class="button" id="reset-game" type="button">Reset run</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro-row" aria-labelledby="game-title">
+        <div class="intro-copy">
+          <p class="section-kicker" id="section-kicker">Cloudbreakers / level one</p>
+          <h2 id="game-title">Bonk the bubble bandits.</h2>
+          <p>Pull back, pick a brave angle, and send your little sky-hero through the paper-cutout chaos. Every block is a shortcut if you hit it hard enough.</p>
+        </div>
+        <div class="mission-ribbon" aria-live="polite">
+          <div class="ribbon-copy">
+            <span class="ribbon-label">Bandits left</span>
+            <span class="ribbon-value" id="target-left">02</span>
+          </div>
+          <p id="level-subtitle">Taffy Towers is feeling wobbly.</p>
+        </div>
+      </section>
+
+      <section class="game-layout" aria-label="Flockshot game">
+        <div class="play-card">
+          <div class="play-meta">
+            <div class="level-copy">Level <strong id="level-label">01</strong></div>
+            <div class="phase-pill" id="phase-label">Ready to fling</div>
+          </div>
+          <div class="game-frame">
+            <canvas id="game" width="1000" height="560" tabindex="0" role="img" aria-label="Flockshot sky island playfield" data-state="ready"></canvas>
+            <div class="canvas-hint" id="canvas-hint">Drag the bird, then let go. Click anywhere for a quick fling.</div>
+            <div class="game-overlay" id="game-overlay" hidden>
+              <div class="overlay-card">
+                <p class="overlay-kicker" id="overlay-kicker">Island cleared</p>
+                <h3 id="overlay-title">That was a proper bonk.</h3>
+                <p id="overlay-copy">The bubble bandits have officially lost the plot.</p>
+                <div class="button-row">
+                  <button class="button button-light" id="next-level" type="button">Next island</button>
+                  <button class="button button-quiet" id="overlay-reset" type="button">Try again</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="play-footer">
+            <div class="tip-line">
+              <span class="tip-icon" aria-hidden="true">✦</span>
+              <span id="status-text" role="status" aria-live="polite">Pick a pocket of sky and fling.</span>
+            </div>
+            <div class="legend" aria-label="Game legend">
+              <span><i class="legend-bird"></i> Hero</span>
+              <span><i class="legend-block"></i> Block</span>
+              <span><i class="legend-target"></i> Bandit</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="side-stack" aria-label="Game stats and controls">
+          <section class="score-card" aria-label="Score">
+            <span class="score-label">Current score</span>
+            <strong id="score">000000</strong>
+            <span class="score-note" id="score-note">Make the first bonk count.</span>
+          </section>
+
+          <section class="side-card" aria-label="Shot board">
+            <div class="stat-heading">
+              <span>Shot board</span>
+              <span id="shots-left">4 ready</span>
+            </div>
+            <div class="shot-pips" id="shot-pips" aria-label="Four shots remaining"></div>
+            <p class="side-note">Unused birds become bonus points when you clear an island.</p>
+          </section>
+
+          <section class="side-card how-to">
+            <h3>How to play</h3>
+            <ol>
+              <li>
+                <span class="step-number">1</span>
+                <div><strong>Pull the sling</strong><p class="side-note">Drag the hero away from the target.</p></div>
+              </li>
+              <li>
+                <span class="step-number">2</span>
+                <div><strong>Find the weak spot</strong><p class="side-note">Wood cracks. Bandits pop.</p></div>
+              </li>
+              <li>
+                <span class="step-number">3</span>
+                <div><strong>Chase the high score</strong><p class="side-note">Fewer shots means a fatter bonus.</p></div>
+              </li>
+            </ol>
+            <p class="keyboard-note"><kbd>←</kbd> <kbd>↑</kbd> <kbd>↓</kbd> aim · <kbd>Space</kbd> fling · <kbd>R</kbd> reset</p>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <footer class="footer-note">
+      <p>Flockshot / Cloudbreakers · Built for tiny heroes with big arcs.</p>
+      <p>Three islands. One very wobbly sling.</p>
+    </footer>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

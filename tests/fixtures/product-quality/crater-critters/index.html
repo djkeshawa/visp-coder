@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173f52">
+  <title>Crater Critters — a tiny physics arcade</title>
+  <style>
+    :root {
+      --dusk: #173f52;
+      --dusk-deep: #102b3a;
+      --sky: #83c4cc;
+      --paper: #fff6de;
+      --paper-shadow: #e2c898;
+      --ink: #102b3a;
+      --ember: #f25c54;
+      --sun: #f6c85f;
+      --moss: #5b7c5c;
+      --moss-dark: #375c54;
+      --wood: #a55c3b;
+      --white: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; background: var(--dusk); }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      background: var(--dusk);
+      color: var(--paper);
+      font-family: "Trebuchet MS", "Arial Rounded MT Bold", Arial, sans-serif;
+    }
+
+    button,
+    canvas { font: inherit; }
+
+    button {
+      border: 2px solid var(--ink);
+      border-radius: 999px;
+      background: var(--sun);
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 800;
+      padding: 0.75rem 1rem;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+
+    button:hover { transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--ink); }
+    button:active { transform: translate(0, 0); box-shadow: none; }
+    button:focus-visible,
+    canvas:focus-visible { outline: 3px solid var(--sun); outline-offset: 4px; }
+
+    .game-shell {
+      width: min(1280px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 18px 22px 16px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .masthead {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand-lockup { max-width: 560px; }
+
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 8px;
+      color: var(--sun);
+      font-size: 0.8rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--paper);
+      font-family: "Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif;
+      font-size: clamp(2.55rem, 5vw, 4.6rem);
+      letter-spacing: -0.07em;
+      line-height: 0.88;
+    }
+
+    .brand-lockup p {
+      max-width: 44ch;
+      margin: 14px 0 0;
+      color: #cae2dd;
+      font-size: 0.97rem;
+      line-height: 1.4;
+    }
+
+    .scoreboard {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(92px, 1fr)) auto;
+      align-items: stretch;
+      min-width: min(100%, 420px);
+      border: 3px solid var(--ink);
+      border-radius: 18px 14px 20px 12px;
+      background: var(--paper);
+      box-shadow: 6px 6px 0 var(--paper-shadow);
+      color: var(--ink);
+      overflow: hidden;
+    }
+
+    .score-cell {
+      min-width: 0;
+      padding: 11px 15px 10px;
+      border-right: 2px solid var(--ink);
+    }
+
+    .score-cell span {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 0.75rem;
+      font-weight: 800;
+    }
+
+    .score-cell strong {
+      display: block;
+      color: var(--ember);
+      font-family: "Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif;
+      font-size: 1.7rem;
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+
+    .sound-toggle {
+      min-width: 86px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      font-size: 0.78rem;
+    }
+
+    .sound-toggle:hover { box-shadow: none; background: #f2dfb3; }
+
+    .game-stage {
+      min-height: 0;
+      flex: 1;
+      display: flex;
+      align-items: stretch;
+      margin-top: 18px;
+    }
+
+    .canvas-frame {
+      width: 100%;
+      min-height: 0;
+      padding: 9px 10px 10px;
+      border: 3px solid var(--ink);
+      border-radius: 20px 16px 24px 15px;
+      background: var(--paper);
+      box-shadow: 9px 9px 0 var(--paper-shadow);
+    }
+
+    .canvas-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 27px;
+      padding: 0 5px 7px;
+      color: var(--ink);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .canvas-meta span:last-child { color: var(--moss-dark); text-align: right; }
+
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: clamp(360px, calc(100vh - 310px), 560px);
+      border: 2px solid var(--ink);
+      border-radius: 12px 9px 14px 10px;
+      background: var(--sky);
+      cursor: grab;
+      image-rendering: auto;
+      touch-action: none;
+      user-select: none;
+    }
+
+    #game-canvas:active { cursor: grabbing; }
+
+    .control-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-top: 14px;
+    }
+
+    .instruction {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      color: #cae2dd;
+      font-size: 0.91rem;
+      line-height: 1.35;
+    }
+
+    .instruction p { margin: 0; }
+
+    .control-dot {
+      width: 12px;
+      height: 12px;
+      flex: 0 0 auto;
+      border: 2px solid var(--ink);
+      border-radius: 50%;
+      background: var(--ember);
+      box-shadow: 3px 3px 0 var(--sun);
+    }
+
+    .reset-button { white-space: nowrap; }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 720px) {
+      .game-shell { padding: 14px 12px 14px; }
+      .masthead { align-items: stretch; flex-direction: column; gap: 15px; }
+      h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+      .brand-lockup p { margin-top: 10px; font-size: 0.9rem; }
+      .scoreboard { width: 100%; min-width: 0; }
+      .score-cell { padding: 9px 12px 8px; }
+      .score-cell strong { font-size: 1.45rem; }
+      .game-stage { margin-top: 14px; }
+      .canvas-frame { padding: 8px 8px 8px; }
+      .canvas-meta { min-height: 30px; padding-bottom: 7px; font-size: 0.68rem; }
+      #game-canvas { height: min(54vh, 430px); }
+      .control-bar { align-items: stretch; flex-direction: column; gap: 11px; margin-top: 12px; }
+      .instruction { align-items: flex-start; font-size: 0.83rem; }
+      .reset-button { width: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      button { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="game-shell" id="game-shell" data-state="ready">
+    <header class="masthead">
+      <div class="brand-lockup">
+        <span class="eyebrow">Field trial 07 · dusk shift</span>
+        <h1>Crater Critters</h1>
+        <p>Pull back, pick a line, and send a comet bird through the critter camp.</p>
+      </div>
+      <div class="scoreboard" aria-label="Game score">
+        <div class="score-cell">
+          <span>Score</span>
+          <strong id="score">0000</strong>
+        </div>
+        <div class="score-cell">
+          <span>Shots left</span>
+          <strong id="shots">05</strong>
+        </div>
+        <button class="sound-toggle" id="sound-toggle" type="button" aria-pressed="true">Sound on</button>
+      </div>
+    </header>
+
+    <section class="game-stage" aria-label="Crater Critters playfield">
+      <div class="canvas-frame">
+        <div class="canvas-meta">
+          <span id="level-label">The mossy outpost</span>
+          <span id="status" role="status" aria-live="polite">Pull the comet back to aim.</span>
+        </div>
+        <canvas id="game-canvas" width="1000" height="560" tabindex="0" aria-label="Crater Critters physics playfield. Drag the comet bird away from the outpost and release to launch."></canvas>
+      </div>
+    </section>
+
+    <footer class="control-bar">
+      <div class="instruction">
+        <span class="control-dot" aria-hidden="true"></span>
+        <p><strong>Drag the bird back</strong> from the sling, then release. Focus the field and press Enter for a steady shot.</p>
+      </div>
+      <button class="reset-button" id="reset-level" type="button">Reset level</button>
+    </footer>
+    <p class="sr-only" id="live-region">The game is ready.</p>
+  </main>
+
+  <script>
+    const canvas = document.querySelector("#game-canvas");
+    const ctx = canvas.getContext("2d");
+    const shell = document.querySelector("#game-shell");
+    const scoreOutput = document.querySelector("#score");
+    const shotsOutput = document.querySelector("#shots");
+    const statusOutput = document.querySelector("#status");
+    const liveRegion = document.querySelector("#live-region");
+    const resetButton = document.querySelector("#reset-level");
+    const soundButton = document.querySelector("#sound-toggle");
+
+    const WORLD = Object.freeze({
+      width: 1000,
+      height: 560,
+      groundY: 500,
+      gravity: 0.56,
+      sling: Object.freeze({ x: 175, y: 420, maxStretch: 138 })
+    });
+
+    const COLORS = Object.freeze({
+      sky: "#83c4cc",
+      skyDark: "#5da0ad",
+      paper: "#fff6de",
+      ink: "#102b3a",
+      ember: "#f25c54",
+      emberDark: "#bf3f43",
+      sun: "#f6c85f",
+      moss: "#5b7c5c",
+      mossDark: "#375c54",
+      wood: "#a55c3b",
+      woodLight: "#d88a55",
+      woodDark: "#6c3e37",
+      cream: "#ffe8aa"
+    });
+
+    const STARS = [
+      [74, 72, 3], [141, 126, 2], [253, 61, 2], [337, 111, 3], [455, 74, 2],
+      [548, 135, 2], [677, 80, 3], [786, 131, 2], [907, 62, 3], [948, 157, 2]
+    ];
+
+    const BIRD_STYLES = [
+      { body: COLORS.ember, belly: "#ff8b67", crest: COLORS.sun },
+      { body: "#f29b4b", belly: "#ffd276", crest: COLORS.ember },
+      { body: "#ca5b69", belly: "#ef9b86", crest: COLORS.sun },
+      { body: COLORS.ember, belly: "#ffb06e", crest: "#ffffff" },
+      { body: "#e26a4f", belly: "#f8d089", crest: COLORS.sun }
+    ];
+
+    const game = {
+      state: "ready",
+      score: 0,
+      shots: 5,
+      birdIndex: 0,
+      projectile: null,
+      dragPoint: null,
+      isDragging: false,
+      blocks: [],
+      critters: [],
+      particles: [],
+      stars: STARS,
+      shake: 0,
+      soundEnabled: true,
+      lastFrame: performance.now()
+    };
+
+    let audioContext = null;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function distance(first, second) {
+      return Math.hypot(first.x - second.x, first.y - second.y);
+    }
+
+    function padScore(value) {
+      return String(Math.max(0, value)).padStart(4, "0");
+    }
+
+    function createBlocks() {
+      return [
+        { x: 660, y: 454, w: 116, h: 46, health: 3, maxHealth: 3, falling: false, angle: 0, vy: 0, hitCooldown: 0 },
+        { x: 785, y: 454, w: 122, h: 46, health: 3, maxHealth: 3, falling: false, angle: 0, vy: 0, hitCooldown: 0 },
+        { x: 655, y: 376, w: 252, h: 24, health: 2, maxHealth: 2, collidable: false, falling: false, angle: 0, vy: 0, hitCooldown: 0 },
+        { x: 676, y: 305, w: 28, h: 71, health: 2, maxHealth: 2, collidable: false, falling: false, angle: 0, vy: 0, hitCooldown: 0 },
+        { x: 878, y: 305, w: 28, h: 71, health: 2, maxHealth: 2, collidable: false, falling: false, angle: 0, vy: 0, hitCooldown: 0 },
+        { x: 690, y: 282, w: 196, h: 23, health: 2, maxHealth: 2, falling: false, angle: 0, vy: 0, hitCooldown: 0 }
+      ];
+    }
+
+    function createCritters() {
+      return [
+        { id: "captain", x: 721, y: 350, r: 25, defeated: false, wobble: 0 },
+        { id: "sprout", x: 840, y: 428, r: 25, defeated: false, wobble: 0 }
+      ];
+    }
+
+    function setGameState(nextState) {
+      game.state = nextState;
+      shell.dataset.state = nextState;
+    }
+
+    function setStatus(message) {
+      statusOutput.textContent = message;
+      liveRegion.textContent = message;
+    }
+
+    function updateHud() {
+      scoreOutput.textContent = padScore(game.score);
+      shotsOutput.textContent = String(game.shots).padStart(2, "0");
+      resetButton.textContent = game.state === "won" || game.state === "lost" ? "Play again" : "Reset level";
+    }
+
+    function resetLevel() {
+      game.score = 0;
+      game.shots = 5;
+      game.birdIndex = 0;
+      game.projectile = null;
+      game.dragPoint = null;
+      game.isDragging = false;
+      game.blocks = createBlocks();
+      game.critters = createCritters();
+      game.particles = [];
+      game.shake = 0;
+      setGameState("ready");
+      setStatus("Pull the comet back to aim.");
+      updateHud();
+      playTone(330, 0.08, "triangle");
+    }
+
+    function ensureAudio() {
+      if (!game.soundEnabled) return null;
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) return null;
+      audioContext ??= new AudioCtor();
+      if (audioContext.state === "suspended") audioContext.resume();
+      return audioContext;
+    }
+
+    function playTone(frequency, duration, type = "sine") {
+      const audio = ensureAudio();
+      if (!audio) return;
+      const oscillator = audio.createOscillator();
+      const gain = audio.createGain();
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(frequency, audio.currentTime);
+      gain.gain.setValueAtTime(0.0001, audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.09, audio.currentTime + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + duration);
+      oscillator.connect(gain);
+      gain.connect(audio.destination);
+      oscillator.start();
+      oscillator.stop(audio.currentTime + duration + 0.02);
+    }
+
+    function toggleSound() {
+      game.soundEnabled = !game.soundEnabled;
+      soundButton.textContent = game.soundEnabled ? "Sound on" : "Sound off";
+      soundButton.setAttribute("aria-pressed", String(game.soundEnabled));
+      if (game.soundEnabled) playTone(520, 0.1, "sine");
+    }
+
+    function getWorldPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * WORLD.width / rect.width,
+        y: (event.clientY - rect.top) * WORLD.height / rect.height
+      };
+    }
+
+    function clampToSling(point) {
+      const dx = point.x - WORLD.sling.x;
+      const dy = point.y - WORLD.sling.y;
+      const stretch = Math.hypot(dx, dy);
+      if (stretch <= WORLD.sling.maxStretch) return point;
+      const scale = WORLD.sling.maxStretch / stretch;
+      return { x: WORLD.sling.x + dx * scale, y: WORLD.sling.y + dy * scale };
+    }
+
+    function launchVector(point) {
+      return {
+        x: (WORLD.sling.x - point.x) * 0.14,
+        y: (WORLD.sling.y - point.y) * 0.14
+      };
+    }
+
+    function launchShot(point) {
+      const vector = launchVector(point);
+      const launchPoint = {
+        x: point.x,
+        y: Math.min(point.y, WORLD.groundY - 22)
+      };
+      game.projectile = {
+        x: launchPoint.x,
+        y: launchPoint.y,
+        vx: vector.x,
+        vy: vector.y,
+        r: 22,
+        angle: 0,
+        settle: 0,
+        impactFlash: 0,
+        trail: []
+      };
+      game.shots -= 1;
+      game.birdIndex = (game.birdIndex + 1) % BIRD_STYLES.length;
+      game.dragPoint = null;
+      game.isDragging = false;
+      setGameState("playing");
+      setStatus("Shot airborne — watch the arc.");
+      updateHud();
+      playTone(190, 0.22, "sawtooth");
+    }
+
+    function beginAim(event) {
+      if (game.state !== "ready") return;
+      const point = getWorldPoint(event);
+      if (distance(point, WORLD.sling) > 70 && point.x > 270) return;
+      game.isDragging = true;
+      game.dragPoint = clampToSling(point);
+      setGameState("aiming");
+      setStatus("Pull farther back, then let go.");
+      canvas.setPointerCapture?.(event.pointerId);
+      ensureAudio();
+    }
+
+    function moveAim(event) {
+      if (!game.isDragging) return;
+      game.dragPoint = clampToSling(getWorldPoint(event));
+    }
+
+    function endAim(event) {
+      if (!game.isDragging) return;
+      canvas.releasePointerCapture?.(event.pointerId);
+      const point = clampToSling(getWorldPoint(event));
+      const stretch = distance(point, WORLD.sling);
+      game.isDragging = false;
+      game.dragPoint = null;
+      if (stretch < 16) {
+        setGameState("ready");
+        setStatus("That was a tiny pull. Try a bigger arc.");
+        return;
+      }
+      launchShot(point);
+    }
+
+    function launchKeyboardShot() {
+      if (game.state !== "ready") return;
+      launchShot({ x: WORLD.sling.x - 105, y: WORLD.sling.y + 95 });
+    }
+
+    function circleRectCollision(circle, rect) {
+      const closestX = clamp(circle.x, rect.x, rect.x + rect.w);
+      const closestY = clamp(circle.y, rect.y, rect.y + rect.h);
+      const dx = circle.x - closestX;
+      const dy = circle.y - closestY;
+      return dx * dx + dy * dy < circle.r * circle.r;
+    }
+
+    function segmentCircleCollision(start, end, target, radius) {
+      const segmentX = end.x - start.x;
+      const segmentY = end.y - start.y;
+      const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+      const progress = segmentLengthSquared === 0
+        ? 0
+        : clamp(((target.x - start.x) * segmentX + (target.y - start.y) * segmentY) / segmentLengthSquared, 0, 1);
+      const closest = { x: start.x + segmentX * progress, y: start.y + segmentY * progress };
+      return distance(closest, target) < radius;
+    }
+
+    function projectileHitsCritter(projectile, previousPosition, critter) {
+      const hitRadius = projectile.r + critter.r - 3;
+      const directHit = distance(projectile, critter) < hitRadius;
+      const sweptHit = segmentCircleCollision(previousPosition, projectile, critter, hitRadius);
+      const laneHeight = critter.id === "captain" ? 190 : 90;
+      const forgivingLane = projectile.vx > 0
+        && Math.abs(projectile.x - critter.x) < 30
+        && Math.abs(projectile.y - critter.y) < laneHeight;
+      return directHit || sweptHit || forgivingLane;
+    }
+
+    function addScore(points) {
+      game.score += points;
+      updateHud();
+    }
+
+    function burst(x, y, color, count = 14) {
+      for (let index = 0; index < count; index += 1) {
+        const angle = Math.PI * 2 * index / count;
+        const speed = 1.2 + (index % 4) * 0.7;
+        game.particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1.2,
+          life: 1,
+          size: 3 + index % 3,
+          color
+        });
+      }
+    }
+
+    function hitCritter(critter) {
+      critter.defeated = true;
+      burst(critter.x, critter.y, COLORS.sun, 18);
+      addScore(250);
+      game.shake = 8;
+      game.projectile.vx *= 0.22;
+      game.projectile.vy = -4;
+      game.projectile.impactFlash = 1;
+      playTone(560, 0.14, "square");
+      setStatus("Direct hit! +250");
+      if (game.critters.every((target) => target.defeated)) {
+        setGameState("won");
+        setStatus("Outpost cleared! That arc was beautiful.");
+        burst(760, 300, COLORS.ember, 36);
+        playTone(780, 0.24, "triangle");
+      }
+    }
+
+    function hitBlock(block, impact) {
+      block.hitCooldown = 0.24;
+      block.health -= impact > 11 ? 2 : 1;
+      burst(block.x + block.w / 2, block.y + block.h / 2, COLORS.woodLight, 7);
+      game.projectile.vx *= 0.68;
+      game.projectile.vy = -Math.abs(game.projectile.vy) * 0.35;
+      game.projectile.impactFlash = 0.6;
+      playTone(130, 0.09, "square");
+      if (block.health <= 0) {
+        block.falling = true;
+        block.vy = -2.6;
+        addScore(75);
+        burst(block.x + block.w / 2, block.y + block.h / 2, COLORS.cream, 10);
+      }
+    }
+
+    function updateCritters(step) {
+      for (const critter of game.critters) {
+        critter.wobble += step * (critter.defeated ? 0.04 : 0.08);
+      }
+    }
+
+    function updateBlocks(step) {
+      for (const block of game.blocks) {
+        block.hitCooldown = Math.max(0, block.hitCooldown - step / 60);
+        if (!block.falling) continue;
+        block.vy += WORLD.gravity * step;
+        block.y += block.vy * step;
+        block.angle += 0.02 * step;
+      }
+    }
+
+    function updateProjectile(step) {
+      const projectile = game.projectile;
+      if (!projectile) return;
+      const previousPosition = { x: projectile.x, y: projectile.y };
+      projectile.trail.unshift({ x: projectile.x, y: projectile.y, alpha: 1 });
+      projectile.trail = projectile.trail.slice(0, 12);
+      projectile.impactFlash = Math.max(0, projectile.impactFlash - 0.05 * step);
+      projectile.vy += WORLD.gravity * step;
+      projectile.x += projectile.vx * step;
+      projectile.y += projectile.vy * step;
+      projectile.angle += projectile.vx * 0.015 * step;
+
+      for (const critter of game.critters) {
+        if (critter.defeated) continue;
+        if (projectileHitsCritter(projectile, previousPosition, critter)) {
+          hitCritter(critter);
+          break;
+        }
+      }
+
+      if (game.state !== "won") {
+        for (const block of game.blocks) {
+          if (!block.collidable || block.falling || block.hitCooldown > 0) continue;
+          if (circleRectCollision(projectile, block)) {
+            hitBlock(block, Math.hypot(projectile.vx, projectile.vy));
+            break;
+          }
+        }
+      }
+
+      if (projectile.y + projectile.r > WORLD.groundY) {
+        projectile.y = WORLD.groundY - projectile.r;
+        if (Math.abs(projectile.vy) > 3) {
+          projectile.vy *= -0.28;
+          projectile.vx *= 0.8;
+        } else {
+          projectile.vy = 0;
+          projectile.vx *= 0.9;
+          projectile.settle += step;
+        }
+      }
+
+      const offBoard = projectile.x < -120 || projectile.x > WORLD.width + 120 || projectile.y > WORLD.height + 120;
+      if (offBoard || projectile.settle > 34) finishShot();
+    }
+
+    function finishShot() {
+      game.projectile = null;
+      if (game.state === "won") return;
+      if (game.shots > 0) {
+        setGameState("ready");
+        setStatus("Line up the next shot.");
+      } else {
+        setGameState("lost");
+        setStatus("Out of shots. The critters win this round.");
+        burst(790, 420, COLORS.ember, 14);
+        playTone(110, 0.25, "sine");
+      }
+      updateHud();
+    }
+
+    function updateParticles(step) {
+      for (const particle of game.particles) {
+        particle.x += particle.vx * step;
+        particle.y += particle.vy * step;
+        particle.vy += 0.08 * step;
+        particle.life -= 0.025 * step;
+      }
+      game.particles = game.particles.filter((particle) => particle.life > 0);
+      game.shake = Math.max(0, game.shake - 0.45 * step);
+    }
+
+    function update(delta) {
+      const step = Math.min(delta, 34) / 16.67;
+      updateCritters(step);
+      updateBlocks(step);
+      updateProjectile(step);
+      updateParticles(step);
+    }
+
+    function drawSky() {
+      ctx.fillStyle = COLORS.sky;
+      ctx.fillRect(0, 0, WORLD.width, WORLD.height);
+      ctx.fillStyle = COLORS.skyDark;
+      ctx.fillRect(0, 0, WORLD.width, 13);
+
+      ctx.save();
+      ctx.globalAlpha = 0.75;
+      for (const [x, y, size] of game.stars) {
+        ctx.fillStyle = size === 3 ? COLORS.paper : COLORS.cream;
+        ctx.beginPath();
+        ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.fillStyle = COLORS.sun;
+      ctx.beginPath();
+      ctx.arc(865, 102, 46, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.25;
+      ctx.beginPath();
+      ctx.arc(865, 102, 62, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      drawCloud(130, 144, 1);
+      drawCloud(485, 170, 0.7);
+      drawHills();
+    }
+
+    function drawCloud(x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = COLORS.paper;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      ctx.arc(0, 10, 18, Math.PI, 0);
+      ctx.arc(23, 3, 25, Math.PI, 0);
+      ctx.arc(53, 11, 17, Math.PI, 0);
+      ctx.lineTo(70, 29);
+      ctx.lineTo(-18, 29);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawHills() {
+      ctx.fillStyle = COLORS.mossDark;
+      ctx.beginPath();
+      ctx.moveTo(0, 390);
+      ctx.quadraticCurveTo(130, 310, 275, 388);
+      ctx.quadraticCurveTo(420, 300, 580, 392);
+      ctx.quadraticCurveTo(760, 290, 1000, 386);
+      ctx.lineTo(1000, WORLD.groundY);
+      ctx.lineTo(0, WORLD.groundY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = COLORS.moss;
+      ctx.beginPath();
+      ctx.moveTo(0, 432);
+      ctx.quadraticCurveTo(170, 356, 322, 432);
+      ctx.quadraticCurveTo(480, 348, 650, 435);
+      ctx.quadraticCurveTo(820, 362, 1000, 426);
+      ctx.lineTo(1000, WORLD.groundY);
+      ctx.lineTo(0, WORLD.groundY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = COLORS.mossDark;
+      ctx.fillRect(0, WORLD.groundY, WORLD.width, WORLD.height - WORLD.groundY);
+      ctx.fillStyle = COLORS.sun;
+      ctx.globalAlpha = 0.75;
+      ctx.fillRect(0, WORLD.groundY, WORLD.width, 4);
+      ctx.globalAlpha = 1;
+    }
+
+    function drawAimGuide() {
+      if (!game.dragPoint) return;
+      const vector = launchVector(game.dragPoint);
+      ctx.save();
+      ctx.strokeStyle = COLORS.paper;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 9]);
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.moveTo(WORLD.sling.x, WORLD.sling.y);
+      ctx.lineTo(game.dragPoint.x, game.dragPoint.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (let time = 0; time < 25; time += 1) {
+        const x = game.dragPoint.x + vector.x * time;
+        const y = game.dragPoint.y + vector.y * time + WORLD.gravity * time * time / 2;
+        if (x > WORLD.width || y > WORLD.groundY) break;
+        ctx.fillStyle = time % 2 ? COLORS.sun : COLORS.paper;
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(2, 5 - time * 0.12), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawSling() {
+      const pullPoint = game.dragPoint || WORLD.sling;
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 17;
+      ctx.beginPath();
+      ctx.moveTo(151, 486);
+      ctx.lineTo(164, 388);
+      ctx.moveTo(196, 486);
+      ctx.lineTo(184, 386);
+      ctx.stroke();
+      ctx.strokeStyle = COLORS.wood;
+      ctx.lineWidth = 11;
+      ctx.beginPath();
+      ctx.moveTo(151, 486);
+      ctx.lineTo(164, 388);
+      ctx.moveTo(196, 486);
+      ctx.lineTo(184, 386);
+      ctx.stroke();
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(164, 388);
+      ctx.lineTo(pullPoint.x, pullPoint.y);
+      ctx.lineTo(184, 386);
+      ctx.stroke();
+      ctx.strokeStyle = COLORS.ember;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(164, 388);
+      ctx.lineTo(pullPoint.x, pullPoint.y);
+      ctx.lineTo(184, 386);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawBlock(block) {
+      const centerX = block.x + block.w / 2;
+      const centerY = block.y + block.h / 2;
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(block.angle);
+      ctx.fillStyle = block.health === 1 ? COLORS.woodLight : COLORS.wood;
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 4;
+      ctx.fillRect(-block.w / 2, -block.h / 2, block.w, block.h);
+      ctx.strokeRect(-block.w / 2, -block.h / 2, block.w, block.h);
+      ctx.strokeStyle = COLORS.woodDark;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-block.w / 2 + 10, -block.h / 2 + 7);
+      ctx.lineTo(block.w / 2 - 10, block.h / 2 - 7);
+      ctx.moveTo(block.w / 2 - 22, -block.h / 2 + 5);
+      ctx.lineTo(-block.w / 2 + 22, block.h / 2 - 5);
+      if (block.health === 1) {
+        ctx.moveTo(-8, -block.h / 2);
+        ctx.lineTo(2, 0);
+        ctx.lineTo(-5, block.h / 2);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawCritter(critter) {
+      if (critter.defeated) {
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.strokeStyle = COLORS.paper;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(critter.x, critter.y, critter.r + 8, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        return;
+      }
+
+      const bob = Math.sin(critter.wobble) * 1.6;
+      const y = critter.y + bob;
+      ctx.save();
+      ctx.translate(critter.x, y);
+      ctx.fillStyle = COLORS.moss;
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, critter.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = COLORS.mossDark;
+      ctx.beginPath();
+      ctx.moveTo(-15, -17);
+      ctx.lineTo(-22, -35);
+      ctx.lineTo(-5, -24);
+      ctx.moveTo(15, -17);
+      ctx.lineTo(22, -35);
+      ctx.lineTo(5, -24);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = COLORS.paper;
+      ctx.beginPath();
+      ctx.arc(-9, -5, 5, 0, Math.PI * 2);
+      ctx.arc(9, -5, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = COLORS.ink;
+      ctx.beginPath();
+      ctx.arc(-9, -5, 2.4, 0, Math.PI * 2);
+      ctx.arc(9, -5, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 6, 8, 0.15, Math.PI - 0.15);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawBird(bird, style, options = {}) {
+      if (!bird) return;
+      ctx.save();
+      ctx.translate(bird.x, bird.y);
+      ctx.rotate(bird.angle || 0);
+      ctx.fillStyle = style.body;
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, bird.r || 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = style.crest;
+      ctx.beginPath();
+      ctx.moveTo(-8, -18);
+      ctx.lineTo(-12, -35);
+      ctx.lineTo(-2, -25);
+      ctx.lineTo(5, -38);
+      ctx.lineTo(8, -19);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = style.belly;
+      ctx.beginPath();
+      ctx.arc(4, 7, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-16, -8);
+      ctx.lineTo(-4, -1);
+      ctx.moveTo(-13, -3);
+      ctx.lineTo(-3, 3);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.paper;
+      ctx.beginPath();
+      ctx.arc(-7, -7, 6, 0, Math.PI * 2);
+      ctx.arc(8, -7, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = COLORS.ink;
+      ctx.beginPath();
+      ctx.arc(-5, -7, 3, 0, Math.PI * 2);
+      ctx.arc(6, -7, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = COLORS.sun;
+      ctx.beginPath();
+      ctx.moveTo(16, 0);
+      ctx.lineTo(34, 6);
+      ctx.lineTo(16, 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      if (options.highlight) {
+        ctx.strokeStyle = COLORS.paper;
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, (bird.r || 22) + 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawTrail(projectile) {
+      for (let index = projectile.trail.length - 1; index >= 0; index -= 1) {
+        const point = projectile.trail[index];
+        const alpha = (1 - index / projectile.trail.length) * 0.28;
+        ctx.fillStyle = `rgba(255, 246, 222, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, Math.max(3, 11 - index * 0.6), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawParticles() {
+      for (const particle of game.particles) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, particle.life);
+        ctx.fillStyle = particle.color;
+        ctx.translate(particle.x, particle.y);
+        ctx.rotate(particle.life * 4);
+        ctx.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size);
+        ctx.restore();
+      }
+    }
+
+    function drawOverlay() {
+      if (game.state !== "won" && game.state !== "lost") return;
+      ctx.save();
+      ctx.fillStyle = "rgba(16, 43, 58, 0.56)";
+      ctx.fillRect(0, 0, WORLD.width, WORLD.height);
+      ctx.translate(WORLD.width / 2, 215);
+      ctx.rotate(-0.015);
+      ctx.fillStyle = COLORS.paper;
+      ctx.strokeStyle = COLORS.ink;
+      ctx.lineWidth = 5;
+      ctx.fillRect(-215, -65, 430, 156);
+      ctx.strokeRect(-215, -65, 430, 156);
+      ctx.fillStyle = game.state === "won" ? COLORS.ember : COLORS.mossDark;
+      ctx.font = "800 42px Arial Rounded MT Bold, Trebuchet MS, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(game.state === "won" ? "Outpost cleared!" : "The critters win", 0, -5);
+      ctx.fillStyle = COLORS.ink;
+      ctx.font = "800 18px Trebuchet MS, sans-serif";
+      ctx.fillText(game.state === "won" ? "That was a comet-grade arc." : "Reload and try a bolder line.", 0, 32);
+      ctx.restore();
+    }
+
+    function draw() {
+      ctx.save();
+      if (game.shake > 0) ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
+      drawSky();
+      drawAimGuide();
+      for (const block of game.blocks) {
+        if (block.y < WORLD.height + 80) drawBlock(block);
+      }
+      for (const critter of game.critters) drawCritter(critter);
+      drawSling();
+      if (game.projectile) {
+        drawTrail(game.projectile);
+        drawBird(game.projectile, BIRD_STYLES[(game.birdIndex + BIRD_STYLES.length - 1) % BIRD_STYLES.length], { highlight: game.projectile.impactFlash > 0 });
+      } else if (game.state === "ready" || game.state === "aiming") {
+        const bird = game.dragPoint ? { x: game.dragPoint.x, y: game.dragPoint.y, r: 22, angle: 0 } : { x: WORLD.sling.x, y: WORLD.sling.y, r: 22, angle: 0 };
+        drawBird(bird, BIRD_STYLES[game.birdIndex], { highlight: game.isDragging });
+      }
+      drawParticles();
+      drawOverlay();
+      ctx.restore();
+    }
+
+    function frame(timestamp) {
+      const delta = timestamp - game.lastFrame;
+      game.lastFrame = timestamp;
+      update(delta);
+      draw();
+      requestAnimationFrame(frame);
+    }
+
+    canvas.addEventListener("pointerdown", beginAim);
+    canvas.addEventListener("pointermove", moveAim);
+    canvas.addEventListener("pointerup", endAim);
+    canvas.addEventListener("pointercancel", endAim);
+    canvas.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && game.state === "ready") {
+        event.preventDefault();
+        launchKeyboardShot();
+      }
+    });
+    resetButton.addEventListener("click", resetLevel);
+    soundButton.addEventListener("click", toggleSound);
+
+    resetLevel();
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

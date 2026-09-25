@@ -1,0 +1,69 @@
+{
+  "kind": "probes",
+  "createdAt": "2026-09-04T18:29:43.124Z",
+  "feature": "001-legacy-login-evidence",
+  "task": "T001",
+  "receipts": [
+    {
+      "briefId": "c3153b7ae557acf7ad471dad4cace06f6e99d461ee03a7a051e270f613193289",
+      "feature": "001-legacy-login-evidence",
+      "task": "T001",
+      "role": "risk",
+      "runId": "legacy-run-001",
+      "harness": "codex",
+      "startedAt": "2026-09-04T18:28:40.000Z",
+      "endedAt": "2026-09-04T18:28:42.000Z",
+      "status": "complete",
+      "checks": [
+        {
+          "id": "requirement-gaps",
+          "outcome": "not-observed",
+          "conclusion": "The bounded login requirement is represented by the task and test.",
+          "findings": [],
+          "unknowns": []
+        },
+        {
+          "id": "failure-paths",
+          "outcome": "not-observed",
+          "conclusion": "No additional failure path was observed in the bounded auth module.",
+          "findings": [],
+          "unknowns": []
+        },
+        {
+          "id": "outcome-reachability",
+          "outcome": "not-observed",
+          "conclusion": "The public login entry point returns the expected token for a valid user.",
+          "findings": [],
+          "unknowns": []
+        },
+        {
+          "id": "behavior-model-consistency",
+          "outcome": "not-observed",
+          "conclusion": "No duplicate predictor or serializer is present in this fixture.",
+          "findings": [],
+          "unknowns": []
+        },
+        {
+          "id": "validation-gaps",
+          "outcome": "not-observed",
+          "conclusion": "The functional test invokes the public module and checks its returned value.",
+          "findings": [],
+          "unknowns": []
+        }
+      ],
+      "readFiles": [
+        {
+          "path": "src/auth/login.js",
+          "sha256": "8e88cc711ba1c4788b2b5056b3bb6f855c2bc07083f7679a27c1274f700e13d0"
+        },
+        {
+          "path": "tests/auth.test.mjs",
+          "sha256": "c4d460d028b0101cd94d521379cbe3a1c6f501975f54c64bda531f177d14a72d"
+        }
+      ],
+      "queryReceipts": [],
+      "receiptId": "8cb11c334687740f38efe3fe86b7f2e0ab660ef0e89ee74e1fadbf06c343d92f",
+      "ingestedAt": "2026-09-04T18:29:43.083Z"
+    }
+  ]
+}

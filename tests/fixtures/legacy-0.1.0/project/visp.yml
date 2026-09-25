@@ -1,0 +1,95 @@
+# visp configuration. Every key is optional; the values below are the defaults.
+# Machine-owned state lives in .visp/ and should not be edited by hand.
+
+# Project type. Chooses the validation commands init suggests below.
+preset: javascript
+
+# The AI coding agent this project installs assets for.
+# One of: claude-code, opencode, codex, copilot, cursor, generic
+harness: codex
+
+# How much always-resident text the install spends. "minimal" gives a short
+# guide and six MCP tools — for small models or small context windows; every
+# other capability stays reachable as a CLI command. Use "standard" only when
+# the model benefits from the full resident guide and MCP surface.
+profile: minimal
+
+workflow:
+  # How firmly gates refuse: relaxed | standard | strict | locked.
+  # locked is strict with overrides refused — no recorded exception waives a rule.
+  strictness: standard
+
+  # A change touching more files than this needs an override.
+  maxChangedFiles: 40
+
+  # Review signal for implementation and test code, not an architecture target.
+  # Standard mode reports it as advice. Strict and locked modes enforce it;
+  # responsibility boundaries—not a target line count—decide whether to split.
+  maxSourceFileLines: 600
+
+  # Physical line-length heuristic, not a measure of module quality. It is
+  # advisory in standard mode and enforced in strict/locked modes.
+  maxSourceLineChars: 500
+
+  # Never writable by an agent, whatever a task's scope says.
+  blockedPaths:
+    - ".env"
+    - ".env.*"
+    - "node_modules"
+    - "dist"
+    - "build"
+    - ".git"
+
+  # Commands that prove a change works. Run as argv vectors, never via a shell,
+  # so one entry is one command: write "pnpm test" and "pnpm lint" as two, not
+  # as "pnpm test && pnpm lint". An entry may also be a list of arguments —
+  # ["pnpm", "test", "--", "--reporter=dot"] — for arguments that only look
+  # like shell syntax.
+  validationCommands:
+    - npm run test
+
+  # Require a test signal in the diff before review passes.
+  requireTests: true
+
+  # After a green verify, also check that validation fails with the task's
+  # change reverted — a test that passes either way proves nothing. "auto"
+  # asks only when the task declares its own commands and touched a test;
+  # "on" asks on every green verify; "off" only with verify --flip.
+  flipCheck: auto
+
+graph:
+  # Languages the repository index extracts from.
+  languages:
+    - typescript
+    - javascript
+    - python
+
+  # Extra globs to keep out of the index.
+  exclude: []
+
+  # Default query bounds.
+  queryDepth: 3
+  queryResults: 50
+
+context:
+  # Token ceiling for a compiled context pack.
+  tokenBudget: 12000
+
+  # Send bounded snippets instead of whole files.
+  snippetCap: true
+  maxSnippets: 4
+  maxSnippetLines: 40
+
+  # Write snippet text into the on-disk pack, for readers without file access.
+  includeSnippets: false
+
+  # How many named line ranges the index contributes per file in a pack.
+  maxRegionsPerFile: 8
+
+memory:
+  # Durable project notes under .visp/memory, recalled as untrusted context.
+  enabled: true
+
+telemetry:
+  # Local-only attempt and token records. Never leaves the machine.
+  enabled: true

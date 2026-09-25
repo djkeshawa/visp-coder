@@ -1,0 +1,12 @@
+<!doctype html><html><style>body{font:18px sans-serif}button{padding:20px;margin:20px}#reset{display:block;margin-top:900px}</style><body>
+<button id="launch">Launch</button><output id="status">2 rounds</output><span id="transient" hidden>Flying</span><button id="reset">Reset</button>
+<script>
+let ammo = 2;
+const launch = document.querySelector('#launch'), status = document.querySelector('#status');
+launch.onclick = () => {
+  ammo = Math.max(0, ammo - 1);
+  status.textContent = ammo + ' rounds';
+  if (ammo === 0 && document.body.classList.contains('repaired')) { launch.disabled = true; status.textContent = 'Empty — reset to continue'; }
+};
+document.querySelector('#reset').onclick = () => { ammo = 2; launch.disabled = false; status.textContent = '2 rounds'; document.querySelector('#transient').remove(); };
+</script></body></html>

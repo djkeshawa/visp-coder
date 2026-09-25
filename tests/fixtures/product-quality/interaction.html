@@ -1,0 +1,34 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>#drag {width:120px;height:120px;background:teal;touch-action:none}</style>
+<body>
+<div id="drag" tabindex="0">Drag control</div>
+<output id="phase">ready</output><output id="remaining">3</output>
+<script>
+(() => {
+  const drag = document.querySelector('#drag');
+  const phase = document.querySelector('#phase');
+  const remaining = document.querySelector('#remaining');
+  const repaired = document.body.classList.contains('repaired');
+  let dragging = false;
+  function launch() {
+    phase.textContent = 'running';
+    remaining.textContent = String(Number(remaining.textContent) - 1);
+    if (repaired) dragging = false;
+  }
+  drag.onpointerdown = event => {
+    dragging = true;
+    phase.textContent = 'aiming';
+    drag.setPointerCapture(event.pointerId);
+  };
+  drag.onpointermove = () => { if (dragging) phase.textContent = 'aiming'; };
+  drag.onpointerup = () => { if (dragging) { dragging = false; phase.textContent = 'ready'; } };
+  drag.onpointercancel = () => {
+    if (repaired) { dragging = false; phase.textContent = 'ready'; }
+    else launch();
+  };
+  window.onkeydown = event => {
+    if (event.key === ' ') { event.preventDefault(); launch(); }
+  };
+})();
+</script>

@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171332">
+  <title>Flockshot — Cloudbreakers</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #171332;
+      --ink-soft: #27214a;
+      --paper: #fff8e9;
+      --paper-dim: #eadfc9;
+      --coral: #ff765a;
+      --coral-deep: #dc4e49;
+      --sun: #ffd166;
+      --mint: #8fe1c1;
+      --sky: #8bd7df;
+      --line: rgba(255, 248, 233, .16);
+      --shadow: rgba(8, 5, 25, .32);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; background: var(--ink); }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: clamp(18px, 3vw, 36px);
+      overflow-x: hidden;
+      color: var(--paper);
+      background:
+        radial-gradient(circle at 16% 8%, rgba(255, 209, 102, .16), transparent 22rem),
+        radial-gradient(circle at 90% 22%, rgba(143, 225, 193, .12), transparent 28rem),
+        linear-gradient(155deg, #171332 0%, #211945 48%, #382447 100%);
+      font-family: "Trebuchet MS", "Arial Rounded MT Bold", system-ui, sans-serif;
+    }
+
+    body::before,
+    body::after {
+      position: fixed;
+      z-index: 0;
+      width: 1px;
+      height: 1px;
+      border-radius: 50%;
+      content: "";
+      box-shadow:
+        8vw 12vh 0 1px rgba(255, 255, 255, .42),
+        21vw 30vh 0 1px rgba(255, 209, 102, .35),
+        43vw 9vh 0 1px rgba(255, 255, 255, .28),
+        63vw 20vh 0 1px rgba(255, 255, 255, .35),
+        86vw 13vh 0 1px rgba(255, 209, 102, .4),
+        74vw 46vh 0 1px rgba(255, 255, 255, .24),
+        10vw 72vh 0 1px rgba(255, 255, 255, .22),
+        92vw 82vh 0 1px rgba(255, 255, 255, .26);
+      pointer-events: none;
+    }
+
+    body::before { top: 0; left: 0; }
+    body::after { top: 4vh; left: 3vw; transform: scale(.7); opacity: .7; }
+
+    button, canvas { -webkit-tap-highlight-color: transparent; }
+
+    button {
+      border: 0;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    canvas:focus-visible {
+      outline: 3px solid var(--sun);
+      outline-offset: 4px;
+    }
+
+    .app {
+      position: relative;
+      z-index: 1;
+      width: min(1240px, 100%);
+      margin: 0 auto;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 56px;
+      height: 56px;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 2px solid rgba(255, 209, 102, .72);
+      border-radius: 19px 19px 19px 6px;
+      color: var(--ink);
+      background: var(--sun);
+      box-shadow: 6px 6px 0 rgba(255, 118, 90, .7);
+      font-size: 30px;
+      transform: rotate(-6deg);
+    }
+
+    .brand-copy p,
+    .brand-copy h1 { margin: 0; }
+
+    .brand-copy .eyebrow,
+    .section-label {
+      color: var(--mint);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .brand-copy h1 {
+      color: var(--paper);
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: .92;
+      letter-spacing: -.06em;
+    }
+
+    .brand-copy .subtitle {
+      margin-top: 5px;
+      color: var(--paper-dim);
+      font-size: 13px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 9px;
+    }
+
+    .stat {
+      min-width: 90px;
+      padding: 10px 13px 11px;
+      border: 1px solid var(--line);
+      border-radius: 14px 14px 5px 14px;
+      background: rgba(255, 248, 233, .07);
+      box-shadow: inset 0 1px rgba(255, 255, 255, .08);
+    }
+
+    .stat dt {
+      color: var(--paper-dim);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .stat dd {
+      margin: 3px 0 0;
+      color: var(--sun);
+      font-size: 25px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .game-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 258px;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .stage-card,
+    .rail-card,
+    .instructions {
+      border: 1px solid rgba(255, 248, 233, .14);
+      background: rgba(16, 12, 38, .45);
+      box-shadow: 0 22px 55px var(--shadow), inset 0 1px rgba(255, 255, 255, .08);
+      backdrop-filter: blur(12px);
+    }
+
+    .stage-card {
+      min-width: 0;
+      padding: 10px;
+      border-radius: 24px 24px 8px 24px;
+    }
+
+    .stage-topline,
+    .stage-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 4px 8px 9px;
+      color: var(--paper-dim);
+      font-size: 12px;
+    }
+
+    .stage-topline strong { color: var(--paper); }
+
+    #wind-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--mint);
+      font-weight: 800;
+    }
+
+    #game {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 16 / 9;
+      border: 1px solid rgba(255, 248, 233, .25);
+      border-radius: 17px 17px 5px 17px;
+      background: #29204c;
+      cursor: crosshair;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .stage-bottom {
+      min-height: 32px;
+      padding: 9px 8px 1px;
+    }
+
+    #status-line { color: var(--paper); font-weight: 800; }
+    .tip { color: #bfb6d0; text-align: right; }
+
+    .side-rail {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .rail-card,
+    .instructions { padding: 18px; border-radius: 18px 18px 6px 18px; }
+
+    .rail-card h2 {
+      max-width: 190px;
+      margin: 7px 0 8px;
+      color: var(--paper);
+      font-size: 25px;
+      line-height: 1.03;
+      letter-spacing: -.045em;
+    }
+
+    .rail-card p { margin: 0; color: var(--paper-dim); font-size: 13px; line-height: 1.45; }
+
+    .level-dots {
+      display: flex;
+      gap: 8px;
+      margin-top: 17px;
+    }
+
+    .level-dot {
+      width: 28px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255, 248, 233, .15);
+      transition: background .2s ease, transform .2s ease;
+    }
+
+    .level-dot.current { background: var(--coral); transform: scaleY(1.35); }
+    .level-dot.cleared { background: var(--mint); }
+
+    .control-stack { display: grid; gap: 8px; }
+
+    .control-button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      min-height: 45px;
+      padding: 0 13px 0 15px;
+      border: 1px solid transparent;
+      border-radius: 12px 12px 4px 12px;
+      color: var(--paper);
+      background: rgba(255, 248, 233, .09);
+      font-size: 13px;
+      font-weight: 800;
+      text-align: left;
+      transition: transform .16s ease, background .16s ease, opacity .16s ease;
+    }
+
+    .control-button:hover:not(:disabled) { background: rgba(255, 248, 233, .16); transform: translateY(-2px); }
+    .control-button:active:not(:disabled) { transform: translateY(1px); }
+
+    .control-button.primary { color: var(--ink); background: var(--sun); box-shadow: 4px 4px 0 rgba(255, 118, 90, .45); }
+    .control-button.primary:hover:not(:disabled) { background: #ffe08b; }
+    .control-button:disabled { opacity: .35; cursor: not-allowed; }
+    .control-button .key { color: inherit; opacity: .62; font-size: 11px; font-weight: 900; }
+
+    .instructions { margin-top: auto; }
+
+    .instructions p { margin: 0 0 11px; color: var(--sun); font-size: 12px; font-weight: 900; }
+
+    .instructions ul { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+    .instructions li { color: var(--paper-dim); font-size: 12px; line-height: 1.35; }
+
+    kbd {
+      display: inline-block;
+      min-width: 23px;
+      margin-right: 4px;
+      padding: 2px 5px;
+      border: 1px solid rgba(255, 248, 233, .24);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      color: var(--paper);
+      background: rgba(255, 248, 233, .08);
+      font-size: 10px;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .footer-note {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 17px;
+      padding: 0 8px;
+      color: rgba(234, 223, 201, .68);
+      font-size: 11px;
+    }
+
+    .footer-note strong { color: var(--coral); }
+
+    @media (max-width: 900px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .game-layout { grid-template-columns: 1fr; }
+      .side-rail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .72fr); align-items: start; }
+      .instructions { margin-top: 0; }
+      .control-stack { grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 560px) {
+      body { padding: 14px; }
+      .topbar { gap: 17px; margin-bottom: 16px; }
+      .brand-mark { width: 47px; height: 47px; font-size: 24px; }
+      .stats { width: 100%; }
+      .stat { flex: 1; min-width: 0; padding: 9px 10px; }
+      .stat dd { font-size: 22px; }
+      .stage-card { padding: 7px; border-radius: 17px 17px 5px 17px; }
+      .stage-topline, .stage-bottom { padding-left: 5px; padding-right: 5px; }
+      .tip { display: none; }
+      .side-rail { display: flex; }
+      .control-stack { grid-template-columns: 1fr 1fr; }
+      .control-button:last-child { grid-column: 1 / -1; }
+      .footer-note { align-items: flex-start; flex-direction: column; gap: 4px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">✦</div>
+        <div class="brand-copy">
+          <p class="eyebrow">Sky island arcade</p>
+          <h1>Flockshot</h1>
+          <p class="subtitle">Cloudbreakers training grounds</p>
+        </div>
+      </div>
+      <dl class="stats" aria-label="Game status">
+        <div class="stat"><dt>Score</dt><dd id="score">0000</dd></div>
+        <div class="stat"><dt>Shots</dt><dd id="shots">04</dd></div>
+        <div class="stat"><dt>Targets</dt><dd id="targets">02</dd></div>
+      </dl>
+    </header>
+
+    <section class="game-layout" aria-label="Flockshot game">
+      <section class="stage-card" aria-label="Cloudbreakers playfield">
+        <div class="stage-topline">
+          <span><strong id="level-label">Island 01</strong> <span id="level-name">Sunset Switchbacks</span></span>
+          <span id="wind-label">↝ breeze · calm</span>
+        </div>
+        <canvas id="game" width="960" height="540" tabindex="0" role="img" aria-label="Flockshot playfield. Drag Ember back and release to launch." data-state="ready"></canvas>
+        <div class="stage-bottom">
+          <span id="status-line" aria-live="polite">Ember is ready. Pull back and let fly.</span>
+          <span class="tip">Aim with the whole sky</span>
+        </div>
+      </section>
+
+      <aside class="side-rail">
+        <section class="rail-card">
+          <p class="section-label">Mission brief</p>
+          <h2>Knock the clouds loose.</h2>
+          <p>Send Ember through the weather towers, bonk every cloud muncher, and keep a shot in reserve for style.</p>
+          <div class="level-dots" aria-label="Island progress">
+            <span class="level-dot current" data-level-dot="0"></span>
+            <span class="level-dot" data-level-dot="1"></span>
+            <span class="level-dot" data-level-dot="2"></span>
+          </div>
+        </section>
+
+        <div class="control-stack" aria-label="Game controls">
+          <button class="control-button primary" id="reset-game" type="button">Reset flight <span class="key">R</span></button>
+          <button class="control-button" id="next-level" type="button" disabled>Next island <span class="key">ENTER</span></button>
+          <button class="control-button" id="sound-toggle" type="button" aria-pressed="true">Sound: on <span class="key">M</span></button>
+        </div>
+
+        <section class="instructions">
+          <p>Ready, captain?</p>
+          <ul>
+            <li><kbd>Drag</kbd> pull Ember back, release to launch</li>
+            <li><kbd>Click</kbd> anywhere to fire a quick shot</li>
+            <li><kbd>Arrows</kbd> line up, <kbd>Space</kbd> launch</li>
+          </ul>
+        </section>
+      </aside>
+    </section>
+
+    <footer class="footer-note">
+      <span>Built for tiny pilots with big trajectories.</span>
+      <span><strong>3 islands</strong> · one sky to save</span>
+    </footer>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>

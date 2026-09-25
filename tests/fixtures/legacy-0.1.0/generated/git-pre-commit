@@ -1,0 +1,51 @@
+#!/bin/sh
+# managed by visp
+# Refuses a commit whose staged files fall outside the active task's scope.
+
+if ! command -v visp >/dev/null 2>&1; then
+  exit 0
+fi
+
+# --if-authorized: with no task active you are not working under visp, so
+# ordinary commits are left alone.
+# --include-done: work from a task visp already closed is still in the tree and
+# must remain committable, or finishing a task would strand it.
+output=$(visp guard --staged --if-authorized --include-done --json 2>/dev/null)
+
+# The exit code alone cannot be trusted. Another program named `visp` on
+# PATH — an older release, say — exits 1 for its own reasons, and 1 is also the
+# refusal code. Only a parseable guard envelope proves this check actually ran,
+# so that is what the decision reads.
+verdict=$(printf '%s' "$output" | node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => { raw += chunk; });
+process.stdin.on("end", () => {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed.command !== "guard") { console.log("unchecked"); return; }
+    if (parsed.ok) { console.log("allow"); return; }
+    const first = parsed.data?.violations?.[0];
+    console.log("refuse " + (first?.message ?? "changes are outside the authorized scope"));
+  } catch {
+    console.log("unchecked");
+  }
+});
+' 2>/dev/null)
+
+case "$verdict" in
+  allow)
+    exit 0
+    ;;
+  refuse*)
+    echo ""
+    echo "Commit refused: ${verdict#refuse }"
+    echo "Adjust the task's allowedFiles, or unstage the extra files."
+    exit 1
+    ;;
+  *)
+    echo ""
+    echo "visp could not check this commit, so it was not checked."
+    echo "Run 'visp doctor' to find out why. Committing anyway."
+    exit 0
+    ;;
+esac

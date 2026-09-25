@@ -1,0 +1,6 @@
+{
+  "variant": "control",
+  "expectedDefects": [],
+  "evaluationScope": "Rendered summary only, not an implemented full application",
+  "correctSummary": "$45"
+}

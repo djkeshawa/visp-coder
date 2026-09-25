@@ -1,0 +1,114 @@
+{
+  "kind": "verification",
+  "createdAt": "2026-09-04T18:32:12.685Z",
+  "feature": "001-legacy-login-evidence",
+  "task": "T001",
+  "passed": true,
+  "codeEvidence": "executed",
+  "commands": [
+    {
+      "command": "npm run test",
+      "exitCode": 0,
+      "passed": true,
+      "durationMs": 298,
+      "verificationLayer": "functional"
+    },
+    {
+      "command": "node --test tests/auth.test.mjs",
+      "exitCode": 0,
+      "passed": true,
+      "durationMs": 160,
+      "verificationLayer": "functional"
+    }
+  ],
+  "changedFiles": [
+    ".visp/failure-patterns.json",
+    ".visp/features/001-legacy-login-evidence/context/T001.json",
+    ".visp/features/001-legacy-login-evidence/context/T001.manifest.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/observations.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/observations/OBS-00f497e1869c/attachments/01-legacy-login-observation.txt",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/probes.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546595498-000002-57541c56-0243-4403-b80f-5ee65e54ac41.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546663197-000002-b686e055-0cbe-48e9-8d29-3c2e81fc4b17.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546681409-000002-73d9c835-e7d4-436c-8d39-e638dfaa8451.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546699461-000002-44e07b85-df27-4879-ba8c-17de411ebbdf.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546594997-000001-98ef2f1e-78c0-45d2-a5d1-2d2f01bdb0eb.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546662572-000001-0ea4fcff-0946-405a-87f1-36bc76cad8b4.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546680936-000001-88433303-15dc-42ac-99d0-68d20cb7b096.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546699076-000001-474d63f6-455f-454d-ba02-0008189ad9b3.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification.json",
+    ".visp/features/001-legacy-login-evidence/intent.json",
+    ".visp/features/001-legacy-login-evidence/plan.json",
+    ".visp/features/001-legacy-login-evidence/research.json",
+    ".visp/features/001-legacy-login-evidence/spec.json",
+    ".visp/features/001-legacy-login-evidence/tasks.json",
+    ".visp/features/001-legacy-login-evidence/traceability.json",
+    "src/auth/login.js",
+    "tests/auth.test.mjs"
+  ],
+  "findings": [
+    {
+      "code": "flip-signal-unclassified",
+      "severity": "warning",
+      "message": "Validation failed in the reverted tree, but its output does not establish behavioral coverage",
+      "recommendation": "Inspect the failing check: an assertion error can come from a source-text check as well as a behavioral test"
+    }
+  ],
+  "attempt": 5,
+  "delta": [
+    {
+      "command": "npm run test",
+      "newFailures": [],
+      "persisting": 0,
+      "resolved": 0
+    }
+  ],
+  "flip": {
+    "failsWithoutChange": true,
+    "signal": "unclassified",
+    "reason": "reverted 1 implementation file(s) to HEAD in a temporary worktree; failure alone does not establish behavioral coverage",
+    "revertedFiles": [
+      "src/auth/login.js"
+    ],
+    "preservedValidationFiles": [
+      "tests/auth.test.mjs"
+    ],
+    "commands": [
+      {
+        "command": "npm run test",
+        "exitCode": 1,
+        "passed": false,
+        "durationMs": 431,
+        "output": ""
+      },
+      {
+        "command": "node --test tests/auth.test.mjs",
+        "exitCode": 1,
+        "passed": false,
+        "durationMs": 159,
+        "output": ""
+      }
+    ]
+  },
+  "subject": {
+    "digest": "c325bfcd616485c8d34ecd7d906d22b9dc073629a27fbcfb04e9418fee0f40f0",
+    "basis": "working-tree",
+    "head": "fc1b749ac3f68aaedfe364e2f7fbbe0b76d00d53",
+    "files": [
+      {
+        "path": "src/auth/login.js",
+        "status": "modified",
+        "digest": "af9ab856867394d3cb2d5d6f7281db9a98e417319977bec1b5f16464f3212021"
+      },
+      {
+        "path": "tests/auth.test.mjs",
+        "status": "modified",
+        "digest": "2fc6bb39362ba6f1bc2b6d6185ef9b18699a1227f1463f44bc3b188a452728ec"
+      }
+    ],
+    "contractHash": "8c5ae1599b58526453e22a3f695f64f265dc3ce362faf830afc676e64ee627f3",
+    "contextManifestHash": "c886eb139a294e1643e3643a4f3381832f05cfac97b9f681929a7dec3f1f4255",
+    "validationHash": "dbebff18b4da76d89d4fa2fe37365da8911550c782f4d77906f1c9a4b01c241e"
+  }
+}

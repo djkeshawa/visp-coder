@@ -1,0 +1,342 @@
+{
+ "delivery": {
+  "status": "unresolved-product",
+  "summary": "Not complete: required product checks or assessments remain unresolved."
+ },
+ "nextCommand": "visp done --feature 001-build-a-small-local-inference --task T001",
+ "feedbackPlan": {
+  "observationPlan": {
+   "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+   "sequence": [
+    "Real input \u2192 assert settled result \u2192 input again \u2192 assert settled result",
+    "If applicable: reset/cancel pending work \u2192 restart \u2192 outlive old completion; new state stays intact"
+   ],
+   "probes": [
+    {
+     "kind": "independent-result",
+     "status": "unassessed"
+    }
+   ],
+   "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+  },
+  "nextProbe": {
+   "kind": "independent-result",
+   "when": "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels.",
+   "expected": [
+    "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels.",
+    "A local HTTP client can POST JSON {\"texts\":[...]} to /v1/sentiment/batch and receive 200 JSON with one result per input in order, including mixed sentiment results."
+   ],
+   "outcomes": [
+    "O001",
+    "O002"
+   ],
+   "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed.",
+   "id": "PROBE-952169d33a2d"
+  },
+  "probeResponses": [],
+  "focus": "implement",
+  "research": {
+   "question": "The empty repository has no existing runtime or test conventions, so the standard-library Python layout is the smallest portable choice.",
+   "method": "Use the host's research capability for external facts, or a bounded local experiment for repository behavior. Choose whichever can resolve this question.",
+   "consume": "Update the existing brief decision with the conclusion, evidence, implementation implication and affected check; remove only the uncertainty actually resolved. Then build or correct the slice.",
+   "required": false
+  },
+  "trace": {
+   "question": "Which code owns Implement and exercise the first complete local HTTP request flow, including success, batch, validation errors, documentation, and tests., and which callers and tests will change?",
+   "command": "visp work --feature 001-build-a-small-local-inference --task T001",
+   "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+  },
+  "findings": [],
+  "findingsRemaining": 0,
+  "gaps": [],
+  "gapsRemaining": 0,
+  "nextCheck": "Exercise the next complete behavior, then inspect whether the result fulfills the original request across relevant quality dimensions."
+ },
+ "next": {
+  "feature": "001-build-a-small-local-inference",
+  "task": "T001",
+  "action": "implement",
+  "objective": "Implement and exercise the first complete local HTTP request flow, including success, batch, validation errors, documentation, and tests.",
+  "command": "visp done --feature 001-build-a-small-local-inference --task T001",
+  "evidence": [
+   "O001: behavior unassessed; review unassessed",
+   "O002: behavior unassessed; review unassessed",
+   "O003: behavior unassessed; review unassessed",
+   "O004: behavior unassessed; review unassessed",
+   "O005: behavior unassessed; review unassessed",
+   "C001: not executed for current product",
+   "C002: not executed for current product",
+   "C003: not executed for current product"
+  ],
+  "mayEdit": true
+ },
+ "trace": {
+  "graph": [
+   {
+    "kind": "entity",
+    "key": "test_api.py#file",
+    "path": "test_api.py",
+    "name": "test_api.py",
+    "detail": "file",
+    "startLine": 1,
+    "endLine": 132,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#class:RequestError",
+    "path": "sentiment_api.py",
+    "name": "RequestError",
+    "detail": "class",
+    "startLine": 78,
+    "endLine": 92,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#class:SentimentAnalyzer",
+    "path": "sentiment_api.py",
+    "name": "SentimentAnalyzer",
+    "detail": "class",
+    "startLine": 95,
+    "endLine": 125,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#class:SentimentHandler",
+    "path": "sentiment_api.py",
+    "name": "SentimentHandler",
+    "detail": "class",
+    "startLine": 141,
+    "endLine": 351,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#function:_error_payload",
+    "path": "sentiment_api.py",
+    "name": "_error_payload",
+    "detail": "function",
+    "startLine": 131,
+    "endLine": 138,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#function:create_server",
+    "path": "sentiment_api.py",
+    "name": "create_server",
+    "detail": "function",
+    "startLine": 354,
+    "endLine": 357,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#function:main",
+    "path": "sentiment_api.py",
+    "name": "main",
+    "detail": "function",
+    "startLine": 360,
+    "endLine": 378,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#file",
+    "path": "sentiment_api.py",
+    "name": "sentiment_api.py",
+    "detail": "file",
+    "startLine": 1,
+    "endLine": 383,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#class:SentimentApiTest",
+    "path": "test_api.py",
+    "name": "SentimentApiTest",
+    "detail": "class",
+    "startLine": 11,
+    "endLine": 127,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:request",
+    "path": "test_api.py",
+    "name": "request",
+    "detail": "method",
+    "startLine": 26,
+    "endLine": 43,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:setUpClass",
+    "path": "test_api.py",
+    "name": "setUpClass",
+    "detail": "method",
+    "startLine": 13,
+    "endLine": 18,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:tearDownClass",
+    "path": "test_api.py",
+    "name": "tearDownClass",
+    "detail": "method",
+    "startLine": 21,
+    "endLine": 24,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:test_analyzer_is_deterministic_and_distinguishes_sentiment",
+    "path": "test_api.py",
+    "name": "test_analyzer_is_deterministic_and_distinguishes_sentiment",
+    "detail": "method",
+    "startLine": 45,
+    "endLine": 56,
+    "distance": 1
+   }
+  ],
+  "notes": [
+   "Graph uncertainty: ANALYZER.analyze",
+   "Graph uncertainty: SystemExit",
+   "Graph uncertainty: TOKEN_RE.findall",
+   "Graph uncertainty: allow.split",
+   "Graph context is partial; use a targeted query for additional callers or tests.",
+   "Graph uncertainty: analyzer.analyze",
+   "Graph uncertainty: cls.server.server_close",
+   "Graph uncertainty: cls.server.shutdown",
+   "Graph uncertainty: cls.thread.join"
+  ]
+ },
+ "feature": "001-build-a-small-local-inference",
+ "task": "T001",
+ "subjectDigest": "524f2f2f196581f1367ee07580856a77f01796f03f485e2a6590cf310b4238b9",
+ "passed": false,
+ "closed": false,
+ "executions": [
+  {
+   "id": "9f2024c1-27af-421f-8816-bfa2df2842c6",
+   "comparisonEnvironment": "ba4c56e9358ed0d9267ceafa96d3497c263c9a8221913ff9631616a7b5018756",
+   "check": "C001",
+   "task": "T001",
+   "subjectDigest": "bd7ea892d89927b7f6176b21b2394219fb1118b693f2bc73091f9da854528445",
+   "contractDigest": "f7d7ca6fa97c924fdee6e363d72f04110742ea6e978c6be9c0f7b653e730afb4",
+   "createdAt": "2026-09-23T18:07:50.342Z",
+   "command": "python3 -m unittest -v test_api.py",
+   "provenance": "supervisor-executed",
+   "assertions": "agent-reported",
+   "status": "passed",
+   "exitCode": 0,
+   "durationMs": 577,
+   "output": "test_analyzer_is_deterministic_and_distinguishes_sentiment (test_api.SentimentApiTest) ... ok\ntest_batch_preserves_order_and_mixed_labels (test_api.SentimentApiTest) ... ok\ntest_health_check_is_real_http (test_api.SentimentApiTest) ... ok\ntest_invalid_batch_does_not_partially_succeed (test_api.SentimentApiTest) ... ok\ntest_invalid_json_has_useful_error (test_api.SentimentApiTest) ... ok\ntest_invalid_single_text_is_unprocessable (test_api.SentimentApiTest) ... ok\ntest_media_type_route_and_method_errors_are_json (test_api.SentimentApiTest) ... ok\ntest_single_text_returns_result (test_api.SentimentApiTest) ... ok\n\n----------------------------------------------------------------------\nRan 8 tests in 0.508s\n\nOK"
+  },
+  {
+   "id": "d5c8fcda-5c3c-46ab-b4b8-a1bfcbd70b07",
+   "comparisonEnvironment": "ba4c56e9358ed0d9267ceafa96d3497c263c9a8221913ff9631616a7b5018756",
+   "check": "C002",
+   "task": "T001",
+   "subjectDigest": "bd7ea892d89927b7f6176b21b2394219fb1118b693f2bc73091f9da854528445",
+   "contractDigest": "f7d7ca6fa97c924fdee6e363d72f04110742ea6e978c6be9c0f7b653e730afb4",
+   "createdAt": "2026-09-23T18:07:50.934Z",
+   "command": "python3 -m py_compile sentiment_api.py test_api.py",
+   "provenance": "supervisor-executed",
+   "assertions": "agent-reported",
+   "status": "passed",
+   "exitCode": 0,
+   "durationMs": 27,
+   "output": ""
+  },
+  {
+   "id": "a0eea516-f765-42af-9288-e2c72d226ee2",
+   "comparisonEnvironment": "ba4c56e9358ed0d9267ceafa96d3497c263c9a8221913ff9631616a7b5018756",
+   "check": "C003",
+   "task": "T001",
+   "subjectDigest": "bd7ea892d89927b7f6176b21b2394219fb1118b693f2bc73091f9da854528445",
+   "contractDigest": "f7d7ca6fa97c924fdee6e363d72f04110742ea6e978c6be9c0f7b653e730afb4",
+   "createdAt": "2026-09-23T18:07:50.965Z",
+   "command": "python3 test_api.py",
+   "provenance": "supervisor-executed",
+   "assertions": "agent-reported",
+   "status": "passed",
+   "exitCode": 0,
+   "durationMs": 576,
+   "output": "........\n----------------------------------------------------------------------\nRan 8 tests in 0.507s\n\nOK"
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "O001",
+   "statement": "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels.",
+   "priority": "must",
+   "behavior": "unassessed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": false
+  },
+  {
+   "id": "O002",
+   "statement": "A local HTTP client can POST JSON {\"texts\":[...]} to /v1/sentiment/batch and receive 200 JSON with one result per input in order, including mixed sentiment results.",
+   "priority": "must",
+   "behavior": "unassessed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": false
+  },
+  {
+   "id": "O003",
+   "statement": "Malformed JSON, missing or invalid fields, unsupported media types, unknown routes, and unsupported methods receive JSON errors with appropriate HTTP status codes and stable machine-readable error codes.",
+   "priority": "must",
+   "behavior": "unassessed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": false
+  },
+  {
+   "id": "O004",
+   "statement": "The implementation runs using only the standard library, requires no credentials or downloaded model, and repeats the same input with the same output.",
+   "priority": "must",
+   "behavior": "unassessed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": false
+  },
+  {
+   "id": "O005",
+   "statement": "README documents startup, curl examples for single and batch requests, error behavior, and deterministic lexicon limitations; automated tests cover inference and HTTP behavior.",
+   "priority": "must",
+   "behavior": "unassessed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": false
+  }
+ ],
+ "gaps": [
+  "O001: behavior unassessed; review unassessed",
+  "O002: behavior unassessed; review unassessed",
+  "O003: behavior unassessed; review unassessed",
+  "O004: behavior unassessed; review unassessed",
+  "O005: behavior unassessed; review unassessed",
+  "C001: not executed for current product",
+  "C002: not executed for current product",
+  "C003: not executed for current product",
+  "C001: no current passing execution",
+  "C002: no current passing execution",
+  "C003: no current passing execution",
+  "Product changed while checks ran; these executions describe the previous version. Changed input paths: \"__pycache__/sentiment_api.cpython-310.pyc\", \"__pycache__/test_api.cpython-310.pyc\". Checks must leave product inputs unchanged. Declare generated-output ignore rules before authorization, while keeping source, configuration and declared check inputs tracked. Python -B suppresses import caches; explicit py_compile/compileall still write bytecode even with -B. For syntax-only checks, compile(source, filename, 'exec') does not write bytecode; otherwise use an explicit output directory outside product inputs."
+ ],
+ "journeyFeedback": {
+  "runs": [],
+  "omitted": 0
+ },
+ "behaviorChanges": {
+  "checks": [],
+  "omitted": 0
+ }
+}

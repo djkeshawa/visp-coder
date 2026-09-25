@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "captureViewports": [
+    {"width": 1280, "height": 800},
+    {"width": 390, "height": 844},
+    {"width": 844, "height": 390}
+  ],
+  "journey": [
+    "Open the game and identify the launcher, building, targets, missile choices and primary action without reading implementation notes.",
+    "Launch each offered missile type using ordinary controls. Observe launch, travel, impact and settlement. Determine whether the types have meaningful behavioral differences rather than only different names or colors.",
+    "Aim a clear miss and a clear hit. Check that targets and score, if present, respond to actual contact or the communicated blast area; unrelated distant targets must not disappear without a supported game rule.",
+    "Compare two shots using different types against equivalent initial conditions. Record differences in damage, trajectory or other communicated mechanics without prescribing a particular physics implementation.",
+    "Hit part of the building, then inspect damaged and surviving regions. Look for floating or disconnected pieces inconsistent with the game's established rules, invisible blockers, pass-through collisions, or destruction that is only a visual overlay.",
+    "Continue through another shot after debris settles. Verify that remaining targets can still be located and attacked and that transient effects do not permanently hide essential information.",
+    "Reach completion and restart if offered. Exercise an unsuccessful attempt and recovery if supported. Report missing recovery as a usability finding, not as an invented explicit user requirement.",
+    "Repeat the primary action on a narrow portrait and short landscape viewport using the advertised input. Record unsupported inputs separately; resizing or a desktop click alone does not establish touch support."
+  ],
+  "correctness": "Assess required launch, distinct missile behavior and building-target destruction through real interaction. Classify additional checks by applicability to the implementation; exclude inapplicable checks from the denominator and record why. Passing worker tests, HUD labels and data attributes alone are insufficient.",
+  "briefFidelity": "Assess only the original request's browser game, launch interaction, different missiles and targets in a building. Do not silently require Angry Birds mechanics, multiple levels, realistic rigid-body physics, a dependency policy or a particular art style. Distinguish evaluator usability suggestions from explicit requirements.",
+  "usabilityRubric": {
+    "0": "The requested core activity cannot be completed.",
+    "1": "Aiming, missile selection, target visibility or feedback creates major confusion or obstruction.",
+    "2": "The activity is usable, with some unclear controls, effects or recovery.",
+    "3": "Missile selection, aiming, impacts and remaining objectives are clear across tested supported layouts.",
+    "4": "Level-3 conditions plus readable intermediate states, satisfying control and smooth recovery without losing context."
+  },
+  "visualQualityRubric": {
+    "0": "Blank, broken or materially unreadable scene.",
+    "1": "Confused composition, weak silhouettes, clipping or effects that obscure the activity.",
+    "2": "Coherent, readable scene with limited refinement.",
+    "3": "Intentional composition, readable building and target placement, distinct missiles and well-scaled feedback.",
+    "4": "Level-3 conditions plus refined visual identity and animation that supports the activity across tested layouts."
+  },
+  "reviewProtocol": "Give the critic the original prompt and actual product evidence with a neutral question about correctness and user experience. Keep this oracle, arm identity, worker self-assessments and passing-test summaries out of its initial assessment. Record visible observations before conclusions and preserve uncertainty. Evaluators may inspect source after observing behavior to investigate a concrete discrepancy. Anchor aesthetic judgments in cited states and consequences; they remain judgments, not objective physical measurements.",
+  "feedbackEvaluation": {
+    "beforeRepair": "Freeze the implementation and independently record observed defects before revealing the critic response. Preserve screenshots and ordinary input sequences for launch, flight, impact, settled damage and recovery where available.",
+    "afterRepair": "Replay the same input under matching initial conditions and inspect both the reported defect and previously working behavior. New demonstrations alone cannot establish that the original defect was fixed.",
+    "reportSeparately": [
+      "Independently observed defects the critic detected or missed",
+      "Unsupported or inapplicable critic findings",
+      "Specific, actionable corrections and whether the worker applied them",
+      "Verified repairs and regressions introduced by repair",
+      "Final correctness, brief fidelity, usability and visual quality",
+      "Unavailable or omitted evidence, including whole viewport groups",
+      "Time to usable output, total time, model cost and administrative effort"
+    ],
+    "limitations": "This is a public evaluation fixture, not held-out evidence. A second projectile game tests transfer within a domain; retain an unrelated UI task and a backend task before drawing general conclusions. No live run or spending authorization is implied by this fixture."
+  }
+}

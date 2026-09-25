@@ -1,0 +1,25 @@
+{
+  "kind": "context-manifest",
+  "createdAt": "2026-09-04T18:32:10.577Z",
+  "feature": "001-legacy-login-evidence",
+  "task": "T001",
+  "sources": [
+    {
+      "path": "001-legacy-login-evidence/intent.json",
+      "hash": "bd7be1eea95017e34c774059c801882567c00c2ae8bfcef0c245d906d1e3ba4f"
+    },
+    {
+      "path": "001-legacy-login-evidence/spec.json",
+      "hash": "f7aae491802efdc82fefadfd4bf98cb53e48477f980fd06d879499647cf13c15"
+    },
+    {
+      "path": "001-legacy-login-evidence/plan.json",
+      "hash": "2b06a370af180ee946c25448182725ec092769e0297c9c6894f114ae16dada01"
+    },
+    {
+      "path": "001-legacy-login-evidence/tasks.json",
+      "hash": "ce5bb51d5cc9fece4fed6f6eadf3c7ee4f81273742ed93f7128acb52709901c3"
+    }
+  ],
+  "contextHash": "0dfc93475281da9ec33071ab71331a46b98f8af8f83e20ee6969fe0422cc4517"
+}

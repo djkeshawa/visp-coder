@@ -1,0 +1,9 @@
+{
+  "source": "interrupted Flockshot run, 2026-09-12",
+  "files": {
+    "index.html": "2bd896170661d9c99b6658e568737b11659625ff2ddb3b8903794300f5fb522d",
+    "game.js": "4f8f2240846ca853fc8a90f0a3f05a042d74f4fc6ad6a6a2e0b9d7dc64cc67d1",
+    "test/game.test.mjs": "bd661c35dd3032ff8f27da7fe16878e3efb7f7ec602a6989d2a1b7be454bc0f8"
+  },
+  "packageJson": "Added only to preserve original CommonJS test environment"
+}

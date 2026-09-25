@@ -1,0 +1,57 @@
+{
+  "kind": "pr",
+  "createdAt": "2026-09-04T18:32:20.152Z",
+  "feature": "001-legacy-login-evidence",
+  "title": "Legacy login evidence",
+  "body": "## Evidence verdict\n\n- Ready: yes\n- Tasks closed: 1/1\n- Fully evidenced: 1/1\n- Limitation: T001 verification — flip-signal-unclassified\n\n## Goal\n\nLegacy login evidence\n\n## Requirements\n\n- REQ001: Valid credentials return a session token — T001 verified\n\n## Quality requirements\n\n- NFR001 [reliability]: Missing credentials never create a token — target: An empty user value returns no token — T001 verified\n\n## Behaviour scenarios\n\n- SCN001: Valid credentials create a session — tasks: T001\n\n## Tasks\n\n- [x] T001 Add the login handler\n\n## Evidence\n\n- Verification (T001): passed (commands executed) — attempt 5\n  - `npm run test` passed\n  - `node --test tests/auth.test.mjs` passed\n  - Flip check: validation fails without this change (failure type unclassified; failure output alone does not establish behavioral coverage)\n- Review (T001): passed over 25 files (working-tree)\n\n## Advisory observations\n\n- T001/AC001: manual satisfied — Login returned the expected session token. (stale — spec changed; context manifest changed)\n  - attachment: `.visp/features/001-legacy-login-evidence/evidence/T001/observations/OBS-00f497e1869c/attachments/01-legacy-login-observation.txt` (7fe5331f3804ca375870a1f6f8e4b62c4804f55d87a938a22dd531fc5bbd4dc4)\n\n## Changed files\n\n- .visp/failure-patterns.json\n- .visp/features/001-legacy-login-evidence/context/T001.json\n- .visp/features/001-legacy-login-evidence/context/T001.manifest.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/observations.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/observations/OBS-00f497e1869c/attachments/01-legacy-login-observation.txt\n- .visp/features/001-legacy-login-evidence/evidence/T001/probes.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546595498-000002-57541c56-0243-4403-b80f-5ee65e54ac41.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546663197-000002-b686e055-0cbe-48e9-8d29-3c2e81fc4b17.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546681409-000002-73d9c835-e7d4-436c-8d39-e638dfaa8451.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546699461-000002-44e07b85-df27-4879-ba8c-17de411ebbdf.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/review.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546594997-000001-98ef2f1e-78c0-45d2-a5d1-2d2f01bdb0eb.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546662572-000001-0ea4fcff-0946-405a-87f1-36bc76cad8b4.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546680936-000001-88433303-15dc-42ac-99d0-68d20cb7b096.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546699076-000001-474d63f6-455f-454d-ba02-0008189ad9b3.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546732686-000001-786809bb-75ba-4510-9de9-7dea13cbd990.json\n- .visp/features/001-legacy-login-evidence/evidence/T001/verification.json\n- .visp/features/001-legacy-login-evidence/intent.json\n- .visp/features/001-legacy-login-evidence/plan.json\n- .visp/features/001-legacy-login-evidence/research.json\n- .visp/features/001-legacy-login-evidence/spec.json\n- .visp/features/001-legacy-login-evidence/tasks.json\n- .visp/features/001-legacy-login-evidence/traceability.json\n- src/auth/login.js\n- tests/auth.test.mjs",
+  "changedFiles": [
+    ".visp/failure-patterns.json",
+    ".visp/features/001-legacy-login-evidence/context/T001.json",
+    ".visp/features/001-legacy-login-evidence/context/T001.manifest.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/observations.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/observations/OBS-00f497e1869c/attachments/01-legacy-login-observation.txt",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/probes.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546595498-000002-57541c56-0243-4403-b80f-5ee65e54ac41.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546663197-000002-b686e055-0cbe-48e9-8d29-3c2e81fc4b17.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546681409-000002-73d9c835-e7d4-436c-8d39-e638dfaa8451.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review-attempts/1788546699461-000002-44e07b85-df27-4879-ba8c-17de411ebbdf.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/review.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546594997-000001-98ef2f1e-78c0-45d2-a5d1-2d2f01bdb0eb.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546662572-000001-0ea4fcff-0946-405a-87f1-36bc76cad8b4.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546680936-000001-88433303-15dc-42ac-99d0-68d20cb7b096.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546699076-000001-474d63f6-455f-454d-ba02-0008189ad9b3.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification-attempts/1788546732686-000001-786809bb-75ba-4510-9de9-7dea13cbd990.json",
+    ".visp/features/001-legacy-login-evidence/evidence/T001/verification.json",
+    ".visp/features/001-legacy-login-evidence/intent.json",
+    ".visp/features/001-legacy-login-evidence/plan.json",
+    ".visp/features/001-legacy-login-evidence/research.json",
+    ".visp/features/001-legacy-login-evidence/spec.json",
+    ".visp/features/001-legacy-login-evidence/tasks.json",
+    ".visp/features/001-legacy-login-evidence/traceability.json",
+    "src/auth/login.js",
+    "tests/auth.test.mjs"
+  ],
+  "checklist": [
+    "Verification passed",
+    "Review passed",
+    "Validation commands executed",
+    "Flip check: every checked task's validation fails without its change"
+  ],
+  "summary": {
+    "ready": true,
+    "totalTasks": 1,
+    "tasksDone": 1,
+    "verificationPassed": 1,
+    "reviewPassed": 1,
+    "fullyEvidenced": 1,
+    "blockers": [],
+    "limitations": [
+      {
+        "task": "T001",
+        "stage": "verification",
+        "code": "flip-signal-unclassified"
+      }
+    ],
+    "latestClosedTask": "T001"
+  }
+}

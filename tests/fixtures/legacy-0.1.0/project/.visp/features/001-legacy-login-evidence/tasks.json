@@ -1,0 +1,58 @@
+{
+  "kind": "tasks",
+  "createdAt": "2026-09-04T18:27:33.532Z",
+  "feature": "001-legacy-login-evidence",
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "Add the login handler",
+      "description": "Implement and verify the bounded authentication behavior.",
+      "taskClass": "feature",
+      "riskLevel": "low",
+      "status": "done",
+      "requirements": [
+        "REQ001"
+      ],
+      "qualityRequirements": [
+        "NFR001"
+      ],
+      "scenarios": [
+        "SCN001"
+      ],
+      "modules": [
+        "auth"
+      ],
+      "concerns": [],
+      "dependsOn": [],
+      "allowedFiles": [
+        "src/auth/**/*.js",
+        "tests/**/*"
+      ],
+      "expectedFiles": [
+        "src/auth/login.js",
+        "tests/auth.test.mjs"
+      ],
+      "forbiddenFiles": [],
+      "validationCommands": [
+        "npm run test",
+        "node --test tests/auth.test.mjs"
+      ],
+      "validationChecks": [
+        {
+          "layer": "functional",
+          "command": "npm run test"
+        },
+        {
+          "layer": "functional",
+          "command": "node --test tests/auth.test.mjs"
+        }
+      ],
+      "validationFiles": [
+        "tests/auth.test.mjs"
+      ],
+      "probeRoles": [],
+      "doneCriteria": []
+    }
+  ],
+  "draft": false
+}

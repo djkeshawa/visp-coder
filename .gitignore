@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.tgz
+.visp/
+*.log
+.DS_Store
+.claude/
+.codex/
+.agents/
+.cursor/
+docs/audits/
+__pycache__/
+*.pyc
+*.jsonl
+.env
+.env.*

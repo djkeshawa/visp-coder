@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Output contract fixture</title></head>
+<body>
+  <button id="render">Render result</button>
+  <output id="status">ready</output>
+  <canvas id="scene" width="200" height="120" style="display:block; touch-action:none"></canvas>
+  <script>
+    (() => {
+    const scene = document.querySelector('#scene');
+    const context = scene.getContext('2d');
+    let held = false;
+    function draw() {
+      context.clearRect(0, 0, 200, 120);
+      if (document.body.classList.contains('no-render')) return;
+      context.fillStyle = '#00ff00';
+      context.fillRect(120, 20, 40, 40);
+      if (!held || !document.body.classList.contains('detached')) {
+        context.fillStyle = '#ff0000';
+        context.fillRect(20, 80, 100, 4);
+      }
+    }
+    document.querySelector('#render').onclick = () => {
+      document.querySelector('#status').textContent = 'rendered';
+      draw();
+    };
+    scene.onpointerdown = (event) => { scene.setPointerCapture(event.pointerId); held = true; draw(); };
+    scene.onpointerup = scene.onpointercancel = () => { held = false; draw(); };
+    draw();
+    })();
+  </script>
+</body>
+</html>

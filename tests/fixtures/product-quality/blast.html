@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><body>
+<canvas id="range" width="906" height="446" aria-label="Blast range"></canvas>
+<button id="launch">Launch</button><output id="ammo">2</output><output id="targets">1</output>
+<script>
+(() => {
+  const canvas = document.querySelector('#range'), context = canvas.getContext('2d');
+  const ammo = document.querySelector('#ammo'), targets = document.querySelector('#targets');
+  const target = {x: .46, y: .28}, aim = {x: .64, y: .28};
+  const radius = .16 * Math.min(canvas.width, canvas.height);
+  let alive = true, launched = false;
+  function draw() {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (alive) {
+      context.fillStyle = '#ffca70';
+      context.fillRect(target.x * canvas.width - 24, target.y * canvas.height - 12, 48, 24);
+    }
+    if (launched) {
+      context.strokeStyle = '#00ffff'; context.lineWidth = 2;
+      context.beginPath(); context.arc(aim.x * canvas.width, aim.y * canvas.height, radius, 0, Math.PI * 2); context.stroke();
+    }
+  }
+  document.querySelector('#launch').onclick = () => {
+    launched = true; ammo.textContent = String(Number(ammo.textContent) - 1);
+    const hit = document.body.classList.contains('repaired')
+      ? Math.hypot((target.x - aim.x) * canvas.width, (target.y - aim.y) * canvas.height) <= radius + 24
+      : Math.hypot(target.x - aim.x, target.y - aim.y) <= .16 + .029;
+    if (hit) alive = false;
+    targets.textContent = alive ? '1' : '0'; draw();
+  };
+  draw();
+})();
+</script></body></html>

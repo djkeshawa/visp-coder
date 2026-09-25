@@ -1,0 +1,9 @@
+{
+  "variant": "defective",
+  "expectedDefects": ["vertical-release-direction", "unsupported-initial-structure"],
+  "counterevidence": {
+    "release": "A down-left pull generates positive vertical velocity in downward-positive canvas coordinates; the launched bird initially travels down-right.",
+    "supports": "At 1280x720 the floor floats 36px over the ground, the roof is 6px above its pillars, and the cap is 16px above the roof."
+  },
+  "evaluationScope": "Initial supports and the recorded pull/release only. Score cascade and resize defects are independent execution counterchecks and are not expected findings from these images. Do not infer full-game quality or require a particular visual style."
+}

@@ -1,0 +1,1816 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101a2e">
+  <title>Bramble Brigade — Sling Into The Night</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --night: #101a2e;
+      --night-deep: #0a1121;
+      --ink: #18243a;
+      --ink-soft: #32415a;
+      --paper: #f9edcf;
+      --paper-dim: #dbcda9;
+      --berry: #f25b4d;
+      --berry-dark: #b83e48;
+      --moss: #b9e36c;
+      --moss-dark: #638a4a;
+      --gold: #ffc857;
+      --sky: #5b7aa7;
+      --line: rgba(249, 237, 207, 0.15);
+      --shadow: rgba(0, 0, 0, 0.35);
+      --display: "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+      --body: "Trebuchet MS", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; background: var(--night-deep); }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--paper);
+      background:
+        radial-gradient(circle at 16% 0%, rgba(91, 122, 167, 0.24), transparent 31rem),
+        radial-gradient(circle at 86% 16%, rgba(242, 91, 77, 0.12), transparent 25rem),
+        var(--night-deep);
+      font-family: var(--body);
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      content: "";
+      opacity: 0.3;
+      pointer-events: none;
+      background-image: radial-gradient(rgba(249, 237, 207, 0.25) 0.7px, transparent 0.7px);
+      background-size: 23px 23px;
+      mask-image: linear-gradient(to bottom, black, transparent 78%);
+    }
+
+    button,
+    canvas { -webkit-tap-highlight-color: transparent; }
+
+    button {
+      border: 0;
+      font: inherit;
+    }
+
+    button:focus-visible,
+    canvas:focus-visible {
+      outline: 3px solid var(--gold);
+      outline-offset: 4px;
+    }
+
+    .app-shell {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 26px clamp(18px, 3.4vw, 54px) 38px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto minmax(250px, 1fr);
+      gap: 22px;
+      align-items: center;
+      margin-bottom: 22px;
+    }
+
+    .brand {
+      display: flex;
+      gap: 13px;
+      align-items: center;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 54px;
+      height: 54px;
+      flex: 0 0 54px;
+      place-items: center;
+      border: 2px solid rgba(249, 237, 207, 0.7);
+      border-radius: 18px 18px 18px 6px;
+      color: var(--night);
+      background: var(--berry);
+      box-shadow: 6px 6px 0 rgba(242, 91, 77, 0.18);
+      font-size: 26px;
+      transform: rotate(-4deg);
+    }
+
+    .brand-kicker,
+    .eyebrow,
+    .stat-label,
+    .stage-label,
+    .mission-label,
+    .control-key,
+    .power-label {
+      margin: 0;
+      color: var(--paper-dim);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      line-height: 1.1;
+      text-transform: uppercase;
+    }
+
+    .brand-kicker { margin-bottom: 4px; color: var(--moss); }
+
+    h1,
+    h2,
+    p { margin: 0; }
+
+    h1,
+    h2 {
+      font-family: var(--display);
+      letter-spacing: -0.055em;
+    }
+
+    h1 {
+      color: var(--paper);
+      font-size: clamp(25px, 3.1vw, 38px);
+      line-height: 0.96;
+    }
+
+    .mission {
+      display: flex;
+      gap: 11px;
+      align-items: center;
+      min-width: 0;
+      padding: 10px 15px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(249, 237, 207, 0.055);
+    }
+
+    .mission-icon {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      place-items: center;
+      border-radius: 11px;
+      color: var(--night);
+      background: var(--gold);
+      font-size: 17px;
+    }
+
+    .mission-label { margin-bottom: 4px; }
+
+    .mission-copy {
+      overflow: hidden;
+      color: var(--paper);
+      font-size: 12px;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stats {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .stat {
+      min-width: 76px;
+      padding: 9px 12px 10px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(249, 237, 207, 0.055);
+    }
+
+    .stat-label { display: block; margin-bottom: 4px; }
+
+    .stat-value {
+      display: block;
+      color: var(--paper);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.07em;
+      line-height: 1;
+    }
+
+    .stat-value.accent { color: var(--gold); }
+
+    .sound-toggle {
+      display: inline-flex;
+      width: 43px;
+      height: 43px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--paper);
+      background: rgba(249, 237, 207, 0.055);
+      cursor: pointer;
+      font-size: 18px;
+      transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+    }
+
+    .sound-toggle:hover { border-color: rgba(255, 200, 87, 0.62); background: rgba(255, 200, 87, 0.12); transform: translateY(-2px); }
+
+    .game-layout {
+      display: grid;
+      grid-template-columns: 244px minmax(0, 1fr);
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .briefing {
+      position: relative;
+      display: flex;
+      min-height: 100%;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 25px 22px 20px;
+      border: 1px solid rgba(249, 237, 207, 0.16);
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(53, 70, 104, 0.7), rgba(22, 33, 57, 0.85)),
+        var(--ink);
+      box-shadow: 12px 15px 0 rgba(0, 0, 0, 0.12);
+    }
+
+    .briefing::after {
+      position: absolute;
+      right: -38px;
+      bottom: -43px;
+      width: 140px;
+      height: 140px;
+      border: 15px solid rgba(185, 227, 108, 0.1);
+      border-radius: 50%;
+      content: "";
+    }
+
+    .stage-badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 18px;
+      padding: 7px 9px;
+      border-radius: 9px;
+      color: var(--night);
+      background: var(--moss);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .stage-badge::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--night);
+      content: "";
+    }
+
+    .briefing h2 {
+      max-width: 190px;
+      margin-bottom: 10px;
+      color: var(--paper);
+      font-size: 28px;
+      line-height: 0.98;
+    }
+
+    .briefing-copy {
+      min-height: 48px;
+      color: var(--paper-dim);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .objective {
+      margin: 21px 0 18px;
+      padding: 13px 0 16px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .objective-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
+      color: var(--gold);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .objective-copy {
+      color: var(--paper);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .how-to {
+      display: grid;
+      gap: 10px;
+      margin-top: auto;
+      padding-top: 18px;
+    }
+
+    .how-to-title { margin-bottom: 3px; color: var(--paper-dim); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+
+    .control-row { display: flex; align-items: center; gap: 9px; color: var(--paper-dim); font-size: 11px; line-height: 1.25; }
+
+    .control-key {
+      display: inline-grid;
+      min-width: 45px;
+      height: 27px;
+      place-items: center;
+      padding: 0 7px;
+      border: 1px solid rgba(249, 237, 207, 0.18);
+      border-radius: 8px;
+      color: var(--paper);
+      background: rgba(249, 237, 207, 0.08);
+      font-size: 9px;
+      letter-spacing: 0.08em;
+    }
+
+    .restart-button,
+    .result-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      border-radius: 13px;
+      color: var(--night);
+      background: var(--paper);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+    }
+
+    .restart-button { width: 100%; margin-top: 18px; }
+
+    .restart-button:hover,
+    .result-button:hover { background: var(--gold); box-shadow: 4px 4px 0 rgba(255, 200, 87, 0.18); transform: translateY(-2px); }
+
+    .restart-button:active,
+    .result-button:active { transform: translateY(1px); }
+
+    .play-area { min-width: 0; }
+
+    .stage-topline {
+      display: flex;
+      min-height: 31px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 6px 8px 2px;
+    }
+
+    .stage-label { color: var(--paper-dim); }
+
+    .live-status {
+      display: inline-flex;
+      min-height: 25px;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border: 1px solid rgba(185, 227, 108, 0.28);
+      border-radius: 999px;
+      color: var(--moss);
+      background: rgba(185, 227, 108, 0.08);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .live-status::before { width: 6px; height: 6px; border-radius: 50%; background: var(--moss); content: ""; box-shadow: 0 0 0 4px rgba(185, 227, 108, 0.1); }
+
+    .canvas-frame {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(249, 237, 207, 0.18);
+      border-radius: 24px;
+      background: #23364e;
+      box-shadow: 14px 17px 0 rgba(0, 0, 0, 0.17), 0 0 0 7px rgba(249, 237, 207, 0.025);
+    }
+
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 16 / 9;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .canvas-hint {
+      position: absolute;
+      left: 50%;
+      bottom: 15px;
+      max-width: calc(100% - 32px);
+      padding: 8px 13px;
+      border: 1px solid rgba(249, 237, 207, 0.2);
+      border-radius: 10px;
+      color: var(--paper);
+      background: rgba(10, 17, 33, 0.63);
+      font-size: 11px;
+      line-height: 1.2;
+      text-align: center;
+      transform: translateX(-50%);
+      transition: opacity 180ms ease, transform 180ms ease;
+      pointer-events: none;
+    }
+
+    .canvas-hint.is-hidden { opacity: 0; transform: translate(-50%, 8px); }
+
+    .power-badge {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      display: none;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      border: 1px solid rgba(255, 200, 87, 0.55);
+      border-radius: 10px;
+      color: var(--night);
+      background: var(--gold);
+      box-shadow: 4px 4px 0 rgba(10, 17, 33, 0.2);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .power-badge.is-ready { display: inline-flex; animation: badge-pop 320ms ease both; }
+
+    .power-label { color: var(--night); font-size: 9px; }
+
+    @keyframes badge-pop { 0% { opacity: 0; transform: translateY(-7px) rotate(2deg); } 100% { opacity: 1; transform: translateY(0) rotate(0); } }
+
+    .stage-footer {
+      display: flex;
+      min-height: 45px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 13px 4px 0;
+    }
+
+    .footer-note { color: var(--paper-dim); font-size: 11px; }
+
+    .stage-dots { display: flex; gap: 7px; }
+
+    .stage-dot {
+      width: 29px;
+      height: 6px;
+      padding: 0;
+      border-radius: 99px;
+      background: rgba(249, 237, 207, 0.16);
+      cursor: pointer;
+      transition: width 180ms ease, background 180ms ease;
+    }
+
+    .stage-dot.is-current { width: 42px; background: var(--berry); }
+    .stage-dot.is-cleared { background: var(--moss); }
+    .stage-dot:disabled { cursor: default; opacity: 0.85; }
+
+    .result-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(10, 17, 33, 0.75);
+      backdrop-filter: blur(7px);
+    }
+
+    .result-overlay[hidden] { display: none; }
+
+    .result-card {
+      width: min(410px, 100%);
+      padding: 29px 28px 26px;
+      border: 1px solid rgba(249, 237, 207, 0.26);
+      border-radius: 22px;
+      background: var(--paper);
+      color: var(--ink);
+      box-shadow: 10px 11px 0 rgba(10, 17, 33, 0.25);
+      text-align: center;
+      transform: rotate(-1.2deg);
+    }
+
+    .result-kicker { margin-bottom: 8px; color: var(--berry-dark); font-size: 10px; font-weight: 900; letter-spacing: 0.16em; text-transform: uppercase; }
+
+    .result-card h2 { margin-bottom: 10px; font-size: 38px; line-height: 0.96; }
+
+    .result-copy { color: var(--ink-soft); font-size: 13px; line-height: 1.45; }
+
+    .result-score { margin: 18px 0 20px; color: var(--berry-dark); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 25px; font-weight: 900; letter-spacing: -0.08em; }
+
+    .result-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .result-button.secondary { color: var(--ink); background: rgba(24, 36, 58, 0.09); }
+    .result-button.secondary:hover { background: rgba(24, 36, 58, 0.17); box-shadow: none; }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 1060px) {
+      .topbar { grid-template-columns: 1fr auto; }
+      .mission { grid-column: 1 / -1; grid-row: 2; justify-content: center; }
+      .stats { grid-column: 2; grid-row: 1; }
+    }
+
+    @media (max-width: 820px) {
+      .app-shell { padding: 18px 14px 28px; }
+      .game-layout { grid-template-columns: 1fr; gap: 14px; }
+      .briefing { min-height: 0; padding: 18px; }
+      .briefing::after { display: none; }
+      .briefing h2 { max-width: none; font-size: 25px; }
+      .briefing-copy { min-height: 0; }
+      .objective { margin: 14px 0 12px; padding: 12px 0; }
+      .how-to { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-top: 0; }
+      .how-to-title { flex-basis: 100%; }
+      .restart-button { width: auto; min-width: 130px; margin: 0 0 0 auto; padding: 0 14px; }
+    }
+
+    @media (max-width: 560px) {
+      .topbar { display: flex; flex-wrap: wrap; gap: 13px; }
+      .brand { flex: 1 1 100%; }
+      .brand-mark { width: 45px; height: 45px; flex-basis: 45px; font-size: 21px; }
+      h1 { font-size: 28px; }
+      .stats { flex: 1; justify-content: flex-start; }
+      .stat { min-width: 0; flex: 1; }
+      .stat-value { font-size: 17px; }
+      .mission { flex: 1 1 100%; order: 3; justify-content: flex-start; }
+      .stage-topline { align-items: flex-start; flex-direction: column; gap: 8px; }
+      .live-status { align-self: flex-start; }
+      .canvas-frame { border-radius: 17px; }
+      .canvas-hint { bottom: 10px; font-size: 10px; }
+      .stage-footer { align-items: flex-start; flex-direction: column-reverse; gap: 10px; }
+      .result-actions { grid-template-columns: 1fr; }
+      .result-overlay { position: fixed; inset: 0; overflow-x: hidden; overflow-y: auto; }
+      .result-card { width: min(410px, calc(100vw - 28px)); transform: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="Bramble Brigade">
+        <div class="brand-mark" aria-hidden="true">✦</div>
+        <div>
+          <p class="brand-kicker">Bramble Grove · midnight patrol</p>
+          <h1>Bramble Brigade</h1>
+        </div>
+      </div>
+
+      <div class="mission" aria-label="Current mission">
+        <div class="mission-icon" aria-hidden="true">☄</div>
+        <div>
+          <p class="mission-label">Tonight's mission</p>
+          <p class="mission-copy">Launch brave. Land loud. Leave no mossling behind.</p>
+        </div>
+      </div>
+
+      <div class="stats" aria-label="Game stats">
+        <div class="stat">
+          <span class="stat-label">Score</span>
+          <strong class="stat-value accent" id="score" data-testid="score">00000</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Stage</span>
+          <strong class="stat-value" id="stage-count">01 / 03</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Birds</span>
+          <strong class="stat-value" id="bird-count">04</strong>
+        </div>
+        <button class="sound-toggle" id="sound-toggle" type="button" aria-label="Turn sound off" aria-pressed="true">♫</button>
+      </div>
+    </header>
+
+    <main class="game-layout">
+      <aside class="briefing" aria-label="Stage briefing">
+        <div class="stage-badge" id="stage-badge">Stage 01</div>
+        <h2 id="stage-name">Mosslight Meadow</h2>
+        <p class="briefing-copy" id="stage-copy">A soft landing for sharp-eyed launchers. The grove is humming.</p>
+
+        <section class="objective" aria-labelledby="objective-title">
+          <div class="objective-title">
+            <span id="objective-title">Objective</span>
+            <span aria-hidden="true">✦</span>
+          </div>
+          <p class="objective-copy" id="objective-copy">Pop the mosslings before the lantern goes out.</p>
+        </section>
+
+        <div class="how-to" aria-label="Controls">
+          <p class="how-to-title">Field notes</p>
+          <div class="control-row"><span class="control-key">DRAG</span><span>Pull an emberbird back, then let go.</span></div>
+          <div class="control-row"><span class="control-key">SPACE</span><span>Launch your held aim from the keyboard.</span></div>
+          <div class="control-row"><span class="control-key">R</span><span>Reset the stage when the plan gets thorny.</span></div>
+          <button class="restart-button" id="restart-button" type="button">Restart stage</button>
+        </div>
+      </aside>
+
+      <section class="play-area" aria-label="Bramble Brigade game board">
+        <div class="stage-topline">
+          <p class="stage-label" id="stage-label">STAGE 01 / MOSSLIGHT MEADOW</p>
+          <div class="live-status" id="game-status" data-testid="game-status" role="status" aria-live="polite">Ready to aim</div>
+        </div>
+
+        <div class="canvas-frame">
+          <canvas id="game-canvas" data-testid="game-canvas" tabindex="0" aria-label="Game board. Drag the emberbird back to aim, then release to launch."></canvas>
+          <div class="canvas-hint" id="canvas-hint">Drag from the emberbird to aim · release to launch</div>
+          <div class="power-badge" id="power-badge"><span aria-hidden="true">✹</span><span class="power-label">Burst ready</span></div>
+          <div class="result-overlay" id="result-overlay" hidden aria-hidden="true">
+            <div class="result-card" role="dialog" aria-modal="true" aria-labelledby="result-title">
+              <p class="result-kicker" id="result-kicker">Grove report</p>
+              <h2 id="result-title">The grove is safe!</h2>
+              <p class="result-copy" id="result-copy">Every mossling has been bounced out of the brambles.</p>
+              <p class="result-score" id="result-score">SCORE 00000</p>
+              <div class="result-actions">
+                <button class="result-button secondary" id="result-retry" type="button">Try again</button>
+                <button class="result-button" id="result-action" type="button">Next stage</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stage-footer">
+          <p class="footer-note" id="footer-note">Chain hits for a berry-bright combo.</p>
+          <div class="stage-dots" aria-label="Stages">
+            <button class="stage-dot is-current" type="button" data-stage="0" aria-label="Stage 1" aria-current="step"></button>
+            <button class="stage-dot" type="button" data-stage="1" aria-label="Stage 2" disabled></button>
+            <button class="stage-dot" type="button" data-stage="2" aria-label="Stage 3" disabled></button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.getElementById("game-canvas");
+      const ctx = canvas.getContext("2d", { alpha: false });
+      const canvasFrame = document.querySelector(".canvas-frame");
+      const scoreEl = document.getElementById("score");
+      const stageCountEl = document.getElementById("stage-count");
+      const birdCountEl = document.getElementById("bird-count");
+      const stageBadgeEl = document.getElementById("stage-badge");
+      const stageNameEl = document.getElementById("stage-name");
+      const stageCopyEl = document.getElementById("stage-copy");
+      const objectiveEl = document.getElementById("objective-copy");
+      const stageLabelEl = document.getElementById("stage-label");
+      const footerNoteEl = document.getElementById("footer-note");
+      const statusEl = document.getElementById("game-status");
+      const hintEl = document.getElementById("canvas-hint");
+      const powerBadgeEl = document.getElementById("power-badge");
+      const soundToggle = document.getElementById("sound-toggle");
+      const restartButton = document.getElementById("restart-button");
+      const resultOverlay = document.getElementById("result-overlay");
+      const resultKickerEl = document.getElementById("result-kicker");
+      const resultTitleEl = document.getElementById("result-title");
+      const resultCopyEl = document.getElementById("result-copy");
+      const resultScoreEl = document.getElementById("result-score");
+      const resultRetryButton = document.getElementById("result-retry");
+      const resultActionButton = document.getElementById("result-action");
+      const stageDots = [...document.querySelectorAll(".stage-dot")];
+
+      const VIEW = { width: 1280, height: 720 };
+      const GROUND = 610;
+      const SLING = { x: 190, y: 500 };
+      const FIXED_STEP = 1 / 60;
+      const GRAVITY = 760;
+      const MAX_PULL = 126;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+      const palettes = {
+        wood: { fill: "#bd754f", edge: "#75443c", light: "#e7a066" },
+        stone: { fill: "#78869a", edge: "#465873", light: "#aebac8" },
+        ice: { fill: "#79c9c5", edge: "#327b89", light: "#c1f3df" }
+      };
+
+      const stageBlueprints = [
+        {
+          name: "Mosslight Meadow",
+          copy: "A soft landing for sharp-eyed launchers. The grove is humming.",
+          objective: "Pop 2 mosslings before the lantern goes out.",
+          footer: "Chain hits for a berry-bright combo.",
+          birds: 4,
+          hue: 0,
+          blocks: [
+            { kind: "wood", x: 700, y: 530, w: 24, h: 80, hp: 2 },
+            { kind: "wood", x: 842, y: 530, w: 24, h: 80, hp: 2 },
+            { kind: "stone", x: 700, y: 498, w: 166, h: 24, hp: 3 },
+            { kind: "wood", x: 750, y: 418, w: 24, h: 80, hp: 2 },
+            { kind: "wood", x: 808, y: 418, w: 24, h: 80, hp: 2 },
+            { kind: "stone", x: 750, y: 386, w: 82, h: 23, hp: 3 }
+          ],
+          targets: [
+            { x: 735, y: 468, r: 28, name: "Mossling Pip" },
+            { x: 791, y: 352, r: 27, name: "Mossling Puck" }
+          ],
+          powerups: [{ x: 615, y: 333, r: 18, kind: "burst" }]
+        },
+        {
+          name: "Lantern Lookout",
+          copy: "The sentries built higher. That just makes the landing sweeter.",
+          objective: "Rescue 3 mosslings and collect the starseed if you can.",
+          footer: "The golden starseed turns impact into thunder.",
+          birds: 5,
+          hue: 1,
+          blocks: [
+            { kind: "stone", x: 690, y: 540, w: 30, h: 70, hp: 3 },
+            { kind: "stone", x: 860, y: 540, w: 30, h: 70, hp: 3 },
+            { kind: "wood", x: 690, y: 512, w: 200, h: 25, hp: 2 },
+            { kind: "ice", x: 742, y: 432, w: 24, h: 80, hp: 2 },
+            { kind: "ice", x: 814, y: 432, w: 24, h: 80, hp: 2 },
+            { kind: "wood", x: 742, y: 400, w: 96, h: 24, hp: 2 },
+            { kind: "wood", x: 780, y: 326, w: 24, h: 74, hp: 2 }
+          ],
+          targets: [
+            { x: 723, y: 480, r: 27, name: "Mossling Nib" },
+            { x: 839, y: 480, r: 27, name: "Mossling Nop" },
+            { x: 792, y: 292, r: 27, name: "Mossling Nox" }
+          ],
+          powerups: [{ x: 1005, y: 413, r: 18, kind: "burst" }]
+        },
+        {
+          name: "Thornmoon Keep",
+          copy: "One last tower. One last moonshot. Make it a story worth telling.",
+          objective: "Clear the keep with 4 emberbirds and make the moon cheer.",
+          footer: "Clean clears earn a moon medal beside your score.",
+          birds: 5,
+          hue: 2,
+          blocks: [
+            { kind: "stone", x: 704, y: 545, w: 28, h: 65, hp: 3 },
+            { kind: "stone", x: 884, y: 545, w: 28, h: 65, hp: 3 },
+            { kind: "wood", x: 704, y: 515, w: 208, h: 25, hp: 2 },
+            { kind: "ice", x: 746, y: 430, w: 25, h: 85, hp: 2 },
+            { kind: "ice", x: 846, y: 430, w: 25, h: 85, hp: 2 },
+            { kind: "stone", x: 746, y: 400, w: 125, h: 24, hp: 3 },
+            { kind: "wood", x: 786, y: 322, w: 25, h: 78, hp: 2 },
+            { kind: "wood", x: 686, y: 292, w: 224, h: 21, hp: 2 }
+          ],
+          targets: [
+            { x: 733, y: 483, r: 26, name: "Mossling Mip" },
+            { x: 872, y: 483, r: 26, name: "Mossling Mop" },
+            { x: 801, y: 367, r: 26, name: "Mossling Mup" },
+            { x: 801, y: 251, r: 26, name: "Mossling Moon" }
+          ],
+          powerups: [{ x: 604, y: 277, r: 18, kind: "burst" }]
+        }
+      ];
+
+      const stars = Array.from({ length: 58 }, (_, index) => ({
+        x: 30 + ((index * 193) % 1220),
+        y: 30 + ((index * 83) % 300),
+        r: 0.7 + ((index * 17) % 11) / 10,
+        phase: (index * 0.83) % (Math.PI * 2)
+      }));
+
+      const state = {
+        mode: "ready",
+        stageIndex: 0,
+        stageStartScore: 0,
+        score: 0,
+        combo: 0,
+        bestCombo: 0,
+        birdsLeft: 0,
+        stage: null,
+        bird: null,
+        aimPoint: { x: SLING.x - 58, y: SLING.y - 58 },
+        aimOrigin: { x: SLING.x, y: SLING.y },
+        dragging: false,
+        pointerId: null,
+        particles: [],
+        floaters: [],
+        ripples: [],
+        shake: 0,
+        result: null,
+        finishScheduled: false,
+        clearedStages: new Set(),
+        soundOn: true,
+        audioContext: null,
+        lastShotHadPower: false,
+        hintDismissed: false
+      };
+
+      let canvasScale = { x: 1, y: 1 };
+      let animationFrame = 0;
+      let previousTime = performance.now();
+      let accumulator = 0;
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function padScore(value) {
+        return String(Math.max(0, Math.round(value))).padStart(5, "0");
+      }
+
+      function distance(ax, ay, bx, by) {
+        return Math.hypot(ax - bx, ay - by);
+      }
+
+      function cloneStage(blueprint) {
+        return {
+          ...blueprint,
+          blocks: blueprint.blocks.map((block) => ({ ...block, broken: false, hitCooldown: 0 })),
+          targets: blueprint.targets.map((target) => ({ ...target, rescued: false, hitCooldown: 0 })),
+          powerups: blueprint.powerups.map((powerup) => ({ ...powerup, collected: false }))
+        };
+      }
+
+      function createWaitingBird() {
+        return {
+          x: SLING.x,
+          y: SLING.y,
+          vx: 0,
+          vy: 0,
+          radius: 23,
+          angle: 0,
+          age: 0,
+          restTime: 0,
+          power: null,
+          trail: []
+        };
+      }
+
+      function setStatus(message) {
+        statusEl.textContent = message;
+      }
+
+      function updateHud() {
+        const stageNumber = String(state.stageIndex + 1).padStart(2, "0");
+        scoreEl.textContent = padScore(state.score);
+        stageCountEl.textContent = `${stageNumber} / 03`;
+        birdCountEl.textContent = String(state.birdsLeft).padStart(2, "0");
+        stageBadgeEl.textContent = `Stage ${stageNumber}`;
+        stageNameEl.textContent = state.stage.name;
+        stageCopyEl.textContent = state.stage.copy;
+        objectiveEl.textContent = state.stage.objective;
+        stageLabelEl.textContent = `STAGE ${stageNumber} / ${state.stage.name.toUpperCase()}`;
+        footerNoteEl.textContent = state.stage.footer;
+        powerBadgeEl.classList.toggle("is-ready", Boolean(state.bird?.power === "burst"));
+
+        stageDots.forEach((dot, index) => {
+          dot.classList.toggle("is-current", index === state.stageIndex);
+          dot.classList.toggle("is-cleared", state.clearedStages.has(index));
+          dot.disabled = index > state.stageIndex && !state.clearedStages.has(index);
+          if (index === state.stageIndex) dot.setAttribute("aria-current", "step");
+          else dot.removeAttribute("aria-current");
+        });
+      }
+
+      function hideResult() {
+        resultOverlay.hidden = true;
+        resultOverlay.setAttribute("aria-hidden", "true");
+        state.result = null;
+      }
+
+      function startStage(index, preserveScore = true) {
+        state.stageIndex = clamp(index, 0, stageBlueprints.length - 1);
+        if (!preserveScore) state.score = 0;
+        state.stageStartScore = state.score;
+        state.stage = cloneStage(stageBlueprints[state.stageIndex]);
+        state.birdsLeft = state.stage.birds;
+        state.bird = createWaitingBird();
+        state.aimPoint = { x: SLING.x - 60, y: SLING.y - 58 };
+        state.aimOrigin = { x: SLING.x, y: SLING.y };
+        state.mode = "ready";
+        state.dragging = false;
+        state.pointerId = null;
+        state.combo = 0;
+        state.finishScheduled = false;
+        state.lastShotHadPower = false;
+        state.particles = [];
+        state.floaters = [];
+        state.ripples = [];
+        state.shake = 0;
+        hideResult();
+        hintEl.classList.remove("is-hidden");
+        setStatus("Ready to aim");
+        updateHud();
+      }
+
+      function restartStage() {
+        state.score = state.stageStartScore;
+        startStage(state.stageIndex, true);
+        playTone(180, 0.08, "triangle", 0.025);
+      }
+
+      function openResult(result) {
+        state.mode = "result";
+        state.result = result;
+        state.dragging = false;
+        resultOverlay.hidden = false;
+        resultOverlay.setAttribute("aria-hidden", "false");
+        resultScoreEl.textContent = `SCORE ${padScore(state.score)}`;
+
+        if (result === "win" && state.stageIndex < stageBlueprints.length - 1) {
+          state.clearedStages.add(state.stageIndex);
+          resultKickerEl.textContent = "Grove report · clean clear";
+          resultTitleEl.textContent = "The grove is safe!";
+          resultCopyEl.textContent = `${state.stage.name} is singing again. The next lookout is already rustling.`;
+          resultActionButton.textContent = "Next stage";
+          setStatus("Stage cleared");
+        } else if (result === "win") {
+          state.clearedStages.add(state.stageIndex);
+          resultKickerEl.textContent = "Moon medal earned";
+          resultTitleEl.textContent = "Bramble legend!";
+          resultCopyEl.textContent = "Three keeps, one brave flock, and absolutely no mossling left behind.";
+          resultActionButton.textContent = "Play again";
+          setStatus("Grove cleared");
+        } else {
+          resultKickerEl.textContent = "A thorny landing";
+          resultTitleEl.textContent = "Regroup, launcher.";
+          resultCopyEl.textContent = "The mosslings are still giggling. There is another emberbird with your name on it.";
+          resultActionButton.textContent = "Try stage again";
+          setStatus("Out of emberbirds");
+        }
+        updateHud();
+        window.setTimeout(() => resultActionButton.focus(), 40);
+      }
+
+      function nextResultAction() {
+        if (state.result === "win" && state.stageIndex < stageBlueprints.length - 1) {
+          startStage(state.stageIndex + 1, true);
+        } else if (state.result === "win") {
+          startStage(0, false);
+        } else {
+          restartStage();
+        }
+      }
+
+      function maybeFinishStage() {
+        if (state.stage.targets.every((target) => target.rescued)) {
+          if (state.finishScheduled) return true;
+          state.finishScheduled = true;
+          window.setTimeout(() => {
+            if (state.mode === "flying" || state.mode === "ready") openResult("win");
+          }, reducedMotion.matches ? 0 : 380);
+          return true;
+        }
+        return false;
+      }
+
+      function prepareNextBird() {
+        if (state.mode === "result") return;
+        if (maybeFinishStage()) return;
+        if (state.birdsLeft > 0) {
+          state.bird = createWaitingBird();
+          state.aimPoint = { x: SLING.x - 60, y: SLING.y - 58 };
+          state.mode = "ready";
+          state.combo = 0;
+          setStatus("Ready to aim");
+          updateHud();
+        } else {
+          window.setTimeout(() => openResult("retry"), 260);
+        }
+      }
+
+      function createAudioContext() {
+        if (!state.audioContext) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) state.audioContext = new AudioContext();
+        }
+        if (state.audioContext?.state === "suspended") state.audioContext.resume();
+        return state.audioContext;
+      }
+
+      function playTone(frequency, duration, type = "sine", volume = 0.035) {
+        if (!state.soundOn) return;
+        const audio = createAudioContext();
+        if (!audio) return;
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.type = type;
+        oscillator.frequency.setValueAtTime(frequency, audio.currentTime);
+        gain.gain.setValueAtTime(volume, audio.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
+        oscillator.connect(gain).connect(audio.destination);
+        oscillator.start();
+        oscillator.stop(audio.currentTime + duration);
+      }
+
+      function playLaunchTone() {
+        playTone(240, 0.16, "triangle", 0.045);
+        window.setTimeout(() => playTone(420, 0.12, "sine", 0.03), 55);
+      }
+
+      function playImpactTone(power = 0) {
+        playTone(130 + power * 55, 0.11, "square", 0.022);
+      }
+
+      function clientToWorld(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: clamp((clientX - rect.left) / rect.width * VIEW.width, 0, VIEW.width),
+          y: clamp((clientY - rect.top) / rect.height * VIEW.height, 0, VIEW.height)
+        };
+      }
+
+      function setAim(point) {
+        const dx = point.x - SLING.x;
+        const dy = point.y - SLING.y;
+        const length = Math.hypot(dx, dy);
+        if (length > MAX_PULL) {
+          const factor = MAX_PULL / length;
+          point = { x: SLING.x + dx * factor, y: SLING.y + dy * factor };
+        }
+        state.aimPoint = {
+          x: clamp(point.x, 70, 275),
+          y: clamp(point.y, 340, 590)
+        };
+      }
+
+      function beginAim(point, pointerId) {
+        if (state.mode !== "ready" || !state.bird) return;
+        if (distance(point.x, point.y, state.bird.x, state.bird.y) > 76) return;
+        state.dragging = true;
+        state.pointerId = pointerId;
+        state.mode = "aiming";
+        state.aimOrigin = { x: state.bird.x, y: state.bird.y };
+        setAim(point);
+        hintEl.classList.add("is-hidden");
+        setStatus("Pull back · find the arc");
+        canvas.focus({ preventScroll: true });
+      }
+
+      function launchBird() {
+        if (!state.dragging || state.mode !== "aiming" || !state.bird) return;
+        const bird = state.bird;
+        const pullX = state.aimOrigin.x - state.aimPoint.x;
+        const pullY = state.aimPoint.y - state.aimOrigin.y;
+        const pullDistance = Math.hypot(pullX, pullY);
+        state.dragging = false;
+        state.pointerId = null;
+
+        if (pullDistance < 17) {
+          state.mode = "ready";
+          state.aimPoint = { x: SLING.x - 60, y: SLING.y - 58 };
+          setStatus("Ready to aim");
+          return;
+        }
+
+        const power = 5.5;
+        bird.vx = clamp(pullX * power, -620, 700);
+        bird.vy = clamp(pullY * power, -650, 650);
+        bird.age = 0;
+        bird.restTime = 0;
+        bird.trail = [];
+        state.birdsLeft -= 1;
+        state.mode = "flying";
+        state.lastShotHadPower = Boolean(bird.power);
+        setStatus("Emberbird airborne");
+        playLaunchTone();
+        state.shake = 4;
+        updateHud();
+      }
+
+      function impactPoint(bird) {
+        state.ripples.push({ x: bird.x, y: bird.y, radius: 8, life: 0.55, maxLife: 0.55 });
+        state.shake = Math.max(state.shake, 8);
+        playImpactTone(state.combo);
+      }
+
+      function spawnParticles(x, y, color, count = 12, spread = 160) {
+        for (let index = 0; index < count; index += 1) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 35 + Math.random() * spread;
+          state.particles.push({
+            x,
+            y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 40,
+            life: 0.45 + Math.random() * 0.6,
+            maxLife: 0.45 + Math.random() * 0.6,
+            size: 3 + Math.random() * 5,
+            color,
+            shape: index % 3
+          });
+        }
+      }
+
+      function addFloater(text, x, y, color = "#ffc857", size = 20) {
+        state.floaters.push({ text, x, y, color, size, life: 0.9, maxLife: 0.9 });
+      }
+
+      function triggerBurst(x, y) {
+        const burstRadius = 185;
+        spawnParticles(x, y, "#ffc857", 28, 240);
+        state.ripples.push({ x, y, radius: 20, life: 0.85, maxLife: 0.85, burst: true });
+        state.shake = 15;
+        addFloater("STARDEED!", x, y - 34, "#ffc857", 22);
+        playTone(540, 0.22, "sawtooth", 0.035);
+
+        state.stage.targets.forEach((target) => {
+          if (!target.rescued && distance(x, y, target.x, target.y) < burstRadius) rescueTarget(target, true);
+        });
+        state.stage.blocks.forEach((block) => {
+          if (!block.broken && distance(x, y, block.x + block.w / 2, block.y + block.h / 2) < burstRadius) {
+            block.hp = 0;
+            block.broken = true;
+            state.score += 80;
+            spawnParticles(block.x + block.w / 2, block.y + block.h / 2, palettes[block.kind].light, 14, 150);
+          }
+        });
+        state.bird.power = null;
+        updateHud();
+      }
+
+      function rescueTarget(target, burst = false) {
+        if (target.rescued) return;
+        target.rescued = true;
+        state.combo += 1;
+        state.bestCombo = Math.max(state.bestCombo, state.combo);
+        const comboBonus = Math.max(0, state.combo - 1) * 55;
+        const points = 160 + comboBonus;
+        state.score += points;
+        spawnParticles(target.x, target.y, burst ? "#ffc857" : "#b9e36c", burst ? 20 : 14, 170);
+        state.ripples.push({ x: target.x, y: target.y, radius: 10, life: 0.7, maxLife: 0.7 });
+        addFloater(`+${points}`, target.x, target.y - 33, "#b9e36c", 20);
+        if (state.combo > 1) addFloater(`${state.combo}× COMBO`, target.x + 5, target.y - 60, "#ffc857", 14);
+        playTone(360 + state.combo * 70, 0.12, "sine", 0.04);
+        state.shake = Math.max(state.shake, burst ? 12 : 7);
+        updateHud();
+      }
+
+      function circleRectCollision(circle, rect) {
+        const closestX = clamp(circle.x, rect.x, rect.x + rect.w);
+        const closestY = clamp(circle.y, rect.y, rect.y + rect.h);
+        const dx = circle.x - closestX;
+        const dy = circle.y - closestY;
+        return dx * dx + dy * dy < circle.radius * circle.radius;
+      }
+
+      function damageBlock(block, bird) {
+        if (block.broken || block.hitCooldown > 0) return;
+        const speed = Math.hypot(bird.vx, bird.vy);
+        const damage = speed > 540 ? 2 : 1;
+        block.hp -= damage;
+        block.hitCooldown = 0.27;
+        impactPoint(bird);
+        spawnParticles(bird.x, bird.y, palettes[block.kind].light, block.hp <= 0 ? 15 : 6, 95);
+        if (block.hp <= 0) {
+          block.broken = true;
+          state.score += 75;
+          addFloater("CRACK! +75", block.x + block.w / 2, block.y, palettes[block.kind].light, 14);
+          playTone(200, 0.13, "square", 0.025);
+        } else {
+          state.score += 15;
+        }
+        bird.vx *= 0.74;
+        bird.vy *= -0.44;
+        if (bird.power === "burst") triggerBurst(bird.x, bird.y);
+        updateHud();
+      }
+
+      function updateFlyingBird(dt) {
+        const bird = state.bird;
+        if (!bird) return;
+        bird.age += dt;
+        bird.x += bird.vx * dt;
+        bird.y += bird.vy * dt;
+        bird.vy += GRAVITY * dt;
+        bird.angle += bird.vx * dt * 0.004;
+        bird.trail.push({ x: bird.x, y: bird.y, life: 0.42 });
+        if (bird.trail.length > 16) bird.trail.shift();
+        bird.trail.forEach((point) => { point.life -= dt; });
+        state.stage.blocks.forEach((block) => { block.hitCooldown = Math.max(0, block.hitCooldown - dt); });
+        state.stage.targets.forEach((target) => { target.hitCooldown = Math.max(0, target.hitCooldown - dt); });
+
+        if (bird.y + bird.radius > GROUND) {
+          bird.y = GROUND - bird.radius;
+          bird.vy *= -0.36;
+          bird.vx *= 0.78;
+          impactPoint(bird);
+          if (Math.abs(bird.vy) < 105 && Math.abs(bird.vx) < 85) bird.restTime += dt;
+        }
+
+        if (bird.x - bird.radius < 20 || bird.x + bird.radius > VIEW.width - 15) {
+          bird.vx *= -0.48;
+          bird.x = clamp(bird.x, 20 + bird.radius, VIEW.width - 15 - bird.radius);
+        }
+
+        for (const block of state.stage.blocks) {
+          if (!block.broken && circleRectCollision(bird, block)) damageBlock(block, bird);
+        }
+
+        for (const target of state.stage.targets) {
+          if (!target.rescued && target.hitCooldown <= 0 && distance(bird.x, bird.y, target.x, target.y) < bird.radius + target.r) {
+            target.hitCooldown = 0.5;
+            rescueTarget(target);
+            impactPoint(bird);
+            bird.vx *= 0.48;
+            bird.vy *= -0.35;
+            if (bird.power === "burst") triggerBurst(bird.x, bird.y);
+          }
+        }
+
+        for (const powerup of state.stage.powerups) {
+          if (!powerup.collected && distance(bird.x, bird.y, powerup.x, powerup.y) < bird.radius + powerup.r) {
+            powerup.collected = true;
+            bird.power = powerup.kind;
+            addFloater("BURST READY", powerup.x, powerup.y - 24, "#ffc857", 15);
+            spawnParticles(powerup.x, powerup.y, "#ffc857", 18, 180);
+            playTone(620, 0.2, "triangle", 0.045);
+            updateHud();
+          }
+        }
+
+        if (maybeFinishStage()) return;
+
+        if (bird.age > 0.65 && (bird.restTime > 0.55 || bird.age > 8.5 || bird.y > VIEW.height + 100)) {
+          prepareNextBird();
+        }
+      }
+
+      function updateEffects(dt) {
+        state.particles = state.particles.filter((particle) => {
+          particle.life -= dt;
+          particle.x += particle.vx * dt;
+          particle.y += particle.vy * dt;
+          particle.vy += 260 * dt;
+          particle.vx *= 0.98;
+          return particle.life > 0;
+        });
+        state.floaters = state.floaters.filter((floater) => {
+          floater.life -= dt;
+          floater.y -= 24 * dt;
+          return floater.life > 0;
+        });
+        state.ripples = state.ripples.filter((ripple) => {
+          ripple.life -= dt;
+          ripple.radius += (ripple.burst ? 230 : 105) * dt;
+          return ripple.life > 0;
+        });
+        state.shake = Math.max(0, state.shake - 18 * dt);
+      }
+
+      function update(dt) {
+        updateEffects(dt);
+        if (state.mode === "flying") updateFlyingBird(dt);
+      }
+
+      function roundedRect(x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + width, y, x + width, y + height, r);
+        ctx.arcTo(x + width, y + height, x, y + height, r);
+        ctx.arcTo(x, y + height, x, y, r);
+        ctx.arcTo(x, y, x + width, y, r);
+        ctx.closePath();
+      }
+
+      function drawBackground(time) {
+        const stageHue = state.stage.hue;
+        const gradient = ctx.createLinearGradient(0, 0, 0, VIEW.height);
+        gradient.addColorStop(0, stageHue === 0 ? "#172643" : stageHue === 1 ? "#202c51" : "#302746");
+        gradient.addColorStop(0.62, stageHue === 0 ? "#355773" : stageHue === 1 ? "#435170" : "#5a4163");
+        gradient.addColorStop(1, "#1e3542");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, VIEW.width, VIEW.height);
+
+        const moonX = stageHue === 2 ? 1082 : 1080;
+        const moonY = stageHue === 2 ? 129 : 108;
+        ctx.save();
+        ctx.shadowColor = "rgba(255, 200, 87, 0.34)";
+        ctx.shadowBlur = 34;
+        ctx.fillStyle = stageHue === 2 ? "#ffc857" : "#f4e0a5";
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, stageHue === 2 ? 45 : 39, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = stageHue === 2 ? "#33253f" : "#24334d";
+        ctx.beginPath();
+        ctx.arc(moonX + 16, moonY - 11, stageHue === 2 ? 39 : 35, 0, Math.PI * 2);
+        ctx.fill();
+
+        stars.forEach((star) => {
+          const twinkle = reducedMotion.matches ? 0.8 : 0.62 + Math.sin(time * 1.6 + star.phase) * 0.27;
+          ctx.globalAlpha = twinkle;
+          ctx.fillStyle = star.r > 1.3 ? "#ffc857" : "#f9edcf";
+          ctx.beginPath();
+          ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        drawHill(0, 408, 0.006, "#2b4360", 38, 0.9);
+        drawHill(0, 465, 0.0045, "#284858", 50, 1.2);
+        drawTreeLine("#1b3742", 507, 0.82);
+
+        const groundGradient = ctx.createLinearGradient(0, 570, 0, VIEW.height);
+        groundGradient.addColorStop(0, "#244c43");
+        groundGradient.addColorStop(1, "#122a2d");
+        ctx.fillStyle = groundGradient;
+        ctx.fillRect(0, 570, VIEW.width, 150);
+        ctx.fillStyle = "#71965c";
+        ctx.fillRect(0, GROUND - 4, VIEW.width, 4);
+        ctx.globalAlpha = 0.32;
+        for (let x = 0; x < VIEW.width; x += 22) {
+          ctx.strokeStyle = x % 44 === 0 ? "#b9e36c" : "#4f8057";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x, GROUND + 2);
+          ctx.lineTo(x + 5, GROUND - 7 - (x % 3));
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      function drawHill(x, y, wave, color, amplitude, frequency) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x, VIEW.height);
+        ctx.lineTo(x, y);
+        for (let point = 0; point <= VIEW.width + 30; point += 30) {
+          ctx.lineTo(point, y + Math.sin(point * wave * frequency) * amplitude + Math.cos(point * wave * 0.41) * 12);
+        }
+        ctx.lineTo(VIEW.width, VIEW.height);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      function drawTreeLine(color, baseY, scale) {
+        ctx.fillStyle = color;
+        for (let x = -30; x < VIEW.width + 60; x += 75) {
+          const treeHeight = 55 + ((x * 7) % 45 + 45) % 45;
+          ctx.fillRect(x + 27, baseY - treeHeight, 11, treeHeight + 33);
+          ctx.beginPath();
+          ctx.moveTo(x + 33, baseY - treeHeight - 48 * scale);
+          ctx.lineTo(x - 4, baseY - treeHeight + 20);
+          ctx.lineTo(x + 73, baseY - treeHeight + 20);
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(x + 33, baseY - treeHeight - 18 * scale);
+          ctx.lineTo(x - 16, baseY - treeHeight + 47);
+          ctx.lineTo(x + 82, baseY - treeHeight + 47);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      function drawStageSign() {
+        ctx.save();
+        roundedRect(35, 34, 228, 54, 14);
+        ctx.fillStyle = "rgba(10, 17, 33, 0.38)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(249, 237, 207, 0.2)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = "#b9e36c";
+        ctx.font = "700 11px Trebuchet MS, sans-serif";
+        ctx.letterSpacing = "1px";
+        ctx.fillText(`ROUND ${String(state.stageIndex + 1).padStart(2, "0")}  /  NIGHT PATROL`, 51, 56);
+        ctx.fillStyle = "#f9edcf";
+        ctx.font = "800 16px Arial Rounded MT Bold, Trebuchet MS, sans-serif";
+        ctx.fillText(state.stage.name, 51, 77);
+        ctx.restore();
+      }
+
+      function drawBlock(block) {
+        if (block.broken) return;
+        const palette = palettes[block.kind];
+        ctx.save();
+        roundedRect(block.x + 3, block.y + 4, block.w, block.h, Math.min(7, block.w / 3));
+        ctx.fillStyle = "rgba(10, 17, 33, 0.25)";
+        ctx.fill();
+        roundedRect(block.x, block.y, block.w, block.h, Math.min(7, block.w / 3));
+        ctx.fillStyle = palette.fill;
+        ctx.fill();
+        ctx.strokeStyle = palette.edge;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.strokeStyle = palette.light;
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 2;
+        if (block.kind === "wood") {
+          ctx.beginPath();
+          ctx.moveTo(block.x + 7, block.y + block.h * 0.26);
+          ctx.bezierCurveTo(block.x + block.w * 0.4, block.y + block.h * 0.15, block.x + block.w * 0.65, block.y + block.h * 0.35, block.x + block.w - 6, block.y + block.h * 0.22);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(block.x + 7, block.y + block.h * 0.7);
+          ctx.bezierCurveTo(block.x + block.w * 0.3, block.y + block.h * 0.58, block.x + block.w * 0.76, block.y + block.h * 0.8, block.x + block.w - 6, block.y + block.h * 0.64);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(block.x + block.w * 0.22, block.y + 5);
+          ctx.lineTo(block.x + block.w * 0.48, block.y + block.h * 0.46);
+          ctx.lineTo(block.x + block.w * 0.3, block.y + block.h - 5);
+          ctx.moveTo(block.x + block.w * 0.72, block.y + 4);
+          ctx.lineTo(block.x + block.w * 0.53, block.y + block.h * 0.58);
+          ctx.lineTo(block.x + block.w * 0.78, block.y + block.h - 5);
+          ctx.stroke();
+        }
+        if (block.hp === 1) {
+          ctx.globalAlpha = 0.95;
+          ctx.strokeStyle = "#f9edcf";
+          ctx.beginPath();
+          ctx.moveTo(block.x + block.w * 0.5, block.y + 3);
+          ctx.lineTo(block.x + block.w * 0.32, block.y + block.h * 0.5);
+          ctx.lineTo(block.x + block.w * 0.58, block.y + block.h - 3);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawMossling(target) {
+        if (target.rescued) return;
+        ctx.save();
+        ctx.translate(target.x, target.y);
+        ctx.shadowColor = "rgba(10, 17, 33, 0.28)";
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = "#b9e36c";
+        ctx.beginPath();
+        ctx.arc(0, 0, target.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "#4e784d";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.fillStyle = "#6f9e50";
+        ctx.beginPath();
+        ctx.ellipse(-15, -25, 10, 17, -0.52, 0, Math.PI * 2);
+        ctx.ellipse(15, -25, 10, 17, 0.52, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#18243a";
+        ctx.beginPath();
+        ctx.arc(-9, -3, 4, 0, Math.PI * 2);
+        ctx.arc(9, -3, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#f9edcf";
+        ctx.beginPath();
+        ctx.arc(-8, -4, 1.5, 0, Math.PI * 2);
+        ctx.arc(10, -4, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#4e784d";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 3, 10, 0.2, Math.PI - 0.2);
+        ctx.stroke();
+        ctx.fillStyle = "#f25b4d";
+        ctx.beginPath();
+        ctx.arc(0, 18, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawPowerup(powerup, time) {
+        if (powerup.collected) return;
+        const pulse = reducedMotion.matches ? 0 : Math.sin(time * 3.2) * 3;
+        ctx.save();
+        ctx.translate(powerup.x, powerup.y + pulse);
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = "#ffc857";
+        ctx.beginPath();
+        ctx.arc(0, 0, powerup.r + 15 + pulse, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#ffc857";
+        ctx.strokeStyle = "#9b6439";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, -powerup.r - 4);
+        ctx.quadraticCurveTo(powerup.r + 8, -6, 0, powerup.r + 5);
+        ctx.quadraticCurveTo(-powerup.r - 8, -6, 0, -powerup.r - 4);
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = "#6f984d";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, -powerup.r - 3);
+        ctx.quadraticCurveTo(3, -powerup.r - 15, 14, -powerup.r - 13);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawSling() {
+        const bird = state.bird;
+        const aimX = state.dragging ? state.aimPoint.x : bird?.x ?? SLING.x;
+        const aimY = state.dragging ? state.aimPoint.y : bird?.y ?? SLING.y;
+        ctx.save();
+        ctx.strokeStyle = "#492f38";
+        ctx.lineWidth = 17;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(166, 592);
+        ctx.lineTo(172, 480);
+        ctx.moveTo(216, 592);
+        ctx.lineTo(208, 480);
+        ctx.stroke();
+        ctx.strokeStyle = "#8a4a4b";
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(168, 480);
+        ctx.lineTo(aimX, aimY);
+        ctx.lineTo(211, 480);
+        ctx.stroke();
+        ctx.strokeStyle = "#df7c62";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(168, 480);
+        ctx.lineTo(aimX, aimY);
+        ctx.lineTo(211, 480);
+        ctx.stroke();
+        ctx.fillStyle = "#53353b";
+        roundedRect(142, 588, 99, 18, 8);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawBird(bird) {
+        if (!bird) return;
+        ctx.save();
+        ctx.translate(bird.x, bird.y);
+        ctx.rotate(bird.angle || 0);
+        if (bird.power === "burst") {
+          ctx.globalAlpha = 0.24;
+          ctx.fillStyle = "#ffc857";
+          ctx.beginPath();
+          ctx.arc(0, 0, 36, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        ctx.shadowColor = "rgba(10, 17, 33, 0.35)";
+        ctx.shadowBlur = 9;
+        ctx.fillStyle = "#f25b4d";
+        ctx.beginPath();
+        ctx.arc(0, 0, bird.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "#9e3d47";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.fillStyle = "#ff7c58";
+        ctx.beginPath();
+        ctx.arc(-8, -9, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#8f3543";
+        ctx.beginPath();
+        ctx.ellipse(-13, 8, 12, 7, -0.35, 0, Math.PI * 2);
+        ctx.ellipse(7, 14, 11, 6, 0.35, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#492f38";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(-15, -8);
+        ctx.lineTo(-4, -13);
+        ctx.moveTo(2, -13);
+        ctx.lineTo(14, -8);
+        ctx.stroke();
+        ctx.fillStyle = "#f9edcf";
+        ctx.beginPath();
+        ctx.arc(-9, -5, 5, 0, Math.PI * 2);
+        ctx.arc(9, -5, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#18243a";
+        ctx.beginPath();
+        ctx.arc(-8, -5, 2.5, 0, Math.PI * 2);
+        ctx.arc(10, -5, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffc857";
+        ctx.beginPath();
+        ctx.moveTo(17, 4);
+        ctx.lineTo(34, 10);
+        ctx.lineTo(17, 15);
+        ctx.closePath();
+        ctx.fill();
+        if (bird.power === "burst") {
+          ctx.fillStyle = "#ffc857";
+          ctx.font = "900 13px Trebuchet MS, sans-serif";
+          ctx.fillText("✹", -7, 34);
+        }
+        ctx.restore();
+      }
+
+      function drawTrajectory() {
+        if (!state.dragging || !state.bird) return;
+        const pullX = state.aimOrigin.x - state.aimPoint.x;
+        const pullY = state.aimPoint.y - state.aimOrigin.y;
+        let x = state.aimOrigin.x;
+        let y = state.aimOrigin.y;
+        let vx = pullX * 5.5;
+        let vy = pullY * 5.5;
+        ctx.save();
+        for (let index = 0; index < 19; index += 1) {
+          const dt = 0.11;
+          x += vx * dt;
+          y += vy * dt;
+          vy += GRAVITY * dt;
+          if (y > GROUND) break;
+          ctx.globalAlpha = 0.72 - index * 0.032;
+          ctx.fillStyle = index < 6 ? "#ffc857" : "#f9edcf";
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(2, 5 - index * 0.16), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function drawTrail(bird) {
+        if (!bird?.trail?.length) return;
+        ctx.save();
+        bird.trail.forEach((point, index) => {
+          ctx.globalAlpha = Math.max(0, point.life) * 0.55;
+          ctx.fillStyle = index % 3 === 0 ? "#ffc857" : "#f9edcf";
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 2.5 + (index / bird.trail.length) * 2, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
+      function drawEffects() {
+        state.ripples.forEach((ripple) => {
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, ripple.life / ripple.maxLife) * 0.7;
+          ctx.strokeStyle = ripple.burst ? "#ffc857" : "#f9edcf";
+          ctx.lineWidth = ripple.burst ? 5 : 3;
+          ctx.beginPath();
+          ctx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        });
+        state.particles.forEach((particle) => {
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, particle.life / particle.maxLife);
+          ctx.fillStyle = particle.color;
+          if (particle.shape === 0) {
+            ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
+          } else {
+            ctx.beginPath();
+            ctx.arc(particle.x, particle.y, particle.size / 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        });
+        state.floaters.forEach((floater) => {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, floater.life * 2);
+          ctx.fillStyle = floater.color;
+          ctx.font = `900 ${floater.size}px Trebuchet MS, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.strokeStyle = "rgba(10, 17, 33, 0.48)";
+          ctx.lineWidth = 4;
+          ctx.strokeText(floater.text, floater.x, floater.y);
+          ctx.fillText(floater.text, floater.x, floater.y);
+          ctx.restore();
+        });
+      }
+
+      function draw(time) {
+        const ratioX = canvas.width / VIEW.width;
+        const ratioY = canvas.height / VIEW.height;
+        canvasScale = { x: ratioX, y: ratioY };
+        ctx.setTransform(ratioX, 0, 0, ratioY, 0, 0);
+        ctx.clearRect(0, 0, VIEW.width, VIEW.height);
+        const shakeX = reducedMotion.matches ? 0 : (Math.random() - 0.5) * state.shake;
+        const shakeY = reducedMotion.matches ? 0 : (Math.random() - 0.5) * state.shake;
+        ctx.save();
+        ctx.translate(shakeX, shakeY);
+        drawBackground(time);
+        drawStageSign();
+        state.stage.powerups.forEach((powerup) => drawPowerup(powerup, time));
+        state.stage.blocks.forEach(drawBlock);
+        state.stage.targets.forEach(drawMossling);
+        drawTrail(state.bird);
+        drawTrajectory();
+        drawSling();
+        drawBird(state.bird);
+        drawEffects();
+        ctx.restore();
+      }
+
+      function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, Math.round(rect.width * dpr));
+        canvas.height = Math.max(1, Math.round(rect.height * dpr));
+        canvasScale = { x: canvas.width / VIEW.width, y: canvas.height / VIEW.height };
+      }
+
+      function frame(timestamp) {
+        const elapsed = Math.min(0.05, (timestamp - previousTime) / 1000);
+        previousTime = timestamp;
+        accumulator += elapsed;
+        while (accumulator >= FIXED_STEP) {
+          update(FIXED_STEP);
+          accumulator -= FIXED_STEP;
+        }
+        draw(timestamp / 1000);
+        animationFrame = window.requestAnimationFrame(frame);
+      }
+
+      function onPointerDown(event) {
+        if (state.mode !== "ready") return;
+        event.preventDefault();
+        const point = clientToWorld(event.clientX, event.clientY);
+        beginAim(point, event.pointerId);
+        if (state.dragging) canvas.setPointerCapture?.(event.pointerId);
+      }
+
+      function onPointerMove(event) {
+        if (!state.dragging || event.pointerId !== state.pointerId) return;
+        event.preventDefault();
+        setAim(clientToWorld(event.clientX, event.clientY));
+      }
+
+      function onPointerUp(event) {
+        if (!state.dragging || event.pointerId !== state.pointerId) return;
+        event.preventDefault();
+        setAim(clientToWorld(event.clientX, event.clientY));
+        launchBird();
+        canvas.releasePointerCapture?.(event.pointerId);
+      }
+
+      function onKeyDown(event) {
+        if (event.key.toLowerCase() === "r") {
+          event.preventDefault();
+          restartStage();
+          return;
+        }
+        if (state.mode !== "ready") return;
+        const keySteps = { ArrowLeft: [-16, 0], ArrowRight: [16, 0], ArrowUp: [0, -16], ArrowDown: [0, 16] };
+        if (keySteps[event.key]) {
+          event.preventDefault();
+          setAim({ x: state.aimPoint.x + keySteps[event.key][0], y: state.aimPoint.y + keySteps[event.key][1] });
+          state.dragging = true;
+          state.mode = "aiming";
+          state.aimOrigin = { x: SLING.x, y: SLING.y };
+          hintEl.classList.add("is-hidden");
+          setStatus("Aim set · press Space to launch");
+        } else if (event.key === " " || event.key === "Enter") {
+          event.preventDefault();
+          if (!state.dragging) {
+            state.dragging = true;
+            state.mode = "aiming";
+            state.aimOrigin = { x: SLING.x, y: SLING.y };
+          }
+          launchBird();
+        }
+      }
+
+      soundToggle.addEventListener("click", () => {
+        state.soundOn = !state.soundOn;
+        soundToggle.textContent = state.soundOn ? "♫" : "◌";
+        soundToggle.setAttribute("aria-pressed", String(state.soundOn));
+        soundToggle.setAttribute("aria-label", state.soundOn ? "Turn sound off" : "Turn sound on");
+        if (state.soundOn) playTone(440, 0.12, "sine", 0.03);
+      });
+
+      restartButton.addEventListener("click", restartStage);
+      resultRetryButton.addEventListener("click", restartStage);
+      resultActionButton.addEventListener("click", nextResultAction);
+      stageDots.forEach((dot) => {
+        dot.addEventListener("click", () => {
+          const index = Number(dot.dataset.stage);
+          if (index <= state.stageIndex || state.clearedStages.has(index)) startStage(index, true);
+        });
+      });
+
+      canvas.addEventListener("pointerdown", onPointerDown);
+      canvas.addEventListener("pointermove", onPointerMove);
+      canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerUp);
+      canvas.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("resize", resizeCanvas);
+      if (window.ResizeObserver) new ResizeObserver(resizeCanvas).observe(canvasFrame);
+
+      startStage(0, false);
+      resizeCanvas();
+      animationFrame = window.requestAnimationFrame(frame);
+      window.addEventListener("beforeunload", () => window.cancelAnimationFrame(animationFrame));
+    })();
+  </script>
+</body>
+</html>

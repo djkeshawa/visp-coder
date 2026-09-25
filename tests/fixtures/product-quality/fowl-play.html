@@ -1,0 +1,1570 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b32">
+  <title>Fowl Play — Sky-Map Arcade</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink-950: #0d172b;
+      --ink-900: #13223a;
+      --ink-800: #1c3150;
+      --ink-600: #61718a;
+      --paper: #f5efdf;
+      --paper-deep: #e8dcc4;
+      --paper-line: #d5c7aa;
+      --sky: #83d7ef;
+      --sky-deep: #4bafd7;
+      --coral: #fb765b;
+      --coral-deep: #d9504b;
+      --sun: #ffd166;
+      --sun-deep: #efaa3d;
+      --pea: #8cdb78;
+      --pea-deep: #4aa866;
+      --mint: #dff2d8;
+      --white: #fffdf6;
+      --shadow: rgba(8, 19, 36, 0.28);
+      --display: "Trebuchet MS", "Arial Rounded MT Bold", system-ui, sans-serif;
+      --body: "Trebuchet MS", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { width: 100%; height: 100%; min-height: 100%; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 12% 10%, rgba(97, 188, 226, 0.18), transparent 27rem),
+        linear-gradient(145deg, #0e1d34 0%, #101a2c 48%, #0a1425 100%);
+      color: var(--ink-950);
+      font-family: var(--body);
+    }
+
+    button {
+      border: 0;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible {
+      outline: 3px solid var(--sun);
+      outline-offset: 4px;
+    }
+
+    .game-app {
+      width: min(1500px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      background: rgba(11, 24, 43, 0.4);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 18px clamp(16px, 3vw, 38px);
+      color: var(--white);
+      border-bottom: 1px solid rgba(213, 231, 241, 0.13);
+    }
+
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: max-content;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      color: var(--ink-950);
+      background: var(--sun);
+      border: 3px solid var(--paper);
+      border-radius: 15px 15px 19px 11px;
+      box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.18);
+      transform: rotate(-5deg);
+      font-size: 23px;
+      line-height: 1;
+    }
+
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      right: -7px;
+      bottom: -6px;
+      width: 13px;
+      height: 13px;
+      border-right: 3px solid var(--paper);
+      border-bottom: 3px solid var(--paper);
+      border-radius: 0 0 7px 0;
+      transform: rotate(10deg);
+    }
+
+    .brand-name {
+      margin: 0;
+      font-family: var(--display);
+      font-size: clamp(1.15rem, 2vw, 1.65rem);
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      line-height: 0.95;
+    }
+
+    .brand-subtitle {
+      margin: 5px 0 0;
+      color: #a8bdd2;
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+    }
+
+    .hud {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+    }
+
+    .stat-card {
+      min-width: 92px;
+      padding: 9px 13px 10px;
+      background: rgba(245, 239, 223, 0.08);
+      border: 1px solid rgba(245, 239, 223, 0.15);
+      border-radius: 13px;
+    }
+
+    .stat-label {
+      display: block;
+      color: #9bb1c8;
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      display: block;
+      margin-top: 3px;
+      color: var(--white);
+      font-family: var(--display);
+      font-size: 1.16rem;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+    }
+
+    #score-value { color: var(--sun); }
+    #target-value { color: var(--pea); }
+
+    .content-grid {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 252px;
+      gap: 16px;
+      padding: 16px clamp(16px, 3vw, 38px);
+    }
+
+    .stage-card,
+    .mission-panel {
+      min-height: 0;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 20px 45px var(--shadow);
+    }
+
+    .stage-card {
+      display: grid;
+      grid-template-rows: auto minmax(300px, 1fr) auto;
+      overflow: hidden;
+      border-radius: 24px;
+      background: var(--paper);
+    }
+
+    .stage-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 18px 22px 16px;
+      border-bottom: 1px solid var(--paper-line);
+    }
+
+    .level-kicker {
+      margin-bottom: 3px;
+      color: var(--coral-deep);
+      font-size: 0.63rem;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .stage-title {
+      margin: 0;
+      color: var(--ink-950);
+      font-family: var(--display);
+      font-size: clamp(1.35rem, 2.7vw, 2.35rem);
+      font-weight: 900;
+      letter-spacing: -0.045em;
+      line-height: 0.98;
+    }
+
+    .stage-copy {
+      max-width: 540px;
+      margin: 6px 0 0;
+      color: var(--ink-600);
+      font-size: 0.82rem;
+      line-height: 1.35;
+    }
+
+    .wind-card {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      color: var(--ink-800);
+      background: #ede3cf;
+      border: 1px solid #d9c9ab;
+      border-radius: 12px;
+    }
+
+    .wind-glyph {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      color: var(--sky-deep);
+      background: var(--white);
+      border-radius: 10px;
+      font-size: 1.15rem;
+    }
+
+    .wind-label {
+      margin: 0;
+      color: var(--ink-600);
+      font-size: 0.58rem;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .wind-value {
+      margin: 2px 0 0;
+      font-family: var(--display);
+      font-size: 0.8rem;
+      font-weight: 900;
+    }
+
+    .canvas-wrap {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--sky);
+    }
+
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 300px;
+      touch-action: none;
+      cursor: grab;
+    }
+
+    #game-canvas:active { cursor: grabbing; }
+
+    .canvas-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 14px;
+      pointer-events: none;
+    }
+
+    .toast {
+      max-width: min(420px, calc(100% - 32px));
+      padding: 9px 15px;
+      color: var(--ink-950);
+      background: rgba(255, 253, 246, 0.92);
+      border: 1px solid rgba(255, 253, 246, 0.74);
+      border-radius: 999px;
+      box-shadow: 0 7px 20px rgba(27, 58, 86, 0.14);
+      font-size: 0.75rem;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .aim-hint {
+      position: absolute;
+      bottom: 18px;
+      left: 50%;
+      padding: 7px 11px;
+      color: var(--ink-800);
+      background: rgba(255, 253, 246, 0.72);
+      border-radius: 8px;
+      font-size: 0.65rem;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      transform: translateX(-50%);
+      white-space: nowrap;
+    }
+
+    .stage-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 11px 20px 12px;
+      color: var(--ink-600);
+      background: #eee5d3;
+      border-top: 1px solid var(--paper-line);
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    .stage-footer strong { color: var(--ink-800); }
+
+    .mission-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-radius: 18px;
+      background: #1a2b47;
+      color: var(--white);
+    }
+
+    .mission-intro {
+      padding: 20px 18px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .mission-kicker {
+      margin: 0 0 8px;
+      color: var(--sun);
+      font-size: 0.61rem;
+      font-weight: 900;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .mission-title {
+      margin: 0;
+      font-family: var(--display);
+      font-size: 1.35rem;
+      font-weight: 900;
+      letter-spacing: -0.035em;
+      line-height: 1;
+    }
+
+    .mission-copy {
+      margin: 8px 0 0;
+      color: #b4c4d5;
+      font-size: 0.75rem;
+      line-height: 1.42;
+    }
+
+    .crew-list {
+      display: grid;
+      gap: 8px;
+      padding: 15px 14px;
+    }
+
+    .crew-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      color: #dce8ee;
+      background: rgba(255, 255, 255, 0.055);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 11px;
+    }
+
+    .crew-icon {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 auto;
+      background: var(--pea);
+      border: 2px solid var(--pea-deep);
+      border-radius: 48% 52% 45% 55%;
+    }
+
+    .crew-icon::before,
+    .crew-icon::after {
+      content: "";
+      position: absolute;
+      top: -5px;
+      width: 9px;
+      height: 7px;
+      background: var(--pea);
+      border: 2px solid var(--pea-deep);
+      border-bottom: 0;
+      border-radius: 8px 8px 0 0;
+    }
+
+    .crew-icon::before { left: 3px; transform: rotate(-20deg); }
+    .crew-icon::after { right: 3px; transform: rotate(20deg); }
+
+    .crew-item.is-cleared { opacity: 0.42; }
+    .crew-item.is-cleared .crew-icon { filter: grayscale(1); transform: rotate(18deg); }
+
+    .crew-text { min-width: 0; }
+
+    .crew-name {
+      display: block;
+      font-size: 0.73rem;
+      font-weight: 900;
+    }
+
+    .crew-note {
+      display: block;
+      margin-top: 2px;
+      color: #8da4bc;
+      font-size: 0.61rem;
+      font-weight: 700;
+    }
+
+    .map-note {
+      margin: auto 14px 14px;
+      padding: 12px;
+      color: #bcd0dc;
+      background: rgba(6, 16, 32, 0.25);
+      border-left: 3px solid var(--coral);
+      border-radius: 0 9px 9px 0;
+      font-size: 0.68rem;
+      line-height: 1.4;
+    }
+
+    .map-note strong { color: var(--white); }
+
+    .bottom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 0 clamp(16px, 3vw, 38px) 18px;
+    }
+
+    .status-block {
+      min-width: 0;
+      color: #a6b9cd;
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 9px;
+      color: var(--ink-950);
+      background: var(--sun);
+      border-radius: 999px;
+      font-size: 0.64rem;
+      font-weight: 900;
+    }
+
+    .status-chip::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      background: currentColor;
+      border-radius: 50%;
+    }
+
+    .status-chip[data-tone="active"] { color: var(--ink-950); background: var(--pea); }
+    .status-chip[data-tone="danger"] { color: var(--white); background: var(--coral); }
+    .status-chip[data-tone="win"] { color: var(--ink-950); background: var(--sun); }
+
+    .status-copy {
+      margin: 7px 0 0;
+      overflow: hidden;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .control-dock {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
+    .action-button {
+      padding: 11px 17px;
+      border-radius: 11px;
+      font-size: 0.74rem;
+      font-weight: 900;
+      transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+    }
+
+    .action-button:hover { transform: translateY(-2px); }
+
+    .action-button.primary {
+      color: var(--ink-950);
+      background: var(--coral);
+      box-shadow: 0 4px 0 var(--coral-deep);
+    }
+
+    .action-button.primary:hover { background: #ff866e; }
+
+    .action-button.secondary {
+      color: var(--ink-950);
+      background: var(--paper);
+      box-shadow: 0 4px 0 #c3b397;
+    }
+
+    .action-button.tertiary {
+      padding: 10px 12px;
+      color: #dce8ee;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.13);
+    }
+
+    .action-button[hidden] { display: none; }
+
+    [hidden] { display: none !important; }
+
+    @media (max-width: 1040px) {
+      .content-grid { grid-template-columns: minmax(0, 1fr) 220px; }
+      .stat-card { min-width: 78px; padding-inline: 10px; }
+      .stage-header { padding-inline: 18px; }
+    }
+
+    @media (max-width: 860px) {
+      body { overflow-y: auto; }
+      .game-app { min-height: 100vh; }
+      .topbar { align-items: flex-start; flex-direction: column; gap: 15px; }
+      .hud { width: 100%; }
+      .stat-card { flex: 1; }
+      .content-grid {
+        grid-template-columns: 1fr;
+        min-height: auto;
+      }
+      .stage-card { min-height: 540px; }
+      .mission-panel { min-height: 260px; }
+      .map-note { margin-top: 0; }
+      .bottom-bar { padding-bottom: 20px; }
+    }
+
+    @media (max-width: 560px) {
+      .topbar { padding-top: 14px; padding-bottom: 14px; }
+      .hud { gap: 6px; }
+      .stat-card { min-width: 0; padding: 8px; }
+      .stat-value { font-size: 1rem; }
+      .content-grid { padding: 10px 10px 14px; }
+      .stage-card { min-height: 500px; border-radius: 18px; }
+      .stage-header { align-items: stretch; flex-direction: column; padding: 16px; }
+      .wind-card { align-self: flex-start; }
+      .stage-copy { font-size: 0.75rem; }
+      .stage-footer { align-items: flex-start; flex-direction: column; gap: 5px; padding-inline: 15px; }
+      .mission-panel { border-radius: 15px; }
+      .bottom-bar { align-items: stretch; flex-direction: column; gap: 13px; padding-inline: 16px; }
+      .control-dock { width: 100%; }
+      .action-button { flex: 1; }
+      .action-button.tertiary { flex: 0 0 auto; }
+      .aim-hint { bottom: 10px; font-size: 0.58rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="game-app" id="game-root" data-state="ready">
+    <header class="topbar">
+      <div class="brand-lockup" aria-label="Fowl Play Sky-Map Arcade">
+        <div class="brand-mark" aria-hidden="true">✦</div>
+        <div>
+          <p class="brand-name">FOWL PLAY</p>
+          <p class="brand-subtitle">sky-map arcade · flight log 07</p>
+        </div>
+      </div>
+
+      <div class="hud" aria-label="Game score board">
+        <div class="stat-card">
+          <span class="stat-label">Score</span>
+          <span class="stat-value" id="score-value">0000</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Shots</span>
+          <span class="stat-value" id="shots-value">● ● ●</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Crew left</span>
+          <span class="stat-value" id="target-value">3 / 3</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="content-grid" aria-label="Fowl Play game arena">
+      <section class="stage-card" aria-labelledby="stage-title">
+        <div class="stage-header">
+          <div>
+            <div class="level-kicker">Route 01 · the wobbly outpost</div>
+            <h1 class="stage-title" id="stage-title">Bonk the wobble crew.</h1>
+            <p class="stage-copy">Drag the sky scout, trace your arc, and send the outpost into a very satisfying wobble.</p>
+          </div>
+          <div class="wind-card" aria-label="Wind is calm">
+            <div class="wind-glyph" aria-hidden="true">↝</div>
+            <div>
+              <p class="wind-label">Wind report</p>
+              <p class="wind-value">calm-ish / 2 knots</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="canvas-wrap">
+          <canvas id="game-canvas" role="img" aria-label="Interactive slingshot game board"></canvas>
+          <div class="canvas-overlay" aria-hidden="true">
+            <div class="toast" id="toast" role="status" hidden></div>
+            <div class="aim-hint" id="aim-hint">Drag the scout · release to fling · Space launches</div>
+          </div>
+        </div>
+
+        <div class="stage-footer">
+          <span><strong>Map note:</strong> every wobble counts.</span>
+          <span>mouse · touch · keyboard</span>
+        </div>
+      </section>
+
+      <aside class="mission-panel" aria-labelledby="mission-title">
+        <div class="mission-intro">
+          <p class="mission-kicker">today's tiny mission</p>
+          <h2 class="mission-title" id="mission-title">Make a mess.</h2>
+          <p class="mission-copy">Three green goobers. One ramshackle fort. A suspicious amount of air-time.</p>
+        </div>
+
+        <div class="crew-list" aria-label="Wobble crew status">
+          <div class="crew-item" data-target-id="glob-alpha">
+            <span class="crew-icon" aria-hidden="true"></span>
+            <span class="crew-text"><span class="crew-name">Moss</span><span class="crew-note">hides behind planks</span></span>
+          </div>
+          <div class="crew-item" data-target-id="glob-bravo">
+            <span class="crew-icon" aria-hidden="true"></span>
+            <span class="crew-text"><span class="crew-name">Pip</span><span class="crew-note">thinks helmets are hats</span></span>
+          </div>
+          <div class="crew-item" data-target-id="glob-charlie">
+            <span class="crew-icon" aria-hidden="true"></span>
+            <span class="crew-text"><span class="crew-name">Bloop</span><span class="crew-note">very bad at lookout duty</span></span>
+          </div>
+        </div>
+
+        <p class="map-note"><strong>Field tip:</strong> a high arc buys time. A low arc buys chaos. The map is not judging you.</p>
+      </aside>
+    </section>
+
+    <footer class="bottom-bar">
+      <div class="status-block">
+        <div class="status-line"><span class="status-chip" id="status-chip" data-tone="ready">READY</span></div>
+        <p class="status-copy" id="status-copy" aria-live="polite">Pinch the scout, then send it sailing.</p>
+      </div>
+      <div class="control-dock" aria-label="Game controls">
+        <button class="action-button primary" id="start-button" type="button">Start flight</button>
+        <button class="action-button primary" id="launch-again-button" type="button" hidden>Next launch</button>
+        <button class="action-button secondary" id="reset-button" type="button">Reset map</button>
+        <button class="action-button tertiary" id="sound-button" type="button" aria-pressed="false" title="Toggle tiny launch sounds">Sound off</button>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const root = document.getElementById("game-root");
+      const canvas = document.getElementById("game-canvas");
+      const ctx = canvas.getContext("2d");
+      const startButton = document.getElementById("start-button");
+      const resetButton = document.getElementById("reset-button");
+      const launchAgainButton = document.getElementById("launch-again-button");
+      const soundButton = document.getElementById("sound-button");
+      const scoreValue = document.getElementById("score-value");
+      const shotsValue = document.getElementById("shots-value");
+      const targetValue = document.getElementById("target-value");
+      const statusChip = document.getElementById("status-chip");
+      const statusCopy = document.getElementById("status-copy");
+      const toast = document.getElementById("toast");
+      const aimHint = document.getElementById("aim-hint");
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      const COLORS = {
+        ink: "#13223a",
+        inkSoft: "#294566",
+        paper: "#f5efdf",
+        paperDeep: "#e8dcc4",
+        sky: "#83d7ef",
+        skyDeep: "#4bafd7",
+        coral: "#fb765b",
+        coralDeep: "#d9504b",
+        sun: "#ffd166",
+        sunDeep: "#efaa3d",
+        pea: "#8cdb78",
+        peaDeep: "#4aa866",
+        grass: "#71b76b",
+        grassDeep: "#4b8c5c",
+        white: "#fffdf6",
+        cloud: "#eff8f2",
+        wood: "#bd744c",
+        woodLight: "#e2a25e",
+        stone: "#90a7b4",
+      };
+
+      const world = { width: 900, height: 500, dpr: 1 };
+      const game = {
+        phase: "ready",
+        score: 0,
+        shotsLeft: 3,
+        soundOn: false,
+        targets: [],
+        particles: [],
+        flightTimer: 0,
+        impactTime: 0,
+        impactPoint: { x: 0, y: 0 },
+        toastTimer: 0,
+        bird: null,
+      };
+
+      const input = { pointerId: null, aiming: false };
+      let lastFrame = Date.now();
+
+      function clamp(value, minimum, maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+      }
+
+      function circleRectCollision(circle, rect) {
+        const closestX = clamp(circle.x, rect.x, rect.x + rect.width);
+        const closestY = clamp(circle.y, rect.y, rect.y + rect.height);
+        const dx = circle.x - closestX;
+        const dy = circle.y - closestY;
+        return dx * dx + dy * dy <= circle.radius * circle.radius;
+      }
+
+      function predictTrajectory(origin, velocity, gravity, count = 20) {
+        const points = [];
+        for (let index = 0; index < count; index += 1) {
+          const time = index;
+          points.push({
+            x: origin.x + velocity.x * time,
+            y: origin.y + velocity.y * time + gravity * time * time * 0.5,
+          });
+        }
+        return points;
+      }
+
+      window.FowlPlayMath = { clamp, circleRectCollision, predictTrajectory };
+
+      function getAnchor() {
+        return { x: world.width * 0.16, y: world.height * 0.82 - 13 };
+      }
+
+      function getGroundY() {
+        return world.height * 0.82;
+      }
+
+      function createTargets() {
+        const ground = getGroundY();
+        return [
+          { id: "left-plank", kind: "block", x: world.width * 0.56, y: ground - 62, width: 92, height: 62, angle: -0.02, alive: true, material: "wood" },
+          { id: "right-plank", kind: "block", x: world.width * 0.67, y: ground - 62, width: 95, height: 62, angle: 0.025, alive: true, material: "wood" },
+          { id: "roof", kind: "block", x: world.width * 0.605, y: ground - 121, width: 128, height: 28, angle: -0.025, alive: true, material: "stone" },
+          { id: "glob-alpha", kind: "glob", x: world.width * 0.60, y: ground - 31, radius: 29, alive: true, bounce: 0 },
+          { id: "glob-bravo", kind: "glob", x: world.width * 0.72, y: ground - 31, radius: 29, alive: true, bounce: 0 },
+          { id: "glob-charlie", kind: "glob", x: world.width * 0.66, y: ground - 92, radius: 27, alive: true, bounce: 0 },
+        ];
+      }
+
+      function createBird() {
+        const anchor = getAnchor();
+        return {
+          x: anchor.x,
+          y: anchor.y,
+          radius: Math.max(16, Math.min(22, world.width * 0.021)),
+          vx: 0,
+          vy: 0,
+          rotation: 0,
+          active: true,
+          launched: false,
+        };
+      }
+
+      function resetRound() {
+        game.phase = "ready";
+        game.score = 0;
+        game.shotsLeft = 3;
+        game.targets = createTargets();
+        game.particles = [];
+        game.flightTimer = 0;
+        game.impactTime = 0;
+        game.impactPoint = { x: world.width * 0.62, y: getGroundY() * 0.5 };
+        game.bird = createBird();
+        updateUi();
+      }
+
+      function startRound() {
+        resetRound();
+        setPhase("playing");
+        showToast("Round live. Make some noise.");
+      }
+
+      function setPhase(phase) {
+        game.phase = phase;
+        root.dataset.state = phase;
+        updateUi();
+      }
+
+      function aliveCrew() {
+        return game.targets.filter((target) => target.kind === "glob" && target.alive);
+      }
+
+      function updateUi() {
+        const status = {
+          ready: ["READY", "ready", "Pinch the scout, then send it sailing."],
+          playing: ["AIMING", "active", "Drag the scout away from the fork. The dotted line is your hunch."],
+          aiming: ["AIMING", "active", "Nice. Now release when the arc looks mischievous."],
+          flying: ["IN FLIGHT", "active", "Incoming! Watch the wobble."],
+          impact: ["IMPACT", "danger", "A clean bonk. The map will remember this."],
+          win: ["MAP CLEARED", "win", "Outpost cleared. Obviously, you need another launch."],
+        }[game.phase] ?? ["READY", "ready", "Pinch the scout, then send it sailing."];
+
+        scoreValue.textContent = String(game.score).padStart(4, "0");
+        shotsValue.textContent = Array.from({ length: 3 }, (_, index) => index < game.shotsLeft ? "●" : "○").join(" ");
+        targetValue.textContent = `${aliveCrew().length} / 3`;
+        statusChip.textContent = status[0];
+        statusChip.dataset.tone = status[1];
+        statusCopy.textContent = status[2];
+        startButton.hidden = game.phase !== "ready";
+        launchAgainButton.hidden = !["impact", "win"].includes(game.phase);
+        launchAgainButton.disabled = game.phase === "win" || game.shotsLeft === 0;
+        aimHint.textContent = game.phase === "aiming"
+          ? "Release to fling · keep an eye on the dotted arc"
+          : game.phase === "playing"
+            ? "Drag the scout · release to fling · Space launches"
+            : "Drag the scout · release to fling · Space launches";
+
+        for (const item of document.querySelectorAll("[data-target-id]")) {
+          item.classList.toggle("is-cleared", !game.targets.find((target) => target.id === item.dataset.targetId)?.alive);
+        }
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.hidden = false;
+        game.toastTimer = 2.4;
+      }
+
+      function localPoint(event) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: (event.clientX - rect.left) * world.width / rect.width,
+          y: (event.clientY - rect.top) * world.height / rect.height,
+        };
+      }
+
+      function aimPoint(point) {
+        const anchor = getAnchor();
+        return {
+          x: clamp(point.x, anchor.x - 130, anchor.x + 230),
+          y: clamp(point.y, anchor.y - 180, anchor.y + 55),
+        };
+      }
+
+      function distanceBetween(first, second) {
+        return Math.hypot(first.x - second.x, first.y - second.y);
+      }
+
+      function handlePointerDown(event) {
+        if (game.phase !== "playing" || !game.bird?.active) return;
+        const point = localPoint(event);
+        const anchor = getAnchor();
+        if (distanceBetween(point, anchor) > Math.max(58, game.bird.radius * 2.8)) return;
+        input.pointerId = event.pointerId;
+        input.aiming = true;
+        game.bird.x = anchor.x;
+        game.bird.y = anchor.y;
+        setPhase("aiming");
+        canvas.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+      }
+
+      function handlePointerMove(event) {
+        if (!input.aiming || event.pointerId !== input.pointerId || !game.bird) return;
+        const point = aimPoint(localPoint(event));
+        game.bird.x = point.x;
+        game.bird.y = point.y;
+        event.preventDefault();
+      }
+
+      function handlePointerUp(event) {
+        if (!input.aiming || event.pointerId !== input.pointerId || !game.bird) return;
+        const point = aimPoint(localPoint(event));
+        input.aiming = false;
+        input.pointerId = null;
+        canvas.releasePointerCapture?.(event.pointerId);
+        if (distanceBetween(point, getAnchor()) < 12) {
+          game.bird = createBird();
+          setPhase("playing");
+          return;
+        }
+        launchBird(point);
+        event.preventDefault();
+      }
+
+      function launchBird(point) {
+        if (!game.bird || game.phase !== "aiming" && game.phase !== "playing") return;
+        const anchor = getAnchor();
+        game.bird.x = anchor.x;
+        game.bird.y = anchor.y;
+        game.bird.vx = (point.x - anchor.x) * 0.068;
+        game.bird.vy = (point.y - anchor.y) * 0.068;
+        game.bird.rotation = 0;
+        game.bird.launched = true;
+        game.shotsLeft = Math.max(0, game.shotsLeft - 1);
+        game.flightTimer = 0;
+        setPhase("flying");
+        if (game.soundOn) flashSound();
+      }
+
+      function launchTowardOutpost() {
+        if (game.phase !== "playing" || !game.bird) return;
+        launchBird({ x: world.width * 0.62, y: world.height * 0.4 });
+      }
+
+      function handleKeyDown(event) {
+        if (event.key.toLowerCase() === "r") {
+          resetRound();
+          return;
+        }
+        if (event.key === "Enter" && game.phase === "ready") {
+          startRound();
+          return;
+        }
+        if (event.code === "Space" && game.phase === "playing") {
+          event.preventDefault();
+          launchTowardOutpost();
+        }
+      }
+
+      function flashSound() {
+        soundButton.animate?.([
+          { transform: "rotate(-4deg)" },
+          { transform: "rotate(4deg)" },
+          { transform: "rotate(0deg)" },
+        ], { duration: reducedMotion ? 1 : 180 });
+      }
+
+      function impactTarget(target, point) {
+        if (!target.alive) return;
+        target.alive = false;
+        target.bounce = 1;
+        game.score += target.kind === "glob" ? 350 : 125;
+        game.impactPoint = { x: point.x, y: point.y };
+        spawnBurst(point.x, point.y, target.kind === "glob" ? COLORS.pea : COLORS.woodLight, reducedMotion ? 8 : 20);
+        game.bird.active = false;
+        setPhase("impact");
+        showToast(target.kind === "glob" ? "BONK! +350 · excellent wobble." : "Plank down! +125 · keep going.");
+      }
+
+      function checkCollisions() {
+        if (!game.bird?.active) return;
+        const bird = game.bird;
+        for (const target of game.targets) {
+          if (!target.alive) continue;
+          if (target.kind === "glob") {
+            if (distanceBetween(bird, target) <= bird.radius + target.radius) {
+              impactTarget(target, { x: target.x, y: target.y });
+              return;
+            }
+          } else if (circleRectCollision(bird, target)) {
+            impactTarget(target, { x: bird.x, y: bird.y });
+            return;
+          }
+        }
+      }
+
+      function finishFlight() {
+        if (!game.bird?.active || game.phase !== "flying") return;
+        game.bird.active = false;
+        game.impactPoint = { x: clamp(game.bird.x, 40, world.width - 40), y: clamp(game.bird.y, 40, getGroundY() - 18) };
+        spawnBurst(game.impactPoint.x, game.impactPoint.y, COLORS.sun, reducedMotion ? 5 : 12);
+        setPhase("impact");
+        showToast("A spicy miss. The sky scout lives to fling again.");
+      }
+
+      function updatePhysics(frame) {
+        if (game.toastTimer > 0) {
+          game.toastTimer -= frame / 60;
+          if (game.toastTimer <= 0) toast.hidden = true;
+        }
+
+        if (game.phase === "flying" && game.bird?.active) {
+          game.flightTimer += frame / 60;
+          game.bird.vy += 0.34 * frame;
+          game.bird.x += game.bird.vx * frame;
+          game.bird.y += game.bird.vy * frame;
+          game.bird.rotation += game.bird.vx * 0.012 * frame;
+          checkCollisions();
+
+          const ground = getGroundY();
+          if (game.bird.y + game.bird.radius >= ground) {
+            game.bird.y = ground - game.bird.radius;
+            game.bird.vy *= -0.28;
+            game.bird.vx *= 0.78;
+            if (Math.abs(game.bird.vy) < 1.3 && game.flightTimer > 0.35) finishFlight();
+          }
+          if (game.bird.x > world.width + 100 || game.bird.x < -100 || game.bird.y > world.height + 100 || game.flightTimer > 2.65) finishFlight();
+        }
+
+        if (game.phase === "impact") {
+          game.impactTime += frame / 60;
+          for (const target of game.targets) {
+            if (target.bounce > 0) target.bounce = Math.max(0, target.bounce - frame / 42);
+          }
+          if (game.impactTime > 1.9 && aliveCrew().length === 0) {
+            setPhase("win");
+            showToast("MAP CLEARED! You are officially a menace.");
+          } else if (game.impactTime > 1.9 && game.shotsLeft > 0) {
+            game.bird = createBird();
+            game.impactTime = 0;
+            setPhase("playing");
+          } else if (game.impactTime > 1.9 && game.shotsLeft === 0) {
+            setPhase("win");
+            showToast("No scouts left. Reset the map and go again.");
+          }
+        }
+
+        updateParticles(frame);
+      }
+
+      function spawnBurst(x, y, color, count) {
+        for (let index = 0; index < count; index += 1) {
+          const angle = (Math.PI * 2 * index) / count + Math.random() * 0.35;
+          const speed = 2 + Math.random() * 4;
+          game.particles.push({
+            x,
+            y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 1,
+            life: 1,
+            size: 2 + Math.random() * 4,
+            color,
+            shape: index % 3,
+          });
+        }
+      }
+
+      function updateParticles(frame) {
+        for (const particle of game.particles) {
+          particle.x += particle.vx * frame;
+          particle.y += particle.vy * frame;
+          particle.vy += 0.1 * frame;
+          particle.life -= 0.025 * frame;
+        }
+        game.particles = game.particles.filter((particle) => particle.life > 0);
+      }
+
+      function drawRoundedRect(x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + width, y, x + width, y + height, r);
+        ctx.arcTo(x + width, y + height, x, y + height, r);
+        ctx.arcTo(x, y + height, x, y, r);
+        ctx.arcTo(x, y, x + width, y, r);
+        ctx.closePath();
+      }
+
+      function drawSky() {
+        const gradient = ctx.createLinearGradient(0, 0, 0, world.height);
+        gradient.addColorStop(0, "#6bc5e7");
+        gradient.addColorStop(0.64, "#a8e2ee");
+        gradient.addColorStop(1, "#d8eacc");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, world.width, world.height);
+
+        ctx.save();
+        ctx.globalAlpha = 0.16;
+        ctx.strokeStyle = COLORS.inkSoft;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 9]);
+        for (let x = -world.height; x < world.width + world.height; x += 68) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x - world.height * 0.22, world.height * 0.78);
+          ctx.stroke();
+        }
+        for (let y = 30; y < world.height * 0.78; y += 56) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(world.width, y + 38);
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        ctx.strokeStyle = COLORS.white;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(world.width * 0.82, world.height * 0.26, world.height * 0.13, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(world.width * 0.82, world.height * 0.26, world.height * 0.18, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        drawSun(world.width * 0.14, world.height * 0.17, Math.max(26, world.height * 0.075));
+        drawCloud(world.width * 0.34, world.height * 0.18, 1.1, 0.63);
+        drawCloud(world.width * 0.76, world.height * 0.12, 0.75, 0.5);
+        drawCloud(world.width * 0.53, world.height * 0.34, 0.55, 0.24);
+      }
+
+      function drawSun(x, y, radius) {
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = COLORS.sun;
+        ctx.beginPath();
+        ctx.arc(x, y, radius * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = COLORS.sun;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.36;
+        ctx.strokeStyle = COLORS.sunDeep;
+        ctx.lineWidth = 3;
+        for (let index = 0; index < 10; index += 1) {
+          const angle = (index / 10) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(x + Math.cos(angle) * radius * 1.32, y + Math.sin(angle) * radius * 1.32);
+          ctx.lineTo(x + Math.cos(angle) * radius * 1.65, y + Math.sin(angle) * radius * 1.65);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawCloud(x, y, size, alpha) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = COLORS.cloud;
+        ctx.beginPath();
+        ctx.arc(x - 22 * size, y + 8 * size, 18 * size, Math.PI, 0);
+        ctx.arc(x, y - 5 * size, 26 * size, Math.PI, 0);
+        ctx.arc(x + 28 * size, y + 8 * size, 17 * size, Math.PI, 0);
+        ctx.lineTo(x + 44 * size, y + 28 * size);
+        ctx.lineTo(x - 42 * size, y + 28 * size);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawLandscape() {
+        const ground = getGroundY();
+        ctx.fillStyle = "#aed7bd";
+        ctx.beginPath();
+        ctx.moveTo(0, ground - 72);
+        ctx.quadraticCurveTo(world.width * 0.17, ground - 128, world.width * 0.34, ground - 57);
+        ctx.quadraticCurveTo(world.width * 0.51, ground - 144, world.width * 0.7, ground - 72);
+        ctx.quadraticCurveTo(world.width * 0.86, ground - 128, world.width, ground - 48);
+        ctx.lineTo(world.width, ground);
+        ctx.lineTo(0, ground);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = "#8bc47e";
+        ctx.beginPath();
+        ctx.moveTo(0, ground - 32);
+        ctx.quadraticCurveTo(world.width * 0.24, ground - 78, world.width * 0.45, ground - 22);
+        ctx.quadraticCurveTo(world.width * 0.72, ground - 75, world.width, ground - 23);
+        ctx.lineTo(world.width, ground);
+        ctx.lineTo(0, ground);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = COLORS.grass;
+        ctx.fillRect(0, ground, world.width, world.height - ground);
+        ctx.fillStyle = COLORS.grassDeep;
+        ctx.fillRect(0, ground, world.width, 7);
+
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.strokeStyle = COLORS.paper;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([2, 12]);
+        ctx.beginPath();
+        ctx.moveTo(0, ground + 27);
+        ctx.bezierCurveTo(world.width * 0.23, ground + 5, world.width * 0.43, ground + 64, world.width * 0.68, ground + 26);
+        ctx.bezierCurveTo(world.width * 0.82, ground + 6, world.width * 0.9, ground + 38, world.width, ground + 18);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawFort() {
+        for (const target of game.targets) {
+          if (!target.alive) continue;
+          const wobble = target.bounce > 0 ? Math.sin(target.bounce * 13) * target.bounce * 0.08 : 0;
+          if (target.kind === "glob") drawGlob(target, wobble);
+          else drawBlock(target, wobble);
+        }
+
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = COLORS.ink;
+        ctx.beginPath();
+        ctx.ellipse(world.width * 0.65, getGroundY() + 6, world.width * 0.18, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawBlock(block, wobble) {
+        const x = block.x + block.width / 2;
+        const y = block.y + block.height / 2;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(block.angle + wobble);
+        ctx.translate(-block.width / 2, -block.height / 2);
+        drawRoundedRect(0, 0, block.width, block.height, 7);
+        ctx.fillStyle = block.material === "stone" ? COLORS.stone : COLORS.wood;
+        ctx.fill();
+        ctx.strokeStyle = block.material === "stone" ? "#5d7788" : COLORS.coralDeep;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.globalAlpha = 0.32;
+        ctx.fillStyle = COLORS.white;
+        ctx.fillRect(8, 8, block.width - 16, 6);
+        ctx.globalAlpha = 0.25;
+        ctx.strokeStyle = COLORS.ink;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(block.width * 0.2, 0);
+        ctx.lineTo(block.width * 0.2, block.height);
+        ctx.moveTo(block.width * 0.72, 0);
+        ctx.lineTo(block.width * 0.72, block.height);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawLeaf(x, y, angle, size) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.fillStyle = COLORS.pea;
+        ctx.strokeStyle = COLORS.peaDeep;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, size * 0.6);
+        ctx.quadraticCurveTo(-size * 0.8, -size * 0.2, 0, -size);
+        ctx.quadraticCurveTo(size * 0.8, -size * 0.2, 0, size * 0.6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawGlob(glob, wobble) {
+        ctx.save();
+        ctx.translate(glob.x, glob.y);
+        ctx.rotate(wobble);
+        drawLeaf(-glob.radius * 0.56, -glob.radius * 0.76, -0.55, glob.radius * 0.35);
+        drawLeaf(glob.radius * 0.56, -glob.radius * 0.76, 0.55, glob.radius * 0.35);
+        ctx.fillStyle = COLORS.pea;
+        ctx.strokeStyle = COLORS.peaDeep;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, glob.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = COLORS.ink;
+        ctx.beginPath();
+        ctx.arc(-glob.radius * 0.34, -glob.radius * 0.18, 3.3, 0, Math.PI * 2);
+        ctx.arc(glob.radius * 0.34, -glob.radius * 0.18, 3.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = COLORS.ink;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, glob.radius * 0.08, glob.radius * 0.3, 0.16, Math.PI - 0.16);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(217, 80, 75, 0.4)";
+        ctx.beginPath();
+        ctx.arc(-glob.radius * 0.68, glob.radius * 0.1, glob.radius * 0.12, 0, Math.PI * 2);
+        ctx.arc(glob.radius * 0.68, glob.radius * 0.1, glob.radius * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = COLORS.sun;
+        ctx.strokeStyle = COLORS.sunDeep;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-7, -glob.radius - 4);
+        ctx.lineTo(0, -glob.radius - 12);
+        ctx.lineTo(7, -glob.radius - 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawSlingshot() {
+        const anchor = getAnchor();
+        const ground = getGroundY();
+        const bird = game.bird;
+        const forkLeft = { x: anchor.x - 22, y: anchor.y - 51 };
+        const forkRight = { x: anchor.x + 25, y: anchor.y - 48 };
+
+        ctx.save();
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = COLORS.ink;
+        ctx.beginPath();
+        ctx.ellipse(anchor.x, ground + 5, 60, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.strokeStyle = COLORS.wood;
+        ctx.lineWidth = 14;
+        ctx.beginPath();
+        ctx.moveTo(anchor.x - 1, ground + 4);
+        ctx.lineTo(forkLeft.x, forkLeft.y);
+        ctx.moveTo(anchor.x + 4, ground + 4);
+        ctx.lineTo(forkRight.x, forkRight.y);
+        ctx.stroke();
+        ctx.strokeStyle = COLORS.woodLight;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(anchor.x - 2, ground + 1);
+        ctx.lineTo(forkLeft.x + 1, forkLeft.y + 2);
+        ctx.moveTo(anchor.x + 3, ground + 1);
+        ctx.lineTo(forkRight.x - 1, forkRight.y + 2);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.strokeStyle = COLORS.coral;
+        ctx.lineWidth = 5;
+        if (game.phase === "aiming") {
+          ctx.beginPath();
+          ctx.moveTo(forkLeft.x, forkLeft.y);
+          ctx.lineTo(bird?.x ?? anchor.x, bird?.y ?? anchor.y);
+          ctx.moveTo(forkRight.x, forkRight.y);
+          ctx.lineTo(bird?.x ?? anchor.x, bird?.y ?? anchor.y);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawBird() {
+        const bird = game.bird;
+        if (!bird?.active) return;
+        ctx.save();
+        ctx.translate(bird.x, bird.y);
+        ctx.rotate(bird.rotation);
+        ctx.fillStyle = COLORS.coral;
+        ctx.strokeStyle = COLORS.coralDeep;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, bird.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = COLORS.ink;
+        ctx.beginPath();
+        ctx.arc(-bird.radius * 0.32, -bird.radius * 0.23, bird.radius * 0.13, 0, Math.PI * 2);
+        ctx.arc(bird.radius * 0.28, -bird.radius * 0.23, bird.radius * 0.13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = COLORS.white;
+        ctx.beginPath();
+        ctx.arc(-bird.radius * 0.3, -bird.radius * 0.27, bird.radius * 0.05, 0, Math.PI * 2);
+        ctx.arc(bird.radius * 0.3, -bird.radius * 0.27, bird.radius * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = COLORS.sun;
+        ctx.strokeStyle = COLORS.sunDeep;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bird.radius * 0.76, -bird.radius * 0.06);
+        ctx.lineTo(bird.radius * 1.47, bird.radius * 0.17);
+        ctx.lineTo(bird.radius * 0.75, bird.radius * 0.39);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = COLORS.sun;
+        ctx.beginPath();
+        ctx.moveTo(-bird.radius * 0.55, -bird.radius * 0.82);
+        ctx.quadraticCurveTo(-bird.radius * 0.48, -bird.radius * 1.48, -bird.radius * 0.12, -bird.radius * 0.9);
+        ctx.quadraticCurveTo(bird.radius * 0.12, -bird.radius * 1.52, bird.radius * 0.34, -bird.radius * 0.7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawTrajectory() {
+        if (game.phase !== "aiming" || !game.bird) return;
+        const anchor = getAnchor();
+        const velocity = {
+          x: (game.bird.x - anchor.x) * 0.068,
+          y: (game.bird.y - anchor.y) * 0.068,
+        };
+        const path = predictTrajectory(anchor, velocity, 0.34, 17);
+        ctx.save();
+        ctx.fillStyle = COLORS.white;
+        ctx.strokeStyle = COLORS.white;
+        for (const [index, point] of path.entries()) {
+          if (point.y > getGroundY() + 25) break;
+          const radius = Math.max(2, 5 - index * 0.22);
+          ctx.globalAlpha = Math.max(0.22, 0.9 - index * 0.045);
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        const finalPoint = path[Math.min(path.length - 1, 12)];
+        ctx.globalAlpha = 0.75;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(finalPoint.x, finalPoint.y, 10, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawParticles() {
+        for (const particle of game.particles) {
+          ctx.save();
+          ctx.globalAlpha = particle.life;
+          ctx.fillStyle = particle.color;
+          ctx.translate(particle.x, particle.y);
+          ctx.rotate(particle.life * 3);
+          if (particle.shape === 0) {
+            ctx.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size);
+          } else {
+            ctx.beginPath();
+            ctx.arc(0, 0, particle.size / 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+      }
+
+      function drawImpact() {
+        if (!["impact", "win"].includes(game.phase)) return;
+        const time = Math.min(game.impactTime, 1.1);
+        const radius = 28 + time * 90;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 0.72 - time * 0.5);
+        ctx.strokeStyle = COLORS.sun;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(game.impactPoint.x, game.impactPoint.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = Math.max(0, 0.42 - time * 0.3);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(game.impactPoint.x, game.impactPoint.y, radius + 17, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = COLORS.ink;
+        ctx.globalAlpha = Math.max(0, 0.92 - time * 0.4);
+        ctx.font = "900 18px Trebuchet MS, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(game.phase === "win" ? "CLEAR!" : "BONK!", game.impactPoint.x, game.impactPoint.y - radius - 10);
+        ctx.restore();
+      }
+
+      function draw() {
+        ctx.setTransform(world.dpr, 0, 0, world.dpr, 0, 0);
+        ctx.clearRect(0, 0, world.width, world.height);
+        drawSky();
+        drawLandscape();
+        drawFort();
+        drawTrajectory();
+        drawSlingshot();
+        drawBird();
+        drawParticles();
+        drawImpact();
+      }
+
+      function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        world.width = Math.max(320, rect.width || 900);
+        world.height = Math.max(300, rect.height || 500);
+        world.dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(world.width * world.dpr);
+        canvas.height = Math.floor(world.height * world.dpr);
+        if (!game.bird || game.phase === "ready") {
+          game.targets = createTargets();
+          game.bird = createBird();
+        }
+        if (game.phase === "ready") game.impactPoint = { x: world.width * 0.62, y: world.height * 0.5 };
+        draw();
+      }
+
+      function frame() {
+        const now = Date.now();
+        const frameLength = Math.min(34, Math.max(1, now - lastFrame));
+        lastFrame = now;
+        updatePhysics(frameLength / 16.67);
+        draw();
+        window.requestAnimationFrame(frame);
+      }
+
+      startButton.addEventListener("click", startRound);
+      resetButton.addEventListener("click", () => {
+        resetRound();
+        showToast("Map reset. The goobers are pretending to be brave.");
+      });
+      launchAgainButton.addEventListener("click", () => {
+        if (game.phase === "impact" && game.shotsLeft > 0) {
+          game.bird = createBird();
+          game.impactTime = 0;
+          setPhase("playing");
+          showToast("Next scout loaded. Go lower or go louder.");
+        } else {
+          startRound();
+        }
+      });
+      soundButton.addEventListener("click", () => {
+        game.soundOn = !game.soundOn;
+        soundButton.textContent = game.soundOn ? "Sound on" : "Sound off";
+        soundButton.setAttribute("aria-pressed", String(game.soundOn));
+        showToast(game.soundOn ? "Tiny launch sounds armed." : "Sound tucked away.");
+      });
+      canvas.addEventListener("pointerdown", handlePointerDown);
+      canvas.addEventListener("pointermove", handlePointerMove);
+      canvas.addEventListener("pointerup", handlePointerUp);
+      canvas.addEventListener("pointercancel", handlePointerUp);
+      document.addEventListener("keydown", handleKeyDown);
+      window.addEventListener("resize", resizeCanvas);
+      window.addEventListener("orientationchange", resizeCanvas);
+
+      resizeCanvas();
+      resetRound();
+      window.requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>

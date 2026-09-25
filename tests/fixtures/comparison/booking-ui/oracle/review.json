@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "captureViewports": [{"width": 375, "height": 812}, {"width": 1280, "height": 800}],
+  "journey": [
+    "Open the page: no session is selected and confirmation cannot create a booking.",
+    "Choose Morning wheel: summary identifies 09:00 and the current selection is distinguishable.",
+    "Change to Afternoon wheel: summary identifies 14:00 with exactly one current selection.",
+    "Try Hand building using pointer and keyboard: the full session cannot become bookable.",
+    "Confirm Afternoon wheel: the page reports that exact session and time without navigation.",
+    "Repeat the journey using Tab, Enter or Space and verify visible focus at every actionable control."
+  ],
+  "correctness": "Fraction of journey assertions satisfied by actual interactions. Receipt names or HTML strings alone are insufficient.",
+  "briefFidelity": "Fraction of original prompt outcomes satisfied; preserve core experiential goals even if implementation artifacts label them optional.",
+  "usabilityRubric": {
+    "0": "Core booking journey cannot be completed.",
+    "1": "Journey requires guesswork or has significant input or phone-layout obstacles.",
+    "2": "Journey is usable with minor clarity or accessibility problems.",
+    "3": "Selection, feedback, unavailable state and confirmation are clear on both viewports.",
+    "4": "All level-3 conditions plus confident keyboard flow and considered state transitions."
+  },
+  "visualQualityRubric": {
+    "0": "Blank, broken, clipped, or materially unreadable page.",
+    "1": "Disorganized layout, weak hierarchy, or conspicuous spacing/type problems.",
+    "2": "Legible, coherent layout with limited refinement.",
+    "3": "Intentional studio identity, balanced hierarchy, consistent spacing and clear interactive states.",
+    "4": "All level-3 conditions with distinctive, carefully refined composition across both viewports."
+  },
+  "reviewProtocol": "Present final captures and the original prompt with randomized candidate labels. Hide arm, process artifacts, runtime and cost from the reviewer. Record unresolved judgments instead of inventing scores."
+}

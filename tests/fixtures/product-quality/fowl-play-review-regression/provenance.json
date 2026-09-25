@@ -1,0 +1,11 @@
+{
+  "source": "Fowl Play evaluation run, 2026-09-12",
+  "files": {
+    "index.html": "7ac3b087d5891a4e120203d1f4ce43346f5da5da5ff6bb632d303b4f73978388",
+    "game.js": "778c4506fa52e5a4f48d8b9b323b8041406850786ee6e53c4d7fa218045e9afe",
+    "game-core.js": "a8cf8e5470d85cdac0db2dff11d30716d16c2a22b48b0e96e36179affc610606",
+    "tests/game-core.test.mjs": "32217dddbaa232574e274ca05864463e33ee76db54e81373068a25f459eb1e47"
+  },
+  "packageJson": "Added only to preserve the original classic-script/CommonJS test environment",
+  "scope": "Product source and original tests only; no conversation, credentials, or VISP history copied"
+}

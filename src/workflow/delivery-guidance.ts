@@ -1,0 +1,3 @@
+/** Shared by the plan brief, drafting output, and opt-in research guidance. */
+export const SOURCE_DELIVERY_GUIDANCE =
+  "When delivery constraints matter, record source and delivery decisions separately: an HTML entry point may load modules; a self-contained artifact may be built from modular source. Use existing plan decisions for authored paths, output paths, and reproducible build/check commands when a build is needed. Honor an explicit one authored file/no build constraint; ask about ambiguity or policy conflicts before adding tooling. Neither delivery format nor test files establish implementation boundaries.";

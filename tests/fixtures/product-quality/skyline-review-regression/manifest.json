@@ -1,0 +1,14 @@
+{
+  "source": "luna_max_4 / Skyline // Last Light",
+  "recordedRunBuild": "150c7ad523df44fd",
+  "capturedAt": "2026-09-15",
+  "purpose": "Public regression, not held-out model evaluation. Preserve original game bytes. Demonstrates passing pure-logic tests with reset-during-flight and off-screen primary-activity defects.",
+  "sha256": {
+    "index.html": "9ed91856711d2e699c99222de9dcd6dc15af81c658b909e41efa3c067ccf6633",
+    "styles.css": "53fa9c4120e8847adc3d9682df47a562c68f4c3d6c8fe5e1d50ed344c3fdac52",
+    "src/main.mjs": "df0a867f887f739b591db023422922f89300757694615526d9d835949248d71a",
+    "src/game-logic.mjs": "61c47c26198ed48cca161e4408399b93a26e63905c70c31140b633f42e935268",
+    "tests/game-logic.test.mjs": "7d94b0124c6aa74a86b82e7117dd27e9b0080abe92e1b31f78691f56931ba9a2",
+    "package.json": "eac335446c45af4e8fc80d6874d03b91ea32798fcec1823114025161414debdd"
+  }
+}

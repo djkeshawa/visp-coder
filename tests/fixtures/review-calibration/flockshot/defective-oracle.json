@@ -1,0 +1,8 @@
+{
+  "variant": "defective",
+  "expectedDefects": [
+    "bands-follow-released-bird",
+    "beam-disconnected-from-supports"
+  ],
+  "evaluationScope": "These paired initial and pre-impact states only; the control does not establish complete gameplay correctness."
+}

@@ -1,0 +1,29 @@
+{
+  "kind": "traceability",
+  "createdAt": "2026-09-04T18:32:10.123Z",
+  "feature": "001-legacy-login-evidence",
+  "links": [
+    {
+      "requirement": "REQ001",
+      "tasks": [
+        "T001"
+      ]
+    }
+  ],
+  "qualityLinks": [
+    {
+      "requirement": "NFR001",
+      "tasks": [
+        "T001"
+      ]
+    }
+  ],
+  "scenarioLinks": [
+    {
+      "scenario": "SCN001",
+      "tasks": [
+        "T001"
+      ]
+    }
+  ]
+}

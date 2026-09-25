@@ -1,0 +1,64 @@
+{
+  "kind": "context",
+  "createdAt": "2026-09-04T18:32:10.574Z",
+  "feature": "001-legacy-login-evidence",
+  "task": "T001",
+  "goal": "Add the login handler",
+  "files": [
+    {
+      "path": "src/auth/login.js",
+      "reason": "expected-file",
+      "hash": "af9ab856867394d3cb2d5d6f7281db9a98e417319977bec1b5f16464f3212021",
+      "regions": [
+        {
+          "startLine": 1,
+          "endLine": 5
+        }
+      ],
+      "snippets": [],
+      "estimatedTokens": 40,
+      "truncated": false
+    },
+    {
+      "path": "tests/auth.test.mjs",
+      "reason": "expected-file",
+      "hash": "2fc6bb39362ba6f1bc2b6d6185ef9b18699a1227f1463f44bc3b188a452728ec",
+      "regions": [
+        {
+          "startLine": 1,
+          "endLine": 15
+        }
+      ],
+      "snippets": [],
+      "estimatedTokens": 41,
+      "truncated": false
+    }
+  ],
+  "omitted": [],
+  "entrypoints": [],
+  "unknowns": [],
+  "attemptFeedback": {
+    "source": "review",
+    "capturedAt": "2026-09-04T18:31:39.460Z",
+    "failingCommands": [],
+    "unresolvedFindings": [
+      {
+        "code": "criteria-unchecked",
+        "severity": "error",
+        "message": "2 of 2 acceptance criteria were not checked, so this review says nothing about them; 1 belong to must requirements: AC001 (`npm run test` could not run), AC002 (`npm run test` could not run)",
+        "recommendation": "Write the check as a command in backticks for visp to run it, or check it yourself and record how in the pull request"
+      },
+      {
+        "code": "criterion-command-overloaded",
+        "severity": "error",
+        "message": "One command is the only recorded proof for 2 criteria: AC001, AC002",
+        "recommendation": "Give the criteria narrower commands, or make `npm run test` emit VISP_ASSERT <criterion> passed|failed for every claim"
+      }
+    ],
+    "referencedFiles": []
+  },
+  "estimatedTokens": 395,
+  "tokenBudget": 12000,
+  "graphAvailable": false,
+  "graphDeferred": false
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "status",
+  "createdAt": "2026-09-04T18:23:13.212Z",
+  "activeFeature": "001-legacy-login-evidence",
+  "stage": "implement",
+  "lastCommand": "done --task T001",
+  "updatedAt": "2026-09-04T18:32:13.412Z"
+}

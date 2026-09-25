@@ -1,0 +1,52 @@
+{
+  "kind": "research",
+  "createdAt": "2026-09-04T18:23:39.981Z",
+  "feature": "001-legacy-login-evidence",
+  "mode": "enhancement",
+  "summary": "The existing auth module and test command define the implementation boundary.",
+  "questions": [
+    {
+      "id": "RQ001",
+      "focus": "repository",
+      "question": "Where does authentication behavior belong?",
+      "loadBearing": true,
+      "status": "answered",
+      "answer": "The existing src/auth module owns it."
+    }
+  ],
+  "findings": [
+    {
+      "id": "FND001",
+      "classification": "fact",
+      "statement": "Authentication behavior belongs under src/auth.",
+      "confidence": "high",
+      "question": "RQ001",
+      "loadBearing": true,
+      "challenge": {
+        "method": "repository-trace",
+        "outcome": "supported",
+        "detail": "The existing module and its test establish the ownership boundary.",
+        "falsifier": "A traced login caller outside src/auth would disprove this boundary."
+      },
+      "sources": [
+        {
+          "kind": "repository",
+          "reference": "src/auth/login.js",
+          "detail": "Existing authentication module"
+        }
+      ],
+      "implications": [
+        {
+          "kind": "architecture",
+          "statement": "Keep login under src/auth"
+        },
+        {
+          "kind": "test",
+          "statement": "Exercise login through the auth test"
+        }
+      ]
+    }
+  ],
+  "unknowns": [],
+  "draft": false
+}

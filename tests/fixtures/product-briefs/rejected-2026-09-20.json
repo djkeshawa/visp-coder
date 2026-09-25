@@ -1,0 +1,1509 @@
+{
+ "source": "MCP visp_brief submissions rejected in the 2026-09-20 value round (docs/experiments/visp-value-20260920-*.tgz)",
+ "cases": [
+  {
+   "run": "api-visp-native",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Required at brief.outcomes[0].kind",
+   "brief": {
+    "version": 2,
+    "feature": "001-build-a-small-local-inference",
+    "incomplete": false,
+    "originalRequest": "build a small inference API that accepts text and returns sentiment, with batch requests and useful error responses\n\nUse local deterministic inference; no network model or credentials required. Keep implementation choices your own and disclose the model's limitations. Work only in the current project directory. VISP is installed: follow project instructions and use available native VISP tools. The matching CLI is /tmp/visp-value-20260920/bin/visp-final; use that exact executable if a capability requires CLI. No custom/personal skills. Do not inspect other projects, candidates or evaluation files. No dependency downloads. Build a usable local API and exercise real HTTP behavior. Retain README run instructions and tests. You have up to 10 minutes; do not delegate. Parent will review frozen output separately and return feedback; do not obtain another external review or claim one occurred. Current-context review is allowed with honest provenance. If sandbox blocks a necessary local server/test, request that specific command's escalation instead of repeatedly retrying or claiming it passed. Report actual verification and limitations.",
+    "goal": "Build a small local inference API that accepts text and returns deterministic sentiment, supports batch requests, provides useful error responses, retains README run instructions and tests, and requires no network model or credentials.",
+    "outcomes": [
+     {
+      "id": "single-text",
+      "description": "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels."
+     },
+     {
+      "id": "batch-text",
+      "description": "A local HTTP client can POST JSON {\"texts\":[...]} to /v1/sentiment/batch and receive 200 JSON with one result per input in order, including mixed sentiment results."
+     },
+     {
+      "id": "useful-errors",
+      "description": "Malformed JSON, missing or invalid fields, unsupported media types, unknown routes, and unsupported methods receive JSON errors with appropriate HTTP status codes and stable machine-readable error codes."
+     },
+     {
+      "id": "local-deterministic",
+      "description": "The implementation runs using only the standard library, requires no credentials or downloaded model, and repeats the same input with the same output."
+     },
+     {
+      "id": "docs-tests",
+      "description": "README documents startup, curl examples for single and batch requests, error behavior, and deterministic lexicon limitations; automated tests cover inference and HTTP behavior."
+     }
+    ],
+    "examples": [
+     {
+      "id": "positive-single",
+      "given": "The API is running locally",
+      "when": "POST /v1/sentiment with JSON {\"text\":\"I love this excellent result\"}",
+      "then": "HTTP 200 JSON reports sentiment positive, a positive score, and matched positive terms."
+     },
+     {
+      "id": "mixed-batch",
+      "given": "The API is running locally",
+      "when": "POST /v1/sentiment/batch with JSON {\"texts\":[\"great work\",\"terrible failure\",\"just a note\"]}",
+      "then": "HTTP 200 JSON returns three results in input order with positive, negative, and neutral labels."
+     },
+     {
+      "id": "invalid-single",
+      "given": "The API is running locally",
+      "when": "POST /v1/sentiment with JSON {\"text\":\"\"}",
+      "then": "HTTP 422 JSON reports code invalid_text and explains that text must be non-empty."
+     },
+     {
+      "id": "invalid-batch",
+      "given": "The API is running locally",
+      "when": "POST /v1/sentiment/batch with JSON {\"texts\":[\"ok\",\"\"]}",
+      "then": "HTTP 422 JSON identifies the invalid item and does not return a partial success."
+     }
+    ],
+    "decisions": [
+     {
+      "id": "runtime",
+      "decision": "Use Python standard-library http.server with a small request handler and ThreadingHTTPServer so the service is runnable without dependency installation."
+     },
+     {
+      "id": "model",
+      "decision": "Use a transparent case-insensitive word lexicon with positive and negative counts, normalized score in [-1,1], and neutral for no matched terms; disclose that it does not understand context, negation, sarcasm, or domain-specific language."
+     },
+     {
+      "id": "contract",
+      "decision": "Use /healthz for liveness, /v1/sentiment for one text, /v1/sentiment/batch for ordered lists, and consistent JSON error envelopes."
+     }
+    ],
+    "uncertainties": [
+     "The empty repository has no existing runtime or test conventions, so the standard-library Python layout is the smallest portable choice."
+    ],
+    "checks": [
+     {
+      "id": "unit-inference",
+      "kind": "command",
+      "command": [
+       "python3",
+       "-m",
+       "unittest",
+       "-v",
+       "test_api.py"
+      ],
+      "outcomes": [
+       "single-text",
+       "batch-text",
+       "local-deterministic",
+       "docs-tests"
+      ]
+     },
+     {
+      "id": "http-smoke",
+      "kind": "command",
+      "command": [
+       "python3",
+       "test_api.py"
+      ],
+      "outcomes": [
+       "single-text",
+       "batch-text",
+       "useful-errors"
+      ]
+     },
+     {
+      "id": "real-http",
+      "kind": "manual",
+      "description": "Start the server and use curl against health, single, batch, malformed JSON, and invalid field requests; verify status, content type, and JSON bodies.",
+      "outcomes": [
+       "single-text",
+       "batch-text",
+       "useful-errors"
+      ]
+     },
+     {
+      "id": "no-dependencies",
+      "kind": "command",
+      "command": [
+       "python3",
+       "-m",
+       "py_compile",
+       "sentiment_api.py",
+       "test_api.py"
+      ],
+      "outcomes": [
+       "local-deterministic"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "runnable-api",
+      "name": "Runnable local API",
+      "scope": {
+       "allowed": [
+        "sentiment_api.py",
+        "test_api.py",
+        "README.md"
+       ]
+      },
+      "checks": [
+       "unit-inference",
+       "http-smoke",
+       "real-http",
+       "no-dependencies"
+      ],
+      "outcomes": [
+       "single-text",
+       "batch-text",
+       "useful-errors",
+       "local-deterministic",
+       "docs-tests"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     "A fresh checkout can start the API with one Python command and exercise documented curl examples without installing packages."
+    ]
+   }
+  },
+  {
+   "run": "api-visp-native",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Invalid enum value. Expected 'functional' | 'quality' | 'experience', received 'non-functional' at brief.outcomes[3].ki",
+   "brief": {
+    "version": 2,
+    "feature": "001-build-a-small-local-inference",
+    "incomplete": false,
+    "originalRequest": "build a small inference API that accepts text and returns sentiment, with batch requests and useful error responses\n\nUse local deterministic inference; no network model or credentials required. Keep implementation choices your own and disclose the model's limitations. Work only in the current project directory. VISP is installed: follow project instructions and use available native VISP tools. The matching CLI is /tmp/visp-value-20260920/bin/visp-final; use that exact executable if a capability requires CLI. No custom/personal skills. Do not inspect other projects, candidates or evaluation files. No dependency downloads. Build a usable local API and exercise real HTTP behavior. Retain README run instructions and tests. You have up to 10 minutes; do not delegate. Parent will review frozen output separately and return feedback; do not obtain another external review or claim one occurred. Current-context review is allowed with honest provenance. If sandbox blocks a necessary local server/test, request that specific command's escalation instead of repeatedly retrying or claiming it passed. Report actual verification and limitations.",
+    "goal": "Build a small local inference API that accepts text and returns deterministic sentiment, supports batch requests, provides useful error responses, retains README run instructions and tests, and requires no network model or credentials.",
+    "outcomes": [
+     {
+      "id": "O001",
+      "kind": "functional",
+      "statement": "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels.",
+      "priority": "must"
+     },
+     {
+      "id": "O002",
+      "kind": "functional",
+      "statement": "A local HTTP client can POST JSON {\"texts\":[...]} to /v1/sentiment/batch and receive 200 JSON with one result per input in order, including mixed sentiment results.",
+      "priority": "must"
+     },
+     {
+      "id": "O003",
+      "kind": "functional",
+      "statement": "Malformed JSON, missing or invalid fields, unsupported media types, unknown routes, and unsupported methods receive JSON errors with appropriate HTTP status codes and stable machine-readable error codes.",
+      "priority": "must"
+     },
+     {
+      "id": "O004",
+      "kind": "non-functional",
+      "statement": "The implementation runs using only the standard library, requires no credentials or downloaded model, and repeats the same input with the same output.",
+      "priority": "must"
+     },
+     {
+      "id": "O005",
+      "kind": "documentation",
+      "statement": "README documents startup, curl examples for single and batch requests, error behavior, and deterministic lexicon limitations; automated tests cover inference and HTTP behavior.",
+      "priority": "must"
+     }
+    ],
+    "examples": [
+     {
+      "id": "E001",
+      "title": "positive single text",
+      "given": [
+       "The API is running locally"
+      ],
+      "when": [
+       "POST /v1/sentiment with JSON {\"text\":\"I love this excellent result\"}"
+      ],
+      "then": [
+       "HTTP 200 JSON reports sentiment positive, a positive score, and matched positive terms."
+      ]
+     },
+     {
+      "id": "E002",
+      "title": "mixed batch",
+      "given": [
+       "The API is running locally"
+      ],
+      "when": [
+       "POST /v1/sentiment/batch with JSON {\"texts\":[\"great work\",\"terrible failure\",\"just a note\"]}"
+      ],
+      "then": [
+       "HTTP 200 JSON returns three results in input order with positive, negative, and neutral labels."
+      ]
+     },
+     {
+      "id": "E003",
+      "title": "invalid single text",
+      "given": [
+       "The API is running locally"
+      ],
+      "when": [
+       "POST /v1/sentiment with JSON {\"text\":\"\"}"
+      ],
+      "then": [
+       "HTTP 422 JSON reports code invalid_text and explains that text must be non-empty."
+      ]
+     },
+     {
+      "id": "E004",
+      "title": "invalid batch item",
+      "given": [
+       "The API is running locally"
+      ],
+      "when": [
+       "POST /v1/sentiment/batch with JSON {\"texts\":[\"ok\",\"\"]}"
+      ],
+      "then": [
+       "HTTP 422 JSON identifies the invalid item and does not return a partial success."
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "D001",
+      "statement": "Use Python standard-library http.server with a small request handler and ThreadingHTTPServer so the service is runnable without dependency installation."
+     },
+     {
+      "id": "D002",
+      "statement": "Use a transparent case-insensitive word lexicon with positive and negative counts, normalized score in [-1,1], and neutral for no matched terms; disclose that it does not understand context, negation, sarcasm, or domain-specific language."
+     },
+     {
+      "id": "D003",
+      "statement": "Use /healthz for liveness, /v1/sentiment for one text, /v1/sentiment/batch for ordered lists, and consistent JSON error envelopes."
+     }
+    ],
+    "uncertainties": [
+     "The empty repository has no existing runtime or test conventions, so the standard-library Python layout is the smallest portable choice."
+    ],
+    "checks": [
+     {
+      "id": "C001",
+      "command": [
+       "python3",
+       "-m",
+       "unittest",
+       "-v",
+       "test_api.py"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003",
+       "O004",
+       "O005"
+      ],
+      "files": [
+       "sentiment_api.py",
+       "test_api.py",
+       "README.md"
+      ]
+     },
+     {
+      "id": "C002",
+      "command": [
+       "python3",
+       "-m",
+       "py_compile",
+       "sentiment_api.py",
+       "test_api.py"
+      ],
+      "outcomes": [
+       "O004"
+      ],
+      "files": [
+       "sentiment_api.py",
+       "test_api.py"
+      ]
+     },
+     {
+      "id": "C003",
+      "command": [
+       "python3",
+       "test_api.py"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ],
+      "files": [
+       "sentiment_api.py",
+       "test_api.py"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "T001",
+      "goal": "Implement and exercise the first complete local HTTP request flow, including success, batch, validation errors, documentation, and tests.",
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003",
+       "O004",
+       "O005"
+      ],
+      "scope": {
+       "allowed": [
+        "sentiment_api.py",
+        "test_api.py",
+        "README.md"
+       ]
+      },
+      "checks": [
+       "C001",
+       "C002",
+       "C003"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     {
+      "id": "A001",
+      "statement": "A fresh checkout can start the API with one Python command and exercise documented curl examples without installing packages."
+     }
+    ]
+   }
+  },
+  {
+   "run": "missile-visp-native",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Required at brief.outcomes[0].kind",
+   "brief": {
+    "version": 2,
+    "feature": "001-build-a-usable-local-browser",
+    "originalRequest": "build small browser game where you launch different missiles to destroy moving enemy planes\n\nWork only in the current project directory. Keep implementation choices your own. VISP is installed: follow the project instructions and use the available native VISP tools. The matching CLI is /tmp/visp-value-20260920/bin/visp-final; use that exact executable if a capability requires CLI. No custom/personal skills. Do not inspect other projects, candidates or evaluation files. No dependency downloads or external APIs are needed. Installed Chrome is /usr/bin/google-chrome. Build a usable local browser game, inspect the rendered result and exercise its behavior. Retain README run instructions and any tests you create. You have up to 10 minutes; do not delegate. Parent will independently review frozen output and return feedback after construction; don't obtain another external review or claim one happened. Current-context review is allowed, but report its provenance honestly. If sandbox blocks a necessary local test, request that specific command's escalation instead of repeatedly retrying or claiming it passed. Report actual verification and limitations.",
+    "goal": "Build a usable local browser game where the player launches different missiles to destroy moving enemy planes. Include a polished responsive interface, selectable missile types with distinct behavior, aiming and launch controls, visible score/lives/game state, restart behavior, and README run instructions. Inspect the rendered result and exercise success, failure, and restart behavior in a real browser.",
+    "incomplete": false,
+    "outcomes": [
+     {
+      "id": "O1",
+      "statement": "A player can load the local game, aim at moving enemy planes, launch missiles, and see visible hit/explosion feedback with score changes.",
+      "priority": "must"
+     },
+     {
+      "id": "O2",
+      "statement": "At least three selectable missile types have visibly distinct behavior and clear ammo/status presentation.",
+      "priority": "must"
+     },
+     {
+      "id": "O3",
+      "statement": "The game visibly communicates score, wave, lives, and game-over/restart state; restart creates a fresh playable run.",
+      "priority": "must"
+     },
+     {
+      "id": "O4",
+      "statement": "The game is usable at desktop and narrow browser sizes, with readable controls and no external network dependency.",
+      "priority": "must"
+     },
+     {
+      "id": "O5",
+      "statement": "README documents how to run the local game and the available controls.",
+      "priority": "must"
+     }
+    ],
+    "examples": [
+     {
+      "id": "E1",
+      "outcome": "O1",
+      "given": "The game is loaded and a plane is moving across the sky.",
+      "when": "The player clicks or taps a point ahead of the plane and launches a missile.",
+      "then": "The missile travels toward the aim point, resolves visually, and a hit increases score when the plane is inside the blast."
+     },
+     {
+      "id": "E2",
+      "outcome": "O2",
+      "given": "The player has not exhausted ammunition.",
+      "when": "The player selects different missile cards and launches each one.",
+      "then": "The selected card changes and the projectiles show distinct speed, radius, or trail behavior."
+     },
+     {
+      "id": "E3",
+      "outcome": "O3",
+      "given": "Planes reach the defended ground enough times to end the run.",
+      "when": "The player presses Restart.",
+      "then": "Score, lives, wave, ammo, planes, and missiles reset to a fresh playable state."
+     },
+     {
+      "id": "E4",
+      "outcome": "O4",
+      "given": "The game is viewed in a narrow viewport.",
+      "when": "The player inspects and uses the controls.",
+      "then": "The HUD and missile controls remain visible and usable without horizontal overflow."
+     },
+     {
+      "id": "E5",
+      "outcome": "O5",
+      "given": "A developer has only the repository.",
+      "when": "They read README.md.",
+      "then": "They find a command-free or single-command local run instruction and keyboard/mouse/touch controls."
+     }
+    ],
+    "decisions": [
+     {
+      "id": "D1",
+      "decision": "Use a dependency-free HTML/CSS/JavaScript canvas game served by a tiny local static server.",
+      "reason": "Keeps the game runnable offline with no package installation and fits the empty repository."
+     },
+     {
+      "id": "D2",
+      "decision": "Use deterministic seeded enemy placement and a debug-friendly pacing toggle through normal play controls.",
+      "reason": "Makes browser verification repeatable while preserving an arcade feel."
+     },
+     {
+      "id": "D3",
+      "decision": "Use canvas for the playfield and DOM controls for HUD/cards.",
+      "reason": "Allows responsive visuals while keeping text and controls accessible and easy to exercise."
+     }
+    ],
+    "uncertainties": [
+     "Browser capture may require starting a local static server in the project directory."
+    ],
+    "checks": [
+     {
+      "id": "C1",
+      "outcome": "O1",
+      "kind": "browser-journey",
+      "journey": {
+       "url": "http://127.0.0.1:4173/",
+       "viewport": {
+        "width": 1280,
+        "height": 820
+       },
+       "actions": []
+      }
+     },
+     {
+      "id": "C2",
+      "outcome": "O2",
+      "kind": "browser-journey",
+      "journey": {
+       "url": "http://127.0.0.1:4173/",
+       "viewport": {
+        "width": 1280,
+        "height": 820
+       },
+       "actions": []
+      }
+     },
+     {
+      "id": "C3",
+      "outcome": "O3",
+      "kind": "browser-journey",
+      "journey": {
+       "url": "http://127.0.0.1:4173/",
+       "viewport": {
+        "width": 1280,
+        "height": 820
+       },
+       "actions": []
+      }
+     },
+     {
+      "id": "C4",
+      "outcome": "O4",
+      "kind": "browser-journey",
+      "journey": {
+       "url": "http://127.0.0.1:4173/",
+       "viewport": {
+        "width": 420,
+        "height": 820
+       },
+       "actions": []
+      }
+     },
+     {
+      "id": "C5",
+      "outcome": "O5",
+      "kind": "command",
+      "command": [
+       "sed",
+       "-n",
+       "1,220p",
+       "README.md"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "S1",
+      "name": "Playable core",
+      "goal": "A complete local canvas game loop with aim, launch, plane movement, collisions, score, lives, and restart.",
+      "outcomes": [
+       "O1",
+       "O3"
+      ],
+      "scope": {
+       "allowed": [
+        "index.html",
+        "styles.css",
+        "game.js",
+        "README.md",
+        "tests"
+       ]
+      },
+      "checks": [
+       "C1",
+       "C3",
+       "C5"
+      ]
+     },
+     {
+      "id": "S2",
+      "name": "Missile arsenal and responsive polish",
+      "goal": "Three missile choices with distinct behavior plus responsive HUD and control layout.",
+      "outcomes": [
+       "O2",
+       "O4"
+      ],
+      "scope": {
+       "allowed": [
+        "index.html",
+        "styles.css",
+        "game.js",
+        "README.md",
+        "tests"
+       ]
+      },
+      "checks": [
+       "C2",
+       "C4",
+       "C5"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     {
+      "outcome": "O1",
+      "expectation": "Real browser interaction visibly changes projectile, plane, and score state."
+     },
+     {
+      "outcome": "O2",
+      "expectation": "Three missile choices cause different projectile behavior in the running game."
+     },
+     {
+      "outcome": "O3",
+      "expectation": "Game-over and restart are observable in the running game."
+     },
+     {
+      "outcome": "O4",
+      "expectation": "Narrow viewport remains usable without horizontal overflow."
+     },
+     {
+      "outcome": "O5",
+      "expectation": "README contains accurate local run and control instructions."
+     }
+    ]
+   }
+  },
+  {
+   "run": "missile-visp-native",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Invalid enum value. Expected 'functional' | 'quality' | 'experience', received 'documentation' at brief.outcomes[4].kin",
+   "brief": {
+    "version": 2,
+    "feature": "001-build-a-usable-local-browser",
+    "originalRequest": "build small browser game where you launch different missiles to destroy moving enemy planes\n\nWork only in the current project directory. Keep implementation choices your own. VISP is installed: follow the project instructions and use the available native VISP tools. The matching CLI is /tmp/visp-value-20260920/bin/visp-final; use that exact executable if a capability requires CLI. No custom/personal skills. Do not inspect other projects, candidates or evaluation files. No dependency downloads or external APIs are needed. Installed Chrome is /usr/bin/google-chrome. Build a usable local browser game, inspect the rendered result and exercise its behavior. Retain README run instructions and any tests you create. You have up to 10 minutes; do not delegate. Parent will independently review frozen output and return feedback after construction; don't obtain another external review or claim one happened. Current-context review is allowed, but report its provenance honestly. If sandbox blocks a necessary local test, request that specific command's escalation instead of repeatedly retrying or claiming it passed. Report actual verification and limitations.",
+    "goal": "Build a usable local browser game where the player launches different missiles to destroy moving enemy planes. Include a polished responsive interface, selectable missile types with distinct behavior, aiming and launch controls, visible score/lives/game state, restart behavior, and README run instructions. Inspect the rendered result and exercise success, failure, and restart behavior in a real browser.",
+    "incomplete": false,
+    "outcomes": [
+     {
+      "id": "O001",
+      "kind": "functional",
+      "statement": "A player can load the local game, aim at moving enemy planes, launch missiles, and see visible hit or explosion feedback with score changes.",
+      "priority": "must"
+     },
+     {
+      "id": "O002",
+      "kind": "functional",
+      "statement": "At least three selectable missile types have visibly distinct behavior and clear ammo or status presentation.",
+      "priority": "must"
+     },
+     {
+      "id": "O003",
+      "kind": "functional",
+      "statement": "The game visibly communicates score, wave, lives, and game-over or restart state; restart creates a fresh playable run.",
+      "priority": "must"
+     },
+     {
+      "id": "O004",
+      "kind": "experience",
+      "statement": "The game is usable at desktop and narrow browser sizes, with readable controls and no external network dependency.",
+      "priority": "must"
+     },
+     {
+      "id": "O005",
+      "kind": "documentation",
+      "statement": "README documents how to run the local game and the available controls.",
+      "priority": "must"
+     }
+    ],
+    "examples": [
+     {
+      "id": "E001",
+      "title": "Launch resolves against a moving plane",
+      "given": [
+       "The game is loaded and a plane is moving across the sky."
+      ],
+      "when": [
+       "The player aims at the plane and launches a missile."
+      ],
+      "expected": [
+       "The missile travels toward the aim point, resolves visibly, and a hit increases score when the plane is inside the blast."
+      ]
+     },
+     {
+      "id": "E002",
+      "title": "Missile cards change projectile behavior",
+      "given": [
+       "The player has ammunition available."
+      ],
+      "when": [
+       "The player selects different missile cards and launches each one."
+      ],
+      "expected": [
+       "The selected card changes and projectiles show distinct speed, radius, or trail behavior."
+      ]
+     },
+     {
+      "id": "E003",
+      "title": "Restart resets the run",
+      "given": [
+       "Planes have ended the run or the player chooses to restart."
+      ],
+      "when": [
+       "The player presses Restart."
+      ],
+      "expected": [
+       "Score, lives, wave, ammo, planes, and missiles reset to a fresh playable state."
+      ]
+     },
+     {
+      "id": "E004",
+      "title": "Narrow layout remains usable",
+      "given": [
+       "The game is viewed in a narrow viewport."
+      ],
+      "when": [
+       "The player inspects and uses the controls."
+      ],
+      "expected": [
+       "The HUD and missile controls remain readable and usable without horizontal overflow."
+      ]
+     },
+     {
+      "id": "E005",
+      "title": "README enables local launch",
+      "given": [
+       "A developer has only the repository."
+      ],
+      "when": [
+       "They read README.md."
+      ],
+      "expected": [
+       "They find a local run instruction and keyboard, mouse, and touch controls."
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "D001",
+      "statement": "Use a dependency-free HTML/CSS/JavaScript canvas game served by a tiny local static server because the repository is empty and the request forbids dependency downloads."
+     },
+     {
+      "id": "D002",
+      "statement": "Use a canvas playfield with DOM HUD and missile cards so visuals can be responsive while text and controls remain accessible."
+     }
+    ],
+    "uncertainties": [
+     "Browser capture may require starting a local static server in the project directory."
+    ],
+    "checks": [
+     {
+      "id": "C001",
+      "command": [
+       "node",
+       "--check",
+       "game.js"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ],
+      "files": [
+       "game.js"
+      ]
+     },
+     {
+      "id": "C002",
+      "command": [
+       "node",
+       "--check",
+       "tests/game.test.js"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ],
+      "files": [
+       "tests/game.test.js",
+       "game.js"
+      ]
+     },
+     {
+      "id": "C003",
+      "command": [
+       "sed",
+       "-n",
+       "1,220p",
+       "README.md"
+      ],
+      "outcomes": [
+       "O005"
+      ],
+      "files": [
+       "README.md"
+      ]
+     },
+     {
+      "id": "C004",
+      "command": [
+       "/tmp/visp-value-20260920/bin/visp-final",
+       "capture"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003",
+       "O004"
+      ],
+      "files": [
+       "index.html",
+       "styles.css",
+       "game.js"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "T001",
+      "goal": "Implement and exercise the first complete local playable game loop with aiming, launch, plane movement, collisions, score, lives, and restart.",
+      "outcomes": [
+       "O001",
+       "O003"
+      ],
+      "scope": {
+       "allowed": [
+        "index.html",
+        "styles.css",
+        "game.js",
+        "README.md",
+        "tests/game.test.js"
+       ]
+      },
+      "checks": [
+       "C001",
+       "C002",
+       "C003",
+       "C004"
+      ]
+     },
+     {
+      "id": "T002",
+      "goal": "Add the missile arsenal and responsive presentation, then exercise three missile choices and a narrow viewport.",
+      "outcomes": [
+       "O002",
+       "O004"
+      ],
+      "scope": {
+       "allowed": [
+        "index.html",
+        "styles.css",
+        "game.js",
+        "README.md",
+        "tests/game.test.js"
+       ]
+      },
+      "checks": [
+       "C001",
+       "C002",
+       "C003",
+       "C004"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     {
+      "id": "A001",
+      "statement": "The core launch-and-destroy loop is observable in the running browser.",
+      "files": [
+       "index.html",
+       "styles.css",
+       "game.js"
+      ],
+      "command": [
+       "node",
+       "--check",
+       "game.js"
+      ]
+     },
+     {
+      "id": "A002",
+      "statement": "Three missile choices and responsive controls are implemented.",
+      "files": [
+       "index.html",
+       "styles.css",
+       "game.js"
+      ],
+      "command": [
+       "node",
+       "--check",
+       "game.js"
+      ]
+     },
+     {
+      "id": "A003",
+      "statement": "README contains local run and controls instructions.",
+      "files": [
+       "README.md"
+      ],
+      "command": [
+       "sed",
+       "-n",
+       "1,220p",
+       "README.md"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "run": "angry-guide-current",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Expected string, received array at brief.examples[0].when",
+   "brief": {
+    "version": 2,
+    "feature": "001-build-a-small-angry-bird",
+    "originalRequest": "build a small angry bird game run in browser",
+    "goal": "Build a small angry bird game that runs in a browser.",
+    "outcomes": [
+     {
+      "id": "O001",
+      "kind": "functional",
+      "statement": "The browser page presents a playable Angry Birds-style round with a sling, draggable bird, target structures, pigs, score, shots, and clear launch/reset controls.",
+      "priority": "must"
+     },
+     {
+      "id": "O002",
+      "kind": "functional",
+      "statement": "Dragging the bird and releasing it launches a physics-driven projectile; hitting a pig or structure changes the visible score or game state.",
+      "priority": "must"
+     },
+     {
+      "id": "O003",
+      "kind": "functional",
+      "statement": "The game communicates win, loss, or ready state and reset starts a fresh round with the initial score and shot count.",
+      "priority": "must"
+     },
+     {
+      "id": "O004",
+      "kind": "experience",
+      "statement": "The layout remains usable at desktop and narrow browser widths with readable instructions and pointer-friendly controls.",
+      "priority": "must"
+     }
+    ],
+    "examples": [
+     {
+      "id": "E001",
+      "title": "Launch and score",
+      "given": [
+       "The game is ready with the bird on the sling"
+      ],
+      "when": [
+       "The player drags the bird back and releases it toward the target"
+      ],
+      "expected": [
+       "The bird visibly travels through the playfield",
+       "A collision can award points and update the score"
+      ],
+      "outcomes": [
+       "O001",
+       "O002"
+      ]
+     },
+     {
+      "id": "E002",
+      "title": "Reset after a round",
+      "given": [
+       "A round has been played or ended"
+      ],
+      "when": [
+       "The player activates Play again or Reset"
+      ],
+      "expected": [
+       "The bird returns to the sling",
+       "Score and shots return to their starting values",
+       "The ready message is visible"
+      ],
+      "outcomes": [
+       "O003"
+      ]
+     },
+     {
+      "id": "E003",
+      "title": "Narrow viewport",
+      "given": [
+       "The game is opened in a narrow browser viewport"
+      ],
+      "when": [
+       "The player views the game and controls"
+      ],
+      "expected": [
+       "The playfield and controls remain visible without requiring horizontal scrolling"
+      ],
+      "outcomes": [
+       "O004"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "D001",
+      "statement": "Use a single static HTML page with CSS and a canvas-based JavaScript game loop; avoid external assets and dependencies.",
+      "rationale": "Keeps the game locally runnable with the browser and a simple static server."
+     },
+     {
+      "id": "D002",
+      "statement": "Use deterministic target placement and a small physics model with pointer drag input.",
+      "rationale": "Makes the round predictable and easy to exercise while preserving the core slingshot interaction."
+     }
+    ],
+    "checks": [
+     {
+      "id": "C001",
+      "command": [
+       "node",
+       "--test",
+       "game.test.mjs"
+      ],
+      "outcomes": [
+       "O002",
+       "O003"
+      ],
+      "files": [
+       "game.js",
+       "game.test.mjs"
+      ]
+     },
+     {
+      "id": "C002",
+      "command": {
+       "kind": "browser-journey",
+       "journey": {
+        "url": "http://127.0.0.1:4187/",
+        "viewport": {
+         "width": 1280,
+         "height": 800
+        },
+        "actions": []
+       }
+      },
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ],
+      "files": [
+       "index.html",
+       "styles.css",
+       "game.js"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "T001",
+      "goal": "Implement and exercise the first complete playable browser round",
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003",
+       "O004"
+      ],
+      "scope": {
+       "allowed": [
+        "index.html",
+        "styles.css",
+        "game.js",
+        "game.test.mjs",
+        "README.md"
+       ]
+      },
+      "checks": [
+       "C001",
+       "C002"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     "A playable local browser game is available on port 4187 with no external dependencies."
+    ]
+   }
+  },
+  {
+   "run": "angry-guide-current",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Required at brief.acceptanceBaseline[0].files",
+   "brief": {
+    "version": 2,
+    "feature": "001-build-a-small-angry-bird",
+    "originalRequest": "build a small angry bird game run in browser",
+    "goal": "Build a small angry bird game that runs in a browser.",
+    "outcomes": [
+     {
+      "id": "O001",
+      "kind": "functional",
+      "statement": "The browser page presents a playable Angry Birds-style round with a sling, draggable bird, target structures, pigs, score, shots, and clear launch/reset controls.",
+      "priority": "must"
+     },
+     {
+      "id": "O002",
+      "kind": "functional",
+      "statement": "Dragging the bird and releasing it launches a physics-driven projectile; hitting a pig or structure changes the visible score or game state.",
+      "priority": "must"
+     },
+     {
+      "id": "O003",
+      "kind": "functional",
+      "statement": "The game communicates win, loss, or ready state and reset starts a fresh round with the initial score and shot count.",
+      "priority": "must"
+     },
+     {
+      "id": "O004",
+      "kind": "experience",
+      "statement": "The layout remains usable at desktop and narrow browser widths with readable instructions and pointer-friendly controls.",
+      "priority": "must"
+     }
+    ],
+    "examples": [
+     {
+      "id": "E001",
+      "title": "Launch and score",
+      "given": [
+       "The game is ready with the bird on the sling"
+      ],
+      "when": "The player drags the bird back and releases it toward the target",
+      "expected": [
+       "The bird visibly travels through the playfield",
+       "A collision can award points and update the score"
+      ],
+      "outcomes": [
+       "O001",
+       "O002"
+      ]
+     },
+     {
+      "id": "E002",
+      "title": "Reset after a round",
+      "given": [
+       "A round has been played or ended"
+      ],
+      "when": "The player activates Play again or Reset",
+      "expected": [
+       "The bird returns to the sling",
+       "Score and shots return to their starting values",
+       "The ready message is visible"
+      ],
+      "outcomes": [
+       "O003"
+      ]
+     },
+     {
+      "id": "E003",
+      "title": "Narrow viewport",
+      "given": [
+       "The game is opened in a narrow browser viewport"
+      ],
+      "when": "The player views the game and controls",
+      "expected": [
+       "The playfield and controls remain visible without requiring horizontal scrolling"
+      ],
+      "outcomes": [
+       "O004"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "D001",
+      "statement": "Use a single static HTML page with CSS and a canvas-based JavaScript game loop; avoid external assets and dependencies.",
+      "rationale": "Keeps the game locally runnable with the browser and a simple static server."
+     },
+     {
+      "id": "D002",
+      "statement": "Use deterministic target placement and a small physics model with pointer drag input.",
+      "rationale": "Makes the round predictable and easy to exercise while preserving the core slingshot interaction."
+     }
+    ],
+    "checks": [
+     {
+      "id": "C001",
+      "command": [
+       "node",
+       "--test",
+       "game.test.mjs"
+      ],
+      "outcomes": [
+       "O002",
+       "O003"
+      ],
+      "files": [
+       "game.js",
+       "game.test.mjs"
+      ]
+     },
+     {
+      "id": "C002",
+      "command": {
+       "kind": "browser-journey",
+       "journey": {
+        "url": "http://127.0.0.1:4187/",
+        "viewport": {
+         "width": 1280,
+         "height": 800
+        },
+        "actions": []
+       }
+      },
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ],
+      "files": [
+       "index.html",
+       "styles.css",
+       "game.js"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "T001",
+      "goal": "Implement and exercise the first complete playable browser round",
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003",
+       "O004"
+      ],
+      "scope": {
+       "allowed": [
+        "index.html",
+        "styles.css",
+        "game.js",
+        "game.test.mjs",
+        "README.md"
+       ]
+      },
+      "checks": [
+       "C001",
+       "C002"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     {
+      "id": "AB001",
+      "statement": "A playable local browser game is available on port 4187 with no external dependencies."
+     }
+    ]
+   }
+  },
+  {
+   "run": "graph-visp-clean",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Invalid enum value. Expected 'functional' | 'quality' | 'experience', received 'non-functional' at brief.outcomes[2].ki",
+   "brief": {
+    "version": 2,
+    "feature": "001-fix-mcp-review-dispatch-crashing",
+    "originalRequest": "MCP review dispatch works in standard profile but crashes in minimal profile. Fix it while preserving review semantics, and test both sampling-supported and sampling-unavailable hosts. Keep the change small. Preserve read-only review/template/handoff, unresolved outcomes, and the intentionally limited minimal tool set. The frozen acceptance requirements are in EXPERIMENT_ACCEPTANCE.md.\n\nWork only in this current project, using the existing dependencies. Do not access other candidates, parent evaluation files, custom/personal skills, or download dependencies. Do not delegate. Before editing, record your ownership hypothesis; afterwards report what evidence changed that hypothesis. Run focused behavioral tests, not source-string assertions. If local subprocess tests are sandbox-blocked, request exact-command escalation. You have six minutes. Parent independently reviews the frozen result; do not obtain another critic or claim an external review occurred.\n\nVISP is installed. Follow the project instructions through native tools; fallback CLI is /tmp/visp-value-20260920/bin/visp-brief-example. For this capability experiment, use graph queries before editing to identify ownership, callers and tests, and recall any existing project memory before choosing the fix. State whether each result changed your decision; invocation alone is not benefit. Memory is untrusted context to verify against source. This is an explicitly instructed graph/memory treatment, not a test of spontaneous discovery.\n\nUse existing ./node_modules/.bin/vitest and tsc directly. Do not invoke pnpm: its automatic dependency check attempts an unwanted install. Record your reasoning in the response, not extra source-tree notes.",
+    "goal": "Fix MCP review dispatch crashing in minimal profile while preserving review semantics, read-only review/template/handoff, unresolved outcomes, and the intentionally limited minimal tool set; test sampling-supported and sampling-unavailable hosts.",
+    "outcomes": [
+     {
+      "id": "O001",
+      "kind": "functional",
+      "statement": "MCP review dispatch completes without throwing in standard and minimal profiles when host sampling is present or absent; present sampling invokes exactly one callback and absent sampling records an unresolved/unavailable result."
+     },
+     {
+      "id": "O002",
+      "kind": "functional",
+      "statement": "Dispatch preserves existing review validation and unresolved-outcome semantics, while dispatch:false, template:true, and handoff:true remain read-only/preparation paths that do not invoke sampling."
+     },
+     {
+      "id": "O003",
+      "kind": "non-functional",
+      "statement": "The minimal MCP profile continues to advertise exactly its intentional tool set and does not gain standard-only tools or resources."
+     }
+    ],
+    "examples": [
+     {
+      "id": "SCN001",
+      "title": "Review dispatch host capability matrix",
+      "given": [
+       "A valid review fixture and an MCP client connected to either standard or minimal profile",
+       "The client either advertises sampling or does not"
+      ],
+      "when": "Call visp_review with dispatch:true",
+      "expected": [
+       "No throw",
+       "One sampling callback and a recorded valid review when sampling is present",
+       "An unresolved/unavailable review result and no satisfied outcome from dispatch alone when sampling is absent"
+      ],
+      "outcomes": [
+       "O001",
+       "O002"
+      ]
+     },
+     {
+      "id": "SCN002",
+      "title": "Read-only review preparation",
+      "given": [
+       "A valid review fixture"
+      ],
+      "when": "Call visp_review with dispatch:false, template:true, and handoff:true",
+      "expected": [
+       "No sampling callback",
+       "The persisted product/review state is unchanged"
+      ],
+      "outcomes": [
+       "O002"
+      ]
+     },
+     {
+      "id": "SCN003",
+      "title": "Minimal tool surface",
+      "given": [
+       "A minimal-profile MCP server"
+      ],
+      "when": "List tools and resources",
+      "expected": [
+       "Exactly MINIMAL_TOOLS are listed and resources are unavailable"
+      ],
+      "outcomes": [
+       "O003"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "statement": "Keep the fix at the minimal registration boundary so the original MCP server capability surface remains available to the dispatch adapter without changing the filtered tool registration."
+     },
+     {
+      "statement": "Use integration behavior through MCP client calls and persisted review state; do not rely on source-string assertions."
+     }
+    ],
+    "uncertainties": [],
+    "checks": [
+     {
+      "id": "C001",
+      "command": [
+       "./node_modules/.bin/vitest",
+       "run",
+       "tests/integration/mcp/server.test.ts",
+       "tests/unit/mcp/product-feedback-host.test.ts"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ]
+     },
+     {
+      "id": "C002",
+      "command": [
+       "./node_modules/.bin/tsc",
+       "--noEmit"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "T001",
+      "goal": "Minimal-profile review dispatch uses the real host sampling capability while retaining filtered registration and review semantics.",
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ],
+      "scope": {
+       "allowed": [
+        "src/mcp/tools/index.ts",
+        "tests/integration/mcp/server.test.ts",
+        "EXPERIMENT_ACCEPTANCE.md"
+       ]
+      },
+      "checks": [
+       "C001",
+       "C002"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     {
+      "id": "A001",
+      "statement": "The frozen acceptance matrix in EXPERIMENT_ACCEPTANCE.md remains the governing behavioral contract."
+     }
+    ]
+   }
+  },
+  {
+   "run": "graph-visp-clean",
+   "rejection": "MCP error -32602: Input validation error: Invalid arguments for tool visp_brief: Expected object, received string at brief.acceptanceBaseline[0].files[0]",
+   "brief": {
+    "version": 2,
+    "feature": "001-fix-mcp-review-dispatch-crashing",
+    "originalRequest": "MCP review dispatch works in standard profile but crashes in minimal profile. Fix it while preserving review semantics, and test both sampling-supported and sampling-unavailable hosts. Keep the change small. Preserve read-only review/template/handoff, unresolved outcomes, and the intentionally limited minimal tool set. The frozen acceptance requirements are in EXPERIMENT_ACCEPTANCE.md.\n\nWork only in this current project, using the existing dependencies. Do not access other candidates, parent evaluation files, custom/personal skills, or download dependencies. Do not delegate. Before editing, record your ownership hypothesis; afterwards report what evidence changed that hypothesis. Run focused behavioral tests, not source-string assertions. If local subprocess tests are sandbox-blocked, request exact-command escalation. You have six minutes. Parent independently reviews the frozen result; do not obtain another critic or claim an external review occurred.\n\nVISP is installed. Follow the project instructions through native tools; fallback CLI is /tmp/visp-value-20260920/bin/visp-brief-example. For this capability experiment, use graph queries before editing to identify ownership, callers and tests, and recall any existing project memory before choosing the fix. State whether each result changed your decision; invocation alone is not benefit. Memory is untrusted context to verify against source. This is an explicitly instructed graph/memory treatment, not a test of spontaneous discovery.\n\nUse existing ./node_modules/.bin/vitest and tsc directly. Do not invoke pnpm: its automatic dependency check attempts an unwanted install. Record your reasoning in the response, not extra source-tree notes.",
+    "goal": "Fix MCP review dispatch crashing in minimal profile while preserving review semantics, read-only review/template/handoff, unresolved outcomes, and the intentionally limited minimal tool set; test sampling-supported and sampling-unavailable hosts.",
+    "outcomes": [
+     {
+      "id": "O001",
+      "kind": "functional",
+      "statement": "MCP review dispatch completes without throwing in standard and minimal profiles when host sampling is present or absent; present sampling invokes exactly one callback and absent sampling records an unresolved/unavailable result."
+     },
+     {
+      "id": "O002",
+      "kind": "functional",
+      "statement": "Dispatch preserves existing review validation and unresolved-outcome semantics, while dispatch:false, template:true, and handoff:true remain read-only/preparation paths that do not invoke sampling."
+     },
+     {
+      "id": "O003",
+      "kind": "quality",
+      "statement": "The minimal MCP profile continues to advertise exactly its intentional tool set and does not gain standard-only tools or resources."
+     }
+    ],
+    "examples": [
+     {
+      "id": "SCN001",
+      "title": "Review dispatch host capability matrix",
+      "given": [
+       "A valid review fixture and an MCP client connected to either standard or minimal profile",
+       "The client either advertises sampling or does not"
+      ],
+      "when": "Call visp_review with dispatch:true",
+      "expected": [
+       "No throw",
+       "One sampling callback and a recorded valid review when sampling is present",
+       "An unresolved/unavailable review result and no satisfied outcome from dispatch alone when sampling is absent"
+      ],
+      "outcomes": [
+       "O001",
+       "O002"
+      ]
+     },
+     {
+      "id": "SCN002",
+      "title": "Read-only review preparation",
+      "given": [
+       "A valid review fixture"
+      ],
+      "when": "Call visp_review with dispatch:false, template:true, and handoff:true",
+      "expected": [
+       "No sampling callback",
+       "The persisted product/review state is unchanged"
+      ],
+      "outcomes": [
+       "O002"
+      ]
+     },
+     {
+      "id": "SCN003",
+      "title": "Minimal tool surface",
+      "given": [
+       "A minimal-profile MCP server"
+      ],
+      "when": "List tools and resources",
+      "expected": [
+       "Exactly MINIMAL_TOOLS are listed and resources are unavailable"
+      ],
+      "outcomes": [
+       "O003"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "statement": "Keep the fix at the minimal registration boundary so the original MCP server capability surface remains available to the dispatch adapter without changing the filtered tool registration."
+     },
+     {
+      "statement": "Use integration behavior through MCP client calls and persisted review state; do not rely on source-string assertions."
+     }
+    ],
+    "uncertainties": [],
+    "checks": [
+     {
+      "id": "C001",
+      "command": [
+       "./node_modules/.bin/vitest",
+       "run",
+       "tests/integration/mcp/server.test.ts",
+       "tests/unit/mcp/product-feedback-host.test.ts"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ]
+     },
+     {
+      "id": "C002",
+      "command": [
+       "./node_modules/.bin/tsc",
+       "--noEmit"
+      ],
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ]
+     }
+    ],
+    "slices": [
+     {
+      "id": "T001",
+      "goal": "Minimal-profile review dispatch uses the real host sampling capability while retaining filtered registration and review semantics.",
+      "outcomes": [
+       "O001",
+       "O002",
+       "O003"
+      ],
+      "scope": {
+       "allowed": [
+        "src/mcp/tools/index.ts",
+        "tests/integration/mcp/server.test.ts",
+        "EXPERIMENT_ACCEPTANCE.md"
+       ]
+      },
+      "checks": [
+       "C001",
+       "C002"
+      ]
+     }
+    ],
+    "acceptanceBaseline": [
+     {
+      "files": [
+       "EXPERIMENT_ACCEPTANCE.md"
+      ],
+      "command": [
+       "./node_modules/.bin/vitest",
+       "run",
+       "tests/integration/mcp/server.test.ts"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

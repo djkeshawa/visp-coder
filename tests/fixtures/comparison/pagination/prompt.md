@@ -1,0 +1,1 @@
+Fix pagination in the existing module. Each page should contain up to the requested number of entries, including the final entry. Page numbers start at 1. Return an empty list when the requested page is beyond the data. Reject page numbers and page sizes that are not positive integers. Preserve the original entries and their order. Keep the exported function name and arguments.

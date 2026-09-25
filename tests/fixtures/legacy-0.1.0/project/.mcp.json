@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "visp": {
+      "command": "visp",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    }
+  }
+}

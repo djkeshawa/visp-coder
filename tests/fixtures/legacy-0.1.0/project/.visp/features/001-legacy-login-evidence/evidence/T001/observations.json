@@ -1,0 +1,34 @@
+{
+  "kind": "observations",
+  "createdAt": "2026-09-04T18:28:34.806Z",
+  "feature": "001-legacy-login-evidence",
+  "task": "T001",
+  "observations": [
+    {
+      "kind": "observation",
+      "createdAt": "2026-09-04T18:28:34.806Z",
+      "id": "OBS-00f497e1869c",
+      "feature": "001-legacy-login-evidence",
+      "task": "T001",
+      "requirement": "REQ001",
+      "criterion": "AC001",
+      "criterionStatement": "The login test suite passes",
+      "source": "manual",
+      "result": "satisfied",
+      "note": "Login returned the expected session token.",
+      "route": "/login",
+      "steps": [
+        "Run the login test"
+      ],
+      "specHash": "5e5229b9b2cf36e2e3bca8cfe559a4d0955656ffafdba9c5a468f8564186c2c5",
+      "contextManifestHash": "e56c381206ba0a102752d930dcb77e324f4a7cc3086baf6124bbae7735126619",
+      "attachments": [
+        {
+          "sourcePath": "evidence/legacy-login-observation.txt",
+          "storedPath": ".visp/features/001-legacy-login-evidence/evidence/T001/observations/OBS-00f497e1869c/attachments/01-legacy-login-observation.txt",
+          "sha256": "7fe5331f3804ca375870a1f6f8e4b62c4804f55d87a938a22dd531fc5bbd4dc4"
+        }
+      ]
+    }
+  ]
+}

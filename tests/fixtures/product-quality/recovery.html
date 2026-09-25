@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Product recovery regression fixture</title>
+<style>
+  body { margin: 0; }
+  #playfield { position: relative; width: 100%; height: 600px; overflow: hidden; }
+  #outcome { position: absolute; top: 360px; padding: 20px; }
+  button { min-width: 100px; min-height: 44px; }
+  button:focus-visible { outline: 3px solid blue; outline-offset: 2px; }
+  @media (max-width: 500px) {
+    #playfield { height: 220px; }
+    body.repaired #outcome { top: 100px; }
+  }
+</style>
+<body>
+  <main id="playfield">
+    <button id="launch">Launch</button>
+    <section id="outcome" hidden>
+      <p>Shot failed</p><button id="retry">Retry</button>
+    </section>
+  </main>
+  <output id="phase">ready</output>
+  <script>
+    document.querySelector('#launch').addEventListener('click', () => {
+      document.querySelector('#phase').textContent = 'failed';
+      document.querySelector('#outcome').hidden = false;
+    });
+    document.querySelector('#retry').addEventListener('click', () => {
+      document.querySelector('#phase').textContent = 'ready';
+      document.querySelector('#outcome').hidden = true;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#060b16" />
+    <title>Skyline // Last Light</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="game-shell" id="game-shell">
+      <header class="masthead">
+        <div class="brand-lockup">
+          <div class="signal-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div>
+            <p class="eyebrow">Orbital response unit <span>//</span> city block 07</p>
+            <h1>Skyline <span>//</span> Last Light</h1>
+          </div>
+        </div>
+        <div class="mission-meta">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span>Live tactical feed</span>
+          <span class="meta-divider" aria-hidden="true"></span>
+          <span id="round-label">Round 01 / 01</span>
+        </div>
+      </header>
+
+      <section class="game-layout" aria-label="Skyline Last Light game">
+        <aside class="command-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Mission brief</p>
+              <h2>Bring the block<br /><em>back online.</em></h2>
+            </div>
+            <span class="panel-code">SL-07</span>
+          </div>
+
+          <p class="mission-copy">
+            Choose a warhead, then select a live window. Every launch is final, so read the
+            impact map before you fire.
+          </p>
+
+          <div class="progress-card">
+            <div class="progress-row">
+              <span>Targets remaining</span>
+              <strong id="targets-remaining">12 <small>/ 12</small></strong>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+              <span id="progress-fill"></span>
+            </div>
+            <div class="progress-footer">
+              <span id="turn-count">Turn 00</span>
+              <span id="ammo-count">7 warheads ready</span>
+            </div>
+          </div>
+
+          <div class="section-label">
+            <span>01</span>
+            <span>Arm a warhead</span>
+          </div>
+          <div class="missile-grid" role="group" aria-label="Missile selection">
+            <button class="missile-card is-selected" id="missile-precision" data-missile-id="precision" type="button">
+              <span class="missile-icon missile-icon--kinetic" aria-hidden="true"><i></i></span>
+              <span class="missile-card-copy">
+                <strong>Kinetic</strong>
+                <small>One room / direct hit</small>
+              </span>
+              <span class="ammo-pill" data-ammo-for="precision">03</span>
+            </button>
+            <button class="missile-card" id="missile-shockwave" data-missile-id="shockwave" type="button">
+              <span class="missile-icon missile-icon--shockwave" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="missile-card-copy">
+                <strong>Shockwave</strong>
+                <small>3 × 3 blast radius</small>
+              </span>
+              <span class="ammo-pill" data-ammo-for="shockwave">02</span>
+            </button>
+            <button class="missile-card" id="missile-cluster" data-missile-id="cluster" type="button">
+              <span class="missile-icon missile-icon--cluster" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="missile-card-copy">
+                <strong>Cluster</strong>
+                <small>Three linked strikes</small>
+              </span>
+              <span class="ammo-pill" data-ammo-for="cluster">02</span>
+            </button>
+          </div>
+
+          <div class="status-card" aria-live="polite">
+            <span class="status-orb" id="status-orb" aria-hidden="true"></span>
+            <div>
+              <span class="status-kicker">Launch status</span>
+              <p id="launch-status">Choose a warhead, then pick a live window.</p>
+            </div>
+          </div>
+
+          <div class="controls-note">
+            <span class="keycap">1</span><span class="keycap">2</span><span class="keycap">3</span>
+            <span>select warhead</span>
+            <span class="note-divider">·</span>
+            <span class="keycap">R</span><span>restart round</span>
+          </div>
+        </aside>
+
+        <section class="scene-panel" id="scene" aria-label="Building target grid">
+          <div class="scene-topline">
+            <div>
+              <span class="eyebrow">Sector 07 / West corridor</span>
+              <span class="scene-title">Unpowered tower · live heat signatures</span>
+            </div>
+            <span class="scan-label"><i></i> Scan locked</span>
+          </div>
+
+          <div class="skyline-art" aria-hidden="true">
+            <span class="skyline-cloud cloud-a"></span>
+            <span class="skyline-cloud cloud-b"></span>
+            <span class="skyline-crosshair crosshair-a"></span>
+            <span class="skyline-crosshair crosshair-b"></span>
+          </div>
+
+          <div class="building-wrap">
+            <div class="roof-cap" aria-hidden="true">
+              <span class="roof-light"></span>
+              <span class="roof-label">NO. 07</span>
+              <span class="roof-antenna"></span>
+            </div>
+            <div class="building-structure">
+              <div class="building-grid" id="building-grid" aria-label="Target windows"></div>
+              <div class="building-shadow" aria-hidden="true"></div>
+            </div>
+            <div class="building-foundation" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+
+          <div class="launcher-bay">
+            <div class="launcher" id="launcher" aria-hidden="true">
+              <span class="launcher-ring ring-one"></span>
+              <span class="launcher-ring ring-two"></span>
+              <span class="launcher-core"></span>
+              <span class="launcher-beam"></span>
+            </div>
+            <div class="bay-copy">
+              <span class="eyebrow">Launch bay A</span>
+              <strong>Awaiting target lock</strong>
+            </div>
+          </div>
+
+          <div class="flight-trail" id="flight-trail" aria-hidden="true">
+            <span></span>
+          </div>
+          <div class="impact-layer" id="impact-layer" aria-hidden="true"></div>
+
+          <div class="result-panel" id="game-result" hidden aria-live="assertive">
+            <span class="result-kicker" id="result-kicker">Mission report / 01</span>
+            <h2 id="result-title">Building <em>secured.</em></h2>
+            <p id="result-message">All heat signatures are down. Sector 07 is ready for recovery crews.</p>
+            <button class="restart-button" id="restart-button" type="button">
+              <span>Run the round again</span><span aria-hidden="true">↗</span>
+            </button>
+          </div>
+        </section>
+      </section>
+
+      <footer class="footer-bar">
+        <span><i class="footer-signal"></i> Targeting system nominal</span>
+        <span>Signal delay <strong>0.08s</strong></span>
+        <span>Mission clock <strong id="mission-clock">00:00</strong></span>
+      </footer>
+    </main>
+    <script type="module" src="./src/main.mjs"></script>
+  </body>
+</html>

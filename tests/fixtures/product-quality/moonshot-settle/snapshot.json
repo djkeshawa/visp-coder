@@ -1,0 +1,11 @@
+{
+  "source": "/absolute/project",
+  "purpose": "Public regression fixture, not held-out evaluation. Original bytes retained. Browser test repairs only a disposable copy.",
+  "sha256": {
+    "index.html": "8f6fc580a45d844241f8a0a2af904c11c9dd963f814846e323f89cac9d10b58f",
+    "styles.css": "877bae69ada1a09a265f30642a5a3e9c1caeeef3edd4b4a22f8cb441d11d6723",
+    "game.js": "327acabdd10b2de8e8ea52cd66500d4d01f3760de1289e3e16789238763ba280",
+    "game-core.js": "1c92a45e0e891f91ccacb10cd9c548adeee3bc2ccec2848340c46ad9cb0ec2d3",
+    "tests/game-core.test.mjs": "0f27282c44ed6e4f15d744bdc635fd5260e2436eae3b8e74d68356709b7b8cae"
+  }
+}

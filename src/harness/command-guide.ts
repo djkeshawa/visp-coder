@@ -1,0 +1,191 @@
+/** An illustrative fragment, never inserted into authored intent or saved automatically. */
+export const BRIEF_FIELDS_EXAMPLE = {
+  outcomes: [{ id: "O001", kind: "functional", statement: "The requested behavior is observable" }],
+  slices: [
+    {
+      id: "T001",
+      goal: "Deliver the usable behavior",
+      outcomes: ["O001"],
+      scope: { allowed: ["src/feature.js"] },
+      checks: [],
+    },
+  ],
+};
+
+export const BRIEF_INPUT_HELP = `Edit the existing brief returned by --template; preserve originalRequest, feature and acceptanceBaseline.
+Use these field shapes, replacing the illustrative result and file path:
+${JSON.stringify(BRIEF_FIELDS_EXAMPLE, null, 2)}
+Optional behavior examples use {title, given: [], when, expected: [], outcomes: []}.
+Executable checks use --check-template command or --check-template browser.
+Prefer --patch - --reason "<decision>" for changed fields (arrays merge by ID); use --from - --reason "<decision>" for a full replacement. Status and execution records are generated, not brief inputs.`;
+
+/** One discoverability catalogue for generated host instructions and their examples. */
+export const VISP_COMMANDS = [
+  {
+    command: "reproduce",
+    when: "A finding needs a later failing reproduction",
+    example:
+      'visp reproduce --finding <finding-id> --execution <execution-id> --reason "<relationship to report>"',
+    next: "Run a declared behavioral check first and attach its failed execution before editing. Repair, rerun the same check and an adjacent behavior, then obtain separate assessment. Attachment is not resolution.",
+  },
+  {
+    command: "next",
+    when: "Start or resume",
+    example: "visp next",
+    next: "Read-only routing: follow the returned action; unresolved is not complete.",
+  },
+  {
+    command: "feature",
+    when: "New request",
+    example: 'visp feature "<goal>" --source-brief "<original request>"',
+    next: "Read brief --template; preserve the request.",
+  },
+  {
+    command: "brief",
+    when: "Plan or revise a decision",
+    example: "visp brief --template",
+    next: "Prefer --patch - for changed fields; keep the first slice to one usable behavior.",
+  },
+  {
+    command: "work",
+    when: "Implement a slice",
+    example: "visp work --task <id>",
+    next: "Read relevant outcomes/code, then edit only the authorized scope. --inspect reads without authorizing.",
+  },
+  {
+    command: "query",
+    when: "An ownership/caller/test question",
+    example: 'visp query search "<symbol or behavior>"',
+    next: "Use callers, testsFor or impact with the returned entity; inspect source.",
+  },
+  {
+    command: "capture",
+    when: "Observe a browser interaction",
+    example: "visp capture --task <id> --from -",
+    next: "Use act, settle, act again in one journey; inspect images. After repair, --replay <run-id> repeats the original check.",
+  },
+  {
+    command: "critic",
+    when: "Independent product feedback",
+    example: "visp critic --preflight",
+    next: "Setup-needed means inspect capabilities; ready means prepare/delegate/submit, or dispatch through an attached adapter.",
+  },
+  {
+    command: "critic feedback",
+    when: "Manual feedback enabled; first usable slice or consequential design uncertainty",
+    example: 'visp critic feedback --ask "What should I improve in this version?"',
+    next: "Use the host user-question popup; submit the user's words. Defer without approval; continue unrelated work.",
+  },
+  {
+    command: "review",
+    when: "Host review requested by next or critic is off",
+    example: "visp review --task <id> --prepare",
+    next: "Pause actor edits while reviewing. Read packetPath and images; submit judgments with --session <id> --from -.",
+  },
+  {
+    command: "done",
+    when: "The slice is usable",
+    example: "visp done --task <id>",
+    next: "Follow its returned fix/critic/accept action; no duplicate worker approval.",
+  },
+  {
+    command: "accept",
+    when: "Next directs final acceptance",
+    example: "visp accept --feature <id>",
+    next: "Run the final product checks and report accepted status or remaining gaps.",
+  },
+] as const;
+
+export function commandMap(includeNext = true) {
+  return [
+    includeNext ? "| When | Command | Next |" : "| When | Command |",
+    includeNext ? "|---|---|---|" : "|---|---|",
+    ...VISP_COMMANDS.map((entry) =>
+      includeNext
+        ? `| ${entry.when} | \`${entry.example}\` | ${entry.next} |`
+        : `| ${entry.when} | \`${entry.example}\` |`,
+    ),
+  ].join("\n");
+}
+
+export function commandGuide() {
+  return `# VISP command guide
+
+The executable is \`visp\`; the package is \`visp-coder\`. Commands accept \`--help\`.
+
+\`visp next\` only reports the next action; it does not record final acceptance. Run \`visp accept\` when that action directs it.
+
+${commandMap()}
+
+## Understand, build, observe
+
+${BRIEF_INPUT_HELP}
+
+Use \`visp brief --check-template command\` or \`visp brief --check-template browser\` for editable check shapes (MCP: brief with checkTemplate). Replace the example executable or URL/selectors and link only outcomes actually exercised. Descriptive prose belongs in brief examples. Unlinked exploratory checks remain allowed; passing them does not declare coverage.
+
+Keep the template's \`acceptanceBaseline\` unchanged: VISP pins independently supplied acceptance checks there. Put implementation checks in \`checks\`; do not hash the source you intend to change into an acceptance expectation.
+Resolve research questions with the host's research tools or a bounded local experiment only when the answer can change implementation. Record the conclusion, evidence and consequence in the existing brief. The retired research/spec/plan/tasks commands are not another workflow. Graph queries answer concrete code questions; an empty graph does not delay a new slice.
+
+Start with one complete behavior through result and recovery. Challenge a slice that includes every level or screen before expanding content. Do not impose arbitrary file or layer counts. Assess functionality, non-functional needs, experience and code quality against the user's request.
+
+## Recovery and legacy features
+
+If \`work\` reports a browser startup or permission gap, recover the host and retry with
+\`visp work --retry-environment\`. A startup gap does not prevent scoped implementation. If
+the scope check rejects the work, inspect the named changes, restore unintended changes or
+revise the intended scope, then retry. Keep sandboxing enabled and never work around a URL policy refusal.
+
+For a legacy feature or current product history needing upgrade, use the installed
+\`visp-migrate --project <project> preview\`, then
+\`visp-migrate --project <project> apply\`. Preview is read-only; apply preserves a raw backup
+in the migration transaction. Stop old writers before applying and restart MCP with the upgraded
+executable afterward. \`visp next\` and \`visp status\` only read state; they never migrate it.
+
+For UI work, recover the browser and capture the usable interaction before spending a product critic call. Source advice is optional for a concrete code question: \`visp critic --source-only --preflight\`. It spends the same call budget and cannot assess visuals; keep capacity for rendered feedback. Continue the same build–observe–fix loop when the critic is unavailable.
+
+For a browser capture, pipe YAML/JSON to \`visp capture --task <id> --from -\`:
+
+\`\`\`yaml
+url: http://127.0.0.1:3000
+viewport: {width: 1280, height: 720}
+actions:
+  - {kind: click, selector: "#start", capture: true}
+  - {kind: wait, durationMs: 300, capture: false}
+  - {kind: wait-for, selector: "#result", visibility: visible, capture: true}
+\`\`\`
+
+Waits use \`durationMs\` (1–10000). Follow settling waits with \`wait-for\` or \`compare\` to establish the expected state. Use the actual permitted URL and real controls. For local-file projects use a confined project file URL where the host permits it. Each journey allows six total captures, including the automatic initial capture, the final capture when the last action does not request one, \`capture: true\`, and drag \`captureDuring: true\`. Operation records are generated. Capture and verify return matching before/after observations; investigate possible regressions and execution gaps, and inspect actual images. Work and review handoffs attach a recheck to findings linked to recorded execution: use its command to revisit the original path, then inspect the result and one nearby behavior affected by the edit. A matching rerun is observed-unassessed, not a resolved finding. These comparisons are advisory, not quality approval. Legacy runs without a saved journey still need --from. A different input that succeeds does not resolve an earlier failed input.
+
+## Reviewer execution
+
+Critic is configurable and on by default. The configured model/effort are returned by preflight; never substitute silently. Scheduled review authorizes one bounded delegation where the host allows it. Configured, reserved, invoked, returned and accepted-review are distinct states.
+
+1. Run \`visp critic --preflight\` for product review. Early design advice is optional. If requested, use
+   \`--phase understanding --question "<concrete decision>"\` before implementation. An unavailable request
+   does not block ordinary work; while it is pending, pause scoped edits until it returns, fails, or expires.
+2. Setup-needed means capability information is missing, not that a reviewer was refused. Inspect native delegation/model/tool/image support. Pipe actual host capability JSON using \`--capabilities -\`; do not copy example settings as observed facts. If retaining a report, put it under .visp/; a new file beside product source invalidates prior evidence.
+3. With an attached capable host adapter, \`visp critic --dispatch\` inspects and invokes once. Standalone CLI supplies a native handoff; it cannot call the parent agent's tools. Standard MCP sampling cannot preserve the no-token-ceiling setting.
+4. For a native handoff use \`visp critic --prepare --capabilities -\`, passing the same feature/task/phase. Delegate a fresh reviewer with returned model/effort and only packet/images; no worker history, custom skills, edits, execution or further delegation. Codex supports a fallback plan only where the host can honor these restrictions. Preparation creates a capability template with null unknown values. Fill only actual observed host metadata, use the generated responseSchemaPath (Codex fallback uses --output-schema), save reviewer JSON unchanged at responsePath, and follow the returned submission.command or literal submission.args; do not reconstruct paths or envelopes. Malformed JSON keeps the raw file and pending reservation; report failure without inventing a review or automatically invoking again.
+5. Follow the returned reportUnavailable/failureCommand. For an unreserved early refusal use \`visp critic --phase understanding --failure-kind permission-denied --failure "<reason>"\` with the selected feature/task. For a reserved attempt use \`visp critic --attempt <id> --failure "<reason>"\` with the same selection. Other categories: host-unavailable, model-unavailable, image-unavailable, invocation-failed, schema-rejected, setup-unverified. An unverified setup is not a confirmed refusal. Do not retry a possibly billable pending call automatically. If a reserved call never started, add \`--not-invoked\`; this remains host-reported. When the blocker is resolved, follow the status recovery command with \`--retry-after <failed-attempt> --reason "<what changed>"\` and current capabilities. Use permission already given for the same packet and destination; do not ask again. Preflight is read-only; prepare or attached dispatch creates one fresh attempt within the remaining budget, preserving the failed record. Reuse unchanged evidence instead of repeating worker approvals.
+
+The accepted critic submission records the product assessment; no separate worker approval is required. Follow the next action from done/verify/next. An unavailable early review permits implementation but supplies no quality credit. If the critic cannot run, continue the baseline host review of behavior and images and disclose the missing independent review; do not treat service availability as product quality. Critic --off is only for the user's explicit preference. Existing calls, deadlines and image budgets remain; VISP adds no text/token ceiling.
+
+## Automatic and manual feedback
+
+Default mode is auto (existing behavior). Select \`visp critic --mode auto|manual|both|off\` for an existing feature. For future features use \`visp critic defaults --save --mode both\`, optionally with --harness; project configuration \`critic: { mode: both }\` takes precedence. Legacy enabled/on/off select auto/off. Manual-only needs no reviewer model. Mode switches preserve automatic call history; manual questions consume no model-review calls.
+
+When manual mode is enabled, work/next surface a question opportunity after the first usable observation. An earlier consequential design choice may warrant one focused question. Run \`visp critic feedback --task T001 --ask "Does this interaction match what you wanted?" --context "The preview is open; try dragging and releasing."\`. Attached hosts or MCP form elicitation show the popup; standalone CLI returns a handoff for the coding tool's user-question capability. Show relevant preview/images separately. If no popup exists, ask once in the conversation; never claim a popup was shown.
+
+Record the user's verbatim reply with \`visp critic feedback --task T001 --id <request-id> --reply "<user feedback>"\`, or defer with --defer. Do not fabricate answers. Pending/interrupted requests are preserved and not automatically re-prompted. Continue unrelated work while waiting; defer is not approval. Feedback returns through work/next with its source identity and provenance. Use it to improve the product and observe the result; it does not itself pass checks, resolve an automatic critic, or weaken preserved outcomes. New feedback about a changed direction can be requested explicitly; do not repeatedly ask on every capture.
+
+## Review sessions
+
+When an exploratory journey failed, the prepare response may include host-only recovery drafts with current observation/image IDs. Inspect that counterevidence, fill the diagnosis and actual reviewer context, and submit the draft through its session only if it addresses the original failure. No product approval is implied. Unrelated input, stale evidence and declared-check waivers remain invalid.
+
+\`visp review --prepare\` returns session, packetPath and responsePath under .visp. Read the packet and inspect its actual images. Complete the packet's response schema: summary, outcome assessments with cited evidence, zero to three findings, limitations and any resolutions. No category declarations, example-coverage ledger or identity fields are needed; unknown remains unresolved. Submit that JSON with \`visp review --session <id> --from -\`, or --from responsePath. VISP supplies selection/hashes and links selected before/after images from cited execution IDs; these links establish observation, not quality. Do not create review inputs beside product source or edit generated state. The old --template and stdin interface remains supported. Submission returns a compact recording receipt; --detail returns the full result, neither establishes acceptance.
+
+An outside-session reference requires preparing a session with the relevant --group; it does not prove an image was never viewed. New captures do not invalidate an existing selection. Actual source/contract/environment changes require fresh applicable evidence. Passing commands and delivered images do not establish quality.
+
+Opt in to \`workflow.reviewMode: observation-preview\` in visp.yml to inspect original goals and representative states without worker judgments. Report visible contradictions, locations, consequences, corrections and next checks; zero to three findings, not forced criticism. This preview is unvalidated by live model comparisons. Optional style advice never blocks acceptance.
+`;
+}

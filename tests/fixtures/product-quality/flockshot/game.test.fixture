@@ -1,0 +1,107 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+
+async function loadGameApi() {
+  const source = await readFile(new URL("../game.js", import.meta.url), "utf8");
+  const sandbox = {
+    console,
+    Math,
+    module: { exports: {} },
+    setTimeout,
+    clearTimeout,
+  };
+  vm.runInNewContext(source, sandbox, { filename: "game.js" });
+  return sandbox.module.exports;
+}
+
+test("index.html is a direct-open local game shell", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+
+  assert.match(html, /<canvas[^>]+id=["']game["']/i);
+  assert.match(html, /<script[^>]+src=["']game\.js["']/i);
+  assert.doesNotMatch(html, /(?:https?:)?\/\//i);
+  assert.match(html, /id=["']reset-game["']/i);
+});
+
+test("a fresh state has a loaded bird and a target-filled level", async () => {
+  const game = await loadGameApi();
+  const state = game.createState();
+
+  assert.equal(state.phase, "ready");
+  assert.equal(state.levelIndex, 0);
+  assert.ok(state.birdsLeft >= 3);
+  assert.ok(state.targets.length >= 2);
+  assert.ok(state.targets.every((target) => target.alive));
+  assert.deepEqual(state.bird.position, state.sling.anchor);
+});
+
+test("aiming creates a trajectory and launching moves the bird", async () => {
+  const game = await loadGameApi();
+  const state = game.createState();
+  const aimPoint = { x: 60, y: 500 };
+  const trajectory = game.previewTrajectory(state, aimPoint, 10);
+
+  assert.equal(trajectory.length, 10);
+  assert.ok(trajectory.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y)));
+
+  game.launch(state, aimPoint);
+  assert.equal(state.phase, "flying");
+  assert.ok(state.bird.velocity.x > 0);
+  assert.ok(state.bird.velocity.y < 0);
+
+  const startX = state.bird.position.x;
+  game.step(state, 0.1);
+  assert.ok(state.bird.position.x > startX);
+});
+
+test("target impact awards points and removes the target", async () => {
+  const game = await loadGameApi();
+  const state = game.createState();
+  const target = state.targets[0];
+
+  state.phase = "flying";
+  state.bird.position = { x: target.x - 30, y: target.y };
+  state.bird.velocity = { x: 900, y: 0 };
+  game.step(state, 1 / 60);
+
+  assert.equal(target.alive, false);
+  assert.ok(state.score >= 500);
+  assert.ok(state.particles.length > 0);
+});
+
+test("an exhausted shot becomes ready or lost without throwing", async () => {
+  const game = await loadGameApi();
+  const state = game.createState();
+  state.birdsLeft = 0;
+  state.phase = "flying";
+  state.bird.position = { x: -140, y: 40 };
+  state.bird.velocity = { x: -160, y: 0 };
+
+  game.step(state, 1 / 60);
+
+  assert.equal(state.birdsLeft, 0);
+  assert.equal(state.phase, "lost");
+});
+
+test("cleared levels can advance and reset cleanly", async () => {
+  const game = await loadGameApi();
+  const state = game.createState(0);
+
+  state.targets.forEach((target) => {
+    target.alive = false;
+  });
+  game.resolveOutcome(state);
+  assert.equal(state.phase, "won");
+
+  game.nextLevel(state);
+  assert.equal(state.levelIndex, 1);
+  assert.equal(state.phase, "ready");
+  assert.ok(state.targets.some((target) => target.alive));
+
+  game.reset(state);
+  assert.equal(state.levelIndex, 1);
+  assert.equal(state.phase, "ready");
+  assert.equal(state.birdsLeft, state.maxBirds);
+});

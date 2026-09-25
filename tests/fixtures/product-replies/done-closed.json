@@ -1,0 +1,334 @@
+{
+ "delivery": {
+  "status": "slice-closed",
+  "summary": "This slice is closed. Run visp next before reporting the feature complete."
+ },
+ "nextCommand": "visp review --handoff --feature 001-build-a-small-local-inference",
+ "checkpoint": {
+  "candidate": "CAN-9639c2052956463fbe6c4eb7fba2d304",
+  "provenance": "First observed implementation; not a passing quality assessment. Preserve it when correcting behavior or visuals."
+ },
+ "feedbackPlan": {
+  "observationPlan": {
+   "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+   "sequence": [
+    "Real input \u2192 assert settled result \u2192 input again \u2192 assert settled result",
+    "If applicable: reset/cancel pending work \u2192 restart \u2192 outlive old completion; new state stays intact"
+   ],
+   "probes": [
+    {
+     "kind": "independent-result",
+     "status": "unassessed"
+    }
+   ],
+   "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+  },
+  "nextProbe": {
+   "kind": "independent-result",
+   "when": "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels.",
+   "expected": [
+    "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels.",
+    "A local HTTP client can POST JSON {\"texts\":[...]} to /v1/sentiment/batch and receive 200 JSON with one result per input in order, including mixed sentiment results."
+   ],
+   "outcomes": [
+    "O001",
+    "O002"
+   ],
+   "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed.",
+   "id": "PROBE-952169d33a2d"
+  },
+  "probeResponses": [],
+  "focus": "implement",
+  "research": {
+   "question": "The empty repository has no existing runtime or test conventions, so the standard-library Python layout is the smallest portable choice.",
+   "method": "Use the host's research capability for external facts, or a bounded local experiment for repository behavior. Choose whichever can resolve this question.",
+   "consume": "Update the existing brief decision with the conclusion, evidence, implementation implication and affected check; remove only the uncertainty actually resolved. Then build or correct the slice.",
+   "required": false
+  },
+  "trace": {
+   "question": "Which code owns Implement and exercise the first complete local HTTP request flow, including success, batch, validation errors, documentation, and tests., and which callers and tests will change?",
+   "command": "visp work --feature 001-build-a-small-local-inference --task T001",
+   "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+  },
+  "findings": [],
+  "findingsRemaining": 0,
+  "gaps": [],
+  "gapsRemaining": 0,
+  "nextCheck": "Exercise the next complete behavior, then inspect whether the result fulfills the original request across relevant quality dimensions."
+ },
+ "next": {
+  "feature": "001-build-a-small-local-inference",
+  "action": "refine",
+  "objective": "Review the assembled product against every mandatory outcome and retained expectation",
+  "command": "visp review --handoff --feature 001-build-a-small-local-inference",
+  "evidence": [
+   "O001: final goal assessment unassessed; review the current product against the original request",
+   "O002: final goal assessment unassessed; review the current product against the original request",
+   "O003: final goal assessment unassessed; review the current product against the original request",
+   "O004: final goal assessment unassessed; review the current product against the original request",
+   "O005: final goal assessment unassessed; review the current product against the original request"
+  ],
+  "mayEdit": false,
+  "criticAdvice": {
+   "status": "suggested",
+   "command": "visp critic --feature 001-build-a-small-local-inference --preflight",
+   "guidance": "Ask the independent critic for useful feedback on this candidate. If unavailable, use the baseline host review of actual behavior and images; disclose the missing independent review."
+  }
+ },
+ "trace": {
+  "graph": [
+   {
+    "kind": "entity",
+    "key": "test_api.py#file",
+    "path": "test_api.py",
+    "name": "test_api.py",
+    "detail": "file",
+    "startLine": 1,
+    "endLine": 132,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#class:RequestError",
+    "path": "sentiment_api.py",
+    "name": "RequestError",
+    "detail": "class",
+    "startLine": 78,
+    "endLine": 92,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#class:SentimentAnalyzer",
+    "path": "sentiment_api.py",
+    "name": "SentimentAnalyzer",
+    "detail": "class",
+    "startLine": 95,
+    "endLine": 125,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#class:SentimentHandler",
+    "path": "sentiment_api.py",
+    "name": "SentimentHandler",
+    "detail": "class",
+    "startLine": 141,
+    "endLine": 351,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#function:_error_payload",
+    "path": "sentiment_api.py",
+    "name": "_error_payload",
+    "detail": "function",
+    "startLine": 131,
+    "endLine": 138,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#function:create_server",
+    "path": "sentiment_api.py",
+    "name": "create_server",
+    "detail": "function",
+    "startLine": 354,
+    "endLine": 357,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#function:main",
+    "path": "sentiment_api.py",
+    "name": "main",
+    "detail": "function",
+    "startLine": 360,
+    "endLine": 378,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "sentiment_api.py#file",
+    "path": "sentiment_api.py",
+    "name": "sentiment_api.py",
+    "detail": "file",
+    "startLine": 1,
+    "endLine": 383,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#class:SentimentApiTest",
+    "path": "test_api.py",
+    "name": "SentimentApiTest",
+    "detail": "class",
+    "startLine": 11,
+    "endLine": 127,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:request",
+    "path": "test_api.py",
+    "name": "request",
+    "detail": "method",
+    "startLine": 26,
+    "endLine": 43,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:setUpClass",
+    "path": "test_api.py",
+    "name": "setUpClass",
+    "detail": "method",
+    "startLine": 13,
+    "endLine": 18,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:tearDownClass",
+    "path": "test_api.py",
+    "name": "tearDownClass",
+    "detail": "method",
+    "startLine": 21,
+    "endLine": 24,
+    "distance": 1
+   },
+   {
+    "kind": "entity",
+    "key": "test_api.py#method:test_analyzer_is_deterministic_and_distinguishes_sentiment",
+    "path": "test_api.py",
+    "name": "test_analyzer_is_deterministic_and_distinguishes_sentiment",
+    "detail": "method",
+    "startLine": 45,
+    "endLine": 56,
+    "distance": 1
+   }
+  ],
+  "notes": [
+   "Graph uncertainty: ANALYZER.analyze",
+   "Graph uncertainty: SystemExit",
+   "Graph uncertainty: TOKEN_RE.findall",
+   "Graph uncertainty: allow.split",
+   "Graph context is partial; use a targeted query for additional callers or tests.",
+   "Graph uncertainty: analyzer.analyze",
+   "Graph uncertainty: cls.server.server_close",
+   "Graph uncertainty: cls.server.shutdown",
+   "Graph uncertainty: cls.thread.join"
+  ]
+ },
+ "feature": "001-build-a-small-local-inference",
+ "task": "T001",
+ "subjectDigest": "df08d8e9d29135b2c85e0544d561eb7ca7fb7200885c9e188d6763116328bc81",
+ "passed": true,
+ "closed": true,
+ "executions": [
+  {
+   "id": "3e9f5ed7-4a18-4fcb-85c0-82e198cc7a19",
+   "comparisonEnvironment": "12adfc4ca1451610613ddaa3dd5d7a9be59b982457244a812970fb192a08495d",
+   "check": "C001",
+   "task": "T001",
+   "subjectDigest": "df08d8e9d29135b2c85e0544d561eb7ca7fb7200885c9e188d6763116328bc81",
+   "contractDigest": "f7d7ca6fa97c924fdee6e363d72f04110742ea6e978c6be9c0f7b653e730afb4",
+   "createdAt": "2026-09-23T18:19:46.843Z",
+   "command": "python3 -m unittest -v test_api.py",
+   "provenance": "supervisor-executed",
+   "assertions": "agent-reported",
+   "status": "passed",
+   "exitCode": 0,
+   "durationMs": 632,
+   "output": "test_analyzer_is_deterministic_and_distinguishes_sentiment (test_api.SentimentApiTest) ... ok\ntest_batch_preserves_order_and_mixed_labels (test_api.SentimentApiTest) ... ok\ntest_health_check_is_real_http (test_api.SentimentApiTest) ... ok\ntest_invalid_batch_does_not_partially_succeed (test_api.SentimentApiTest) ... ok\ntest_invalid_json_has_useful_error (test_api.SentimentApiTest) ... ok\ntest_invalid_single_text_is_unprocessable (test_api.SentimentApiTest) ... ok\ntest_media_type_route_and_method_errors_are_json (test_api.SentimentApiTest) ... ok\ntest_single_text_returns_result (test_api.SentimentApiTest) ... ok\n\n----------------------------------------------------------------------\nRan 8 tests in 0.514s\n\nOK"
+  },
+  {
+   "id": "397f74c5-11b3-4148-9c3d-00396dee623b",
+   "comparisonEnvironment": "12adfc4ca1451610613ddaa3dd5d7a9be59b982457244a812970fb192a08495d",
+   "check": "C002",
+   "task": "T001",
+   "subjectDigest": "df08d8e9d29135b2c85e0544d561eb7ca7fb7200885c9e188d6763116328bc81",
+   "contractDigest": "f7d7ca6fa97c924fdee6e363d72f04110742ea6e978c6be9c0f7b653e730afb4",
+   "createdAt": "2026-09-23T18:19:47.498Z",
+   "command": "python3 -m py_compile sentiment_api.py test_api.py",
+   "provenance": "supervisor-executed",
+   "assertions": "agent-reported",
+   "status": "passed",
+   "exitCode": 0,
+   "durationMs": 51,
+   "output": ""
+  },
+  {
+   "id": "0c68ac06-902c-4fc6-a433-5a41fb659451",
+   "comparisonEnvironment": "12adfc4ca1451610613ddaa3dd5d7a9be59b982457244a812970fb192a08495d",
+   "check": "C003",
+   "task": "T001",
+   "subjectDigest": "df08d8e9d29135b2c85e0544d561eb7ca7fb7200885c9e188d6763116328bc81",
+   "contractDigest": "f7d7ca6fa97c924fdee6e363d72f04110742ea6e978c6be9c0f7b653e730afb4",
+   "createdAt": "2026-09-23T18:19:47.554Z",
+   "command": "python3 test_api.py",
+   "provenance": "supervisor-executed",
+   "assertions": "agent-reported",
+   "status": "passed",
+   "exitCode": 0,
+   "durationMs": 613,
+   "output": "........\n----------------------------------------------------------------------\nRan 8 tests in 0.512s\n\nOK"
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "O001",
+   "statement": "A local HTTP client can POST JSON {\"text\":\"...\"} to /v1/sentiment and receive 200 JSON containing the original text, sentiment label, numeric score, and matched terms; clearly positive and negative inputs produce different labels.",
+   "priority": "must",
+   "behavior": "passed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": true
+  },
+  {
+   "id": "O002",
+   "statement": "A local HTTP client can POST JSON {\"texts\":[...]} to /v1/sentiment/batch and receive 200 JSON with one result per input in order, including mixed sentiment results.",
+   "priority": "must",
+   "behavior": "passed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": true
+  },
+  {
+   "id": "O003",
+   "statement": "Malformed JSON, missing or invalid fields, unsupported media types, unknown routes, and unsupported methods receive JSON errors with appropriate HTTP status codes and stable machine-readable error codes.",
+   "priority": "must",
+   "behavior": "passed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": true
+  },
+  {
+   "id": "O004",
+   "statement": "The implementation runs using only the standard library, requires no credentials or downloaded model, and repeats the same input with the same output.",
+   "priority": "must",
+   "behavior": "passed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": true
+  },
+  {
+   "id": "O005",
+   "statement": "README documents startup, curl examples for single and batch requests, error behavior, and deterministic lexicon limitations; automated tests cover inference and HTTP behavior.",
+   "priority": "must",
+   "behavior": "passed",
+   "review": "unassessed",
+   "requiredReview": false,
+   "satisfied": true
+  }
+ ],
+ "gaps": [],
+ "journeyFeedback": {
+  "runs": [],
+  "omitted": 0
+ },
+ "behaviorChanges": {
+  "checks": [],
+  "omitted": 0
+ }
+}

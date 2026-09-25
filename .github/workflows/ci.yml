@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  trust-boundary:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [22, 24, 26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install the pinned package manager
+        run: npm install --global pnpm@11.3.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Check confined storage and transactional installation
+        run: >-
+          pnpm exec vitest run
+          tests/unit/core/input.test.ts
+          tests/unit/core/paths.test.ts
+          tests/unit/core/fs.test.ts
+          tests/unit/core/file-transaction.test.ts
+          tests/unit/core/state-lock.test.ts
+          tests/integration/state-concurrency.test.ts
+          tests/unit/telemetry
+          tests/unit/runner
+          tests/unit/cli/input-boundary.test.ts
+          tests/unit/graph/extract/tsconfig.test.ts
+          tests/unit/graph/store/confinement.test.ts
+          tests/unit/graph/walker/walk.test.ts
+          tests/unit/harness/activation.test.ts
+          tests/unit/harness/install-transaction.test.ts
+          tests/unit/workflow/transaction-fault-injection.test.ts
+          --maxWorkers=1 --minWorkers=1
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the pinned package manager
+        run: npm install --global pnpm@11.3.0
+      - run: pnpm install --frozen-lockfile
+      # Includes a tarball consumer install, so CI and publishing exercise the
+      # same packaged binary rather than trusting the repository's live dist.
+      - run: pnpm release:check
+        env:
+          CHROME_BIN: /usr/bin/google-chrome

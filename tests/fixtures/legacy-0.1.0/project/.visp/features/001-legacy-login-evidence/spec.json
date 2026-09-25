@@ -1,0 +1,68 @@
+{
+  "kind": "spec",
+  "createdAt": "2026-09-04T18:24:29.631Z",
+  "feature": "001-legacy-login-evidence",
+  "summary": "Add a small login boundary that returns a session token for valid credentials.",
+  "requirements": [
+    {
+      "id": "REQ001",
+      "statement": "Valid credentials return a session token",
+      "priority": "must",
+      "criteria": [
+        {
+          "id": "AC001",
+          "statement": "The login test suite passes",
+          "verification": "`node --test tests/auth.test.mjs`",
+          "verificationKind": "command",
+          "verificationLayer": "functional",
+          "verificationEnvironment": "project"
+        }
+      ]
+    }
+  ],
+  "researchFindings": [
+    "FND001"
+  ],
+  "qualityRequirements": [
+    {
+      "id": "NFR001",
+      "category": "reliability",
+      "statement": "Missing credentials never create a token",
+      "target": "An empty user value returns no token",
+      "priority": "should",
+      "criteria": [
+        {
+          "id": "AC002",
+          "statement": "The invalid credential behavior is covered by the test suite",
+          "verification": "`npm run test`",
+          "verificationKind": "command",
+          "verificationLayer": "functional",
+          "verificationEnvironment": "project"
+        }
+      ]
+    }
+  ],
+  "behaviorScenarios": [
+    {
+      "id": "SCN001",
+      "title": "Valid credentials create a session",
+      "given": [
+        "A registered account exists"
+      ],
+      "when": "The user submits valid credentials",
+      "expected": [
+        "A session token is returned"
+      ],
+      "requirements": [
+        "REQ001",
+        "NFR001"
+      ],
+      "criteria": [
+        "AC001"
+      ]
+    }
+  ],
+  "outOfScope": [],
+  "openQuestions": [],
+  "draft": false
+}

@@ -1,0 +1,1 @@
+Legacy 0.1.0 observation attachment: login returned a session token.

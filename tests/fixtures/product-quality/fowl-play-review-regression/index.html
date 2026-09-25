@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#13263D">
+  <meta name="description" content="Fowl Play is a tiny backyard flight club. Pull back, let go, and make a mess.">
+  <title>Fowl Play - Backyard Flight Club</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #13263D;
+      --sky: #7AD7E6;
+      --coral: #F45F4E;
+      --sun: #FFD166;
+      --paper: #F7F0DF;
+      --leaf: #52B788;
+      --blue: #253B80;
+      --line: rgba(19, 38, 61, 0.18);
+      --paper-glass: rgba(247, 240, 223, 0.95);
+      --shadow: 0 18px 44px rgba(19, 38, 61, 0.28);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--ink);
+    }
+
+    body {
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Arial Rounded MT Bold", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    canvas { font: inherit; }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    button:disabled { cursor: not-allowed; opacity: 0.52; }
+
+    button:focus-visible,
+    canvas:focus-visible {
+      outline: 3px solid var(--sun);
+      outline-offset: 4px;
+    }
+
+    .app-shell {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 100dvh;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    #gameCanvas {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      cursor: grab;
+    }
+
+    #gameCanvas:active { cursor: grabbing; }
+
+    .hud {
+      position: absolute;
+      z-index: 4;
+      top: max(14px, env(safe-area-inset-top));
+      right: max(16px, env(safe-area-inset-right));
+      left: max(16px, env(safe-area-inset-left));
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .brand-lockup,
+    .metrics,
+    .icon-button,
+    .hint-bar,
+    .modal-panel {
+      border: 1px solid rgba(247, 240, 223, 0.46);
+      box-shadow: var(--shadow);
+    }
+
+    .brand-lockup {
+      min-width: 178px;
+      padding: 12px 15px 11px;
+      border-radius: 8px;
+      background: var(--paper-glass);
+      pointer-events: auto;
+    }
+
+    .brand-lockup p { margin: 0; }
+
+    .brand-name {
+      color: var(--ink);
+      font-family: Impact, "Arial Black", sans-serif;
+      font-size: 25px;
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 0.94;
+    }
+
+    .brand-kicker {
+      margin-top: 6px !important;
+      color: var(--coral);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      line-height: 1;
+    }
+
+    .metrics {
+      display: flex;
+      overflow: hidden;
+      border-radius: 8px;
+      background: var(--line);
+      pointer-events: auto;
+    }
+
+    .metric {
+      min-width: 84px;
+      padding: 11px 14px 10px;
+      background: var(--paper-glass);
+    }
+
+    .metric + .metric { border-left: 1px solid var(--line); }
+
+    .metric-label,
+    .metric-value { display: block; }
+
+    .metric-label {
+      margin-bottom: 4px;
+      color: rgba(19, 38, 61, 0.62);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      line-height: 1;
+    }
+
+    .metric-value {
+      color: var(--ink);
+      font-family: Impact, "Arial Black", sans-serif;
+      font-size: 20px;
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 1;
+    }
+
+    .metric:nth-child(2) .metric-value { color: var(--coral); }
+    .metric:nth-child(3) .metric-value { color: var(--blue); }
+
+    .hud-tools {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+      pointer-events: auto;
+    }
+
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 46px;
+      height: 46px;
+      padding: 0 12px;
+      border-radius: 8px;
+      background: var(--paper-glass);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+      transition: transform 150ms ease, background 150ms ease;
+    }
+
+    .icon-button:hover { background: var(--sun); transform: translateY(-2px); }
+
+    .icon-button .button-glyph {
+      margin-right: 6px;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .hint-bar {
+      position: absolute;
+      z-index: 4;
+      right: max(16px, env(safe-area-inset-right));
+      bottom: max(16px, env(safe-area-inset-bottom));
+      left: max(16px, env(safe-area-inset-left));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      width: min(770px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 10px 12px 10px 16px;
+      border-radius: 8px;
+      background: var(--paper-glass);
+      pointer-events: none;
+    }
+
+    .hint-copy { min-width: 0; }
+
+    .hint-title,
+    .hint-detail {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hint-title {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+
+    .hint-detail {
+      margin-top: 4px;
+      color: rgba(19, 38, 61, 0.66);
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .hint-badge {
+      flex: 0 0 auto;
+      padding: 9px 13px;
+      border-radius: 6px;
+      background: var(--ink);
+      color: var(--paper);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    .modal-layer {
+      position: absolute;
+      z-index: 5;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .modal-panel {
+      position: absolute;
+      width: min(388px, calc(100% - 40px));
+      border-radius: 10px;
+      background: var(--paper-glass);
+      pointer-events: auto;
+    }
+
+    .start-panel {
+      top: 22%;
+      left: max(22px, 5vw);
+      padding: 26px 28px 24px;
+    }
+
+    .result-panel {
+      top: 50%;
+      left: 50%;
+      padding: 28px;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+
+    [hidden] { display: none !important; }
+
+    .panel-mark {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 5px 8px;
+      border-radius: 4px;
+      background: var(--sun);
+      color: var(--ink);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    .panel-title {
+      margin: 15px 0 8px;
+      color: var(--ink);
+      font-family: Impact, "Arial Black", sans-serif;
+      font-size: 42px;
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 0.92;
+    }
+
+    .panel-copy {
+      max-width: 310px;
+      margin: 0;
+      color: rgba(19, 38, 61, 0.78);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .panel-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      margin-top: 22px;
+      padding: 0 20px;
+      border-radius: 6px;
+      background: var(--coral);
+      color: var(--paper);
+      font-size: 14px;
+      font-weight: 700;
+      transition: transform 150ms ease, background 150ms ease;
+    }
+
+    .panel-action:hover { background: var(--blue); transform: translateY(-2px); }
+
+    .flight-notes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 20px;
+    }
+
+    .flight-note {
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: rgba(19, 38, 61, 0.68);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .result-panel .panel-title { margin-top: 14px; font-size: 38px; }
+
+    .result-score {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 18px;
+      color: var(--coral);
+    }
+
+    .result-score-value {
+      font-family: Impact, "Arial Black", sans-serif;
+      font-size: 48px;
+      line-height: 0.9;
+    }
+
+    .result-score-label {
+      color: rgba(19, 38, 61, 0.6);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    @media (max-width: 720px) {
+      .hud {
+        right: 10px;
+        left: 10px;
+        gap: 8px;
+      }
+
+      .brand-lockup {
+        min-width: 124px;
+        padding: 10px 11px 9px;
+      }
+
+      .brand-name { font-size: 20px; }
+      .brand-kicker { font-size: 8px; }
+
+      .metrics { flex: 1 1 auto; }
+
+      .metric {
+        min-width: 0;
+        flex: 1 1 0;
+        padding: 10px 8px 9px;
+      }
+
+      .metric-label { font-size: 8px; letter-spacing: 0.04em; }
+      .metric-value { font-size: 17px; }
+      .hud-tools { gap: 5px; }
+      .icon-button { min-width: 40px; height: 40px; padding: 0 8px; }
+      .icon-button .button-text { display: none; }
+      .icon-button .button-glyph { margin: 0; }
+
+      .start-panel {
+        top: 17%;
+        right: 16px;
+        left: 16px;
+        width: auto;
+        padding: 22px 21px 20px;
+      }
+
+      .panel-title { font-size: 36px; }
+      .panel-copy { font-size: 13px; }
+
+      .hint-bar {
+        right: 10px;
+        bottom: 10px;
+        left: 10px;
+        width: calc(100% - 20px);
+        padding-left: 12px;
+      }
+
+      .hint-title { font-size: 12px; }
+      .hint-detail { font-size: 10px; }
+      .hint-badge { padding: 8px 9px; font-size: 8px; }
+
+      .result-panel { width: min(330px, calc(100% - 32px)); padding: 23px 19px 21px; }
+      .result-panel .panel-title { font-size: 34px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell" aria-label="Fowl Play game">
+    <canvas id="gameCanvas" tabindex="0" aria-label="Fowl Play game canvas" data-state="start"></canvas>
+
+    <header class="hud" aria-label="Round status">
+      <div class="brand-lockup">
+        <p class="brand-name">FOWL PLAY</p>
+        <p class="brand-kicker">BACKYARD FLIGHT CLUB</p>
+      </div>
+
+      <div class="metrics" aria-live="polite">
+        <div class="metric">
+          <span class="metric-label">LEVEL</span>
+          <span class="metric-value">01</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">SCORE</span>
+          <span class="metric-value" id="scoreValue" data-score="0">0</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">BIRDS</span>
+          <span class="metric-value" id="birdsValue" data-birds="4">4</span>
+        </div>
+      </div>
+
+      <div class="hud-tools">
+        <button class="icon-button" id="soundButton" type="button" aria-pressed="true" title="Toggle sound">
+          <span class="button-glyph" aria-hidden="true">&#9835;</span>
+          <span class="button-text">Sound</span>
+        </button>
+        <button class="icon-button" id="restartButton" type="button" title="Reset round">
+          <span class="button-glyph" aria-hidden="true">&#8635;</span>
+          <span class="button-text">Reset</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="hint-bar" aria-live="polite">
+      <div class="hint-copy">
+        <span class="hint-title" id="statusTitle">Ready when you are.</span>
+        <span class="hint-detail" id="statusDetail">Pull the bird back, then let go.</span>
+      </div>
+      <span class="hint-badge">MAKE A MESS</span>
+    </div>
+
+    <div class="modal-layer">
+      <section class="modal-panel start-panel" id="startPanel" aria-labelledby="startTitle">
+        <span class="panel-mark">FLIGHT CLUB / 01</span>
+        <h1 class="panel-title" id="startTitle">Make a mess.</h1>
+        <p class="panel-copy">Four birds. One wobbly tower. Pull back, pick a lane, and send those snout goblins packing.</p>
+        <button class="panel-action" id="startButton" type="button">Start flinging</button>
+        <div class="flight-notes" aria-label="How to play">
+          <span class="flight-note">Pull back</span>
+          <span class="flight-note">Let go</span>
+          <span class="flight-note">Chase the combo</span>
+        </div>
+      </section>
+
+      <section class="modal-panel result-panel" id="resultPanel" aria-labelledby="resultTitle" hidden>
+        <span class="panel-mark" id="resultMark">ROUND REPORT</span>
+        <h2 class="panel-title" id="resultTitle">Yard cleared!</h2>
+        <p class="panel-copy" id="resultCopy">That tower just became a very small story.</p>
+        <div class="result-score">
+          <span class="result-score-value" id="resultScore">0</span>
+          <span class="result-score-label">TOTAL POINTS</span>
+        </div>
+        <button class="panel-action" id="replayButton" type="button">Fly it again</button>
+      </section>
+    </div>
+  </main>
+
+  <script src="game-core.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

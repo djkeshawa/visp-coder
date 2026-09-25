@@ -1,0 +1,19 @@
+<!doctype html><html><style>
+body { margin: 0; font: 18px sans-serif; background: #eee; }
+#range { margin: 80px; width: 400px; height: 240px; background: #234; position: relative; }
+#target { position: absolute; left: 18%; top: 16%; width: 16px; height: 16px; background: orange; }
+button { margin-left: 240px; padding: 20px; } output { display: block; margin: 20px; }
+</style><body><div id="range"><span id="target"></span></div><button id="launch">Launch</button><output id="result">Ready</output>
+<script>
+const range = document.querySelector('#range');
+let aim = {x: 0, y: 0}, locked = false;
+range.addEventListener('pointermove', event => {
+  if (locked && document.body.classList.contains('repaired')) return;
+  const rect = range.getBoundingClientRect();
+  aim = {x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height};
+});
+range.addEventListener('pointerdown', () => { locked = true; });
+document.querySelector('#launch').onclick = () => {
+  document.querySelector('#result').textContent = Math.hypot(aim.x - .2, aim.y - .2) < .03 ? 'Hit' : 'Miss';
+};
+</script></body></html>
