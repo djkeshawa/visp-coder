@@ -8,6 +8,11 @@ import { sha256 } from "../../src/core/hash.js";
 import { activateControl, assertControlReachable } from "../../src/testing/browser.js";
 import { openBrowserSession } from "../../src/testing/browser-session.js";
 
+// Node 23.6 renamed --experimental-test-isolation; the package supports Node 22.16+.
+const TEST_ISOLATION_NONE = process.allowedNodeEnvironmentFlags.has("--test-isolation")
+  ? "--test-isolation=none"
+  : "--experimental-test-isolation=none";
+
 const fixture = fileURLToPath(
   new URL("../fixtures/product-quality/moonshot-settle/", import.meta.url),
 );
@@ -27,7 +32,7 @@ it.each([false, true])(
       );
     const unit = execFileSync(
       process.execPath,
-      ["--test", "--test-isolation=none", "--test-reporter=tap", "tests/game-core.test.mjs"],
+      ["--test", TEST_ISOLATION_NONE, "--test-reporter=tap", "tests/game-core.test.mjs"],
       { cwd: directory, encoding: "utf8" },
     );
     expect(unit).toContain("# fail 0");

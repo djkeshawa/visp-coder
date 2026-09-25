@@ -6,6 +6,27 @@
   },
   "description": "Harness for AI coding agents: an actor-critic loop with executed checks, bounded file scope, an independent reviewer and independent acceptance tests. CLI and MCP server.",
   "license": "Apache-2.0",
+  "author": "Dineth Keshawa Jayathilaka",
+  "homepage": "https://github.com/djkeshawa/visp-coder#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/djkeshawa/visp-coder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/djkeshawa/visp-coder/issues"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "harness",
+    "actor-critic",
+    "code-review",
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "codex",
+    "cli"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.16.0"

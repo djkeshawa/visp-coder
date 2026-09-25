@@ -136,6 +136,11 @@ function receiptHeader(context: CheckContext): string {
   return `${JSON.stringify({ version: 1, root: context.root, check: context.check, token: context.receipt?.token })}\n`;
 }
 
+/** Windows reports no POSIX permission bits (ACLs govern access), so only POSIX compares them. */
+function posixMode(mode: number, expected: number): boolean {
+  return process.platform === "win32" || (mode & 0o777) === expected;
+}
+
 /** Only a precreated, private, ordinary receipt file may receive a child refusal. */
 async function openCheckReceipt(context: CheckContext): Promise<FileHandle> {
   const directory = context.receipt?.directory;
@@ -150,7 +155,7 @@ async function openCheckReceipt(context: CheckContext): Promise<FileHandle> {
   if (
     !folder.isDirectory() ||
     folder.isSymbolicLink() ||
-    (folder.mode & 0o777) !== 0o700 ||
+    !posixMode(folder.mode, 0o700) ||
     directory !== (await realpath(directory))
   )
     throw new Error("Unsafe check receipt directory");
@@ -163,7 +168,7 @@ async function openCheckReceipt(context: CheckContext): Promise<FileHandle> {
     if (
       !stat.isFile() ||
       stat.nlink !== 1 ||
-      (stat.mode & 0o777) !== 0o600 ||
+      !posixMode(stat.mode, 0o600) ||
       stat.size > 64 * 1024 ||
       (process.getuid && stat.uid !== process.getuid())
     )

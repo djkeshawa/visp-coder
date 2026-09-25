@@ -9,6 +9,11 @@ import { sha256 } from "../../src/core/hash.js";
 import { activateControl } from "../../src/testing/browser.js";
 import { openBrowserSession } from "../../src/testing/browser-session.js";
 
+// Node 23.6 renamed --experimental-test-isolation; the package supports Node 22.16+.
+const TEST_ISOLATION_NONE = process.allowedNodeEnvironmentFlags.has("--test-isolation")
+  ? "--test-isolation=none"
+  : "--experimental-test-isolation=none";
+
 const fixture = fileURLToPath(
   new URL("../fixtures/product-quality/skyline-review-regression/", import.meta.url),
 );
@@ -75,7 +80,7 @@ it("preserves the run's original source identity and demonstrates its eight weak
     expect(sha256(await readFile(join(fixture, path)))).toBe(expected);
   const output = execFileSync(
     process.execPath,
-    ["--test", "--test-isolation=none", "tests/game-logic.test.mjs"],
+    ["--test", TEST_ISOLATION_NONE, "tests/game-logic.test.mjs"],
     { cwd: fixture, encoding: "utf8" },
   );
   expect(output).toMatch(/(?:pass 8|8 pass)/);
