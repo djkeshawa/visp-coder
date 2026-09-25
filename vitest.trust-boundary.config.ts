@@ -118,6 +118,7 @@ const trustBoundaryTests = [
   "tests/unit/workflow/evidence/product-evidence-policy.test.ts",
   "tests/unit/workflow/evidence/product-evidence-references.test.ts",
   "tests/unit/workflow/evidence/product-work-boundary.test.ts",
+  "tests/unit/workflow/evidence/product-work-checks.test.ts",
   "tests/unit/workflow/evidence/product-context-budget.test.ts",
   "tests/unit/workflow/evidence/product-graph-focus.test.ts",
   "tests/unit/workflow/evidence/product-runtime-boundary.test.ts",
