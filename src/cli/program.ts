@@ -39,7 +39,7 @@ export function buildProgram(
   } = {},
 ): Command {
   const program = new Command(PRODUCT_NAME)
-    .description("Accuracy harness for AI coding agents")
+    .description("Harness for AI coding agents: executed checks, bounded scope and independent review")
     .version(VERSION, "-v, --version")
     .option("--project <path>", "Project root (defaults to the working directory)")
     .option("--json", "Print a single JSON envelope instead of text")
