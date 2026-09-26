@@ -44,8 +44,10 @@ def turn(prompt, session=None):
         argv += ["--resume", session]
     remaining = max(60, args.timeout - int(time.time() - started))
     try:
+        # Own session: a worker signalling its shell's process group (`kill %1` without job
+        # control) must not reach sibling runs in the same batch.
         completed = subprocess.run(argv, cwd=project, env=env, capture_output=True, text=True,
-                                   timeout=remaining)
+                                   timeout=remaining, start_new_session=True)
         return json.loads(completed.stdout), False
     except subprocess.TimeoutExpired:
         return {}, True
