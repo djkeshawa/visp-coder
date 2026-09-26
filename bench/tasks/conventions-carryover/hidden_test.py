@@ -116,7 +116,9 @@ def walk(path, limit):
     rows, cursor = [], None
     for _ in range(100):
         sep = "&" if "?" in path else "?"
-        url = f"{path}{sep}limit={limit}" + (f"&cursor={quote(cursor, safe='')}" if cursor else "")
+        # The cursor goes back as issued; only characters that would change the query are escaped,
+        # so hand-written query parsing that does not percent-decode still pages.
+        url = f"{path}{sep}limit={limit}" + (f"&cursor={quote(cursor, safe='=/:-_.~')}" if cursor else "")
         ok, _, body = page(url)
         if not ok or len(body["data"]) > limit:
             return None
