@@ -47,7 +47,13 @@ try {
 
   const bin = join(project, "node_modules", ".bin", "visp");
   const runnerBin = join(project, "node_modules", ".bin", "visp-runner");
-  const env = { ...process.env, PATH: `${join(project, "node_modules", ".bin")}${delimiter}${process.env.PATH ?? ""}` };
+  // The Codex template launches the reviewer and tester with `codex exec`; a stub that
+  // always fails keeps the smoke test from ever calling a model.
+  const stubs = join(scratch, "stub-bin");
+  await mkdir(stubs);
+  await writeFile(join(stubs, "codex"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  await writeFile(join(stubs, "codex.cmd"), "@exit /b 1\r\n");
+  const env = { ...process.env, PATH: [join(project, "node_modules", ".bin"), stubs, process.env.PATH ?? ""].join(delimiter) };
   run(bin, ["init", "--harness", "codex"], project, env);
   run(bin, ["install", "--harness", "codex", "--dry-run"], project, env);
   run(bin, ["install", "--harness", "codex"], project, env);
@@ -166,7 +172,10 @@ const preregistration: SkillPreregistration | undefined = undefined; void prereg
   run("git", ["config", "user.name", "Package Smoke"], project, env);
   run("git", ["add", "-A"], project, env);
   run("git", ["commit", "-qm", "consumer baseline"], project, env);
-  const started = JSON.parse(run(bin, ["feature", "Return two from the public module", "--json"], project, env));
+  // With the Codex template's launch: codex-exec, the tester and reviewer judge against the
+  // verbatim request, so feature requires it as the source brief.
+  const request = "Return two from the public module: value.mjs exports value = 2.";
+  const started = JSON.parse(run(bin, ["feature", "Return two from the public module", "--source-brief", "-", "--json"], project, env, request));
   if (!started.data?.brief) throw new Error("Packaged feature did not return a brief");
   const brief = JSON.parse(run(bin,["brief","--template"],project,env));
   const updated = {
@@ -181,7 +190,7 @@ const preregistration: SkillPreregistration | undefined = undefined; void prereg
   if (!earlyNext.data?.command?.startsWith("visp work ")) throw new Error("Packaged workflow inserted a mandatory design gate before scoped work");
   run(bin,["work","--task","T001","--json"],project,env);
   const criticStatus = JSON.parse(run(bin,["critic","--task","T001","--json"],project,env));
-  if (criticStatus.data?.enabled !== true || criticStatus.data?.model !== "gpt-5.6-sol" || criticStatus.data?.reasoningEffort !== "high") throw new Error("Fresh Codex feature did not pin balanced critic defaults");
+  if (criticStatus.data?.enabled !== true || criticStatus.data?.model !== "gpt-5.6-sol" || criticStatus.data?.reasoningEffort !== "medium") throw new Error("Fresh Codex feature did not pin the template's critic settings");
   const criticAgent = readFileSync(join(project, ".codex/agents/visp-critic.toml"), "utf8");
   if (!criticAgent.includes('model = "gpt-5.6-sol"')) throw new Error("Native critic definition missing");
   const criticPreflight = JSON.parse(run(bin,["critic","--task","T001","--preflight","--json"],project,env));
@@ -244,7 +253,7 @@ const preregistration: SkillPreregistration | undefined = undefined; void prereg
     if (existsSync(join(project,".visp","features",brief.feature,file))) throw new Error(`Product loop created legacy artifact ${file}`);
   }
   // Reproduce unavailable browser recovery through the installed CLI, not an internal mock.
-  const uiStarted = JSON.parse(run(bin, ["feature", "Exercise a browser button", "--json"], project, env));
+  const uiStarted = JSON.parse(run(bin, ["feature", "Exercise a browser button", "--source-brief", "-", "--json"], project, env, "Exercise a browser button: clicking it shows its result."));
   const uiBrief = {
     ...uiStarted.data.brief,
     outcomes: [{id:"O001",kind:"functional",statement:"A button responds to real input",priority:"must"}],
