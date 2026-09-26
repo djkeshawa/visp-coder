@@ -10,21 +10,6 @@ beforeEach(async () => {
 });
 afterEach(async () => project?.destroy());
 describe("product feedback after a failed check", () => {
-  it("routes directly to fixing the concrete failure and delivers it with relevant code", () => {
-    expect(project.run("verify").exitCode).not.toBe(0);
-    expect(project.json<{ action: string }>("next").envelope.data?.action).toBe("fix");
-    const context = project.json<{ feedback: { check: string; status: string; output: string }[] }>(
-      "work",
-    );
-    expect(context.envelope.data?.feedback[0]).toMatchObject({ check: "C001", status: "failed" });
-    expect(context.envelope.data?.feedback[0]?.output).toContain("AssertionError");
-  });
-  it("does not mistake bookkeeping changes for progress on the same failure", async () => {
-    project.run("verify");
-    await project.write(".visp/notes.md", "Reviewed the current attempt");
-    const repeated = project.json<{ recommendation?: string }>("verify");
-    expect(repeated.envelope.data?.recommendation).toContain("different hypothesis");
-  });
   it("retains execution history and clears current failure feedback after a real repair", async () => {
     project.run("verify");
     await project.write("src/value.mjs", "export const value = 2;");

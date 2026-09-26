@@ -1,10 +1,7 @@
 /** Historical test-fixture builder; never used by the product workflow. */
 import { BLOCK, PRODUCT_NAME } from "../../../../src/core/constants.js";
-import { ok, type Result } from "../../../../src/core/result.js";
 import type { ContextPack } from "../../../../src/workflow/artifacts/context.js";
 import type { Task } from "../../../../src/workflow/artifacts/tasks.js";
-import { requireImplementationFoundation } from "../../../../src/workflow/gates/readiness.js";
-import type { WorkspaceState } from "../../../../src/workflow/state.js";
 import { renderContextContract } from "./contract.js";
 import { describeRanges, PRINTED_OMISSIONS, renderAttemptFeedback } from "./render.js";
 
@@ -20,31 +17,6 @@ export interface HandoffInput {
   readonly task: Task;
   readonly pack?: ContextPack;
   readonly validationCommands: readonly string[];
-}
-
-export async function buildHandoff(
-  state: WorkspaceState,
-  input: Omit<HandoffInput, "goal" | "pack">,
-): Promise<Result<string>> {
-  const foundation = await requireImplementationFoundation(
-    state,
-    `${PRODUCT_NAME} handoff --task ${input.task.id}`,
-  );
-  if (!foundation.ok) return foundation;
-
-  const [intent, pack] = await Promise.all([
-    state.store.readIntent(input.feature),
-    state.store.readContextPack(input.feature, input.task.id),
-  ]);
-  if (!intent.ok) return intent;
-  if (!pack.ok) return pack;
-  return ok(
-    renderHandoff({
-      ...input,
-      goal: intent.value.goal,
-      ...(pack.value ? { pack: pack.value } : {}),
-    }),
-  );
 }
 
 export function renderHandoff(input: HandoffInput): string {

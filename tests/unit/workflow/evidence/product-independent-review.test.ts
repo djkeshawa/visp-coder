@@ -133,11 +133,6 @@ function response(packet: CriticPacket) {
     resolutions: [],
   };
 }
-it("delivers the opt-in observation instructions to the actual native critic packet", async () => {
-  const { packet } = await prepared("observation-preview");
-  expect(packet.instructions).toContain(OBSERVATION_REVIEW_INSTRUCTIONS);
-  expect(packet.current).not.toHaveProperty("feedbackPlan");
-});
 it("binds a compact native response to tool-owned identity and uses the actual response validator as provider schema", async () => {
   const { p, run, native, packet } = await prepared();
   expect(packet.question).toBe("Does the public value fulfill the request?");

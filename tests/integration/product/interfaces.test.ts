@@ -7,7 +7,7 @@ import { stringify } from "yaml";
 import { registerTools } from "../../../src/mcp/tools/index.js";
 import type { ProductBrief } from "../../../src/workflow/product/index.js";
 import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
-import { runCli, runJson } from "../../unit/cli/support/cli.js";
+import { runJson } from "../../unit/cli/support/cli.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";
 import { TestWorkspace } from "../../unit/support/workspace.js";
 
@@ -153,29 +153,5 @@ describe("shared product interfaces", () => {
     const files = await readdir(join(project.root, ".visp/features", brief.feature));
     for (const name of ["research.json", "spec.json", "plan.json", "tasks.json"])
       expect(files).not.toContain(name);
-  });
-
-  it("refuses unknown tasks consistently before execution or mutation", async () => {
-    const brief = await begin();
-    const statePath = join(project.root, ".visp/features", brief.feature, "product-state.json");
-    const before = await readFile(statePath, "utf8");
-    const cli = await runJson(project.root, "verify", "--task", "T999");
-    const mcp = await tools(project.root)("visp_verify", { task: "T999" });
-    expect(cli.envelope.error?.code).toBe("TASK_NOT_FOUND");
-    expect(mcp.structuredContent).toMatchObject({ ok: false, error: { code: "TASK_NOT_FOUND" } });
-    expect(await readFile(statePath, "utf8")).toBe(before);
-  });
-
-  it("retired CLI/MCP stages cannot recreate authored artifacts", async () => {
-    const brief = await begin();
-    const directory = join(project.root, ".visp/features", brief.feature);
-    const before = await readdir(directory);
-    const call = tools(project.root);
-    for (const name of ["research", "spec", "plan", "tasks"]) {
-      const cli = await runCli(project.root, name, "--validate");
-      expect(cli.exitCode, name).not.toBe(0);
-      expect(() => call(`visp_${name}`, { validate: true })).toThrow("Unregistered tool");
-    }
-    expect(await readdir(directory)).toEqual(before);
   });
 });

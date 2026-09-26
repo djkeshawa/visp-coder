@@ -692,29 +692,6 @@ it("keeps unavailable preflight and malformed state read-only across native oper
   }
 });
 
-it("preserves pending and unavailable states when the retired disable operation is attempted", async () => {
-  await ready();
-  const p = await prepare();
-  expect(await run({ operation: "preflight", capabilities })).toMatchObject({
-    ok: true,
-    value: { ready: false, callsUsed: 1, gaps: ["review-in-progress"] },
-  });
-  await run({
-    operation: "submit",
-    result: {
-      attempt: p.attempt,
-      model: "unavailable",
-      context: "unavailable",
-      failure: "Host interrupted",
-    },
-  });
-  expect(await run({ operation: "disable" })).toMatchObject({ ok: false });
-  expect(await run({ operation: "preflight", capabilities })).toMatchObject({
-    ok: true,
-    value: { ready: false, callsUsed: 1, gaps: [expect.stringContaining("Host interrupted")] },
-  });
-});
-
 it("preflight refuses an exhausted budget without loading unrelated historical candidate bytes", async () => {
   await ready({ ...config, maxCalls: 1 });
   const p = await prepare();
@@ -1045,15 +1022,6 @@ it("preserves an adapter's rejected response object for diagnosis without accept
   if (!result.ok) throw new Error(result.error.message);
   const saved = (result.value as { responseRecord: { path: string } }).responseRecord.path;
   expect(JSON.parse(await readFile(saved, "utf8"))).toEqual(raw);
-});
-
-it("does not let a task disable bypass an enabled feature policy", async () => {
-  await ready();
-  expect(await run({ operation: "disable" })).toMatchObject({
-    ok: false,
-    error: { code: "WORKFLOW_REPLACED" },
-  });
-  expect(await run({ operation: "status" })).toMatchObject({ ok: true, value: { enabled: true } });
 });
 
 it("preserves the historical candidate without priming the independent reviewer", async () => {

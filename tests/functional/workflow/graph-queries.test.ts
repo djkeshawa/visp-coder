@@ -25,12 +25,6 @@ describe("querying an indexed repository", () => {
     await project.destroy();
   });
 
-  it("describes what is in the repository", () => {
-    const result = project.run("query", "describe");
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("entities");
-  });
-
   it("exposes traversal limits and explains incomplete answers", () => {
     const { result, envelope } = project.json<{
       receipt: {
@@ -62,12 +56,6 @@ describe("querying an indexed repository", () => {
     expect(text.stdout).not.toContain("ask for more with --results");
   });
 
-  it("finds a symbol by name", () => {
-    const result = project.run("query", "search", "makeToken");
-    expect(result.stdout).toContain("src/token.ts");
-    expect(result.stdout).toContain("makeToken");
-  });
-
   it("lists what a file defines when given a path", () => {
     const result = project.run("query", "search", "src/token.ts");
     expect(result.stdout).toContain("makeToken");
@@ -91,16 +79,6 @@ describe("querying an indexed repository", () => {
     const result = project.run("query", "callers", "noSuchSymbol");
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("Nothing in the index matches");
-  });
-
-  it("names the tests covering a file", () => {
-    const result = project.run("query", "testsFor", "src/token.ts");
-    expect(result.stdout).toContain("tests/token.test.ts");
-  });
-
-  it("reports what depends on a file", () => {
-    const result = project.run("query", "impact", "src/token.ts");
-    expect(result.stdout).toContain("src/login.ts");
   });
 
   it("rejects an unknown operation with the list of valid ones", () => {

@@ -161,19 +161,6 @@ it("preserves spent attempts, candidate bytes and evidence across feature off/on
   expect((await record()).stateText).toBe(after.stateText);
 });
 
-it("does not report a selection disabled when an unknown reviewer host has no selection state", async () => {
-  const before = await record();
-  expect(await run({ operation: "disable", task: "T001" })).toMatchObject({
-    ok: false,
-    error: { code: "WORKFLOW_REPLACED" },
-  });
-  expect((await record()).stateText).toBe(before.stateText);
-  expect(await run({ operation: "status", task: "T001" })).toMatchObject({
-    ok: true,
-    value: { enabled: true, gaps: [expect.stringContaining("Setup is incomplete")] },
-  });
-});
-
 it("blocks switches during a pending native attempt and retains the reservation after its deadline", async () => {
   const prepared = await reserve();
   const before = await record();

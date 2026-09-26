@@ -22,38 +22,6 @@ export function describeRanges(file: ContextFile): string {
   return `:${shown}${more}`;
 }
 
-/** One line per file: `reason  path:12-48,90-140 (~350 tokens)`. */
-export function renderReadingPlan(pack: ContextPack): string[] {
-  const lines = pack.files.map(
-    (file) =>
-      `  ${file.reason.padEnd(22)} ${file.path}${describeRanges(file)}` +
-      (file.estimatedTokens > 0 ? ` (~${file.estimatedTokens} tokens)` : ""),
-  );
-
-  const previewLimit = pack.omissionPreviewLimit ?? PRINTED_OMISSIONS;
-  for (const entry of pack.omitted.slice(0, previewLimit)) {
-    lines.push(`  ${"omitted".padEnd(22)} ${entry.path} (${entry.reason}; ${entry.detail})`);
-  }
-
-  if (pack.omitted.length > previewLimit) {
-    lines.push(
-      `  ${pack.omitted.length} omissions total; full ledger: ${pack.artifactRef ?? "context artifact"}#/omitted`,
-    );
-  }
-  if (pack.budgetStatus === "essential-overflow") {
-    lines.push(
-      "",
-      "Required context exceeds the token budget; optional files were omitted. Increase the budget or narrow the task contract before adding more context.",
-    );
-  }
-
-  if (pack.unknowns.length > 0) {
-    lines.push("", "Not known — do not assume:", ...pack.unknowns.map((note) => `  ${note}`));
-  }
-
-  return lines;
-}
-
 /** The failure this pack answers, printed so a text-only agent still sees it. */
 export function renderAttemptFeedback(pack: ContextPack): string[] {
   const feedback = pack.attemptFeedback;
@@ -76,16 +44,6 @@ export function renderAttemptFeedback(pack: ContextPack): string[] {
   }
 
   return lines;
-}
-
-/** One honest explanation of graph state for CLI and MCP delivery. */
-export function renderGraphStatus(pack: ContextPack): string {
-  if (pack.staleIndex) return pack.staleIndex;
-  if (pack.graphAvailable) return "";
-  if (pack.graphDeferred) {
-    return "Repository graph intentionally deferred: no indexable project source exists yet.";
-  }
-  return "No repository index yet, so selection used file paths only. Run: visp index";
 }
 
 /**

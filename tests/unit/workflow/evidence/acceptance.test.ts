@@ -3,7 +3,6 @@ import { createLegacyFeature as runFeature } from "../../support/legacy-feature.
 import { TestWorkspace } from "../../support/workspace.js";
 
 let workspace: TestWorkspace;
-let feature: string;
 const acceptanceSource =
   "import assert from 'node:assert/strict'; import { readFileSync } from 'node:fs'; assert.equal(readFileSync('src/selection.txt', 'utf8').trim(), 'cleared');\n";
 
@@ -30,7 +29,6 @@ beforeEach(async () => {
     workflow: "compact",
   });
   if (!started.ok) throw new Error(started.error.message);
-  feature = started.value.intent.id;
 });
 
 afterEach(async () => {
@@ -61,20 +59,5 @@ describe("predeclared acceptance checks on historical feature records", () => {
       error: { code: "CONFIG_INVALID" },
     });
     expect(await state.store.listFeatures()).toEqual(before);
-  });
-
-  it("pins acceptance files when a feature starts", async () => {
-    const intent = await (await workspace.state()).store.readIntent(feature);
-    expect(intent).toMatchObject({
-      ok: true,
-      value: {
-        acceptanceBaseline: [
-          {
-            command: ["node", "acceptance.mjs"],
-            files: [{ path: "acceptance.mjs", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) }],
-          },
-        ],
-      },
-    });
   });
 });

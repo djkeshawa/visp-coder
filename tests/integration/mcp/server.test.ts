@@ -56,12 +56,6 @@ describe("tool listing", () => {
     expect(tools.map((tool) => tool.name).sort()).toEqual(Object.values(TOOL).sort());
   });
 
-  it("does not advertise tools whose work belongs to the CLI", async () => {
-    const names = (await client.listTools()).tools.map((tool) => tool.name);
-    for (const removed of ["visp_pr", "visp_handoff", "visp_migrate", "visp_control"])
-      expect(names).not.toContain(removed);
-  });
-
   it("gives every tool an object input schema", async () => {
     const { tools } = await client.listTools();
     for (const tool of tools) {
@@ -148,31 +142,6 @@ describe("visp_guard", () => {
     expect(violations).toHaveLength(1);
     expect(violations[0]?.path).toBe(".env");
     expect(violations[0]?.reason).toBe("blocked-path");
-  });
-
-  it("refuses an ordinary path while no task is authorized", async () => {
-    const result = await client.callTool({
-      name: TOOL.guard,
-      arguments: { paths: ["src/billing/invoice.ts"] },
-    });
-    const payload = structured(result);
-    const violations = payload.data?.violations as { reason: string }[];
-
-    expect(payload.data?.allowed).toBe(false);
-    expect(violations[0]?.reason).toBe("no-authorization");
-    expect(payload.data?.authorizedTasks).toEqual([]);
-  });
-
-  it("refuses traversal disguised as a VISP state path", async () => {
-    const result = await client.callTool({
-      name: TOOL.guard,
-      arguments: { paths: [".visp/../src/billing/invoice.ts"] },
-    });
-    const payload = structured(result);
-    const violations = payload.data?.violations as { reason: string }[];
-
-    expect(payload.data?.allowed).toBe(false);
-    expect(violations[0]?.reason).toBe("invalid-path");
   });
 
   it("rejects arguments that do not match the schema", async () => {

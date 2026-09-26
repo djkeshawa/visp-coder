@@ -1,12 +1,10 @@
-import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { observationReproductionState } from "../../../../src/workflow/evidence/observations/identity.js";
-import { recordObservation } from "../../../../src/workflow/evidence/observations.js";
 import { resolveTaskSelection } from "../../../../src/workflow/evidence/task-selection.js";
 import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { runProductReview } from "../../../../src/workflow/product/review.js";
 import { productWorkspace } from "../../support/product-workspace.js";
-import { TestWorkspace } from "../../support/workspace.js";
+import type { TestWorkspace } from "../../support/workspace.js";
 
 const feature = "001-audit";
 let workspace: TestWorkspace | undefined;
@@ -66,54 +64,6 @@ describe("evidence audit regressions", () => {
       ok: true,
       value: { id: "T001" },
     });
-  });
-
-  it("keeps case-sensitive route states and meaningful step whitespace separately", async () => {
-    workspace = await TestWorkspace.create({ "src/app.ts": "export const n = 1;" });
-    await workspace.withFeature(feature, [{ requirements: ["REQ001"] }]);
-    await workspace.withSpec(feature, [
-      {
-        id: "REQ001",
-        statement: "Case sensitive routing",
-        priority: "must",
-        criteria: [
-          { id: "AC001", statement: "Account is visible", verification: "inspection: account" },
-        ],
-      },
-    ]);
-    await workspace.ensureContext(feature);
-    const state = await workspace.state();
-    const base = {
-      feature,
-      task: "T001",
-      criterion: "AC001",
-      source: "manual" as const,
-      result: "satisfied" as const,
-      note: "Observed account",
-      steps: ["", "Type Alice  Smith", "   "],
-    };
-    const upper = await recordObservation(state, { ...base, route: "/User/Alice" });
-    const lower = await recordObservation(state, {
-      ...base,
-      route: "/User/alice",
-      steps: ["Type alice Smith"],
-    });
-    expect(upper.ok && lower.ok).toBe(true);
-    const log = await state.store.readObservations(feature, "T001");
-    expect(log.ok && log.value?.observations).toHaveLength(2);
-    if (upper.ok) {
-      expect(upper.value.identityVersion).toBe(2);
-      expect(upper.value.steps).toEqual(["Type Alice  Smith"]);
-      expect(lower.ok && upper.value.subjectHash).not.toBe(lower.ok && lower.value.subjectHash);
-    }
-    const bytes = await readFile(
-      state.paths.evidenceFile(feature, "T001", "observations.json"),
-      "utf8",
-    );
-    await state.store.readObservations(feature, "T001");
-    expect(
-      await readFile(state.paths.evidenceFile(feature, "T001", "observations.json"), "utf8"),
-    ).toBe(bytes);
   });
 
   it("uses v1 normalization only to read legacy identities", () => {

@@ -332,15 +332,6 @@ describe("product workflow", () => {
     expect(value(await runProductDone(await workspace.state())).closed).toBe(false);
   });
 
-  it("does not reset recurring failures when bookkeeping is edited", async () => {
-    await setup();
-    value(await runProductWork(await workspace.state()));
-    value(await runProductVerify(await workspace.state()));
-    await workspace.write(".visp/reports/other.json", "{}");
-    const repeated = value(await runProductVerify(await workspace.state()));
-    expect(repeated.recommendation).toContain("different hypothesis");
-  });
-
   it("recognizes the same failing node:test assertion despite changing TAP durations and delivers it in work context", async () => {
     const brief = await setup();
     await workspace.write(

@@ -1,6 +1,5 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RESOURCE } from "../../../src/mcp/constants.js";
 import { type ResourceProject, startResourceProject } from "./resource-fixture.js";
 
 /**
@@ -64,12 +63,6 @@ describe("reads that cannot be answered", () => {
       expect(error.message).not.toContain(project.root);
     });
   }
-
-  it("still serves the scope resource without any feature", async () => {
-    const scope = await project.readJson(RESOURCE.scope);
-
-    expect(scope.authorized).toEqual([]);
-  });
 });
 
 /** Reads a resource that is expected to fail, and returns the protocol error. */

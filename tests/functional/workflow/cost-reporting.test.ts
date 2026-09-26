@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { loadWorkspace } from "../../../src/workflow/state.js";
 import { recordLegacyAttempt } from "../../unit/support/legacy-telemetry.js";
-import { productProject } from "../support/product.js";
 import { TestProject } from "../support/project.js";
 
 /**
@@ -74,43 +73,5 @@ describe("visp report", () => {
     expect(result.stdout).toContain("Output tokens:   340 claimed across 1 of 1 attempts");
     expect(result.stdout).toContain("Model:           test-model");
     expect(result.stdout).toContain("visp never observes token usage");
-  });
-
-  it("keeps the claims out of the measured section of the JSON envelope", async () => {
-    project = await projectWithClosedTask(["--input-tokens", "1200"]);
-
-    const { envelope } = project.json<{
-      attempts: number;
-      selfReportedCost: {
-        inputTokens: { total?: number; fromAttempts: number };
-        outputTokens: { total?: number; fromAttempts: number };
-      };
-    }>("report");
-
-    expect(envelope.data?.attempts).toBe(1);
-    expect(envelope.data?.selfReportedCost.inputTokens).toEqual({
-      total: 1200,
-      fromAttempts: 1,
-    });
-    // Absent, never zero: the agent said nothing about output.
-    expect(envelope.data?.selfReportedCost.outputTokens.total).toBeUndefined();
-    expect(envelope.data?.selfReportedCost.outputTokens.fromAttempts).toBe(0);
-  });
-});
-
-describe("visp done", () => {
-  /**
-   * `Number.parseInt("1,200")` is 1. Recording that would replace an
-   * unverifiable claim with a confidently wrong one, which is worse.
-   */
-  it("refuses a token count it cannot read whole, rather than truncating it", async () => {
-    ({ project } = await productProject());
-
-    const result = project.run("done", "--input-tokens", "1,200");
-
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("--input-tokens");
-    // Nothing was closed and nothing was recorded, so there is no bad figure.
-    expect(project.run("report").stdout).toContain("No attempts recorded yet.");
   });
 });

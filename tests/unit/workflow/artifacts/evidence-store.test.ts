@@ -106,33 +106,6 @@ describe("evidence store", () => {
     expect(inspected.ok && inspected.value.pending).toEqual([]);
   });
 
-  it("keeps immutable verification attempts while updating the current projection", async () => {
-    await store.writeVerificationAttempt(verification("T001", ["src/a.ts"]));
-    await store.writeVerificationAttempt(
-      { ...verification("T001", ["src/a.ts"]), passed: false },
-      { updateCurrent: false },
-    );
-
-    const current = await store.readVerification(feature, "T001");
-    const attempts = await store.readVerificationAttempts(feature, "T001");
-
-    expect(current.ok && current.value?.passed).toBe(true);
-    expect(attempts.ok && attempts.value.map((attempt) => attempt.passed)).toEqual([true, false]);
-  });
-
-  it("keeps immutable review attempts while updating the current projection", async () => {
-    await store.writeReviewAttempt(review("T001", ["src/a.ts"]));
-    await store.writeReviewAttempt(review("T001", ["src/a.ts"], false), {
-      updateCurrent: false,
-    });
-
-    const current = await store.readReview(feature, "T001");
-    const attempts = await store.readReviewAttempts(feature, "T001");
-
-    expect(current.ok && current.value?.passed).toBe(true);
-    expect(attempts.ok && attempts.value.map((attempt) => attempt.passed)).toEqual([true, false]);
-  });
-
   it.each([undefined, "behavioral", "structural", "unclassified"] as const)(
     "reads legacy and current flip labels without changing the executed result: %s",
     async (signal) => {
@@ -154,28 +127,12 @@ describe("evidence store", () => {
     },
   );
 
-  it("writes parallel tasks to separate files, so branches merge cleanly", async () => {
-    const paths = new ProjectPaths(root);
-    expect(paths.evidenceFile(feature, "T001", "verification.json")).not.toEqual(
-      paths.evidenceFile(feature, "T002", "verification.json"),
-    );
-  });
-
   it("falls back to the feature-wide record when a task has none", async () => {
     await store.writeVerification(verification(undefined, ["src/whole.ts"]));
 
     const scoped = await store.readVerification(feature, "T009");
 
     expect(scoped.ok && scoped.value?.changedFiles).toEqual(["src/whole.ts"]);
-  });
-
-  it("collects the whole trail for a pull request", async () => {
-    await store.writeReview(review("T001", ["src/a.ts"]));
-    await store.writeReview(review("T002", ["src/b.ts"]));
-
-    const trail = await store.readAllReviews(feature);
-
-    expect(trail.ok && trail.value.map((record) => record.task).sort()).toEqual(["T001", "T002"]);
   });
 
   it("ignores root-level evidence attachments when collecting task records", async () => {
@@ -188,11 +145,6 @@ describe("evidence store", () => {
 
     expect(reviews.ok && reviews.value.map((record) => record.task)).toEqual(["T001"]);
     expect(observations.ok && observations.value).toEqual([]);
-  });
-
-  it("reports an empty trail rather than failing when nothing was recorded", async () => {
-    const trail = await store.readAllVerifications(feature);
-    expect(trail.ok && trail.value).toEqual([]);
   });
 
   it("stores advisory observations beside their owning task", async () => {

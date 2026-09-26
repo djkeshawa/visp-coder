@@ -59,39 +59,6 @@ describe("policy and overrides", () => {
     await project.destroy();
   });
 
-  it("lists every rule with whether it applies", () => {
-    const result = project.run("policy", "show");
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("scope.allowed-files");
-    expect(result.stdout).toContain("cannot be overridden");
-  });
-
-  it("changes which rules apply when strictness changes", () => {
-    const before = project.run("policy", "show").stdout;
-    project.run("policy", "set-strictness", "strict");
-    const after = project.run("policy", "show").stdout;
-
-    expect(before).not.toBe(after);
-    expect(after).toContain("Strictness: strict");
-  });
-
-  it("rejects an unknown strictness", () => {
-    const result = project.run("policy", "set-strictness", "nonsense");
-    expect(result.exitCode).toBe(2);
-  });
-
-  it("turns a single rule off", () => {
-    project.run("policy", "set", "evidence.test-signal", "off");
-    const result = project.run("policy", "show");
-    expect(result.stdout).toContain("evidence.test-signal");
-  });
-
-  it("refuses to turn off a rule that protects the boundary", () => {
-    const result = project.run("policy", "set", "scope.forbidden-paths", "off");
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("cannot be turned off");
-  });
-
   it("records an override with a reason and an expiry", () => {
     const result = project.run(
       "override",

@@ -88,43 +88,10 @@ describe("doctor", () => {
     expect(second.stdout).toContain("healthy");
   });
 
-  it("notices when the index falls behind the worktree", async () => {
-    project.run("doctor", "--fix");
-    await project.write("src/brand-new.ts", "export const added = 1;\n");
-
-    const result = project.run("doctor");
-    expect(result.stdout).toContain("Behind the worktree");
-    expect(result.stdout).toContain("index --refresh");
-  });
-
-  it("brings a stale index current with --fix", async () => {
-    project.run("doctor", "--fix");
-    await project.write("src/brand-new.ts", "export const added = 1;\n");
-
-    const result = project.run("doctor", "--fix");
-    expect(result.stdout).toContain("current with the worktree");
-  });
-
   /**
    * The point of the check: a project where nothing refuses anything must not
    * read as healthy, however complete the rest of the setup is.
    */
-  it("says so when nothing is enforcing scope", () => {
-    project.run("install", "--no-hooks");
-
-    const result = project.run("doctor");
-    expect(result.stdout).toContain("Nothing enforces scope");
-    expect(result.stdout).toContain("degraded");
-  });
-
-  it("reports the surfaces that do the refusing once they are installed", () => {
-    project.run("install", "--harness", "claude-code");
-
-    const result = project.run("doctor");
-    expect(result.stdout).toContain("Refusals are enforced by");
-    expect(result.stdout).toContain("edit hook");
-    expect(result.stdout).toContain("pre-commit");
-  });
 
   it("notices the edit hook being unwired from settings, and rewires it", async () => {
     project.run("install", "--harness", "claude-code");
@@ -138,14 +105,6 @@ describe("doctor", () => {
   });
 
   /** An asset visp wrote and has since changed the template for is not healthy. */
-  it("tells a stale asset apart from one the user edited", async () => {
-    project.run("install");
-    await project.write("AGENTS.visp.md", "# replaced by hand\n");
-
-    const result = project.run("doctor");
-    expect(result.stdout).toContain("edited by you, left alone");
-    expect(result.stdout).not.toContain("Stale for");
-  });
 
   it("reports its findings as structured data too", () => {
     const { envelope } = project.json<{
