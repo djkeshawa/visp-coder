@@ -36,6 +36,7 @@
 - Critic packets summarize obsolete capture notices while keeping current image failures; repair handoffs link findings to cited runner observations and the replay command; the visual checkpoint recognizes current independent outcome assessments; graph entries return to context when oversized excerpts are dropped.
 
 ### Removed
+- Unused source: the historical observation writer (`recordObservation`, about 550 lines), the unused half of the legacy `ArtifactStore` (attempt, trail, pull-request, project and acceptance readers and writers), `evidence-persistence.ts`, and a dozen functions and constants nothing called. Tests that arrange historical records use equivalents in `tests/unit/support`.
 - The stage workflow (`research`, `spec`, `plan`, `tasks`), `context`, `gate` and other commands, tools, library exports and configuration keys replaced by the product loop. See [migration](docs/migration.md) for replacements and `visp-migrate` for upgrading saved history.
 
 ## 0.4.0-beta.3 - 2026-09-15

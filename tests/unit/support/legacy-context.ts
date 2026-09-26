@@ -20,7 +20,7 @@ import type {
 } from "../../../src/workflow/artifacts/context.js";
 import { findTask, type Task, type TaskGraph } from "../../../src/workflow/artifacts/tasks.js";
 import { stableContextHash } from "../../../src/workflow/stages/context/digest.js";
-import { updateStatus, type WorkspaceState } from "../../../src/workflow/state.js";
+import type { WorkspaceState } from "../../../src/workflow/state.js";
 import { fitContextBudget } from "./legacy-context/budget.js";
 import { readContextContract } from "./legacy-context/contract.js";
 import { legacyContextDefaults } from "./legacy-context/defaults.js";
@@ -31,12 +31,15 @@ import { type Candidate, selectFiles } from "./legacy-context/select.js";
 import { extractSnippets } from "./legacy-context/snippets.js";
 import { sourceHash } from "./legacy-context/source-hash.js";
 import type { ContextOptions, ContextOutcome } from "./legacy-context/types.js";
+import { updateStatus } from "./writers.js";
 
 export type {
   ContextOptions,
   ContextOutcome,
   GraphFacts,
 } from "./legacy-context/types.js";
+
+import { legacyStore } from "./legacy-store.js";
 
 export async function buildContextPack(
   state: WorkspaceState,
@@ -97,7 +100,7 @@ async function resolveContextTask(
   state: WorkspaceState,
   options: ContextOptions,
 ): Promise<Result<ResolvedContextTask>> {
-  const graph = await state.store.readTasks(options.feature);
+  const graph = await legacyStore(state).readTasks(options.feature);
   if (!graph.ok) return graph;
 
   const task = findTask(graph.value, options.taskId);

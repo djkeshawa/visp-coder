@@ -10,8 +10,6 @@ import {
   readSkillBody,
   skillPath,
   upsert,
-  writeIndex,
-  writeSkillBody,
 } from "../../../src/skills/store.js";
 import type { WorkspaceState } from "../../../src/workflow/state.js";
 
@@ -119,16 +117,13 @@ describe("skill index paths", () => {
   it.each([
     ["skills-root", "the skills root"],
     ["index-file", "the final index file"],
-  ] as const)("refuses index reads and writes through %s symlinks", async (kind, label) => {
+  ] as const)("refuses index reads and upserts through %s symlinks", async (kind, label) => {
     const fixture = await createIndexSymlinkFixture(kind);
 
     const read = await readIndex(fixture.state);
     expect(read.ok, `read through ${label}`).toBe(false);
     if (read.ok) return;
     expect(read.error.message).toContain("symlink");
-
-    const written = await writeIndex(fixture.state, { ...index, skills: [record] });
-    expect(written.ok, `write through ${label}`).toBe(false);
 
     const inserted = await upsert(fixture.state, record);
     expect(inserted.ok, `upsert through ${label}`).toBe(false);
@@ -205,8 +200,8 @@ describe("skill paths", () => {
     const state = { paths: { state: join(projectRoot, ".visp") } } as WorkspaceState;
     const content = "## Procedure\n\nDo the thing.\n";
 
-    const written = await writeSkillBody(state, "safe-skill", content);
-    expect(written.ok).toBe(true);
+    await mkdir(join(projectRoot, ".visp", "skills", "safe-skill"), { recursive: true });
+    await writeFile(skillPath(state, "safe-skill"), content);
 
     const read = await readSkillBody(state, "safe-skill");
     expect(read.ok && read.value).toBe(content);
@@ -218,16 +213,13 @@ describe("skill paths", () => {
     ["skills-root", "the skills root"],
     ["skill-directory", "an individual skill directory"],
     ["skill-file", "the final skill file"],
-  ] as const)("refuses reads and writes through %s symlinks", async (kind, label) => {
+  ] as const)("refuses reads through %s symlinks", async (kind, label) => {
     const fixture = await createSymlinkFixture(kind);
 
     const read = await readSkillBody(fixture.state, "safe-skill");
     expect(read.ok, `read through ${label}`).toBe(false);
     if (read.ok) return;
     expect(read.error.message).toContain("symlink");
-
-    const write = await writeSkillBody(fixture.state, "safe-skill", "changed\n");
-    expect(write.ok, `write through ${label}`).toBe(false);
     expect(await readFile(fixture.externalFile, "utf8")).toBe(fixture.original);
   });
 });

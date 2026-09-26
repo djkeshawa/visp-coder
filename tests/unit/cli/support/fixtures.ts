@@ -1,5 +1,6 @@
 import { now } from "../../../../src/workflow/artifacts/common.js";
 import type { ImplementMarker } from "../../../../src/workflow/artifacts/evidence.js";
+import { legacyStore } from "../../support/legacy-store.js";
 import type { TestWorkspace } from "../../support/workspace.js";
 
 /**
@@ -14,7 +15,7 @@ export async function authorize(
   marker: Partial<ImplementMarker> & Pick<ImplementMarker, "feature" | "task">,
 ): Promise<void> {
   const state = await workspace.state();
-  const written = await state.store.writeImplementMarker({
+  const written = await legacyStore(state).writeImplementMarker({
     kind: "implement-marker",
     createdAt: now(),
     allowedFiles: ["src/**/*.ts"],

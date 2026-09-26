@@ -56,12 +56,6 @@ export function repositoryRequiredError(gitMetadataPresent?: boolean): VispError
   );
 }
 
-/** Whether anything is tracked at all — an empty repository has nothing to index. */
-export async function hasTrackedFiles(cwd: string): Promise<boolean> {
-  const result = await run("git", ["ls-files", "-z"], { cwd, env: GIT_ENV });
-  return result.ok && result.value.exitCode === 0 && result.value.stdout.trim() !== "";
-}
-
 /** Repository-relative tracked paths, sorted by git. */
 export async function trackedFiles(cwd: string): Promise<Result<string[]>> {
   const result = await run("git", ["ls-files", "-z"], { cwd, env: GIT_ENV });

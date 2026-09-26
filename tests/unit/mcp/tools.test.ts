@@ -13,6 +13,7 @@ import { registerTools } from "../../../src/mcp/tools/index.js";
 import { now } from "../../../src/workflow/artifacts/common.js";
 import { runInit } from "../../../src/workflow/stages/init.js";
 import { runJson } from "../cli/support/cli.js";
+import { legacyStore } from "../support/legacy-store.js";
 import { TestWorkspace, task } from "../support/workspace.js";
 
 type Handler = (args: Record<string, unknown>) => Promise<CallToolResult>;
@@ -181,7 +182,7 @@ describe("historical scope authorization", () => {
       await workspace.withFeature("001-closed", [task({ status: "done" })]);
       const state = await workspace.state();
       for (const taskId of ["T001", "T999"]) {
-        const written = await state.store.writeImplementMarker({
+        const written = await legacyStore(state).writeImplementMarker({
           kind: "implement-marker",
           createdAt: now(),
           feature: "001-closed",

@@ -4,7 +4,9 @@ import { now } from "../../../src/workflow/artifacts/common.js";
 import type { Intent } from "../../../src/workflow/artifacts/feature.js";
 import { captureAcceptanceBaseline } from "../../../src/workflow/evidence/acceptance.js";
 import { nextFeatureId } from "../../../src/workflow/product/feature-id.js";
-import { updateStatus, type WorkspaceState } from "../../../src/workflow/state.js";
+import type { WorkspaceState } from "../../../src/workflow/state.js";
+import { legacyStore } from "./legacy-store.js";
+import { updateStatus } from "./writers.js";
 
 /** Historical fixture setup, deliberately separate from the active product workflow. */
 export async function createLegacyFeature(
@@ -29,7 +31,7 @@ export async function createLegacyFeature(
     evidenceContractsRequired: true,
     acceptanceBaseline: acceptance.value,
   };
-  const written = await state.store.writeIntent(intent);
+  const written = await legacyStore(state).writeIntent(intent);
   if (!written.ok) return written;
   const selected = await updateStatus(state, {
     activeFeature: intent.id,

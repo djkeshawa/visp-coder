@@ -1,13 +1,11 @@
 import { SOURCE_DELIVERY_GUIDANCE } from "../../workflow/delivery-guidance.js";
 
 /**
- * The catalog's existing provenance marker is retained for compatibility.
+ * Curated from an upstream source (SHA-256
+ * e791ca95d33ecb23d8ea27cac3f1cd978e93441b33d83af034fd9a98d786a48f) before VISP's amendments.
  * Keeping the body in TypeScript makes it part of tsup's dependency graph, so
  * published binaries do not depend on an unpackaged runtime asset.
  */
-export const RESEARCH_THE_CRAFT_BASE_HASH =
-  "e791ca95d33ecb23d8ea27cac3f1cd978e93441b33d83af034fd9a98d786a48f";
-
 export const RESEARCH_THE_CRAFT_CONTENT = `---
 name: research-the-craft
 description: Investigate load-bearing uncertainty before it becomes a design, implementation, or testing mistake. Start with repository evidence and search externally only for unresolved or version-sensitive facts.

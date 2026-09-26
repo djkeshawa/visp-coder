@@ -8,6 +8,7 @@ import { createServer } from "../../../../src/mcp/server.js";
 import { now } from "../../../../src/workflow/artifacts/common.js";
 import { productAcceptanceSchema } from "../../../../src/workflow/artifacts/product-acceptance.js";
 import { runJson } from "../../cli/support/cli.js";
+import { legacyStore } from "../../support/legacy-store.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
 const FEATURE = "001-product";
@@ -23,8 +24,8 @@ beforeEach(async () => {
   const state = await workspace.state();
   const intent = await state.store.readIntent(FEATURE);
   if (!intent.ok) throw new Error(intent.error.message);
-  await state.store.writeIntent({ ...intent.value, finalAcceptance: true });
-  await state.store.writeVerification({
+  await legacyStore(state).writeIntent({ ...intent.value, finalAcceptance: true });
+  await legacyStore(state).writeVerification({
     kind: "verification",
     createdAt: now(),
     feature: FEATURE,
@@ -35,7 +36,7 @@ beforeEach(async () => {
     changedFiles: ["src/model.cjs"],
     findings: [],
   });
-  await state.store.writeReview({
+  await legacyStore(state).writeReview({
     kind: "review",
     createdAt: now(),
     feature: FEATURE,

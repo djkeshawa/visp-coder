@@ -8,10 +8,7 @@ import { type Check, type DoctorRuntime, runChecks } from "../../../src/doctor/c
 import { applyFixes } from "../../../src/doctor/fix.js";
 import { indexRepository } from "../../../src/graph/index.js";
 import { ACTIVATION_END } from "../../../src/harness/activation.js";
-import {
-  CLAUDE_PRE_TOOL_USE_HOOK,
-  registerPreToolUseHook,
-} from "../../../src/harness/claude-settings.js";
+import { CLAUDE_PRE_TOOL_USE_HOOK } from "../../../src/harness/claude-settings.js";
 import {
   assetFingerprint,
   CLAUDE_SETTINGS_REGISTRATION,
@@ -21,11 +18,13 @@ import {
 import { readInstallState } from "../../../src/harness/install-state.js";
 import { CODEX_CONFIG_FILE } from "../../../src/harness/mcp-registration.js";
 import { planFor } from "../../../src/harness/targets.js";
-import { writeIndex } from "../../../src/skills/store.js";
+import { upsert } from "../../../src/skills/store.js";
 import { now } from "../../../src/workflow/artifacts/common.js";
 import { updateProductBrief } from "../../../src/workflow/product/index.js";
+import { legacyStore } from "../support/legacy-store.js";
 import { productWorkspace } from "../support/product-workspace.js";
 import { TestWorkspace, task } from "../support/workspace.js";
+import { registerPreToolUseHook } from "../support/writers.js";
 
 /**
  * Doctor is the report a project trusts when deciding whether it is protected,
@@ -703,7 +702,7 @@ describe("authorization recovery", () => {
   it("reports and transactionally removes a marker for a completed task", async () => {
     await workspace.withFeature("001-closed", [task({ id: "T001", status: "done" })]);
     const state = await workspace.state();
-    const written = await state.store.writeImplementMarker({
+    const written = await legacyStore(state).writeImplementMarker({
       kind: "implement-marker",
       createdAt: now(),
       feature: "001-closed",
@@ -962,16 +961,14 @@ describe("the skill library check", () => {
 
   it("summarizes the lifecycle states that are present", async () => {
     const state = await workspace.state();
-    const written = await writeIndex(state, {
-      kind: "skills",
-      createdAt: now(),
-      skills: [
-        skillRecord("one-skill", "admitted"),
-        skillRecord("two-skill", "proposed"),
-        skillRecord("three-skill", "proposed"),
-      ],
-    });
-    expect(written.ok).toBe(true);
+    for (const record of [
+      skillRecord("one-skill", "admitted"),
+      skillRecord("two-skill", "proposed"),
+      skillRecord("three-skill", "proposed"),
+    ]) {
+      const written = await upsert(state, record);
+      expect(written.ok).toBe(true);
+    }
 
     const result = await check("skill library");
 

@@ -9,8 +9,8 @@ import {
   planPreToolUseRegistration,
   planPreToolUseUnregistration,
   preToolUseRegistration,
-  registerPreToolUseHook,
 } from "../../../src/harness/claude-settings.js";
+import { registerPreToolUseHook } from "../support/writers.js";
 
 const HOOK_PATH = ".visp/hooks/claude-pretooluse.mjs";
 

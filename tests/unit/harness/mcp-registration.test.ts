@@ -10,8 +10,8 @@ import {
   mcpConfigFile,
   OPENCODE_CONFIG_FILE,
   planMcpUnregistration,
-  registerMcpServer,
 } from "../../../src/harness/mcp-registration.js";
+import { registerMcpServer } from "../support/writers.js";
 
 let root = "";
 

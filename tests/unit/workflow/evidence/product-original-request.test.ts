@@ -9,6 +9,7 @@ import {
   productStatePath,
   readProductRecord,
 } from "../../../../src/workflow/product/store.js";
+import { legacyStore } from "../../support/legacy-store.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
@@ -32,7 +33,7 @@ describe("immutable product request", () => {
     const legacy = value(await state.store.readIntent(brief.feature));
     const replacement = "The old original request no longer matters";
     value(
-      await state.store.writeIntent({
+      await legacyStore(state).writeIntent({
         ...legacy,
         sourceBrief: replacement,
         sourceBriefHash: sha256(replacement),
@@ -98,7 +99,7 @@ describe("immutable product request", () => {
     const request = "  Keep the Exact User Wording.\nIncluding this line.  ";
     const legacy = value(await state.store.readIntent(feature));
     value(
-      await state.store.writeIntent({
+      await legacyStore(state).writeIntent({
         ...legacy,
         sourceBrief: request,
         sourceBriefHash: sha256(request),

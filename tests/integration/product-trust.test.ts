@@ -24,6 +24,7 @@ import {
   readProductRecord,
 } from "../../src/workflow/product/store.js";
 import { productSourceDigest, productSourceSnapshot } from "../../src/workflow/product/subject.js";
+import { legacyStore } from "../unit/support/legacy-store.js";
 import { moduleFeedback } from "../unit/support/product-feedback.js";
 import { recordedProductJourney } from "../unit/support/product-journey.js";
 import { productWorkspace } from "../unit/support/product-workspace.js";
@@ -239,9 +240,9 @@ describe("transactional legacy migration", () => {
   it("preserves priorities, visual intent, behavior examples, research evidence and unresolved questions", async () => {
     await legacy();
     const state = await workspace.state();
-    const spec = value(await state.store.readSpec(LEGACY));
+    const spec = value(await legacyStore(state).readSpec(LEGACY));
     value(
-      await state.store.writeSpec({
+      await legacyStore(state).writeSpec({
         ...spec,
         requirements: [
           {
@@ -304,7 +305,7 @@ describe("transactional legacy migration", () => {
       }),
     );
     value(
-      await state.store.writeResearch({
+      await legacyStore(state).writeResearch({
         kind: "research",
         createdAt: new Date().toISOString(),
         feature: LEGACY,
@@ -350,9 +351,9 @@ describe("transactional legacy migration", () => {
       }),
     );
     await workspace.withPlan(LEGACY);
-    const plan = value(await state.store.readPlan(LEGACY));
+    const plan = value(await legacyStore(state).readPlan(LEGACY));
     value(
-      await state.store.writePlan({
+      await legacyStore(state).writePlan({
         ...plan,
         decisions: [
           { statement: "Keep one event handler", rationale: "Prevent divergent transitions" },
@@ -425,7 +426,7 @@ describe("transactional legacy migration", () => {
     await legacy();
     const state = await workspace.state();
     const intent = value(await state.store.readIntent(LEGACY));
-    value(await state.store.writeIntent({ ...intent, finalAcceptance: true }));
+    value(await legacyStore(state).writeIntent({ ...intent, finalAcceptance: true }));
     await workspace.write(
       `.visp/features/${LEGACY}/acceptance.json`,
       JSON.stringify({

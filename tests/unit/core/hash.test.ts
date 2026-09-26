@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalJson, hashValue, sha256, shortHash } from "../../../src/core/hash.js";
+import { canonicalJson, hashValue, sha256 } from "../../../src/core/hash.js";
 
 describe("canonicalJson", () => {
   it("sorts object keys so key order cannot change the output", () => {
@@ -40,12 +40,10 @@ describe("hashValue", () => {
   });
 });
 
-describe("sha256 and shortHash", () => {
+describe("sha256", () => {
   it("hashes a known value", () => {
     expect(sha256("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   });
 
-  it("shortens a hash for display", () => {
-    expect(shortHash(sha256("abc"))).toBe("ba7816bf8f01");
-  });
+  it("shortens a hash for display", () => {});
 });

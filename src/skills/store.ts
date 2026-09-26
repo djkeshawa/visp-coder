@@ -125,11 +125,6 @@ function normalizeLegacyEvidence(record: SkillRecord): SkillRecord {
   };
 }
 
-export async function writeIndex(state: WorkspaceState, index: SkillIndex): Promise<Result<void>> {
-  const path = checkedIndexPath(state);
-  return path.ok ? projectFiles(state).writeJson(path.value, index) : path;
-}
-
 export async function upsert(state: WorkspaceState, record: SkillRecord): Promise<Result<void>> {
   return persistSkillRecord(state, record);
 }
@@ -225,15 +220,6 @@ export async function readSkillBody(
 ): Promise<Result<string | undefined>> {
   const paths = lexicalSkillPaths(state, id);
   return paths.ok ? projectFiles(state).readTextIfExists(paths.value.file) : paths;
-}
-
-export async function writeSkillBody(
-  state: WorkspaceState,
-  id: string,
-  content: string,
-): Promise<Result<void>> {
-  const paths = lexicalSkillPaths(state, id);
-  return paths.ok ? projectFiles(state).writeTextAtomic(paths.value.file, content) : paths;
 }
 
 function projectFiles(state: WorkspaceState): ProjectFileSystem {

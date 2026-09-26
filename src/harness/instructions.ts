@@ -5,9 +5,6 @@ import { commandMap } from "./command-guide.js";
 export const TOOL_ACCESS_GUIDANCE =
   "Use VISP MCP tools when connected: `visp_next({})`, then `visp_<command>` schemas; otherwise use CLI `visp next`.";
 
-/** Shared across hosts: decisions are authored once; VISP maintains the accounting. */
-export const QUERY_OPERATIONS_LINE = "callers | callees | testsFor | impact | search";
-
 export const COMPACT_RULES = `- Keep original request with --source-brief. Preserve outcomes, expectations and scope.allowed.
 - Run visp work before editing; build a small runnable behavior. Each functional outcome needs a check: a test command, or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
 - Stateful work: act, settle, act again; check failure and restart.

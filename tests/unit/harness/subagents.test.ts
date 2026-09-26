@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { QUERY_OPERATIONS_LINE } from "../../../src/harness/instructions.js";
 import { renderClaudeSubagent, SUBAGENTS } from "../../../src/harness/subagents.js";
 import { planFor } from "../../../src/harness/targets.js";
 
@@ -23,7 +22,7 @@ describe("subagents", () => {
    */
   it("teaches the scout every query operation the shared rules name", () => {
     const scout = SUBAGENTS.find((agent) => agent.name === "visp-scout");
-    for (const operation of QUERY_OPERATIONS_LINE.split(" | ")) {
+    for (const operation of ["callers", "callees", "testsFor", "impact", "search"]) {
       expect(scout?.prompt).toContain(`query ${operation}`);
     }
   });

@@ -4,6 +4,7 @@ import { ok, type Result } from "../../../../src/core/result.js";
 import type { ContextContract, ContextPack } from "../../../../src/workflow/artifacts/context.js";
 import { type Task, validationChecksFor } from "../../../../src/workflow/artifacts/tasks.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
+import { legacyStore } from "../legacy-store.js";
 
 export async function readContextContract(
   state: WorkspaceState,
@@ -13,7 +14,7 @@ export async function readContextContract(
   const [intent, spec, plan] = await Promise.all([
     state.store.readIntent(feature),
     state.store.readSpecIfExists(feature),
-    state.store.readPlanIfExists(feature),
+    legacyStore(state).readPlanIfExists(feature),
   ]);
   if (!intent.ok) return intent;
   if (!spec.ok) return spec;

@@ -1,6 +1,4 @@
-import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { RecoveringProjectFileSystem } from "../core/file-transaction.js";
 import { ProjectFileSystem } from "../core/fs.js";
 import { ok, type Result } from "../core/result.js";
 
@@ -108,24 +106,6 @@ function entryFor(hookPath: string): HookEntry {
     matcher: PRE_TOOL_USE_MATCHER,
     hooks: [{ type: "command", command: hookCommand(hookPath) }],
   };
-}
-
-export async function registerPreToolUseHook(
-  root: string,
-  hookPath: string,
-  force: boolean,
-): Promise<Result<RegistrationStatus>> {
-  const path = join(root, CLAUDE_SETTINGS_FILE);
-  const files = new RecoveringProjectFileSystem(root);
-
-  const current = await files.readTextIfExists(path);
-  if (!current.ok) return current;
-  const planned = planPreToolUseRegistration(current.value, hookPath, force);
-  if (!planned.ok) return planned;
-  if (planned.value.content === undefined) return ok(planned.value.status);
-  return files
-    .writeTextAtomic(path, planned.value.content)
-    .then((written) => (written.ok ? ok(planned.value.status) : written));
 }
 
 export interface PlannedClaudeRegistration {

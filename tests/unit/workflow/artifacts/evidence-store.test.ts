@@ -8,7 +8,7 @@ import {
 } from "../../../../src/core/file-transaction.js";
 import { ProjectPaths } from "../../../../src/core/paths.js";
 import type { Review, Verification } from "../../../../src/workflow/artifacts/evidence.js";
-import { ArtifactStore } from "../../../../src/workflow/artifacts/store.js";
+import { LegacyArtifactStore } from "../../support/legacy-store.js";
 
 /**
  * Two tasks worked in parallel used to write the same `verification.json`, so
@@ -50,12 +50,12 @@ function review(task: string, reviewedFiles: string[], passed = true): Review {
 describe("evidence store", () => {
   let root: string;
   let outside: string;
-  let store: ArtifactStore;
+  let store: LegacyArtifactStore;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "visp-evidence-"));
     outside = await mkdtemp(join(tmpdir(), "visp-evidence-outside-"));
-    store = new ArtifactStore(new ProjectPaths(root));
+    store = new LegacyArtifactStore(new ProjectPaths(root));
   });
 
   afterEach(async () => {

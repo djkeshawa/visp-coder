@@ -3,10 +3,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, expect, it } from "vitest";
 import { createServer } from "../../../../src/mcp/server.js";
 import { observationBundle } from "../../../../src/workflow/evidence/observation-delivery.js";
-import { recordObservation } from "../../../../src/workflow/evidence/observations.js";
 import { readObservations } from "../../../../src/workflow/evidence/observations-reader.js";
 import { runProductMigrate } from "../../../../src/workflow/product/migration.js";
 import { runJson } from "../../cli/support/cli.js";
+import { recordObservation } from "../../support/legacy-observations.js";
 import { pngHeader, TestWorkspace, task } from "../../support/workspace.js";
 
 let workspace: TestWorkspace | undefined;

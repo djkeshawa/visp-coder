@@ -1,57 +1,7 @@
 import { createHash } from "node:crypto";
-import type { ObservationAttachment } from "../../artifacts/observations.js";
-import type { RecordObservationOptions } from "../observations.js";
-
-export function validateVisualContext(options: RecordObservationOptions): string | undefined {
-  if (options.source !== "browser") return undefined;
-  if ((options.artifacts ?? []).length === 0) {
-    return "A browser observation requires at least one screenshot or video artifact";
-  }
-  if (!(options.artifacts ?? []).every(isVisualArtifact)) {
-    return "Browser artifacts must be screenshots or videos (png, jpg, jpeg, webp, gif, mp4, or webm)";
-  }
-  if (!options.viewport) return "A browser observation requires the viewport width and height";
-  if (!options.route?.trim()) return "A browser observation requires the observed route or URL";
-  if ((options.steps ?? []).filter((step) => step.trim() !== "").length === 0) {
-    return "A browser observation requires at least one reproduction step";
-  }
-  return undefined;
-}
-
-function isVisualArtifact(path: string): boolean {
-  return /\.(?:png|jpe?g|webp|gif|mp4|webm)$/i.test(path);
-}
 
 export function digestBytes(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-export function validateBrowserAttachmentDimensions(
-  options: RecordObservationOptions,
-  attachments: readonly Pick<ObservationAttachment, "sourcePath" | "dimensions">[],
-): string | undefined {
-  if (options.source !== "browser" || !options.viewport) return undefined;
-  const capture = options.capture ?? "viewport";
-  for (const attachment of attachments) {
-    if (!isImageArtifact(attachment.sourcePath) || !attachment.dimensions) continue;
-    const scale = attachment.dimensions.width / options.viewport.width;
-    if (!Number.isFinite(scale) || scale < 1 || scale > 4) {
-      return `${attachment.sourcePath} width does not match viewport ${options.viewport.width}x${options.viewport.height}`;
-    }
-    const expectedHeight = options.viewport.height * scale;
-    const heightMatches =
-      capture === "full-page"
-        ? attachment.dimensions.height + 1 >= expectedHeight
-        : Math.abs(attachment.dimensions.height - expectedHeight) <= 1;
-    if (!heightMatches) {
-      return `${attachment.sourcePath} (${attachment.dimensions.width}x${attachment.dimensions.height}) does not match viewport ${options.viewport.width}x${options.viewport.height} for ${capture} capture`;
-    }
-  }
-  return undefined;
-}
-
-export function isImageArtifact(path: string): boolean {
-  return /\.(?:png|jpe?g|webp|gif)$/i.test(path);
 }
 
 export function imageDimensions(bytes: Buffer): { width: number; height: number } | undefined {

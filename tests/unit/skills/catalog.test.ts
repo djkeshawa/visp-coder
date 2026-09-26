@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { verificationCommand } from "../../../src/skills/admit.js";
-import {
-  BUNDLED_SKILL_BASE_HASHES,
-  bundledSkill,
-  skillCatalog,
-} from "../../../src/skills/catalog.js";
+import { bundledSkill, skillCatalog } from "../../../src/skills/catalog.js";
 import { readAppliesTo } from "../../../src/skills/schema.js";
 import { fingerprint, parseSkill, skillDescription } from "../../../src/skills/store.js";
 
@@ -41,9 +37,6 @@ describe("bundled skill catalog", () => {
     expect(skill.summary.description).toBe(skillDescription(document.value));
     expect(skill.summary.stages).toEqual(appliesTo.value?.stage);
     expect(skill.summary.contentHash).toBe(fingerprint(skill.content));
-    expect(BUNDLED_SKILL_BASE_HASHES[skill.summary.id]).toBe(
-      "e791ca95d33ecb23d8ea27cac3f1cd978e93441b33d83af034fd9a98d786a48f",
-    );
   });
 
   it("investigates load-bearing uncertainty instead of imitating references", () => {

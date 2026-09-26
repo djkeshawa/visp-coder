@@ -3,11 +3,7 @@ import { loadConfig } from "../config/load.js";
 import { defaultConfig, type VispConfig } from "../config/schema.js";
 import { DIR, FILE, STATE_DIR } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
-import {
-  RecoveringProjectFileSystem,
-  recoverFileTransactions,
-  withStateMutation,
-} from "../core/file-transaction.js";
+import { RecoveringProjectFileSystem, recoverFileTransactions } from "../core/file-transaction.js";
 import type { ProjectFileSystem } from "../core/fs.js";
 import { currentBranch, headCommit, isRepository, workingTreeChanges } from "../core/git.js";
 import { parseFeatureId } from "../core/input.js";
@@ -413,24 +409,6 @@ function markerFor(feature: string, task: Task): ImplementMarker {
     expectedFiles: task.expectedFiles,
     forbiddenFiles: task.forbiddenFiles,
   };
-}
-
-/** Records the active feature, task, and last command. */
-export async function updateStatus(
-  state: WorkspaceState,
-  changes: Partial<Omit<Status, "kind" | "createdAt" | "updatedAt">>,
-): Promise<Result<void>> {
-  return withStateMutation(state.paths.root, async () => {
-    const stored = await state.store.readStatusIfExists();
-    if (!stored.ok) return stored;
-    const current = stored.value ??
-      state.status ?? {
-        kind: "status" as const,
-        createdAt: now(),
-        updatedAt: now(),
-      };
-    return state.store.writeStatus({ ...current, ...changes, updatedAt: now() });
-  });
 }
 
 export { defaultConfig };

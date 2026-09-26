@@ -21,6 +21,7 @@ import {
 } from "../../src/workflow/product/index.js";
 import { authorizationPath, readProductRecord } from "../../src/workflow/product/store.js";
 import { productSourceDigest } from "../../src/workflow/product/subject.js";
+import { legacyStore } from "../unit/support/legacy-store.js";
 import { moduleFeedback } from "../unit/support/product-feedback.js";
 import { recordedProductJourney } from "../unit/support/product-journey.js";
 import { pngHeader, TestWorkspace } from "../unit/support/workspace.js";
@@ -163,7 +164,7 @@ describe("product workflow", () => {
       error: { code: "TASK_NOT_FOUND" },
     });
     value(
-      await state.store.writeStatus({
+      await legacyStore(state).writeStatus({
         kind: "status",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -566,7 +567,7 @@ describe("legacy migration", () => {
     await legacy();
     const state = await workspace.state();
     value(
-      await state.store.writeImplementMarker({
+      await legacyStore(state).writeImplementMarker({
         kind: "implement-marker",
         feature: FEATURE,
         task: "T001",
@@ -609,7 +610,7 @@ describe("legacy migration", () => {
     await legacy("done");
     const state = await workspace.state();
     const intent = value(await state.store.readIntent(FEATURE));
-    value(await state.store.writeIntent({ ...intent, finalAcceptance: true }));
+    value(await legacyStore(state).writeIntent({ ...intent, finalAcceptance: true }));
     value(await runProductMigrate(state));
     const record = value(await readProductRecord(state));
     expect(record.state.slices.T001?.status).toBe("legacy-closed");

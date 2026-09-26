@@ -15,6 +15,7 @@ import { loadWorkspace, type WorkspaceState } from "../../../src/workflow/state.
 import { seedPlan, seedSpec, seedTaskGraph } from "../../unit/support/legacy-artifacts.js";
 import { buildContextPack } from "../../unit/support/legacy-context.js";
 import { createLegacyFeature as runFeature } from "../../unit/support/legacy-feature.js";
+import { legacyStore } from "../../unit/support/legacy-store.js";
 import { productWorkspace } from "../../unit/support/product-workspace.js";
 
 /**
@@ -156,9 +157,9 @@ export async function seedFeature(root: string, goal = "add login"): Promise<See
   const plan = examplePlan(id);
   const tasks = exampleTasks(id);
 
-  await expectOk(state.store.writeSpec(spec), "spec");
-  await expectOk(state.store.writePlan(plan), "plan");
-  await expectOk(state.store.writeTasks(tasks), "tasks");
+  await expectOk(legacyStore(state).writeSpec(spec), "spec");
+  await expectOk(legacyStore(state).writePlan(plan), "plan");
+  await expectOk(legacyStore(state).writeTasks(tasks), "tasks");
 
   // Compiling the pack is also what makes T002 the active task on disk.
   const built = await buildContextPack(await workspace(root), {
@@ -183,15 +184,15 @@ export async function seedDraftFeature(root: string, goal = "add search"): Promi
 
   const state = await workspace(root);
   await expectOk(
-    state.store.writeIntent({ ...started.value.intent, researchRequired: false }),
+    legacyStore(state).writeIntent({ ...started.value.intent, researchRequired: false }),
     "legacy intent",
   );
 
   const spec = seedSpec(id);
   const plan = seedPlan(id);
-  await expectOk(state.store.writeSpec(spec), "draft spec");
-  await expectOk(state.store.writePlan(plan), "draft plan");
-  await expectOk(state.store.writeTasks(seedTaskGraph(id, spec, plan)), "draft tasks");
+  await expectOk(legacyStore(state).writeSpec(spec), "draft spec");
+  await expectOk(legacyStore(state).writePlan(plan), "draft plan");
+  await expectOk(legacyStore(state).writeTasks(seedTaskGraph(id, spec, plan)), "draft tasks");
   return id;
 }
 
@@ -210,7 +211,7 @@ export async function recordEvidence(
   const state = await workspace(root);
 
   await expectOk(
-    state.store.writeVerification({
+    legacyStore(state).writeVerification({
       kind: "verification",
       createdAt: "2026-01-01T00:00:00.000Z",
       feature,
@@ -225,7 +226,7 @@ export async function recordEvidence(
   );
 
   await expectOk(
-    state.store.writeReview({
+    legacyStore(state).writeReview({
       kind: "review",
       createdAt: "2026-01-01T00:00:00.000Z",
       feature,

@@ -10,8 +10,8 @@ import {
   loadWorkspace,
   loadWorkspaceForMutation,
   resolveFeature,
-  updateStatus,
 } from "../../../src/workflow/state.js";
+import { legacyStore } from "../support/legacy-store.js";
 import { TestWorkspace, task } from "../support/workspace.js";
 
 const FEATURE = "001-state";
@@ -256,7 +256,7 @@ describe("authorization and status adapters", () => {
   it("returns open markers directly when completed-task expansion is disabled", async () => {
     await workspace.withFeature(FEATURE);
     const state = await workspace.state();
-    await state.store.writeImplementMarker({
+    await legacyStore(state).writeImplementMarker({
       kind: "implement-marker",
       createdAt: now(),
       feature: FEATURE,
@@ -271,18 +271,6 @@ describe("authorization and status adapters", () => {
     expect(scopes.ok).toBe(true);
     if (scopes.ok) expect(scopes.value.map((marker) => marker.task)).toEqual(["T001"]);
   });
-
-  it("creates status when no developer-local status exists", async () => {
-    const state = await workspace.state();
-    await state.files.removeFile(state.paths.status);
-    const withoutStatus = await workspace.state();
-
-    const written = await updateStatus(withoutStatus, { lastCommand: "status-test" });
-
-    expect(written.ok).toBe(true);
-    const refreshed = await workspace.state();
-    expect(refreshed.status?.lastCommand).toBe("status-test");
-  });
 });
 
 async function prepareCompleteArtifacts(): Promise<void> {
@@ -290,7 +278,7 @@ async function prepareCompleteArtifacts(): Promise<void> {
   await workspace.withSpec(FEATURE, []);
   await workspace.withPlan(FEATURE);
   const state = await workspace.state();
-  await state.store.writeResearch({
+  await legacyStore(state).writeResearch({
     kind: "research",
     createdAt: now(),
     feature: FEATURE,
@@ -303,7 +291,7 @@ async function prepareCompleteArtifacts(): Promise<void> {
     unknowns: [],
     draft: false,
   });
-  await state.store.writeVerification({
+  await legacyStore(state).writeVerification({
     kind: "verification",
     createdAt: now(),
     feature: FEATURE,
@@ -314,7 +302,7 @@ async function prepareCompleteArtifacts(): Promise<void> {
     changedFiles: [],
     findings: [],
   });
-  await state.store.writeReview({
+  await legacyStore(state).writeReview({
     kind: "review",
     createdAt: now(),
     feature: FEATURE,
@@ -325,7 +313,7 @@ async function prepareCompleteArtifacts(): Promise<void> {
     criteria: [],
     findings: [],
   });
-  await state.store.writeTraceability({
+  await legacyStore(state).writeTraceability({
     kind: "traceability",
     createdAt: now(),
     feature: FEATURE,
@@ -341,11 +329,11 @@ async function readHistoricalArtifact(kind: string) {
     case "intent":
       return state.store.readIntent(FEATURE);
     case "research":
-      return state.store.readResearchIfExists(FEATURE);
+      return legacyStore(state).readResearchIfExists(FEATURE);
     case "spec":
       return state.store.readSpecIfExists(FEATURE);
     case "plan":
-      return state.store.readPlanIfExists(FEATURE);
+      return legacyStore(state).readPlanIfExists(FEATURE);
     case "tasks":
       return state.store.readTasksIfExists(FEATURE);
     case "verification":
@@ -353,7 +341,7 @@ async function readHistoricalArtifact(kind: string) {
     case "review":
       return state.store.readReview(FEATURE, "T001");
     case "traceability":
-      return state.store.readTraceability(FEATURE);
+      return legacyStore(state).readTraceability(FEATURE);
     case "context manifest":
       return state.store.readContextManifest(FEATURE, "T001");
     default:

@@ -93,10 +93,6 @@ export function planAgentActivation(
   });
 }
 
-export function expectedActivationBlock(): string {
-  return ACTIVATION_BODY;
-}
-
 /** Removes only the exact VISP-owned block, preserving every surrounding byte. */
 export function planAgentDeactivation(current: string | undefined): {
   readonly status: DeactivationStatus;

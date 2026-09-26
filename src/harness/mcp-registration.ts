@@ -1,7 +1,5 @@
-import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { type Harness, PRODUCT_NAME } from "../core/constants.js";
-import { RecoveringProjectFileSystem } from "../core/file-transaction.js";
 import { ok, type Result } from "../core/result.js";
 import {
   CODEX_CONFIG_FILE,
@@ -51,24 +49,6 @@ function registrationShape(harness: Harness): RegistrationShape {
 export function mcpConfigFile(harness: Harness): string {
   if (harness === "codex") return CODEX_CONFIG_FILE;
   return registrationShape(harness).file;
-}
-
-export async function registerMcpServer(
-  root: string,
-  force: boolean,
-  harness: Harness = "claude-code",
-): Promise<Result<RegistrationStatus>> {
-  const path = join(root, mcpConfigFile(harness));
-  const files = new RecoveringProjectFileSystem(root);
-
-  const current = await files.readTextIfExists(path);
-  if (!current.ok) return current;
-
-  const planned = planMcpRegistration(current.value, force, harness);
-  if (!planned.ok) return planned;
-  if (planned.value.content === undefined) return ok(planned.value.status);
-  const written = await files.writeTextAtomic(path, planned.value.content);
-  return written.ok ? ok(planned.value.status) : written;
 }
 
 export interface PlannedMcpRegistration {

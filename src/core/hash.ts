@@ -21,11 +21,6 @@ export function hashValue(value: unknown): string {
   return sha256(canonicalJson(value));
 }
 
-/** Short, human-comparable form of a hash for display. */
-export function shortHash(hash: string): string {
-  return hash.slice(0, 12);
-}
-
 function canonicalize(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(canonicalize);

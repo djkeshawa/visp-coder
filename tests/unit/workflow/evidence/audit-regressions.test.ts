@@ -3,6 +3,7 @@ import { observationReproductionState } from "../../../../src/workflow/evidence/
 import { resolveTaskSelection } from "../../../../src/workflow/evidence/task-selection.js";
 import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { legacyStore } from "../../support/legacy-store.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
 
@@ -34,7 +35,7 @@ describe("evidence audit regressions", () => {
       expect(workspace.git("status", "--porcelain", "--untracked-files=all")).toBe(before);
       expect(await state.files.readTextIfExists(state.paths.telemetry)).toEqual(telemetryBefore);
       if (!state.status) throw new Error("Missing status fixture");
-      await state.store.writeStatus({ ...state.status, activeTask: "T999" });
+      await legacyStore(state).writeStatus({ ...state.status, activeTask: "T999" });
       state = await workspace.state();
       const active = await run(state, { feature });
       expect(active).toMatchObject({ ok: false, error: { code: "TASK_NOT_FOUND" } });

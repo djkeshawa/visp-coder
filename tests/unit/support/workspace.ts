@@ -12,6 +12,7 @@ import type { Task, TaskGraph } from "../../../src/workflow/artifacts/tasks.js";
 import { runInit } from "../../../src/workflow/stages/init.js";
 import { loadWorkspace, type WorkspaceState } from "../../../src/workflow/state.js";
 import { buildContextPack } from "./legacy-context.js";
+import { legacyStore } from "./legacy-store.js";
 
 /**
  * A real `.visp/` in a real git repository, loaded in process.
@@ -115,7 +116,7 @@ export class TestWorkspace {
   async withFeature(feature: string, tasks: readonly Partial<Task>[] = [task()]): Promise<void> {
     const state = await this.state();
 
-    const wrote = await state.store.writeIntent({
+    const wrote = await legacyStore(state).writeIntent({
       kind: "intent",
       createdAt: now(),
       id: feature,
@@ -131,10 +132,10 @@ export class TestWorkspace {
       tasks: tasks.map((overrides) => ({ ...task(), ...overrides }) as Task),
       draft: false,
     };
-    const written = await state.store.writeTasks(graph);
+    const written = await legacyStore(state).writeTasks(graph);
     if (!written.ok) throw new Error(written.error.message);
 
-    await state.store.writeStatus({
+    await legacyStore(state).writeStatus({
       kind: "status",
       createdAt: now(),
       updatedAt: now(),
@@ -159,7 +160,7 @@ export class TestWorkspace {
       openQuestions: [],
       draft: false,
     };
-    const written = await state.store.writeSpec(spec);
+    const written = await legacyStore(state).writeSpec(spec);
     if (!written.ok) throw new Error(written.error.message);
   }
 
@@ -179,18 +180,18 @@ export class TestWorkspace {
       newDependencies: [...newDependencies],
       draft: false,
     };
-    const written = await state.store.writePlan(plan);
+    const written = await legacyStore(state).writePlan(plan);
     if (!written.ok) throw new Error(written.error.message);
   }
 
   /** Give evidence tests the same compiled-context precondition as the real loop. */
   async ensureContext(feature: string, taskId = "T001"): Promise<void> {
     const state = await this.state();
-    const graph = await state.store.readTasks(feature);
+    const graph = await legacyStore(state).readTasks(feature);
     if (!graph.ok) throw new Error(graph.error.message);
     const selected = graph.value.tasks.find((entry) => entry.id === taskId);
     if (!selected) throw new Error(`${taskId} is not in ${feature}`);
-    const marker = await state.store.writeImplementMarker({
+    const marker = await legacyStore(state).writeImplementMarker({
       kind: "implement-marker",
       createdAt: now(),
       feature,

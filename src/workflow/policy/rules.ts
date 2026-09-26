@@ -291,8 +291,3 @@ export function defaultRuleState(mode: StrictnessMode): Record<RuleId, boolean> 
   for (const rule of RULES) state[rule.id] = rule.enabledIn.includes(mode);
   return state;
 }
-
-/** Rules that exist only to keep the system honest and can never be waived. */
-export const NON_OVERRIDABLE: readonly RuleId[] = RULES.filter((rule) => !rule.overridable).map(
-  (rule) => rule.id,
-);

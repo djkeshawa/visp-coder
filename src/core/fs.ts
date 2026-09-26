@@ -44,19 +44,6 @@ export async function ensureDir(path: string): Promise<Result<void>> {
   }
 }
 
-/** Refuses a symlink at this exact path, while allowing a missing path. */
-export async function rejectSymlink(path: string): Promise<Result<void>> {
-  try {
-    if ((await lstat(path)).isSymbolicLink()) {
-      return err(vispError("IO_ERROR", `Refusing to use symlink: ${path}`));
-    }
-    return ok(undefined);
-  } catch (cause) {
-    if (isNodeError(cause) && cause.code === "ENOENT") return ok(undefined);
-    return err(fromUnknown(cause, "IO_ERROR"));
-  }
-}
-
 /** Reads UTF-8 text, refusing symlinks so a link cannot redirect a read. */
 export async function readText(path: string): Promise<Result<string>> {
   try {

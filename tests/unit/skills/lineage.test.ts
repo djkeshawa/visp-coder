@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readCurrentLineage, reconcileLineage, supportFor } from "../../../src/skills/lineage.js";
 import { createProposalFromContent } from "../../../src/skills/proposal.js";
 import { upsert } from "../../../src/skills/store.js";
+import { legacyStore } from "../support/legacy-store.js";
 import { TestWorkspace } from "../support/workspace.js";
 
 const FEATURE = "001-first-feature";
@@ -39,9 +40,9 @@ async function admitted() {
 
 async function changeTask(status: "done" | "pending", title?: string) {
   const state = await workspace.state();
-  const graph = await state.store.readTasks(FEATURE);
+  const graph = await legacyStore(state).readTasks(FEATURE);
   if (!graph.ok) throw new Error(graph.error.message);
-  await state.store.writeTasks({
+  await legacyStore(state).writeTasks({
     ...graph.value,
     tasks: graph.value.tasks.map((task) =>
       task.id === "T001" ? { ...task, status, ...(title ? { title } : {}) } : task,

@@ -1,13 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  expectedActivationBlock,
-  planAgentActivation,
-  planAgentDeactivation,
-} from "../../../src/harness/activation.js";
+import { planAgentActivation, planAgentDeactivation } from "../../../src/harness/activation.js";
 import { installHarness } from "../../../src/harness/install.js";
 import { TestWorkspace } from "../support/workspace.js";
+
+// A fresh AGENTS.md receives exactly the generated block and a trailing newline.
+const fresh = planAgentActivation("codex", undefined, false);
+const expectedActivationBlock = fresh.ok ? (fresh.value.content ?? "").replace(/\n$/, "") : "";
 
 let workspace: TestWorkspace;
 
@@ -195,7 +195,7 @@ it("upgrades the pre-independent-review command map without changing surrounding
   expect(plan.ok).toBe(true);
   if (!plan.ok) return;
   expect(plan.value.status).toBe("replaced");
-  expect(plan.value.content).toBe(prefix + expectedActivationBlock() + suffix);
+  expect(plan.value.content).toBe(prefix + expectedActivationBlock + suffix);
 });
 
 it("upgrades the previous full command map while preserving edited blocks and user bytes", async () => {
@@ -208,7 +208,7 @@ it("upgrades the previous full command map while preserving edited blocks and us
   const result = planAgentActivation("codex", prefix + old + suffix, false);
   expect(result).toMatchObject({
     ok: true,
-    value: { content: prefix + expectedActivationBlock() + suffix },
+    value: { content: prefix + expectedActivationBlock + suffix },
   });
   expect(
     planAgentActivation(

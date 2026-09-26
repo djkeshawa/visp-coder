@@ -1,8 +1,5 @@
 import type { Stage } from "../core/constants.js";
-import {
-  RESEARCH_THE_CRAFT_BASE_HASH,
-  RESEARCH_THE_CRAFT_CONTENT,
-} from "./catalog/research-the-craft.js";
+import { RESEARCH_THE_CRAFT_CONTENT } from "./catalog/research-the-craft.js";
 import { fingerprint } from "./store.js";
 
 export interface SkillCatalogEntry {
@@ -31,11 +28,6 @@ const RESEARCH_THE_CRAFT: BundledSkill = {
 };
 
 const BUNDLED_SKILLS: readonly BundledSkill[] = [RESEARCH_THE_CRAFT];
-
-/** Provenance of each curated source before visp-specific amendments. */
-export const BUNDLED_SKILL_BASE_HASHES: Readonly<Record<string, string>> = {
-  "research-the-craft": RESEARCH_THE_CRAFT_BASE_HASH,
-};
 
 /** Public metadata intentionally excludes the body; `seed` is the copy boundary. */
 export function skillCatalog(): readonly SkillCatalogEntry[] {

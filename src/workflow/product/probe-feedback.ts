@@ -91,18 +91,6 @@ export function currentProbeResponses(
   return latest;
 }
 
-export function probeFeedbackGaps(record: ProductRecord, subject: string, slice?: ProductSlice) {
-  const responses = currentProbeResponses(record, subject, slice);
-  return productBehaviorProbes(record, slice).probes.flatMap((probe) => {
-    const response = responses.get(probe.kind);
-    return response && ["satisfied", "not-applicable"].includes(response.status)
-      ? []
-      : [
-          `${probe.kind}: ${response?.status ?? "unassessed"}; ${response?.observed ?? probe.question}`,
-        ];
-  });
-}
-
 function sameProbe(
   origin: ReturnType<typeof productBehaviorProbes>["probes"],
   selected: ReturnType<typeof productBehaviorProbes>["probes"],
