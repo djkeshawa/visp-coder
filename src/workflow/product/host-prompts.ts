@@ -15,6 +15,8 @@ export interface HostRequest {
   /** The request to preserve: a verbatim excerpt the worker quoted, or the latest prompt. */
   readonly request: string;
   readonly origin: "worker-quoted-host-prompt" | "host-prompt";
+  /** Every recorded user prompt since the last feature, oldest first. */
+  readonly prompts: readonly string[];
   /** Consumes the recorded prompts so the next feature starts from newer ones. */
   readonly mutation?: FileMutation;
 }
@@ -53,9 +55,10 @@ export async function hostRequest(
     return ok({
       request: quoted,
       origin: "worker-quoted-host-prompt",
+      prompts,
       ...(mutation ? { mutation } : {}),
     });
-  return ok({ request: latest, origin: "host-prompt", ...(mutation ? { mutation } : {}) });
+  return ok({ request: latest, origin: "host-prompt", prompts, ...(mutation ? { mutation } : {}) });
 }
 
 /** The host session that sent the latest user prompt, when the host's hook reports one. */

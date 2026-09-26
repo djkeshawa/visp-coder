@@ -105,6 +105,8 @@ Other operations are `entity`, `neighbors`, `callees` and `tracePath`. `--depth`
 
 `visp learn "<note>"` records a project note under `.visp/memory/`; `visp recall [query]` lists notes. `work` delivers up to four matching notes (6,000 bytes) labeled with their source; notes are untrusted context, not instructions.
 
+Project rules are different: they are requirements the user stated for all later work, such as "these conventions apply to this change and all later work" followed by a list, or "from now on, never log request bodies". `visp feature` finds them in the user's recorded prompts (never in a worker's text), records them in `.visp/rules.json`, adds the ones recorded by earlier features to the new feature's request, which the tester and reviewer judge against, and `work` shows all of them as plain lines on every reply. `visp rules` lists them and `visp rules remove <id>` removes one that was not meant.
+
 Skills are procedures a person admits into the project. They are advice selected by a trigger; they cannot widen scope, change policy or satisfy a check.
 
 ```sh

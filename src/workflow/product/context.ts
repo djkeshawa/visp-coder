@@ -18,6 +18,7 @@ import { correctionChecks, failedCheckOwners } from "./corrections.js";
 import { currentJourneyFailures, currentJourneyFeedback } from "./evidence-references.js";
 import { productFeedbackPlan } from "./feedback.js";
 import { checksFor, type ProductSlice } from "./model.js";
+import { type ProjectRule, readProjectRules } from "./project-rules.js";
 import { reviewExcerpt } from "./review-excerpts.js";
 import { productSkills } from "./skills.js";
 import { briefPath, type ProductRecord, productStatePath } from "./store.js";
@@ -103,6 +104,7 @@ export async function buildProductContext(
     notes.push("Context is bounded; read additional relevant files when needed.");
   const skills = await productSkills(workspace, slice, remaining);
   if (!skills.ok) return skills;
+  const rules = await readProjectRules(workspace);
   notes.push(...skills.value.notes);
   return ok(
     fitProductContext(
@@ -114,6 +116,7 @@ export async function buildProductContext(
         task: slice.id,
         ...(slice.taskClass === undefined ? {} : { taskClass: slice.taskClass }),
         originalRequest: brief.originalRequest,
+        ...projectRulesField(rules),
         objective: slice.goal,
         outcomes: brief.outcomes.filter((outcome) => slice.outcomes.includes(outcome.id)),
         examples: brief.examples.filter((example) =>
@@ -285,4 +288,11 @@ function priorReviewFeedback(
       limitations: review.feedback?.limitations,
     }))
     .filter((review) => review.assessments.length || review.summary || review.limitations?.length);
+}
+
+/** An unreadable rules file fails `visp feature` and `visp rules`; work goes on without it. */
+function projectRulesField(rules: Result<{ rules: ProjectRule[] }>): {
+  projectRules?: readonly ProjectRule[];
+} {
+  return rules.ok && rules.value.rules.length ? { projectRules: rules.value.rules } : {};
 }

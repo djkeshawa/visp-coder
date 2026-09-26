@@ -26,6 +26,7 @@ import {
   verifyCommand,
   workCommand,
 } from "./commands/product.js";
+import { rulesCommand } from "./commands/rules.js";
 import { serveCommand } from "./commands/serve.js";
 import { initCommand } from "./commands/setup.js";
 import { skillCommand } from "./commands/skill.js";
@@ -72,6 +73,7 @@ export function buildProgram(
   program.addCommand(doctorCommand());
   program.addCommand(learnCommand());
   program.addCommand(recallCommand());
+  program.addCommand(rulesCommand());
   program.addCommand(reportCommand());
   program.addCommand(usageCommand());
   program.addCommand(policyCommand());

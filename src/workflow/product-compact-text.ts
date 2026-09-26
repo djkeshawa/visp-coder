@@ -1,3 +1,5 @@
+import { projectRulesText } from "./product/project-rules.js";
+
 /** Where the reader runs: MCP tool text, or CLI text output read by a model through a shell. */
 export type ReplyChannel = "mcp" | "cli";
 
@@ -103,7 +105,16 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${skillText(data.skills)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${skillText(data.skills)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+}
+
+/** Standing project rules are requirements, shown whole as plain lines on every reply that carries them. */
+function rulesText(rules: unknown): string {
+  if (!Array.isArray(rules)) return "";
+  const text = projectRulesText(
+    rules.map(object).map((rule) => ({ id: String(rule.id), text: String(rule.text) })),
+  );
+  return text ? `\n${text}` : "";
 }
 
 /** A skill is a procedure: plain numbered lines are followed where an escaped JSON string is skimmed. */
@@ -295,7 +306,7 @@ export function compactBriefText(
   const wording = WORDING[channel];
   const feature = String(brief.feature);
   const next = name.endsWith("feature") ? wording.template(feature) : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {

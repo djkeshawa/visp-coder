@@ -1,7 +1,11 @@
 import { resolveCriticPolicy } from "../../config/critic-defaults.js";
 import type { RiskLevel } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
-import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
+import {
+  applyFileTransaction,
+  type FileMutation,
+  filePrecondition,
+} from "../../core/file-transaction.js";
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
@@ -13,7 +17,7 @@ import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
 import { nextFeatureId } from "./feature-id.js";
-import { hostRequest } from "./host-prompts.js";
+import { type HostRequest, hostRequest } from "./host-prompts.js";
 import {
   initialProductState,
   outcomeDigest,
@@ -22,6 +26,14 @@ import {
   parseProductBrief,
   sliceDigest,
 } from "./model.js";
+import {
+  mergeProjectRules,
+  type ProjectRule,
+  projectRulesMutation,
+  projectRulesText,
+  readProjectRules,
+  standingRules,
+} from "./project-rules.js";
 import { withProductMutation } from "./runtime.js";
 import { productAuthorizationSchema } from "./scopes.js";
 import {
@@ -44,6 +56,7 @@ export interface ProductFeatureOptions {
 export interface ProductFeatureOutcome {
   readonly brief: ProductBrief;
   readonly intent: Intent;
+  readonly projectRules?: readonly ProjectRule[];
   readonly branchCreated?: string;
   readonly branchWarning?: string;
 }
@@ -67,15 +80,16 @@ async function createProductFeatureLocked(
   if (!listed.ok) return listed;
   const baseline = await captureAcceptanceBaseline(workspace);
   if (!baseline.ok) return baseline;
-  const host = await hostRequest(workspace, options.sourceBrief);
-  if (!host.ok) return host;
   const feature = nextFeatureId(listed.value, options.goal);
   const timestamp = new Date().toISOString();
+  const request = await featureRequest(workspace, options, feature, timestamp);
+  if (!request.ok) return request;
+  const { host, rules } = request.value;
   const parsed = parseProductBrief({
     version: 2,
     feature,
     goal: options.goal,
-    originalRequest: host.value?.request ?? options.sourceBrief ?? options.goal,
+    originalRequest: request.value.originalRequest,
     acceptanceBaseline: baseline.value,
   });
   if (!parsed.ok) return parsed;
@@ -98,16 +112,68 @@ async function createProductFeatureLocked(
       expectedBefore: { existed: false },
     },
     status.value,
-    ...(host.value?.mutation ? [host.value.mutation] : []),
+    ...(host?.mutation ? [host.mutation] : []),
+    ...rules.mutations,
   ]);
   return saved.ok
     ? ok({
         brief,
         intent,
+        ...rules.reported,
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
       })
     : saved;
+}
+
+/**
+ * Rules the user stated for later work in the prompts this feature consumes are recorded;
+ * rules recorded by earlier features join this feature's request, so the worker, tester and
+ * reviewer all hold it to them. Only recorded user prompts count, never a worker's text.
+ */
+async function featureProjectRules(
+  workspace: WorkspaceState,
+  host: HostRequest | undefined,
+  feature: string,
+  capturedAt: string,
+): Promise<
+  Result<{
+    earlier: ProjectRule[];
+    mutations: FileMutation[];
+    reported: { projectRules?: ProjectRule[] };
+  }>
+> {
+  const recorded = await readProjectRules(workspace);
+  if (!recorded.ok) return recorded;
+  const stated = (host?.prompts ?? []).flatMap(standingRules);
+  const merged = mergeProjectRules(recorded.value.rules, stated, feature, capturedAt);
+  return ok({
+    earlier: recorded.value.rules,
+    mutations: merged.added.length
+      ? [projectRulesMutation(workspace, recorded.value.before, merged.rules)]
+      : [],
+    reported: merged.rules.length ? { projectRules: merged.rules } : {},
+  });
+}
+
+/** The user's recorded request, followed by the rules they stated for later work in earlier features. */
+async function featureRequest(
+  workspace: WorkspaceState,
+  options: ProductFeatureOptions,
+  feature: string,
+  timestamp: string,
+) {
+  const host = await hostRequest(workspace, options.sourceBrief);
+  if (!host.ok) return host;
+  const rules = await featureProjectRules(workspace, host.value, feature, timestamp);
+  if (!rules.ok) return rules;
+  const request = host.value?.request ?? options.sourceBrief ?? options.goal;
+  const earlier = rules.value.earlier;
+  return ok({
+    host: host.value,
+    rules: rules.value,
+    originalRequest: earlier.length ? `${request}\n\n${projectRulesText(earlier)}` : request,
+  });
 }
 
 function criticStateFields(critic: {
