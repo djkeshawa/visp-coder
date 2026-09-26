@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Bundled skill `edge-cases-first` (`visp skill seed edge-cases-first --by <name>`, then `visp skill admit`): pin current behavior and the request's edge cases as tests before changing code. In three-run Haiku comparisons it passed 420 of 435 hidden checks against 416 without it, at 20% more wall time, so it is not seeded by default.
+- `bench/setup_arm.py --skill <id>` seeds and admits a bundled skill, so two arms on one build differ only by that skill.
+
+### Fixed
+- Admitted skills reach the worker: an over-budget pack now drops graph rows and source excerpts before skills (it dropped skills first, while keeping excerpts the compact reply never shows), and compact `work` replies show each skill's steps as plain text instead of an escaped JSON string.
+- The benchmark runners start each worker in its own session: one worker's `kill %1` on its test server ended every run in the batch.
+
 ## 0.5.0-beta.1 - 2026-09-26
 
 ### Added

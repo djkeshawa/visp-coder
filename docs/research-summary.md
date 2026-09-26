@@ -53,7 +53,9 @@ The gain was smaller and mixed. The 53 run declared the program itself as its ch
 
 **Browser journeys found real defects** that unit tests missed: clipped controls, a launch that never fired, a second shot that never registered. Syntax-only checks (`node --check`) are not accepted as functional evidence.
 
-**No demonstrated benefit yet** from the repository graph, memory notes or the skill lifecycle in any run. They remain optional.
+**A bundled testing skill gave a small, uncertain gain.** `edge-cases-first` asks the worker to pin current behavior and the request's edge cases as tests before changing code. The first round exposed two delivery faults: an over-budget pack dropped skills before source excerpts that the compact reply never shows, and a skill arrived as one escaped JSON string. With both fixed, Haiku on one build, three runs per arm (control, then with the skill seeded and admitted): reservations 44, 40, 41 and 43, 44, 43; spreadsheet engine 36, 36, 36 and 37, 37, 37; extending an existing engine 58, 63, 62 and 63, 58, 58. That is 420 of 435 hidden checks against 416, at 20% more wall time and 26% more output tokens. No worker pinned existing behavior before editing, and the `#REF!` regression the skill targets appeared in one run of each arm. The skill stays opt-in.
+
+**No demonstrated benefit yet** from the repository graph or memory notes in any run. They remain optional.
 
 ## Design consequences
 
