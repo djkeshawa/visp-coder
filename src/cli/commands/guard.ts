@@ -13,7 +13,10 @@ import {
   hasPendingCriticReview,
   PENDING_REVIEW_MESSAGE,
 } from "../../workflow/product/critic-policy.js";
-import { productScopes as authorizedScopes } from "../../workflow/product/scopes.js";
+import {
+  productScopes as authorizedScopes,
+  earlierSessionAuthorization,
+} from "../../workflow/product/scopes.js";
 import { featureForBranch, isStatePath, type WorkspaceState } from "../../workflow/state.js";
 import {
   type GlobalOptions,
@@ -218,16 +221,18 @@ async function evaluateGuard(
     state.overrides,
     ruleContextFor(state, { ...(opts.task ? { task: opts.task } : {}) }),
   );
-  const violations: GuardViolation[] = checkPaths(paths.value, {
+  const checked = checkPaths(paths.value, {
     markers,
     blockedPaths: state.config.workflow.blockedPaths,
     enforceAllowedFiles: allowedFilesRule.active,
   });
+  const violations = await explainEarlierSession(state, opts, feature, checked);
+  if (!violations.ok) return violations;
   const guarded = await pendingReviewViolations(
     state,
     feature ?? state.status?.activeFeature ?? markers[0]?.feature,
     paths.value,
-    violations,
+    violations.value,
   );
   if (!guarded.ok) return guarded;
   const checkedViolations = guarded.value;
@@ -246,6 +251,34 @@ async function evaluateGuard(
       authorizedTasks: markers.map((marker) => marker.task),
     },
   });
+}
+
+/**
+ * A refusal because the only authorization came from an earlier host session says so,
+ * and names both ways on: a new feature for a new request, or re-confirming the old task.
+ */
+async function explainEarlierSession(
+  state: WorkspaceState,
+  opts: GuardCliOptions,
+  feature: string | undefined,
+  violations: readonly GuardViolation[],
+): Promise<Result<GuardViolation[]>> {
+  if (opts.scope === "tasks" || !violations.some((v) => v.reason === "no-authorization"))
+    return ok([...violations]);
+  const earlier = await earlierSessionAuthorization(state, feature ? { feature } : {});
+  if (!earlier.ok) return earlier;
+  const auth = earlier.value;
+  if (!auth) return ok([...violations]);
+  return ok(
+    violations.map((violation) =>
+      violation.reason === "no-authorization"
+        ? {
+            ...violation,
+            message: `${violation.path} was authorized for ${auth.task} of ${auth.feature} in an earlier session, which no longer permits edits. For a new request, start it with \`visp feature "<request>"\`; to continue ${auth.task}, run \`visp work --task ${auth.task}\``,
+          }
+        : violation,
+    ),
+  );
 }
 
 async function evaluateUnscopedGuard(

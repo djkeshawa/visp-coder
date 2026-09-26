@@ -5,6 +5,7 @@ import { matchesAny } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { ImplementMarker } from "../artifacts/evidence.js";
 import type { ScopeOptions, WorkspaceState } from "../state.js";
+import { currentHostSession } from "./host-prompts.js";
 import { closedSlice, type ProductBrief, type ProductSlice, sliceDigest } from "./model.js";
 import {
   authorizationPath,
@@ -23,6 +24,8 @@ export const productAuthorizationSchema = z
     root: z.string(),
     contractDigest: z.string(),
     baseline: z.record(z.string()),
+    /** The host session that ran `visp work`, when the host's prompt hook reports one. */
+    session: z.string().optional(),
   })
   .strict();
 export type ProductAuthorization = z.infer<typeof productAuthorizationSchema>;
@@ -122,15 +125,47 @@ export async function productScopes(
     return ok(brief.slices.map((slice) => markerForProduct(brief, slice, state.createdAt)));
   const auth = await readProductAuthorization(workspace, record.value);
   if (!auth.ok) return auth;
+  const earlier = await fromEarlierSession(workspace, auth.value);
+  if (!earlier.ok) return earlier;
+  const active = earlier.value ? undefined : auth.value;
   return ok(
     brief.slices
       .filter(
         (slice) =>
-          auth.value?.task === slice.id ||
+          active?.task === slice.id ||
           (options.includeDone && closedSlice(state.slices[slice.id]?.status)),
       )
-      .map((slice) => markerForProduct(brief, slice, auth.value?.createdAt ?? state.createdAt)),
+      .map((slice) => markerForProduct(brief, slice, active?.createdAt ?? state.createdAt)),
   );
+}
+
+/**
+ * The feature's authorization when it was granted in an earlier host session. It still
+ * records the slice's baseline, but permits no edits until `visp work` re-confirms it: a
+ * later session usually carries a new request, which needs its own feature.
+ */
+export async function earlierSessionAuthorization(
+  workspace: WorkspaceState,
+  options: ScopeOptions = {},
+): Promise<Result<ProductAuthorization | undefined>> {
+  const record = await readProductRecord(workspace, options);
+  if (!record.ok) return record.error.code === "NO_ACTIVE_FEATURE" ? ok(undefined) : record;
+  const auth = await readProductAuthorization(workspace, record.value);
+  if (!auth.ok) return auth;
+  const earlier = await fromEarlierSession(workspace, auth.value);
+  if (!earlier.ok) return earlier;
+  return ok(earlier.value ? auth.value : undefined);
+}
+
+async function fromEarlierSession(
+  workspace: WorkspaceState,
+  auth: ProductAuthorization | undefined,
+): Promise<Result<boolean>> {
+  // Hosts without a session-reporting prompt hook keep authorizations as before.
+  if (!auth?.session) return ok(false);
+  const current = await currentHostSession(workspace);
+  if (!current.ok) return current;
+  return ok(current.value !== undefined && current.value !== auth.session);
 }
 
 /** Enforce the active grant against content changes since authorization. */

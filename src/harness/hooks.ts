@@ -6,6 +6,7 @@ import {
   STATE_DIR,
 } from "../core/constants.js";
 import { runtimeIdentity } from "../core/version.js";
+import { HOST_SESSION_FILE } from "../workflow/product/host-prompts.js";
 import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /**
@@ -16,7 +17,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 9;
+export const HOOK_TEMPLATE_VERSION = 10;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -73,6 +74,13 @@ if (input?.hook_event_name === "UserPromptSubmit") {
     } catch {}
     lines.push(JSON.stringify({ at: new Date().toISOString(), prompt: String(input.prompt ?? "") }));
     writeFileSync(file, \`\${lines.slice(-20).join("\\n")}\\n\`);
+    // An edit authorization belongs to the session that ran \`${PRODUCT_NAME} work\`; a later
+    // session with a new request must not edit under it.
+    if (typeof input.session_id === "string" && input.session_id)
+      writeFileSync(
+        join(directory, "${HOST_SESSION_FILE}"),
+        JSON.stringify({ session: input.session_id, at: new Date().toISOString() }),
+      );
   } catch {}
   process.exit(0);
 }
