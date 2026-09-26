@@ -67,7 +67,6 @@ const LIST_FIELDS = [
   "examples",
   "decisions",
   "memory",
-  "skills",
   "graph",
   "unresolved",
   "findings",
@@ -104,7 +103,26 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${skillText(data.skills)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+}
+
+/** A skill is a procedure: plain numbered lines are followed where an escaped JSON string is skimmed. */
+function skillText(skills: unknown): string {
+  if (!Array.isArray(skills)) return "";
+  const shown = skills.slice(0, 3).map((entry) => {
+    const { path, content, truncated } = object(entry);
+    const body = String(content ?? "")
+      .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
+      .trim();
+    const name =
+      String(path ?? "skill")
+        .split("/")
+        .at(-2) ?? String(path);
+    const cut = body.length > 800 || truncated === true;
+    return `\nSkill ${name} (advisory):\n${body.slice(0, 800)}${cut ? `… Full skill: ${String(path)}` : ""}`;
+  });
+  const more = skills.length - shown.length;
+  return `${shown.join("")}${more > 0 ? `\n${more} more skill(s) in the full result.` : ""}`;
 }
 
 /** Graph extraction uncertainty is diagnostic detail, not guidance for the worker. */

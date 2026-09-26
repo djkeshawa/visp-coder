@@ -190,13 +190,13 @@ it("keeps capture replay identity and the committed next action visible in compa
     expect(text).toContain(value);
 });
 
-it("marks compact skill truncation while preserving complete structured capability data", () => {
+it("shows compact skills as plain text while preserving complete structured capability data", () => {
   const data = {
     feature: "001-game",
     taskClass: "bugfix",
-    skills: Array.from({ length: 6 }, (_, index) => ({
-      path: `skill-${index}.md`,
-      content: "procedure ".repeat(100),
+    skills: Array.from({ length: 4 }, (_, index) => ({
+      path: `.visp/skills/skill-${index}/SKILL.md`,
+      content: `---\nname: skill-${index}\n---\n${"procedure ".repeat(100)}`,
       truncated: false,
       advisory: true,
     })),
@@ -207,12 +207,12 @@ it("marks compact skill truncation while preserving complete structured capabili
     .flatMap((entry) => (entry.type === "text" ? [entry.text] : []))
     .join("\n");
   const summary = JSON.parse(text.split("\n")[0]?.slice("visp_work: ".length) ?? "{}");
-  expect(summary.skills.entries).toHaveLength(5);
-  expect(summary.skills.remaining).toBe(1);
-  expect(summary.skills.entries[0]).toMatchObject({ truncated: true, advisory: true });
-  expect(summary.skills.entries[0].content.length).toBeLessThan(
-    data.skills[0]?.content.length ?? 0,
-  );
+  expect(summary).not.toHaveProperty("skills");
+  expect(text).toContain("\nSkill skill-0 (advisory):\nprocedure procedure");
+  expect(text).toContain("… Full skill: .visp/skills/skill-0/SKILL.md");
+  expect(text).not.toContain("name: skill-0");
+  expect(text).not.toContain("Skill skill-3");
+  expect(text).toContain("1 more skill(s) in the full result.");
   expect(summary.graph.entries).toEqual(data.graph);
   expect(summary.taskClass).toBe("bugfix");
   expect(response.structuredContent).toMatchObject({ data });
