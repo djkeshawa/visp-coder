@@ -23,6 +23,9 @@
 - Brief updates normalize common authoring shapes (`description`, `then`, string `given`, list `when`, `decision`/`reason`, slice IDs like `S1`, check objects inside `slices[].checks`, acceptance criteria placed in `acceptanceBaseline`, a reworded `originalRequest`) and report each rewrite in `normalized`; ambiguous input is still refused with its field paths. `--from` also reads drafts in the system temporary directory and suggests stdin for other paths outside the project. Scope errors name the out-of-scope files.
 
 ### Fixed
+- Windows: every check was recorded as an environment failure ("Unsafe check receipt directory") because the receipt checks compared POSIX permission bits, which Windows does not report; they are compared on POSIX only. Checkouts now use LF line endings (`.gitattributes`), since CRLF broke byte-exact fixtures.
+- macOS: the recursion guard for checks now resolves inherited project roots, so a project reached through a symlink (macOS temporary directories sit under `/var`) is still recognized; review-calibration inputs are refused only when the file itself is a symlink, not when a parent directory is.
+- The package smoke test passes the verbatim request, matches the Codex template's medium reviewer effort, and puts a failing `codex` stub on PATH so it never launches a model.
 - A check whose sockets the host sandbox denied is recorded as an environment failure with the instruction to rerun with sandbox escalation, not as a product failure.
 - The Codex reviewer checks that it can reach its model before a call is reserved, and runs with a private writable copy of the Codex sign-in; inside a host sandbox the operator's Codex home is read-only.
 - File transactions treat a write of identical bytes as a no-op; critic reservation rewrote every tracked file and failed under Codex's read-only `.agents/`.
