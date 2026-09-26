@@ -450,6 +450,67 @@ describe("edit authorization across host sessions", () => {
   });
 });
 
+/**
+ * `visp feature` refused a working tree holding a previous session's uncommitted work,
+ * and the worker discarded that work with `git checkout <files>` to get a clean tree.
+ */
+describe("shell commands that would discard uncommitted work", () => {
+  let project: TestProject;
+
+  beforeAll(async () => {
+    project = await TestProject.create({
+      "src/auth/login.ts": "export const login = () => null;\n",
+      "src/auth/token.ts": "export const token = () => null;\n",
+    });
+    project.run("init", "--harness", "generic");
+    project.run("install", "--harness", "claude-code", "--hooks", "claude", "git");
+    await project.installShim();
+    project.commit("add visp");
+    await project.write("src/auth/login.ts", "export const login = () => 'earlier work';\n");
+  });
+
+  afterAll(async () => {
+    await project.destroy();
+  });
+
+  function shell(command: string): string {
+    const output = execFileSync(
+      process.execPath,
+      [join(project.root, ".visp/hooks/claude-pretooluse.mjs")],
+      {
+        cwd: project.root,
+        input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }),
+        env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
+        encoding: "utf8",
+      },
+    );
+    return output ? (JSON.parse(output).hookSpecificOutput?.permissionDecision ?? "") : "";
+  }
+
+  it.each([
+    "git checkout README.md src/auth/login.ts",
+    `cd ${"$"}PWD && git checkout -- src/auth/login.ts`,
+    "git checkout .",
+    "git checkout src",
+    "git restore src/auth/login.ts",
+    "git reset --hard",
+    "git reset --hard HEAD",
+  ])("refuses %s", (command) => {
+    expect(shell(command)).toBe("deny");
+  });
+
+  it.each([
+    "git checkout src/auth/token.ts",
+    "git checkout -b next-feature",
+    "git restore --staged src/auth/login.ts",
+    "git reset",
+    "git status",
+    "git add -A && git commit -m 'earlier work'",
+  ])("leaves %s to the host", (command) => {
+    expect(shell(command)).toBe("");
+  });
+});
+
 async function malformedGuardEnv(project: TestProject): Promise<NodeJS.ProcessEnv> {
   return fakeGuardEnv(project, ".bad-bin", "#!/bin/sh\necho not-json\n");
 }

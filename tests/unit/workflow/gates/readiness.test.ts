@@ -90,21 +90,25 @@ describe("implementation foundation", () => {
     });
   });
 
-  it("requires setup changes to be committed before a feature starts", () => {
-    expect(
-      featureFoundationError(
-        {
-          repositoryAvailable: true,
-          harnessInstalled: true,
-          enforcementInstalled: true,
-          hasBaseline: true,
-          changedFiles: ["visp.yml", "AGENTS.visp.md"],
-        },
-        'visp feature "<goal>"',
-      ),
-    ).toMatchObject({
+  // A worker read "git commit the project baseline" and discarded a previous session's
+  // uncommitted work with git checkout instead.
+  it("requires uncommitted changes to be committed, never discarded, before a feature starts", () => {
+    const error = featureFoundationError(
+      {
+        repositoryAvailable: true,
+        harnessInstalled: true,
+        enforcementInstalled: true,
+        hasBaseline: true,
+        changedFiles: ["visp.yml", "AGENTS.visp.md"],
+      },
+      'visp feature "<goal>"',
+    );
+    expect(error).toMatchObject({
       code: "STAGE_BLOCKED",
-      recovery: 'git commit the project baseline, then visp feature "<goal>"',
+      recovery:
+        'git add -A && git commit -m "<what these changes are>", then visp feature "<goal>"',
     });
+    expect(error?.message).toContain("may be earlier work");
+    expect(error?.message).toContain("do not discard");
   });
 });

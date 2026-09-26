@@ -17,7 +17,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 10;
+export const HOOK_TEMPLATE_VERSION = 11;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -140,8 +140,64 @@ if (input?.tool_name === "Bash") {
         ),
       ),
     );
+    process.exit(0);
+  }
+  const lost = discardedChanges(command);
+  if (lost.length > 0) {
+    process.stdout.write(
+      JSON.stringify(
+        deny(
+          "This command would discard uncommitted changes to " +
+            lost.slice(0, 5).join(", ") +
+            (lost.length > 5 ? " and " + (lost.length - 5) + " more" : "") +
+            ". They may be earlier work: commit them instead (git add -A && git commit -m '<what they are>'). To undo an edit of your own, edit the file back.",
+        ),
+      ),
+    );
   }
   process.exit(0);
+}
+
+// A worker discarded a previous session's uncommitted work with git checkout to get the
+// clean tree a new feature needs. Commands that would discard uncommitted changes to
+// tracked files are refused; branch switches, staged-only restores and stashes are not.
+function discardedChanges(command) {
+  const targets = [];
+  let hard = false;
+  for (const segment of command.split(/&&|\\|\\||;|\\||\\n/)) {
+    const words = segment.trim().split(/\\s+/).map((word) => word.replace(/^['"]|['"]$/g, ""));
+    const git = words.indexOf("git");
+    if (git < 0) continue;
+    const [sub, ...rest] = words.slice(git + 1);
+    const paths = rest.filter((word) => word && !word.startsWith("-"));
+    if (sub === "reset" && rest.includes("--hard")) hard = true;
+    else if (sub === "checkout" && !rest.some((word) => ["-b", "-B", "--orphan"].includes(word)))
+      targets.push(...paths);
+    else if (
+      sub === "restore" &&
+      !(rest.includes("--staged") && !rest.includes("--worktree") && !rest.includes("-W"))
+    )
+      targets.push(...paths);
+  }
+  if (!hard && targets.length === 0) return [];
+  let dirty;
+  try {
+    dirty = execFileSync("git", ["status", "--porcelain"], {
+      cwd: projectRoot(),
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .split("\\n")
+      .filter((line) => line && !line.startsWith("??"))
+      .map((line) => line.slice(3).split(" -> ").pop());
+  } catch {
+    return [];
+  }
+  if (hard) return dirty;
+  const prefixes = targets.map((target) => target.replace(/^\\.\\//, "").replace(/\\/$/, ""));
+  return dirty.filter((path) =>
+    prefixes.some((prefix) => prefix === "." || path === prefix || path.startsWith(prefix + "/")),
+  );
 }
 
 const target = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
