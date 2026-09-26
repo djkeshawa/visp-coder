@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { verificationCommand } from "../../../src/skills/admit.js";
+import { forbiddenClaims, verificationCommand } from "../../../src/skills/admit.js";
 import { bundledSkill, skillCatalog } from "../../../src/skills/catalog.js";
 import { readAppliesTo } from "../../../src/skills/schema.js";
 import { fingerprint, parseSkill, skillDescription } from "../../../src/skills/store.js";
+import { compactProductText } from "../../../src/workflow/product-compact-text.js";
 
 describe("bundled skill catalog", () => {
   it("publishes stable metadata without exposing the bundled body", () => {
     const catalog = skillCatalog();
 
     expect(catalog).toEqual([
+      {
+        id: "edge-cases-first",
+        version: "1.0.0",
+        description:
+          "Pin current behavior and the request's edge cases as tests before changing code, so a change or fix does not break nearby behavior.",
+        stages: ["implement"],
+        contentHash: expect.stringMatching(/^[a-f0-9]{12}$/),
+      },
       {
         id: "research-the-craft",
         version: "3.7.0",
@@ -18,26 +27,29 @@ describe("bundled skill catalog", () => {
         contentHash: expect.stringMatching(/^[a-f0-9]{12}$/),
       },
     ]);
-    expect(catalog[0]).not.toHaveProperty("content");
+    for (const entry of catalog) expect(entry).not.toHaveProperty("content");
   });
 
-  it("keeps catalog metadata aligned with the bundled SKILL.md", () => {
-    const skill = bundledSkill("research-the-craft");
-    expect(skill).toBeDefined();
-    if (!skill) return;
+  it.each(["edge-cases-first", "research-the-craft"])(
+    "keeps %s metadata aligned with its SKILL.md",
+    (id) => {
+      const skill = bundledSkill(id);
+      expect(skill).toBeDefined();
+      if (!skill) return;
 
-    const document = parseSkill(skill.content);
-    expect(document.ok).toBe(true);
-    if (!document.ok) return;
+      const document = parseSkill(skill.content);
+      expect(document.ok).toBe(true);
+      if (!document.ok) return;
 
-    const appliesTo = readAppliesTo(document.value.frontmatter);
-    expect(appliesTo.ok).toBe(true);
-    if (!appliesTo.ok) return;
+      const appliesTo = readAppliesTo(document.value.frontmatter);
+      expect(appliesTo.ok).toBe(true);
+      if (!appliesTo.ok) return;
 
-    expect(skill.summary.description).toBe(skillDescription(document.value));
-    expect(skill.summary.stages).toEqual(appliesTo.value?.stage);
-    expect(skill.summary.contentHash).toBe(fingerprint(skill.content));
-  });
+      expect(skill.summary.description).toBe(skillDescription(document.value));
+      expect(skill.summary.stages).toEqual(appliesTo.value?.stage);
+      expect(skill.summary.contentHash).toBe(fingerprint(skill.content));
+    },
+  );
 
   it("investigates load-bearing uncertainty instead of imitating references", () => {
     const content = bundledSkill("research-the-craft")?.content ?? "";
@@ -94,5 +106,31 @@ describe("bundled skill catalog", () => {
     expect(content).toContain("existing plan decisions");
     expect(content).toContain("do not compact");
     expect(content).toContain("This skill is advisory.");
+  });
+
+  it("reaches the worker whole, as plain steps, through the compact work reply", () => {
+    const skill = bundledSkill("edge-cases-first");
+    const document = parseSkill(skill?.content ?? "");
+    expect(document.ok).toBe(true);
+    if (!document.ok) return;
+
+    const reply = compactProductText("work", {
+      skills: [{ path: ".visp/skills/edge-cases-first/SKILL.md", content: skill?.content }],
+    });
+
+    expect(reply).toContain(`Skill edge-cases-first (advisory):\n${document.value.body.trim()}`);
+    expect(reply).not.toContain("Full skill:");
+  });
+
+  it("pins current behavior and edge cases before changing code, advisory only", () => {
+    const skill = bundledSkill("edge-cases-first");
+    const document = parseSkill(skill?.content ?? "");
+    expect(document.ok).toBe(true);
+    if (!document.ok) return;
+
+    expect(document.value.body).toContain("Before editing existing code");
+    expect(document.value.body).toContain("including review fixes");
+    expect(verificationCommand(document.value.body)).toBeUndefined();
+    expect(forbiddenClaims(document.value)).toEqual([]);
   });
 });
