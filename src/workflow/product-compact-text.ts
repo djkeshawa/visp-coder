@@ -119,7 +119,7 @@ function skillText(skills: unknown): string {
         .split("/")
         .at(-2) ?? String(path);
     const cut = body.length > 800 || truncated === true;
-    return `\nSkill ${name} (advisory):\n${body.slice(0, 800)}${cut ? `… Full skill: ${String(path)}` : ""}`;
+    return `\nSkill ${name} (advisory, ${String(path)}):\n${body.slice(0, 800)}${cut ? "… Read the file for the rest." : ""}`;
   });
   const more = skills.length - shown.length;
   return `${shown.join("")}${more > 0 ? `\n${more} more skill(s) in the full result.` : ""}`;

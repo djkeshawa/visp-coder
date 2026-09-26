@@ -118,8 +118,10 @@ describe("bundled skill catalog", () => {
       skills: [{ path: ".visp/skills/edge-cases-first/SKILL.md", content: skill?.content }],
     });
 
-    expect(reply).toContain(`Skill edge-cases-first (advisory):\n${document.value.body.trim()}`);
-    expect(reply).not.toContain("Full skill:");
+    expect(reply).toContain(
+      `Skill edge-cases-first (advisory, .visp/skills/edge-cases-first/SKILL.md):\n${document.value.body.trim()}`,
+    );
+    expect(reply).not.toContain("Read the file for the rest.");
   });
 
   it("pins current behavior and edge cases before changing code, advisory only", () => {

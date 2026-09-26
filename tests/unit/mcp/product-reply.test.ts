@@ -208,8 +208,10 @@ it("shows compact skills as plain text while preserving complete structured capa
     .join("\n");
   const summary = JSON.parse(text.split("\n")[0]?.slice("visp_work: ".length) ?? "{}");
   expect(summary).not.toHaveProperty("skills");
-  expect(text).toContain("\nSkill skill-0 (advisory):\nprocedure procedure");
-  expect(text).toContain("… Full skill: .visp/skills/skill-0/SKILL.md");
+  expect(text).toContain(
+    "\nSkill skill-0 (advisory, .visp/skills/skill-0/SKILL.md):\nprocedure procedure",
+  );
+  expect(text).toContain("… Read the file for the rest.");
   expect(text).not.toContain("name: skill-0");
   expect(text).not.toContain("Skill skill-3");
   expect(text).toContain("1 more skill(s) in the full result.");
