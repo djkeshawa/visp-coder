@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0-beta.1 - 2026-09-26
 
 ### Added
 - **Independent review launched by VISP.** `critic.launch: codex-exec` (written by `visp init --harness codex`) runs a read-only, ephemeral `codex exec` reviewer once a slice's checks pass and returns its findings as the next repair step; `visp accept` has it assess the assembled product first. Weak workers never ran the host delegation protocol, so their work was never reviewed. `launch: host` keeps host-orchestrated delegation.
