@@ -10,9 +10,11 @@ Fixed-contract tasks for comparing coding workflows (bare coding, Spec Kit, BMAD
 | `spreadsheet-cli` | New command-line spreadsheet engine: precedence, ranges, error order, cycles | 38 |
 | `reservations-bundles` | Change to an existing multi-module service (`start/`) | 60, including the prior contract |
 | `spreadsheet-extend` | Larger change to an existing multi-module engine (`start/`) | 37 regression + 26 new |
+| `conventions-carryover` | Two sessions on the existing reservations service: the first states team API conventions and adds a list and an audit log; a fresh second session adds prices, retirement and a reservations list under those conventions | 20 core + 20 new + 9 code + 8 memory |
 
 - `tasks/<task>/task.md` is the request every arm receives; `start/`, when present, is the existing codebase the project starts from.
 - `tasks/<task>/hidden_test.py <project>` runs the project and prints JSON results.
+- A two-session task has `session1.md`, `session2.md` and `conventions.md` instead of `task.md`. Its `code` checks apply conventions that the first session's code already shows; its `memory` checks apply conventions stated only in the first conversation (money in integer `*Cents` fields, soft deletion answering 410 `gone`), so they pass only if the knowledge survived between sessions.
 - `reference/` holds correct implementations used only to validate the oracles; deliberately broken variants (a racy store, injected bugs) were checked to fail.
 
 ## Running
@@ -25,11 +27,16 @@ python3 bench/setup_arm.py spreadsheet-cli bare r1          # or speckit | bmad 
 python3 bench/run_claude.py r1                              # headless Claude Code worker (Haiku 4.5 by default)
 python3 bench/run_codex.py r1                               # or a headless Codex worker (gpt-5.6-luna, low effort)
 python3 bench/score.py spreadsheet-cli r1                   # hidden checks; writes runs/r1/hidden.json
+
+python3 bench/setup_arm.py conventions-carryover visp:visp-head c1
+python3 bench/run_carryover.py c1 --modes wiped,fresh,oracle  # session 1 once, then session 2 per mode
+python3 bench/score.py conventions-carryover c1/wiped c1/fresh c1/oracle
 ```
 
 - `setup_arm.py` creates a fresh Git project, installs the arm's workflow and writes the prompt. Spec Kit needs `specify` on `PATH`; BMAD is fetched with `npx`. VISP arms use a VISP-launched Codex reviewer and tester (`critic.launch: codex-exec`, medium effort), so the Codex CLI must be signed in. `--skill <id>` seeds and admits a bundled VISP skill, so two arms on the same build differ only by that skill.
 - `run_claude.py` runs `claude -p` in the project with project settings only, so each workflow's own instructions, skills and hooks apply; Spec Kit's phases are sent as follow-up turns and BMAD's approval prompts are answered, as a user would.
 - `run_codex.py` runs `codex exec` with a clean home holding only the Codex sign-in and a workspace-write sandbox with network, with project hooks trusted.
 - Each writes `result.json` (duration, turns, tokens) beside the project.
+- `run_carryover.py` runs the first session once, records which files gained mentions of the conventions (`session1/carriers.json`) and scores it, then restores that snapshot at the same path before each second-session mode: `wiped` resets the assistant's notes (`.visp/memory`, `CLAUDE.md`, `AGENTS.md`), `fresh` keeps everything, `oracle` restates the conventions in the request, `resume` continues the first conversation. Claude Code's own auto memory is disabled for every worker, so only what the project holds can carry.
 
 A desktop app or terminal that ends its child processes can stop a long batch; start batches in their own session (for example `systemd-run --user` on Linux).
