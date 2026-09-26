@@ -10,6 +10,7 @@ Writes result.json (duration, turns, cost, tokens, session id) beside the projec
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import time
 
@@ -22,6 +23,12 @@ FOLLOW_UPS = {
     "speckit": [f"Continue: carry out the speckit-{phase} skill now, then stop."
                 for phase in ("plan", "tasks", "implement", "converge")],
 }
+
+
+# A worker sees only its own processes: `killall python3` or `pkill -f <pattern>` to stop its
+# test server must not reach the runner or another run's servers. The namespace ends with it.
+ISOLATE = (["unshare", "--user", "--map-current-user", "--pid", "--fork", "--mount-proc", "--kill-child"]
+           if shutil.which("unshare") else [])
 
 
 def worker_env(arm):
@@ -40,7 +47,7 @@ def run_session(project, arm, prompt, model=MODEL, timeout=2700, resume=None):
     started = time.time()
 
     def turn(text, session=None):
-        argv = ["claude", "-p", text, "--model", model, "--output-format", "json",
+        argv = [*ISOLATE, "claude", "-p", text, "--model", model, "--output-format", "json",
                 "--permission-mode", "bypassPermissions", "--setting-sources", "project,local",
                 "--strict-mcp-config"]
         if session:
