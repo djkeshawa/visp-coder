@@ -88,7 +88,9 @@ describe("complete product context budgeting", () => {
     expect(fitted.budget.status).toBe("within-budget");
     expect(fitted.budget.estimatedTokens).toBeLessThanOrEqual(2500);
     expect(fitted.budget.omitted.files).toBeGreaterThan(0);
-    expect(fitted.budget.omitted.skills).toBe(1);
+    // An admitted skill outranks source excerpts the worker can read itself.
+    expect(fitted.budget.omitted.skills).toBe(0);
+    expect(fitted.skills).toHaveLength(1);
     expect(fitted.budget.omitted.graphRows).toBe(1);
     const cli = `${JSON.stringify({ command: "work", ok: true, data: fitted }, null, 2)}\n`;
     const mcp = JSON.stringify(productReply("visp_work", ok(fitted)));

@@ -27,7 +27,7 @@ python3 bench/run_codex.py r1                               # or a headless Code
 python3 bench/score.py spreadsheet-cli r1                   # hidden checks; writes runs/r1/hidden.json
 ```
 
-- `setup_arm.py` creates a fresh Git project, installs the arm's workflow and writes the prompt. Spec Kit needs `specify` on `PATH`; BMAD is fetched with `npx`. VISP arms use a VISP-launched Codex reviewer and tester (`critic.launch: codex-exec`, medium effort), so the Codex CLI must be signed in.
+- `setup_arm.py` creates a fresh Git project, installs the arm's workflow and writes the prompt. Spec Kit needs `specify` on `PATH`; BMAD is fetched with `npx`. VISP arms use a VISP-launched Codex reviewer and tester (`critic.launch: codex-exec`, medium effort), so the Codex CLI must be signed in. `--skill <id>` seeds and admits a bundled VISP skill, so two arms on the same build differ only by that skill.
 - `run_claude.py` runs `claude -p` in the project with project settings only, so each workflow's own instructions, skills and hooks apply; Spec Kit's phases are sent as follow-up turns and BMAD's approval prompts are answered, as a user would.
 - `run_codex.py` runs `codex exec` with a clean home holding only the Codex sign-in and a workspace-write sandbox with network, with project hooks trusted.
 - Each writes `result.json` (duration, turns, tokens) beside the project.

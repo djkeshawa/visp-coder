@@ -1,23 +1,32 @@
 """Prepare one benchmark project and write the actor prompt for it.
 
-Usage: setup_arm.py <task> <arm> <run_name>
+Usage: setup_arm.py <task> <arm> <run_name> [--skill <id>]...
 arm: bare | speckit | bmad | visp:<build> (Claude Code worker) | visp-codex:<build> (Codex worker)
-<build> is a name given to build_visp.sh.
+<build> is a name given to build_visp.sh. --skill seeds and admits a bundled VISP skill, so an
+arm with it differs from one without only by that skill.
 
 The prompt is host-neutral; run_claude.py or run_codex.py gives it to a headless worker that
 works only inside the project. Every arm receives the same task and constraints.
 """
+import argparse
 import json
 import os
 import pathlib
 import shutil
 import subprocess
-import sys
 
 from common import RUNS
 
 BENCH = pathlib.Path(__file__).resolve().parent
-task_name, arm, name = sys.argv[1:4]
+parser = argparse.ArgumentParser()
+parser.add_argument("task")
+parser.add_argument("arm")
+parser.add_argument("run")
+parser.add_argument("--skill", action="append", default=[])
+args = parser.parse_args()
+task_name, arm, name = args.task, args.arm, args.run
+if args.skill and not arm.startswith("visp"):
+    raise SystemExit("--skill applies only to VISP arms")
 root = RUNS / "runs" / name / "project"
 root.mkdir(parents=True, exist_ok=False)
 task = (BENCH / "tasks" / task_name / "task.md").read_text()
@@ -80,6 +89,9 @@ elif arm.startswith("visp:") or arm.startswith("visp-codex:"):
     config = config.replace("critic:\n  harness: claude-code", "critic:\n  harness: codex\n  launch: codex-exec\n  reasoningEffort: medium\n  webSearch: true")
     (root / "visp.yml").write_text(config)
     sh(["visp", "install", "--harness", host, "--json"])
+    for skill in args.skill:
+        sh(["visp", "skill", "seed", skill, "--by", "bench"])
+        sh(["visp", "skill", "admit", skill, "--by", "bench"])
     guide = "AGENTS.md" if host == "codex" else "CLAUDE.md"
     workflow = (
         f"This project uses VISP. Read {guide} and the VISP instructions it references before "
@@ -94,5 +106,5 @@ sh(["git", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Benchmark sc
 prompt = f"{workflow}\n\n{COMMON}\n\nTask:\n\n{task}"
 (root.parent / "prompt.txt").write_text(prompt)
 # The headless runner puts the arm's VISP build on PATH so installed hooks find it.
-(root.parent / "arm.json").write_text(json.dumps({"task": task_name, "arm": arm, "shim": shim_dir}))
+(root.parent / "arm.json").write_text(json.dumps({"task": task_name, "arm": arm, "shim": shim_dir, "skills": args.skill}))
 print(json.dumps({"root": str(root), "prompt": str(root.parent / "prompt.txt")}))

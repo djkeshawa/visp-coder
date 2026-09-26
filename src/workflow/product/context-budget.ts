@@ -43,11 +43,13 @@ export function fitProductContext(
     budget: { ...fitted.budget, omitted: { ...fitted.budget.omitted, feedbackCharacters } },
   });
   fitted = fitAdvisoryContext(fitted);
+  // Admitted skills are small and are the only place a procedure reaches the worker;
+  // source excerpts go first because the worker can read those files itself.
   for (const [key, counter] of [
     ["memory", "memory"],
-    ["skills", "skills"],
     ["graph", "graphRows"],
     ["files", "files"],
+    ["skills", "skills"],
   ] as const) {
     if (fitted.budget.estimatedTokens <= tokenBudget) break;
     fitted = fitPrefix(fitted, key, counter);

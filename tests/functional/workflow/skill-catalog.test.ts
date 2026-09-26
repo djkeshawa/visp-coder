@@ -30,6 +30,13 @@ describe("bundled skill catalog", () => {
     expect(result.exitCode).toBe(0);
     expect(envelope.data?.skills).toEqual([
       {
+        id: "edge-cases-first",
+        version: "1.0.0",
+        description: expect.stringContaining("Pin current behavior"),
+        stages: ["implement"],
+        contentHash: expect.stringMatching(/^[a-f0-9]{12}$/),
+      },
+      {
         id: "research-the-craft",
         version: "3.7.0",
         description: expect.stringContaining("Investigate load-bearing uncertainty"),

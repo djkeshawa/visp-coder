@@ -48,8 +48,10 @@ argv = [
 ]
 started = time.time()
 try:
+    # Own session, so a worker's process-group signal cannot reach sibling runs.
     completed = subprocess.run(argv, input=(run / "prompt.txt").read_text(), env=env,
-                               capture_output=True, text=True, timeout=args.timeout)
+                               capture_output=True, text=True, timeout=args.timeout,
+                               start_new_session=True)
     output, timed_out = completed.stdout, False
 except subprocess.TimeoutExpired as expired:
     output = expired.stdout.decode() if isinstance(expired.stdout, bytes) else (expired.stdout or "")

@@ -1,4 +1,5 @@
 import type { Stage } from "../core/constants.js";
+import { EDGE_CASES_FIRST_CONTENT } from "./catalog/edge-cases-first.js";
 import { RESEARCH_THE_CRAFT_CONTENT } from "./catalog/research-the-craft.js";
 import { fingerprint } from "./store.js";
 
@@ -27,7 +28,19 @@ const RESEARCH_THE_CRAFT: BundledSkill = {
   content: RESEARCH_THE_CRAFT_CONTENT,
 };
 
-const BUNDLED_SKILLS: readonly BundledSkill[] = [RESEARCH_THE_CRAFT];
+const EDGE_CASES_FIRST: BundledSkill = {
+  summary: {
+    id: "edge-cases-first",
+    version: "1.0.0",
+    description:
+      "Pin current behavior and the request's edge cases as tests before changing code, so a change or fix does not break nearby behavior.",
+    stages: ["implement"],
+    contentHash: fingerprint(EDGE_CASES_FIRST_CONTENT),
+  },
+  content: EDGE_CASES_FIRST_CONTENT,
+};
+
+const BUNDLED_SKILLS: readonly BundledSkill[] = [EDGE_CASES_FIRST, RESEARCH_THE_CRAFT];
 
 /** Public metadata intentionally excludes the body; `seed` is the copy boundary. */
 export function skillCatalog(): readonly SkillCatalogEntry[] {
