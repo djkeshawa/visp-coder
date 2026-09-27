@@ -14,6 +14,10 @@ second session, so the modes are paired on one first session. Modes:
 - fresh:  new session on the project exactly as the first session left it.
 - oracle: like fresh, with the first session's conventions restated in the request.
 - resume: the second request continues the first session's conversation.
+- noisy:  like memory, with the store first holding the earlier feature requests in the
+          task's noise.md (unrelated features and near-miss traps), recorded as VISP would;
+          Visp Memory's keyword selection alone chooses what the request carries.
+- gated:  noisy, with the reviewer's model choosing among the candidates.
 - memory: like fresh, with Visp Memory as VISP's long-term store (`memory.service`, set up
           before the second session; needs $VISP_BENCH_RUNS/visp-memory-venv and a VISP build
           that supports it).
@@ -36,7 +40,7 @@ from common import RUNS
 from run_claude import MODEL, run_session
 
 BENCH = pathlib.Path(__file__).resolve().parent
-MODES = ("wiped", "fresh", "oracle", "resume", "memory")
+MODES = ("wiped", "fresh", "oracle", "resume", "memory", "noisy", "gated")
 MEMORY = RUNS / "visp-memory-venv" / "bin" / "visp-memory"
 NOTES = ("CLAUDE.md", "AGENTS.md")
 # Where each first-session convention could have been written down. C1 and C2 are also visible
@@ -99,14 +103,34 @@ def wipe_notes(project, workflow_state):
             (project / name).unlink(missing_ok=True)
 
 
-def enable_memory(project):
+def enable_memory(project, select="model"):
     """Visp Memory with its defaults (SQLite, keyword recall); only its own files are committed."""
     subprocess.run([str(MEMORY), "init", "--no-mine"], cwd=project, check=True, capture_output=True)
     config = (project / "visp.yml").read_text()
     (project / "visp.yml").write_text(
-        config.replace("memory:\n", f"memory:\n  service:\n    command: {MEMORY}\n", 1))
+        config.replace("memory:\n", f"memory:\n  service:\n    command: {MEMORY}\n    select: {select}\n", 1))
     git(project, "add", "visp.yml", ".gitignore", "visp-memory.yaml")
     git(project, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Enable Visp Memory")
+
+
+def request_chunks(request):
+    """Paragraphs and list items, as VISP records a request (src/memory/memory-service.ts)."""
+    chunks = []
+    for block in re.split(r"\n\s*\n", request):
+        items = [line.strip() for line in block.split("\n") if re.match(r"^\s*(?:[-*•]|\d+[.)])\s+\S", line)]
+        chunks += items or [re.sub(r"\s+", " ", block).strip()]
+    return [chunk[:1000] for chunk in chunks if len(chunk) >= 20]
+
+
+def seed_noise(project, task):
+    """Earlier feature requests, recorded in Visp Memory the way VISP records them."""
+    noise = (BENCH / "tasks" / task / "noise.md").read_text()
+    for index, request in enumerate(noise.split("\n---\n"), start=1):
+        goal = request.strip().splitlines()[0].removeprefix("Feature:").strip()
+        body = request.strip().split("\n", 1)[1]
+        for chunk in request_chunks(body):
+            subprocess.run([str(MEMORY), "decision", chunk, f"Stated by the user for feature n{index:02d}: {goal}"],
+                           cwd=project, check=True, capture_output=True)
 
 
 def main():
@@ -160,8 +184,10 @@ def main():
         restore(project, snapshot)
         if mode == "wiped":
             wipe_notes(project, workflow_state)
-        if mode == "memory":
-            enable_memory(project)
+        if mode in ("memory", "noisy", "gated"):
+            enable_memory(project, "keyword" if mode == "noisy" else "model")
+        if mode in ("noisy", "gated"):
+            seed_noise(project, arm["task"])
         prompt = (run / ("prompt2-oracle.txt" if mode == "oracle" else "prompt2.txt")).read_text()
         resume = result["sessionId"] if mode == "resume" else None
         if mode == "resume" and not resume:
