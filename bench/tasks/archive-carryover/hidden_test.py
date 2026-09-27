@@ -10,6 +10,7 @@ import json
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -87,6 +88,24 @@ def error(response, expected, code):
         and body["error"]["message"].strip() != ""
     )
     return ok, {"status": status, "body": body}
+
+
+def concurrently(count, request):
+    """Start `count` threads together, each making one request; return their results."""
+    barrier, results, lock = threading.Barrier(count), [], threading.Lock()
+
+    def worker():
+        barrier.wait()
+        outcome = request()
+        with lock:
+            results.append(outcome)
+
+    threads = [threading.Thread(target=worker) for _ in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return results
 
 
 def item(sku, quantity, **extra):
@@ -258,6 +277,8 @@ def new():
         {"lines": [line("N-A"), bad], "ttlSeconds": 60}
         for bad in (None, {}, {"sku": 12, "quantity": 1}, {"sku": "N-B"},
                     line("N-B", 0), line("N-B", -1), line("N-B", True), line("N-B", 1.5), line("N-B", "1"))]))
+    check("bundle line with a malformed SKU is 422 and holds nothing", lambda: invalid_bodies([
+        {"lines": [line("N-A"), line(bad)], "ttlSeconds": 60} for bad in ("bad sku!", "", "X" * 65)]))
     check("bundle invalid ttl is 422", lambda: invalid_bodies([
         {"lines": [line("N-A")], "ttlSeconds": ttl} for ttl in (None, 0, 3601, True, 1.5, "60")]))
 
@@ -268,6 +289,15 @@ def new():
         result = bundle(lines)
         return result[0] == 201 and result[1].get("lines") == lines, result
     check("20-line bundle succeeds", maximum_lines)
+
+    def concurrent_bundles():
+        item("N-C1", 10)
+        item("N-C2", 10)
+        statuses = concurrently(16, lambda: bundle([line("N-C1", 3), line("N-C2", 3)])[0])
+        available = [read("N-C1")[1]["available"], read("N-C2")[1]["available"]]
+        return (statuses.count(201) == 3 and statuses.count(409) == 13
+                and available == [1, 1]), [statuses, available]
+    check("concurrent bundles on the same SKUs never hold more than is available", concurrent_bundles)
 
     def idempotency():
         item("N-ID", 5)
@@ -362,6 +392,14 @@ def memory():
     check(f"restock above cap changes nothing; exactly {CAP} succeeds", lambda: capped_restock("M-4", CAP - 5, 6, boundary=True))
     check("restock at cap rejects one extra unit without changes", lambda: capped_restock("M-5", CAP, 1))
     check("restock cap uses quantity, not available stock", lambda: capped_restock("M-6", CAP - 2, 3, held=10))
+
+    def concurrent_restocks():
+        item("M-8", CAP - 1)
+        statuses = concurrently(16, lambda: restock("M-8", 1)[0])
+        fetched = read("M-8")
+        return (statuses.count(200) == 1 and statuses.count(422) == 15
+                and fetched[1]["quantity"] == CAP), [statuses, fetched]
+    check(f"concurrent restocks one unit below the cap stop at exactly {CAP}", concurrent_restocks)
     if CAP != 10000:
         def past_old_limit():
             item("M-7", 9000)
