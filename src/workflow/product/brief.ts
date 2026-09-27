@@ -12,10 +12,12 @@ import { err, ok, type Result } from "../../core/result.js";
 import {
   type EarlierFeature,
   memoryBriefFor,
+  notInRequest,
   PROJECT_MEMORY_FILE,
   projectMemoryText,
   recordEarlierRequests,
 } from "../../memory/memory-service.js";
+import { recordRequestHistory } from "../../memory/request-history.js";
 import type { Intent } from "../artifacts/feature.js";
 import { captureAcceptanceBaseline } from "../evidence/acceptance.js";
 import { requireFeatureFoundation } from "../gates/readiness.js";
@@ -190,6 +192,7 @@ async function selectMemories(
   workspace: WorkspaceState,
   command: string,
   request: string,
+  rules: readonly string[],
 ): Promise<string[]> {
   const model =
     workspace.config.memory.service?.select === "keyword"
@@ -198,10 +201,50 @@ async function selectMemories(
   if (!model) return memoryBriefFor(workspace, command, request);
   const candidates = await memoryBriefFor(workspace, command, request, GATE_CANDIDATE_TOKENS);
   try {
-    return await codexMemoryGate({ model })(request, candidates);
+    return await codexMemoryGate({ model })(request, candidates, rules);
   } catch {
     return memoryBriefFor(workspace, command, request);
   }
+}
+
+/** Visp Memory's store: earlier requests are recorded there first. */
+async function serviceMemories(
+  workspace: WorkspaceState,
+  command: string,
+  earlier: readonly EarlierFeature[],
+  request: string,
+  rules: readonly string[],
+): Promise<Result<{ memories: string[]; mutation?: FileMutation }>> {
+  const recorded = await recordEarlierRequests(workspace, command, earlier);
+  if (!recorded.ok) return recorded;
+  const memories = await selectMemories(workspace, command, request, rules);
+  return ok({ memories, ...(recorded.value ? { mutation: recorded.value } : {}) });
+}
+
+/** VISP's own store: every recorded note goes to the reviewer's model, which passes on only what applies. */
+async function recallMemories(
+  workspace: WorkspaceState,
+  model: string,
+  earlier: readonly EarlierFeature[],
+  request: string,
+  rules: readonly string[],
+): Promise<Result<{ memories: string[]; mutation?: FileMutation }>> {
+  const history = await recordRequestHistory(workspace, earlier);
+  if (!history.ok) return history;
+  let memories: string[] = [];
+  try {
+    memories = await codexMemoryGate({ model })(
+      request,
+      notInRequest(request, history.value.notes),
+      rules,
+    );
+  } catch {
+    // Without its model, nothing is selected: every note unfiltered would be noise.
+  }
+  return ok({
+    memories,
+    ...(history.value.mutation ? { mutation: history.value.mutation } : {}),
+  });
 }
 
 /** The user's recorded request, with the decisions Visp Memory selects for it; rules are captured on the way. */
@@ -216,7 +259,12 @@ async function featureRequest(
   const rules = await featureProjectRules(workspace, host.value, feature, timestamp);
   if (!rules.ok) return rules;
   const request = host.value?.request ?? options.sourceBrief ?? options.goal;
-  const memory = await featureMemory(workspace, feature, request);
+  const memory = await featureMemory(
+    workspace,
+    feature,
+    request,
+    (rules.value.reported.projectRules ?? []).map((rule) => rule.text),
+  );
   if (!memory.ok) return memory;
   // Earlier rules are not copied into the fixed request: work replies, the reviewer and the
   // tester read the current rules, so a removed rule stops applying at once.
@@ -231,13 +279,15 @@ async function featureRequest(
 }
 
 /**
- * With `memory.service`, earlier features' requests are recorded in Visp Memory and the
- * decisions it selects for this request join it; the feature keeps them for `work` replies.
+ * Earlier features' requests are recorded and the decisions that constrain this request join
+ * it; the feature keeps them for `work` replies. With `memory.service` Visp Memory holds them;
+ * otherwise VISP does, and only with a reviewer model to choose.
  */
 async function featureMemory(
   workspace: WorkspaceState,
   feature: string,
   request: string,
+  rules: readonly string[],
 ): Promise<
   Result<{
     memories: string[];
@@ -245,11 +295,32 @@ async function featureMemory(
     reported: { projectMemory?: string[] };
   }>
 > {
+  const none = ok({ memories: [], mutations: [], reported: {} });
   // memory.enabled switches off every memory path, the long-term store included.
-  const command = workspace.config.memory.enabled
-    ? workspace.config.memory.service?.command
-    : undefined;
-  if (!command) return ok({ memories: [], mutations: [], reported: {} });
+  if (!workspace.config.memory.enabled) return none;
+  const command = workspace.config.memory.service?.command;
+  const model =
+    command || !workspace.config.memory.recall ? undefined : await reviewerModel(workspace);
+  if (!command && !model) return none;
+  const earlier = await earlierFeatures(workspace);
+  if (!earlier.ok) return earlier;
+  const chosen = command
+    ? await serviceMemories(workspace, command, earlier.value, request, rules)
+    : await recallMemories(workspace, model as string, earlier.value, request, rules);
+  if (!chosen.ok) return chosen;
+  const { memories } = chosen.value;
+  const mutations: FileMutation[] = chosen.value.mutation ? [chosen.value.mutation] : [];
+  if (memories.length)
+    mutations.push({
+      kind: "write",
+      path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
+      content: json({ version: 1, memories }),
+      expectedBefore: { existed: false },
+    });
+  return ok({ memories, mutations, reported: memories.length ? { projectMemory: memories } : {} });
+}
+
+async function earlierFeatures(workspace: WorkspaceState): Promise<Result<EarlierFeature[]>> {
   const listed = await workspace.store.listFeatures();
   if (!listed.ok) return listed;
   const earlier: EarlierFeature[] = [];
@@ -262,18 +333,7 @@ async function featureMemory(
         originalRequest: intent.value.sourceBrief,
       });
   }
-  const recorded = await recordEarlierRequests(workspace, command, earlier);
-  if (!recorded.ok) return recorded;
-  const memories = await selectMemories(workspace, command, request);
-  const mutations: FileMutation[] = recorded.value ? [recorded.value] : [];
-  if (memories.length)
-    mutations.push({
-      kind: "write",
-      path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
-      content: json({ version: 1, memories }),
-      expectedBefore: { existed: false },
-    });
-  return ok({ memories, mutations, reported: memories.length ? { projectMemory: memories } : {} });
+  return ok(earlier);
 }
 
 function criticStateFields(critic: {

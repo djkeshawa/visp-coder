@@ -5,7 +5,11 @@ import { z } from "zod";
 import { reachesModel, runCodexStructured } from "./critic-exec.js";
 
 /** Chooses, from recorded notes, the ones a new request must stay consistent with. */
-export type MemoryGate = (request: string, notes: readonly string[]) => Promise<string[]>;
+export type MemoryGate = (
+  request: string,
+  notes: readonly string[],
+  rules?: readonly string[],
+) => Promise<string[]>;
 
 /**
  * Visp Memory's keyword relevance scored the decisions a request needed and unrelated earlier
@@ -21,11 +25,14 @@ export type MemoryGate = (request: string, notes: readonly string[]) => Promise<
  * or value also carry to new operations that take it, while another argument's limits do not.
  * With that, it chose it 5 of 5, and on both inventory stores still chose only the current
  * decisions with no trap.
+ * Reading every note VISP recorded, not a keyword-ranked set, it sees an old limit next to
+ * the later one that replaced it, so it is told the order; and the project rules already
+ * travel with the request, so notes restating them are left out.
  */
-const INSTRUCTIONS = `A user sent the REQUEST below to an AI coding assistant. The NOTES are recorded from the user's earlier requests on the same project. Select only the notes that constrain how THIS request must be implemented, so the new behavior stays consistent with what the user already decided:
+const INSTRUCTIONS = `A user sent the REQUEST below to an AI coding assistant. The NOTES are recorded from the user's earlier requests on the same project, in the order the user stated them; where two notes conflict, only the later one still applies. Select only the notes that constrain how THIS request must be implemented, so the new behavior stays consistent with what the user already decided:
 - Keep invariants of a resource that the requested operations could violate or must respect: a maximum or minimum on a stored value, a state in which an action is forbidden, a required field in every representation. They apply to every operation on that resource, even if the earlier request stated them for a different operation.
 - Keep decisions about a kind of value or argument that the requested behavior also takes or produces (for example which values an argument of that kind accepts, or what a computation of that kind returns in an edge case), even if the earlier request stated them for one operation: new operations handling the same kind of value should behave the same way.
-- Leave out notes about other features, and limits on a different kind of value or argument (for example a per-line or per-request limit of a different endpoint, or the allowed range of a differently named argument), even if they look similar. Leave out notes the request itself contradicts.
+- Leave out notes about other features, and limits on a different kind of value or argument (for example a per-line or per-request limit of a different endpoint, or the allowed range of a differently named argument), even if they look similar. Leave out notes the request itself contradicts, and notes that only restate one of the RULES, which already reach the assistant.
 Return {"selected": []} when none apply. Do not read files or run commands.`;
 
 const RESPONSE_SCHEMA = {
@@ -59,7 +66,7 @@ export function codexMemoryGate(options: {
   executable?: string;
   lookup?: (host: string) => Promise<unknown>;
 }): MemoryGate {
-  return async (request, notes) => {
+  return async (request, notes, rules = []) => {
     if (notes.length === 0) return [];
     const { lookup: dnsLookup } = await import("node:dns/promises");
     if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)))))
@@ -75,7 +82,7 @@ export function codexMemoryGate(options: {
         schema: RESPONSE_SCHEMA,
         prompt: `${INSTRUCTIONS}\n\nREQUEST:\n${request}\n\nNOTES:\n${notes
           .map((note, index) => `[${index + 1}] ${note}`)
-          .join("\n")}`,
+          .join("\n")}${rules.length ? `\n\nRULES:\n${rules.join("\n")}` : ""}`,
         signal: AbortSignal.timeout(90_000),
       });
       return selectedNotes(

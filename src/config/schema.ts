@@ -82,6 +82,11 @@ const skillsSchema = z
 const memorySchema = z
   .object({
     enabled: z.boolean().default(true),
+    /**
+     * With a VISP-launched reviewer, VISP records earlier requests and its model passes a new
+     * feature the recorded decisions that constrain it, usually none. Off skips that call.
+     */
+    recall: z.boolean().default(true),
     /** Visp Memory as the long-term store: earlier requests are recorded there and new features briefed from it. */
     service: z
       .object({
