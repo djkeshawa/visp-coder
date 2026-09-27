@@ -25,6 +25,7 @@ import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
 import { nextFeatureId } from "./feature-id.js";
 import { type HostRequest, hostRequest } from "./host-prompts.js";
+import { codexMemoryGate } from "./memory-gate.js";
 import {
   initialProductState,
   outcomeDigest,
@@ -169,12 +170,42 @@ async function featureProjectRules(
 }
 
 /** The user's recorded request, followed by the rules they stated for later work in earlier features. */
-/** With a VISP-launched Codex reviewer, its model reads the rules; otherwise phrase matching does. */
-async function ruleReader(workspace: WorkspaceState): Promise<RuleExtractor | undefined> {
+/** The model of a VISP-launched Codex reviewer, which also reads rules and chooses memories. */
+async function reviewerModel(workspace: WorkspaceState): Promise<string | undefined> {
   if (workspace.config.critic?.launch !== "codex-exec") return undefined;
   const critic = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
-  const model = critic.ok ? critic.value.config?.model : undefined;
+  return critic.ok ? critic.value.config?.model : undefined;
+}
+
+/** With a VISP-launched Codex reviewer, its model reads the rules; otherwise phrase matching does. */
+async function ruleReader(workspace: WorkspaceState): Promise<RuleExtractor | undefined> {
+  const model = await reviewerModel(workspace);
   return model ? codexRuleExtractor({ model }) : undefined;
+}
+
+/** Candidates wide enough to hold every note of a store with about fifty. */
+const GATE_CANDIDATE_TOKENS = 6000;
+
+/**
+ * Visp Memory's keyword selection alone, or, with a reviewer model and `select: model`, that
+ * model choosing from a wide candidate set; keyword selection is the fallback.
+ */
+async function selectMemories(
+  workspace: WorkspaceState,
+  command: string,
+  request: string,
+): Promise<string[]> {
+  const model =
+    workspace.config.memory.service?.select === "keyword"
+      ? undefined
+      : await reviewerModel(workspace);
+  if (!model) return memoryBriefFor(workspace, command, request);
+  const candidates = await memoryBriefFor(workspace, command, request, GATE_CANDIDATE_TOKENS);
+  try {
+    return await codexMemoryGate({ model })(request, candidates);
+  } catch {
+    return memoryBriefFor(workspace, command, request);
+  }
 }
 
 async function featureRequest(
@@ -235,7 +266,7 @@ async function featureMemory(
   }
   const recorded = await recordEarlierRequests(workspace, command, earlier);
   if (!recorded.ok) return recorded;
-  const memories = await memoryBriefFor(workspace, command, request);
+  const memories = await selectMemories(workspace, command, request);
   const mutations: FileMutation[] = recorded.value ? [recorded.value] : [];
   if (memories.length)
     mutations.push({

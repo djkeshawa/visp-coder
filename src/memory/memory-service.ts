@@ -97,8 +97,10 @@ export async function memoryBriefFor(
   workspace: WorkspaceState,
   command: string,
   request: string,
+  tokens?: number,
 ): Promise<string[]> {
-  const brief = await run(command, ["brief", request, "--format", "json"], {
+  const budget = tokens ? ["--tokens", String(tokens)] : [];
+  const brief = await run(command, ["brief", request, "--format", "json", ...budget], {
     cwd: workspace.paths.root,
     timeoutMs: TIMEOUT_MS,
   });
