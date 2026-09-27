@@ -245,6 +245,11 @@ def run_modes(args, run, project, arm, first, result, modes):
     workflow_state = first / "visp-scaffold.tar"
     project.mkdir(exist_ok=True)
     for mode in modes:
+        resume = result["sessionId"] if mode == "resume" else None
+        if mode == "resume" and not resume:
+            # Checked before restoring, so a skipped mode leaves no restored tree behind.
+            print(json.dumps({"run": args.run, "mode": mode, "skipped": "first session has no id"}))
+            continue
         restore(project, snapshot)
         if args.build:
             refresh_install(project, arm)
@@ -257,10 +262,6 @@ def run_modes(args, run, project, arm, first, result, modes):
         if mode.startswith("outdated"):
             apply_intermediate(project, arm["task"], mode != "outdated-none")
         prompt = (run / ("prompt2-oracle.txt" if mode == "oracle" else "prompt2.txt")).read_text()
-        resume = result["sessionId"] if mode == "resume" else None
-        if mode == "resume" and not resume:
-            print(json.dumps({"run": args.run, "mode": mode, "skipped": "first session has no id"}))
-            continue
         second = run_session(project, arm, prompt, args.model, args.timeout, resume)
         out = run / (f"{mode}-{args.reuse}" if args.reuse else mode)
         out.mkdir()
@@ -269,7 +270,8 @@ def run_modes(args, run, project, arm, first, result, modes):
         project.mkdir()
         print(json.dumps({"run": args.run, "mode": mode, "seconds": second["seconds"],
                           "timedOut": second["timedOut"], "isError": second["isError"]}))
-    project.rmdir()
+    # Empty after a finished mode; still session 1's tree if every mode was skipped (it is in the snapshot).
+    shutil.rmtree(project)
 
 
 if __name__ == "__main__":

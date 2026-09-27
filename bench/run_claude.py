@@ -10,11 +10,10 @@ Writes result.json (duration, turns, cost, tokens, session id) beside the projec
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import time
 
-from common import RUNS
+from common import RUNS, isolate
 
 MODEL = "claude-haiku-4-5-20251001"
 # Spec Kit is driven one command per user turn; each skill ends by naming the next one
@@ -23,12 +22,6 @@ FOLLOW_UPS = {
     "speckit": [f"Continue: carry out the speckit-{phase} skill now, then stop."
                 for phase in ("plan", "tasks", "implement", "converge")],
 }
-
-
-# A worker sees only its own processes: `killall python3` or `pkill -f <pattern>` to stop its
-# test server must not reach the runner or another run's servers. The namespace ends with it.
-ISOLATE = (["unshare", "--user", "--map-current-user", "--pid", "--fork", "--mount-proc", "--kill-child"]
-           if shutil.which("unshare") else [])
 
 
 def worker_env(arm):
@@ -47,7 +40,7 @@ def run_session(project, arm, prompt, model=MODEL, timeout=2700, resume=None):
     started = time.time()
 
     def turn(text, session=None):
-        argv = [*ISOLATE, "claude", "-p", text, "--model", model, "--output-format", "json",
+        argv = [*isolate(), "claude", "-p", text, "--model", model, "--output-format", "json",
                 "--permission-mode", "bypassPermissions", "--setting-sources", "project,local",
                 "--strict-mcp-config"]
         if session:
@@ -58,11 +51,17 @@ def run_session(project, arm, prompt, model=MODEL, timeout=2700, resume=None):
             # control) must not reach sibling runs in the same batch.
             completed = subprocess.run(argv, cwd=project, env=env, capture_output=True, text=True,
                                        timeout=remaining, start_new_session=True)
-            return json.loads(completed.stdout), False
         except subprocess.TimeoutExpired:
             return {}, True
+        try:
+            return json.loads(completed.stdout), False
         except ValueError:
-            return {"raw": completed.stdout[-2000:]}, False
+            data = {"raw": completed.stdout[-2000:]}
+            if completed.returncode != 0:
+                # claude (or the namespace wrapper) failed before reporting: count it as an error.
+                data.update(is_error=True, exit_code=completed.returncode,
+                            result=f"exit {completed.returncode}: {completed.stderr[-1500:]}")
+            return data, False
 
     data, timed_out = turn(prompt, resume)
     turns = [data]
