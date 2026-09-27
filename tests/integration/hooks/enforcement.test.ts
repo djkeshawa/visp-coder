@@ -408,11 +408,11 @@ describe("edit authorization across host sessions", () => {
     });
   }
 
-  function write(path: string): { decision: string; reason: string } {
+  function write(path: string, session: string): { decision: string; reason: string } {
     const output = JSON.parse(
       execFileSync(process.execPath, [hook()], {
         cwd: project.root,
-        input: JSON.stringify({ session_id: "ignored", tool_input: { file_path: path } }),
+        input: JSON.stringify({ session_id: session, tool_input: { file_path: path } }),
         encoding: "utf8",
         env: env(),
       }),
@@ -427,7 +427,7 @@ describe("edit authorization across host sessions", () => {
     const { readFile } = await import("node:fs/promises");
     prompt("session-1", "Change the auth module");
     await setUpTask(project);
-    expect(write("src/auth/login.ts").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-1").decision).toBe("allow");
     const authorization = join(
       project.root,
       ".visp/state/product-authorizations/001-scoped-work.json",
@@ -435,7 +435,7 @@ describe("edit authorization across host sessions", () => {
     const baseline = JSON.parse(await readFile(authorization, "utf8")).baseline;
 
     prompt("session-2", "Add prices to items");
-    const refused = write("src/auth/login.ts");
+    const refused = write("src/auth/login.ts", "session-2");
     expect(refused.decision).toBe("deny");
     expect(refused.reason).toContain("earlier session");
     expect(refused.reason).toContain("visp feature");
@@ -445,8 +445,38 @@ describe("edit authorization across host sessions", () => {
     const worked = project.run("work", "--task", "T001");
     expect(worked.exitCode, worked.stdout + worked.stderr).toBe(0);
     prompt("session-2", "Also keep the login response unchanged");
-    expect(write("src/auth/login.ts").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
     expect(JSON.parse(await readFile(authorization, "utf8")).baseline).toEqual(baseline);
+  });
+
+  // Two sessions in one checkout: the latest prompt came from another session, but the
+  // hook names the session that is editing, and only the one that ran `visp work` may.
+  it("judges an edit by the session making it, not the one that prompted last", () => {
+    prompt("session-3", "Unrelated question in another window");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-3").decision).toBe("deny");
+  });
+
+  it("stamps the session whose shell command runs visp work", async () => {
+    const { readFile } = await import("node:fs/promises");
+    execFileSync(process.execPath, [hook()], {
+      cwd: project.root,
+      input: JSON.stringify({
+        session_id: "session-4",
+        tool_name: "Bash",
+        tool_input: { command: "visp work --task T001" },
+      }),
+      env: env(),
+    });
+    const worked = project.run("work", "--task", "T001");
+    expect(worked.exitCode, worked.stdout + worked.stderr).toBe(0);
+    const authorization = join(
+      project.root,
+      ".visp/state/product-authorizations/001-scoped-work.json",
+    );
+    expect(JSON.parse(await readFile(authorization, "utf8")).session).toBe("session-4");
+    expect(write("src/auth/login.ts", "session-4").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("deny");
   });
 });
 
@@ -461,12 +491,14 @@ describe("shell commands that would discard uncommitted work", () => {
     project = await TestProject.create({
       "src/auth/login.ts": "export const login = () => null;\n",
       "src/auth/token.ts": "export const token = () => null;\n",
+      "src/auth/foo bar.ts": "export const spaced = 1;\n",
     });
     project.run("init", "--harness", "generic");
     project.run("install", "--harness", "claude-code", "--hooks", "claude", "git");
     await project.installShim();
     project.commit("add visp");
     await project.write("src/auth/login.ts", "export const login = () => 'earlier work';\n");
+    await project.write("src/auth/foo bar.ts", "export const spaced = 2;\n");
   });
 
   afterAll(async () => {
@@ -495,6 +527,12 @@ describe("shell commands that would discard uncommitted work", () => {
     "git restore src/auth/login.ts",
     "git reset --hard",
     "git reset --hard HEAD",
+    // Review: shell quoting and forced modes also discard work.
+    "git checkout -- 'src/auth/foo bar.ts'",
+    'git checkout "src/auth/foo bar.ts"',
+    "git checkout -f main",
+    "git checkout --force main",
+    "git switch --discard-changes main",
   ])("refuses %s", (command) => {
     expect(shell(command)).toBe("deny");
   });
@@ -508,6 +546,41 @@ describe("shell commands that would discard uncommitted work", () => {
     "git add -A && git commit -m 'earlier work'",
   ])("leaves %s to the host", (command) => {
     expect(shell(command)).toBe("");
+  });
+});
+
+// A hard reset to a commit that tracks a path deletes the untracked file there.
+describe("hard resets over untracked work", () => {
+  let project: TestProject;
+
+  beforeAll(async () => {
+    project = await TestProject.create({ "src/app.ts": "export const app = 1;\n" });
+    project.run("init", "--harness", "generic");
+    project.run("install", "--harness", "claude-code", "--hooks", "claude", "git");
+    await project.installShim();
+    project.commit("add visp");
+    await project.write("src/new-work.ts", "export const earlier = true;\n");
+  });
+
+  afterAll(async () => {
+    await project.destroy();
+  });
+
+  it("refuses a hard reset while untracked work exists", () => {
+    const output = execFileSync(
+      process.execPath,
+      [join(project.root, ".visp/hooks/claude-pretooluse.mjs")],
+      {
+        cwd: project.root,
+        input: JSON.stringify({
+          tool_name: "Bash",
+          tool_input: { command: "git reset --hard HEAD^" },
+        }),
+        env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
+        encoding: "utf8",
+      },
+    );
+    expect(JSON.parse(output).hookSpecificOutput.permissionDecision).toBe("deny");
   });
 });
 

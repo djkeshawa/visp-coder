@@ -17,7 +17,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 11;
+export const HOOK_TEMPLATE_VERSION = 12;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -125,7 +125,22 @@ if (input?.hook_event_name === "Stop") {
 // A worker deleted .visp and the pinned tests with shell commands to get past a scope
 // error. Only such commands are refused; every other command gets no decision here, so
 // the host's own permission rules still apply.
+// \`${PRODUCT_NAME} work\` stamps its authorization with the session that runs it: record the
+// session of each shell command just before it runs, as prompts do.
+function recordSession() {
+  if (typeof input?.session_id !== "string" || !input.session_id) return;
+  try {
+    const directory = join(projectRoot(), ".visp", "session");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, "${HOST_SESSION_FILE}"),
+      JSON.stringify({ session: input.session_id, at: new Date().toISOString() }),
+    );
+  } catch {}
+}
+
 if (input?.tool_name === "Bash") {
+  recordSession();
   const command = String(input?.tool_input?.command ?? "");
   const touchesState = /(^|[\\s'"=/])(\\.visp|acceptance)(\\/|[\\s'"]|$)/.test(command);
   const destructive =
@@ -159,43 +174,104 @@ if (input?.tool_name === "Bash") {
 }
 
 // A worker discarded a previous session's uncommitted work with git checkout to get the
-// clean tree a new feature needs. Commands that would discard uncommitted changes to
-// tracked files are refused; branch switches, staged-only restores and stashes are not.
+// clean tree a new feature needs. Commands that would discard uncommitted changes are
+// refused: checkout or restore of changed files, forced checkouts and switches, and hard
+// resets (untracked files included, which a reset to another commit can overwrite).
+// Branch switches that keep changes, staged-only restores and stashes are left alone.
+function shellCommands(command) {
+  const commands = [[]];
+  let word = "";
+  let inWord = false;
+  let quote = "";
+  const end = () => {
+    if (inWord) commands[commands.length - 1].push(word);
+    word = "";
+    inWord = false;
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote) {
+      if (c === quote) quote = "";
+      else if (c === "\\\\" && quote === '"' && i + 1 < command.length) word += command[++i];
+      else word += c;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      inWord = true;
+    } else if (c === "\\\\" && i + 1 < command.length) {
+      word += command[++i];
+      inWord = true;
+    } else if (c === "\\n" || c === ";" || c === "&" || c === "|") {
+      end();
+      commands.push([]);
+    } else if (/\\s/.test(c)) {
+      end();
+    } else {
+      word += c;
+      inWord = true;
+    }
+  }
+  end();
+  return commands.filter((words) => words.length > 0);
+}
+
+function workingTreeChanges() {
+  const entries = execFileSync("git", ["status", "--porcelain", "-z"], {
+    cwd: projectRoot(),
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+    .toString()
+    .split("\\0");
+  const tracked = [];
+  const untracked = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) continue;
+    const code = entry.slice(0, 2);
+    (code === "??" ? untracked : tracked).push(entry.slice(3));
+    if (code[0] === "R" || code[0] === "C") i++;
+  }
+  return { tracked, untracked };
+}
+
 function discardedChanges(command) {
   const targets = [];
+  let forced = false;
   let hard = false;
-  for (const segment of command.split(/&&|\\|\\||;|\\||\\n/)) {
-    const words = segment.trim().split(/\\s+/).map((word) => word.replace(/^['"]|['"]$/g, ""));
+  for (const words of shellCommands(command)) {
     const git = words.indexOf("git");
     if (git < 0) continue;
     const [sub, ...rest] = words.slice(git + 1);
-    const paths = rest.filter((word) => word && !word.startsWith("-"));
-    if (sub === "reset" && rest.includes("--hard")) hard = true;
-    else if (sub === "checkout" && !rest.some((word) => ["-b", "-B", "--orphan"].includes(word)))
-      targets.push(...paths);
+    const separator = rest.indexOf("--");
+    const operands = (separator >= 0 ? rest.slice(separator + 1) : rest).filter(
+      (word) => separator >= 0 || !word.startsWith("-"),
+    );
+    const flags = (separator >= 0 ? rest.slice(0, separator) : rest).filter((word) => word.startsWith("-"));
+    if (sub === "reset" && flags.includes("--hard")) hard = true;
+    else if (sub === "checkout" && flags.some((flag) => flag === "--force" || /^-[A-Za-z]*f/.test(flag)))
+      forced = true;
+    else if (sub === "switch" && flags.some((flag) => ["-f", "--force", "--discard-changes"].includes(flag)))
+      forced = true;
+    else if (sub === "checkout" && !flags.some((flag) => ["-b", "-B", "--orphan"].includes(flag)))
+      targets.push(...operands);
     else if (
       sub === "restore" &&
-      !(rest.includes("--staged") && !rest.includes("--worktree") && !rest.includes("-W"))
+      !(flags.includes("--staged") && !flags.includes("--worktree") && !flags.includes("-W"))
     )
-      targets.push(...paths);
+      targets.push(...operands);
   }
-  if (!hard && targets.length === 0) return [];
-  let dirty;
+  if (!hard && !forced && targets.length === 0) return [];
+  let changes;
   try {
-    dirty = execFileSync("git", ["status", "--porcelain"], {
-      cwd: projectRoot(),
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .split("\\n")
-      .filter((line) => line && !line.startsWith("??"))
-      .map((line) => line.slice(3).split(" -> ").pop());
+    changes = workingTreeChanges();
   } catch {
     return [];
   }
-  if (hard) return dirty;
+  if (hard) return [...changes.tracked, ...changes.untracked];
+  if (forced) return changes.tracked;
   const prefixes = targets.map((target) => target.replace(/^\\.\\//, "").replace(/\\/$/, ""));
-  return dirty.filter((path) =>
+  return changes.tracked.filter((path) =>
     prefixes.some((prefix) => prefix === "." || path === prefix || path.startsWith(prefix + "/")),
   );
 }
@@ -271,7 +347,9 @@ function guardEnvelope(stdout) {
 let status = 0;
 let stdout;
 try {
-  stdout = execFileSync("${PRODUCT_NAME}", ["guard", "--path", path, "--json"], {
+  const asking =
+    typeof input?.session_id === "string" && input.session_id ? ["--session", input.session_id] : [];
+  stdout = execFileSync("${PRODUCT_NAME}", ["guard", "--path", path, "--json", ...asking], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });

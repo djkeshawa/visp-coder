@@ -125,7 +125,7 @@ export async function productScopes(
     return ok(brief.slices.map((slice) => markerForProduct(brief, slice, state.createdAt)));
   const auth = await readProductAuthorization(workspace, record.value);
   if (!auth.ok) return auth;
-  const earlier = await fromEarlierSession(workspace, auth.value);
+  const earlier = await fromEarlierSession(workspace, auth.value, options.hostSession);
   if (!earlier.ok) return earlier;
   const active = earlier.value ? undefined : auth.value;
   return ok(
@@ -152,7 +152,7 @@ export async function earlierSessionAuthorization(
   if (!record.ok) return record.error.code === "NO_ACTIVE_FEATURE" ? ok(undefined) : record;
   const auth = await readProductAuthorization(workspace, record.value);
   if (!auth.ok) return auth;
-  const earlier = await fromEarlierSession(workspace, auth.value);
+  const earlier = await fromEarlierSession(workspace, auth.value, options.hostSession);
   if (!earlier.ok) return earlier;
   return ok(earlier.value ? auth.value : undefined);
 }
@@ -160,9 +160,11 @@ export async function earlierSessionAuthorization(
 async function fromEarlierSession(
   workspace: WorkspaceState,
   auth: ProductAuthorization | undefined,
+  asking?: string,
 ): Promise<Result<boolean>> {
-  // Hosts without a session-reporting prompt hook keep authorizations as before.
+  // Hosts without a session-reporting hook keep authorizations as before.
   if (!auth?.session) return ok(false);
+  if (asking) return ok(asking !== auth.session);
   const current = await currentHostSession(workspace);
   if (!current.ok) return current;
   return ok(current.value !== undefined && current.value !== auth.session);
