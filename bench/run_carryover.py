@@ -145,7 +145,32 @@ def record_request(project, request, label, goal):
                        cwd=project, check=True, capture_output=True)
 
 
-def apply_intermediate(project, task, remember):
+# The item limit as code or prose may spell it: 10000, 10_000, 10,000, 10001, 10 ** 4, 1e4.
+OLD_LIMIT = re.compile(r"(?<!\w)(?<!\d\.)(?:10([_,]?)00([01])|10\s*\*\*\s*4|1e4)(?!\w|\.\d)")
+
+
+def raise_limit(text):
+    return OLD_LIMIT.sub(lambda match: f"50{match.group(1)}00{match.group(2)}" if match.group(2) else "50000", text)
+
+
+class IntermediateFailed(RuntimeError):
+    pass
+
+
+def verify_intermediate(project, mode):
+    """The raised limit must hold before the second session, or the mode would be confounded."""
+    scored = subprocess.run([sys.executable, str(BENCH / "tasks" / "archive-carryover-raised" / "hidden_test.py"),
+                             str(project), "--stage", "1"], capture_output=True, text=True, timeout=600)
+    try:
+        results = json.loads(scored.stdout)["results"]
+    except (ValueError, KeyError):
+        raise IntermediateFailed(f"{mode}: the raised-limit check produced no result") from None
+    limit = [r for r in results if r["name"].startswith(("create above 50000", "create exactly 50000"))]
+    if len(limit) != 2 or not all(r["passed"] for r in limit):
+        raise IntermediateFailed(f"{mode}: the intermediate change did not raise the item limit to 50000: {limit}")
+
+
+def apply_intermediate(project, task, remember, mode):
     """The intermediate feature: its code change, and, with memory, the store's history."""
     if remember:
         first = next((project / ".visp" / "features").iterdir())
@@ -161,10 +186,12 @@ def apply_intermediate(project, task, remember):
         if not own or not file.is_file():
             continue
         text = file.read_text()
-        if "10000" in text or "10001" in text:
-            file.write_text(text.replace("10001", "50001").replace("10000", "50000"))
+        raised = raise_limit(text)
+        if raised != text:
+            file.write_text(raised)
             git(project, "add", path)
     git(project, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Raise the item limit to 50000 units")
+    verify_intermediate(project, mode)
     if remember:
         request = (BENCH / "tasks" / task / "intermediate.md").read_text()
         goal = request.strip().splitlines()[0].removeprefix("Feature:").strip()
@@ -180,6 +207,14 @@ def refresh_install(project, arm):
                  if (project / path).exists()]
     git(project, "add", "-A", *installed)
     git(project, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Refresh VISP install")
+
+
+def second_prompt(run, mode, arm):
+    """The second request; with --build, its `export PATH=<shim>` names the new build's shim."""
+    prompt = (run / ("prompt2-oracle.txt" if mode == "oracle" else "prompt2.txt")).read_text()
+    if arm.get("oldShim") and arm["oldShim"] != arm["shim"]:
+        prompt = prompt.replace(f"export PATH={arm['oldShim']}:", f"export PATH={arm['shim']}:")
+    return prompt
 
 
 def main():
@@ -203,7 +238,8 @@ def main():
     project = run / "project"
     arm = json.loads((run / "arm.json").read_text())
     if args.build:
-        arm["shim"] = str(RUNS / "shims" / args.build)
+        # The prepared prompts name the old shim; the second sessions' copies name the new one.
+        arm["oldShim"], arm["shim"] = arm.get("shim"), str(RUNS / "shims" / args.build)
     first = run / "session1"
     if args.reuse:
         run_modes(args, run, project, arm, first, json.loads((first / "result.json").read_text()), modes)
@@ -244,6 +280,7 @@ def run_modes(args, run, project, arm, first, result, modes):
     snapshot = first / "snapshot.tar"
     workflow_state = first / "visp-scaffold.tar"
     project.mkdir(exist_ok=True)
+    failed = []
     for mode in modes:
         resume = result["sessionId"] if mode == "resume" else None
         if mode == "resume" and not resume:
@@ -260,8 +297,15 @@ def run_modes(args, run, project, arm, first, result, modes):
         if mode in ("noisy", "gated", "outdated", "outdated-kw"):
             seed_noise(project, arm["task"])
         if mode.startswith("outdated"):
-            apply_intermediate(project, arm["task"], mode != "outdated-none")
-        prompt = (run / ("prompt2-oracle.txt" if mode == "oracle" else "prompt2.txt")).read_text()
+            try:
+                apply_intermediate(project, arm["task"], mode != "outdated-none", mode)
+            except IntermediateFailed as failure:
+                failed.append(str(failure))
+                print(json.dumps({"run": args.run, "mode": mode, "error": str(failure)}))
+                shutil.rmtree(project)
+                project.mkdir()
+                continue
+        prompt = second_prompt(run, mode, arm)
         second = run_session(project, arm, prompt, args.model, args.timeout, resume)
         out = run / (f"{mode}-{args.reuse}" if args.reuse else mode)
         out.mkdir()
@@ -272,6 +316,8 @@ def run_modes(args, run, project, arm, first, result, modes):
                           "timedOut": second["timedOut"], "isError": second["isError"]}))
     # Empty after a finished mode; still session 1's tree if every mode was skipped (it is in the snapshot).
     shutil.rmtree(project)
+    if failed:
+        raise SystemExit("modes not run:\n" + "\n".join(failed))
 
 
 if __name__ == "__main__":
