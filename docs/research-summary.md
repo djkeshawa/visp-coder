@@ -66,7 +66,19 @@ The gain was smaller and mixed. The 53 run declared the program itself as its ch
 
 No worker ever ran `visp learn`, and workers that read a README stating the conventions still missed them half the time. Project rules close the gap: `visp feature` captures rules stated for later work from the recorded prompt and every later feature's request and `work` reply carries them. The same rounds exposed two workflow defects, now fixed: an edit authorization left by a first session's handoff let a later session edit for a new request without starting a feature (three of nine second sessions), and a worker discarded a previous session's uncommitted work with `git checkout` to get the clean tree `visp feature` asked for.
 
-**No demonstrated benefit yet** from the repository graph or retrieved memory notes in any run. They remain optional.
+Rules must be read by a model, not matched by phrase. Phrase matching found 4 of 18 held-out prompts that stated lasting rules; the reviewer's model at low effort found all 18, recorded nothing from 12 ordinary requests and, once told that instructions for carrying out a request are not rules, nothing from benchmark boilerplate. With the conventions restated as prose (`conventions-carryover-prose`), fresh second sessions applied 24 of 24 stated-only checks (26 of 27 code-shown) against 0 and 9 with VISP state reset.
+
+**Visp Memory carried decisions that were not stated as rules.** In `archive-carryover` the first request specifies item archiving: an archived item cannot be reserved, and items hold at most 10,000 units. The second request adds bundle reservations and restocking without mentioning either. Three runs, second sessions paired on one first session each, no project rules captured (correctly: nothing was stated for later work):
+
+| Second session | Carried decisions (18) | Mean time | Output tokens |
+| --- | --- | --- | --- |
+| VISP with project rules | 9 | 8.2 min | 34.6k |
+| VISP with Visp Memory (`memory.service`) | 18 | 7.3 min | 28.2k |
+| Decisions restated in the request | 18 | 11.2 min | 33.6k |
+
+Without memory every run kept the archive check, which the reservation code already had, and none capped restocking. Visp Memory's keyword selection is coarse (scores 0.55–0.72 for relevant and boilerplate paragraphs alike), so VISP drops what the new request already says; five decisions reached each second request.
+
+**No demonstrated benefit yet** from the repository graph or `visp learn` notes in any run. They remain optional.
 
 ## Design consequences
 
