@@ -11,10 +11,11 @@ Fixed-contract tasks for comparing coding workflows (bare coding, Spec Kit, BMAD
 | `reservations-bundles` | Change to an existing multi-module service (`start/`) | 60, including the prior contract |
 | `spreadsheet-extend` | Larger change to an existing multi-module engine (`start/`) | 37 regression + 26 new |
 | `conventions-carryover` | Two sessions on the existing reservations service: the first states team API conventions and adds a list and an audit log; a fresh second session adds prices, retirement and a reservations list under those conventions | 20 core + 20 new + 9 code + 8 memory |
+| `archive-carryover` | Two sessions on the existing reservations service: item archiving and a quantity cap, then bundles and restocking that must preserve those feature decisions | 15 core + 15 new + 6 memory |
 
 - `tasks/<task>/task.md` is the request every arm receives; `start/`, when present, is the existing codebase the project starts from.
 - `tasks/<task>/hidden_test.py <project>` runs the project and prints JSON results.
-- A two-session task has `session1.md`, `session2.md` and `conventions.md` instead of `task.md`. Its `code` checks apply conventions that the first session's code already shows; its `memory` checks apply conventions stated only in the first conversation (money in integer `*Cents` fields, soft deletion answering 410 `gone`), so they pass only if the knowledge survived between sessions.
+- A two-session task has `session1.md`, `session2.md` and `conventions.md` instead of `task.md`. For `conventions-carryover`, its `code` checks apply conventions that the first session's code already shows; its `memory` checks apply conventions stated only in the first conversation (money in integer `*Cents` fields, soft deletion answering 410 `gone`), so they pass only if the knowledge survived between sessions. `archive-carryover` instead tests feature decisions already expressed in session 1 code: its `memory` checks apply the archived-item restriction to bundles and the quantity cap to restocking. Each memory check includes a forbidden operation, so omitting both carried decisions fails every one.
 - `reference/` holds correct implementations used only to validate the oracles; deliberately broken variants (a racy store, injected bugs) were checked to fail.
 
 ## Running
