@@ -14,6 +14,9 @@ second session, so the modes are paired on one first session. Modes:
 - fresh:  new session on the project exactly as the first session left it.
 - oracle: like fresh, with the first session's conventions restated in the request.
 - resume: the second request continues the first session's conversation.
+- memory: like fresh, with Visp Memory as VISP's long-term store (`memory.service`, set up
+          before the second session; needs $VISP_BENCH_RUNS/visp-memory-venv and a VISP build
+          that supports it).
 
 Writes session1/ (result.json, carriers.json, hidden-stage1.json, snapshot.tar, visp-scaffold.tar) and <mode>/
 (result.json, the finished project) under the run. Score each mode with
@@ -21,6 +24,7 @@ score.py <task> <run>/<mode> after the batch.
 """
 import argparse
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -32,7 +36,8 @@ from common import RUNS
 from run_claude import MODEL, run_session
 
 BENCH = pathlib.Path(__file__).resolve().parent
-MODES = ("wiped", "fresh", "oracle", "resume")
+MODES = ("wiped", "fresh", "oracle", "resume", "memory")
+MEMORY = RUNS / "visp-memory-venv" / "bin" / "visp-memory"
 NOTES = ("CLAUDE.md", "AGENTS.md")
 # Where each first-session convention could have been written down. C1 and C2 are also visible
 # in the code the first session wrote; C3 and C4 are not, until the second session needs them.
@@ -94,6 +99,16 @@ def wipe_notes(project, workflow_state):
             (project / name).unlink(missing_ok=True)
 
 
+def enable_memory(project):
+    """Visp Memory with its defaults (SQLite, keyword recall); only its own files are committed."""
+    subprocess.run([str(MEMORY), "init", "--no-mine"], cwd=project, check=True, capture_output=True)
+    config = (project / "visp.yml").read_text()
+    (project / "visp.yml").write_text(
+        config.replace("memory:\n", f"memory:\n  service:\n    command: {MEMORY}\n", 1))
+    git(project, "add", "visp.yml", ".gitignore", "visp-memory.yaml")
+    git(project, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Enable Visp Memory")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("run")
@@ -106,6 +121,8 @@ def main():
     if unknown:
         raise SystemExit(f"unknown modes: {sorted(unknown)}")
 
+    # Visp Memory without an embedding provider; only the memory mode calls it.
+    os.environ.setdefault("VISP_MEMORY_EMBEDDING_PROVIDER", "noop")
     run = RUNS / "runs" / args.run
     project = run / "project"
     arm = json.loads((run / "arm.json").read_text())
@@ -143,6 +160,8 @@ def main():
         restore(project, snapshot)
         if mode == "wiped":
             wipe_notes(project, workflow_state)
+        if mode == "memory":
+            enable_memory(project)
         prompt = (run / ("prompt2-oracle.txt" if mode == "oracle" else "prompt2.txt")).read_text()
         resume = result["sessionId"] if mode == "resume" else None
         if mode == "resume" and not resume:
