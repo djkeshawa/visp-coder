@@ -13,8 +13,14 @@ export type MemoryGate = (request: string, notes: readonly string[]) => Promise<
  * noise, including near-miss limits from other endpoints, and dropped a needed decision. Given
  * every candidate, the reviewer's model at low effort chose exactly the three decisions that
  * constrained the request out of 45, in about fourteen seconds, seeing only the notes.
+ * Told only to skip other endpoints' limits, it sometimes dropped a resource invariant (a
+ * maximum quantity stated for item creation, needed by restock): 2 of 7 selections. Naming
+ * resource invariants as always applying, it chose them in 5 of 5 with no trap selected.
  */
-const INSTRUCTIONS = `A user sent the REQUEST below to an AI coding assistant. The NOTES are recorded from the user's earlier requests on the same project. Select only the notes that constrain how THIS request must be implemented: decisions about the same resources, fields, limits or invariants that the requested behavior touches, which the implementation must stay consistent with. Do not select notes that describe other features or endpoints, even if they look similar (for example a limit that the earlier request applied only to a different endpoint), and do not select notes the request itself contradicts. Return {"selected": []} when none apply. Do not read files or run commands.`;
+const INSTRUCTIONS = `A user sent the REQUEST below to an AI coding assistant. The NOTES are recorded from the user's earlier requests on the same project. Select only the notes that constrain how THIS request must be implemented, so the new behavior stays consistent with what the user already decided:
+- Keep invariants of a resource that the requested operations could violate or must respect: a maximum or minimum on a stored value, a state in which an action is forbidden, a required field in every representation. They apply to every operation on that resource, even if the earlier request stated them for a different operation.
+- Leave out notes about other features or endpoints, and limits that belong to one specific operation (for example a per-request or per-line limit of a different endpoint), even if they look similar. Leave out notes the request itself contradicts.
+Return {"selected": []} when none apply. Do not read files or run commands.`;
 
 const RESPONSE_SCHEMA = {
   type: "object",
