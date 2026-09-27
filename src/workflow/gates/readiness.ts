@@ -96,9 +96,9 @@ export function foundationBlockers(
       requirement: "clean-baseline",
       error: vispError(
         "STAGE_BLOCKED",
-        "A feature must start from a committed baseline, but the working tree already has changes",
+        "A feature must start from a committed baseline, but the working tree has uncommitted changes. They may be earlier work, so commit them; do not discard them with git checkout, restore or reset",
         {
-          recovery: `git commit the project baseline, then ${recovery}`,
+          recovery: `git add -A && git commit -m "<what these changes are>", then ${recovery}`,
           details: { changedFiles: context.changedFiles },
         },
       ),

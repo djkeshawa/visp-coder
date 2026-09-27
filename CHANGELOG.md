@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- A worker no longer discards earlier uncommitted work to start a feature. `visp feature` refused a working tree holding a previous session's uncommitted changes with "git commit the project baseline", and the worker ran `git checkout` on those files instead, losing the earlier feature. The refusal now names `git add -A && git commit -m "<what these changes are>"` and says not to discard them, and the Claude Code hook refuses `git checkout`/`git restore` of files with uncommitted changes and `git reset --hard` on a dirty tree. Branch switches, staged-only restores and stashes are unaffected.
 - An edit authorization belongs to the host session that ran `visp work`. A first session ended with its slice open after the review budget ran out, and a later session with a new request edited under that leftover authorization without starting a feature for its own request (seen in three of nine second sessions of a two-session benchmark). The hooks now record the host session of each prompt and shell command (`.visp/session/host-session.json`, git-ignored), `visp work` stamps the session that runs it on the authorization, and the editor hook passes the editing session to `visp guard --session`, refusing writes under a grant from another session, naming both ways on: `visp feature` for a new request or `visp work --task <id>` to continue. Re-authorizing keeps the slice's baseline. Hosts whose prompt hook reports no session keep the previous behavior; installed hooks update with `visp install`.
 
 ## 0.5.0-beta.2 - 2026-09-27
