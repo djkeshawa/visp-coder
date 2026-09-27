@@ -80,7 +80,14 @@ const skillsSchema = z
   .default({});
 
 const memorySchema = z
-  .object({ enabled: z.boolean().default(true) })
+  .object({
+    enabled: z.boolean().default(true),
+    /** Visp Memory as the long-term store: earlier requests are recorded there and new features briefed from it. */
+    service: z
+      .object({ command: z.string().trim().min(1).default("visp-memory") })
+      .strict()
+      .optional(),
+  })
   .strict()
   .default({});
 

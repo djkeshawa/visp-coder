@@ -9,6 +9,13 @@ import {
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import {
+  type EarlierFeature,
+  memoryBriefFor,
+  PROJECT_MEMORY_FILE,
+  projectMemoryText,
+  recordEarlierRequests,
+} from "../../memory/memory-service.js";
 import type { Intent } from "../artifacts/feature.js";
 import { captureAcceptanceBaseline } from "../evidence/acceptance.js";
 import { requireFeatureFoundation } from "../gates/readiness.js";
@@ -86,7 +93,7 @@ async function createProductFeatureLocked(
   const timestamp = new Date().toISOString();
   const request = await featureRequest(workspace, options, feature, timestamp);
   if (!request.ok) return request;
-  const { host, rules } = request.value;
+  const { host, rules, memory } = request.value;
   const parsed = parseProductBrief({
     version: 2,
     feature,
@@ -116,6 +123,7 @@ async function createProductFeatureLocked(
     status.value,
     ...(host?.mutation ? [host.mutation] : []),
     ...rules.mutations,
+    ...memory.mutations,
   ]);
   return saved.ok
     ? ok({
@@ -178,12 +186,57 @@ async function featureRequest(
   const rules = await featureProjectRules(workspace, host.value, feature, timestamp);
   if (!rules.ok) return rules;
   const request = host.value?.request ?? options.sourceBrief ?? options.goal;
-  const earlier = rules.value.earlier;
+  const memory = await featureMemory(workspace, feature, request);
+  if (!memory.ok) return memory;
   return ok({
     host: host.value,
     rules: rules.value,
-    originalRequest: earlier.length ? `${request}\n\n${projectRulesText(earlier)}` : request,
+    memory: memory.value,
+    originalRequest: [
+      request,
+      projectRulesText(rules.value.earlier),
+      projectMemoryText(memory.value.memories),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
   });
+}
+
+/**
+ * With `memory.service`, earlier features' requests are recorded in Visp Memory and the
+ * decisions it selects for this request join it; the feature keeps them for `work` replies.
+ */
+async function featureMemory(
+  workspace: WorkspaceState,
+  feature: string,
+  request: string,
+): Promise<Result<{ memories: string[]; mutations: FileMutation[] }>> {
+  const command = workspace.config.memory.service?.command;
+  if (!command) return ok({ memories: [], mutations: [] });
+  const listed = await workspace.store.listFeatures();
+  if (!listed.ok) return listed;
+  const earlier: EarlierFeature[] = [];
+  for (const id of listed.value) {
+    const intent = await workspace.store.readIntent(id);
+    if (intent.ok && intent.value.sourceBrief)
+      earlier.push({
+        feature: id,
+        goal: intent.value.goal,
+        originalRequest: intent.value.sourceBrief,
+      });
+  }
+  const recorded = await recordEarlierRequests(workspace, command, earlier);
+  if (!recorded.ok) return recorded;
+  const memories = await memoryBriefFor(workspace, command, request);
+  const mutations: FileMutation[] = recorded.value ? [recorded.value] : [];
+  if (memories.length)
+    mutations.push({
+      kind: "write",
+      path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
+      content: json({ version: 1, memories }),
+      expectedBefore: { existed: false },
+    });
+  return ok({ memories, mutations });
 }
 
 function criticStateFields(critic: {

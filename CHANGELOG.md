@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **Visp Memory as the long-term store** (experimental, opt-in with `memory.service: {command: visp-memory}`). When a feature starts, VISP records the earlier features' requests in Visp Memory, paragraph by paragraph, and adds the decisions Visp Memory selects for the new request (none when nothing is relevant enough) to that request and to every `work` reply, so the worker, tester and reviewer see them without looking anything up.
 - **Project rules.** When a user's recorded prompt states rules for later work ("these conventions apply to this change and to all later work", "from now on, …", "going forward, …"), `visp feature` records them in `.visp/rules.json` without the worker's help. Every later feature's request carries them, so the tester and reviewer judge against them, and every `work` reply shows them as plain numbered lines. `visp rules` lists them; `visp rules remove <id>` removes one captured by mistake. With a VISP-launched Codex reviewer (`critic.launch: codex-exec`), the reviewer's model reads the rules at low effort (about ten seconds, seeing only the prompt), and a rule is kept only when it quotes the prompt verbatim; phrase matching, the fallback, found 4 of 18 held-out prompts that stated lasting rules, and the model found all 18 with none in 12 ordinary requests. In a two-session benchmark, fresh sessions applied 3 of 24 convention checks when the conventions were only in VISP's records and 24 of 24 when they were restated in the request.
 
 ### Fixed
