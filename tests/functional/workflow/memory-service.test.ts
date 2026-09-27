@@ -30,7 +30,10 @@ beforeAll(async () => {
   const config = await project.read("visp.yml");
   await writeFile(
     join(project.root, "visp.yml"),
-    config.replace(/memory:\n(\s+#[^\n]*\n)?\s+enabled: true/, (block) => `${block}\n  service:\n    command: ${fake}`),
+    config.replace(
+      /memory:\n(\s+#[^\n]*\n)?\s+enabled: true/,
+      (block) => `${block}\n  service:\n    command: ${fake}`,
+    ),
   );
   project.commit("add visp", { skipHooks: true });
 });
@@ -63,6 +66,7 @@ it("records earlier requests and carries the selected decisions into the next re
     "1. An archived item cannot be reserved: 409 item_archived.",
     "2. Items hold at most 10000 units.",
   ]);
+  expect(second.stdout).toContain("M1 An archived item cannot be reserved: 409 item_archived.");
   const brief = await project.read(".visp/features/002-bundles/brief.yaml");
   expect(brief).toContain("M1 An archived item cannot be reserved: 409 item_archived.");
 

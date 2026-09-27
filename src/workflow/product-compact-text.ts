@@ -312,7 +312,7 @@ export function compactBriefText(
   const wording = WORDING[channel];
   const feature = String(brief.feature);
   const next = name.endsWith("feature") ? wording.template(feature) : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {

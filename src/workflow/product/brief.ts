@@ -66,6 +66,7 @@ export interface ProductFeatureOutcome {
   readonly brief: ProductBrief;
   readonly intent: Intent;
   readonly projectRules?: readonly ProjectRule[];
+  readonly projectMemory?: readonly string[];
   readonly branchCreated?: string;
   readonly branchWarning?: string;
 }
@@ -130,6 +131,7 @@ async function createProductFeatureLocked(
         brief,
         intent,
         ...rules.reported,
+        ...memory.reported,
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
       })
@@ -210,9 +212,15 @@ async function featureMemory(
   workspace: WorkspaceState,
   feature: string,
   request: string,
-): Promise<Result<{ memories: string[]; mutations: FileMutation[] }>> {
+): Promise<
+  Result<{
+    memories: string[];
+    mutations: FileMutation[];
+    reported: { projectMemory?: string[] };
+  }>
+> {
   const command = workspace.config.memory.service?.command;
-  if (!command) return ok({ memories: [], mutations: [] });
+  if (!command) return ok({ memories: [], mutations: [], reported: {} });
   const listed = await workspace.store.listFeatures();
   if (!listed.ok) return listed;
   const earlier: EarlierFeature[] = [];
@@ -236,7 +244,7 @@ async function featureMemory(
       content: json({ version: 1, memories }),
       expectedBefore: { existed: false },
     });
-  return ok({ memories, mutations });
+  return ok({ memories, mutations, reported: memories.length ? { projectMemory: memories } : {} });
 }
 
 function criticStateFields(critic: {
