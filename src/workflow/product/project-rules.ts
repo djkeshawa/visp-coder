@@ -18,7 +18,9 @@ import { withProductMutation } from "./runtime.js";
 export const PROJECT_RULES_FILE = "rules.json";
 
 const MAX_RULES_PER_PROMPT = 20;
-const MAX_RULE_LENGTH = 600;
+const MAX_RULE_LENGTH = 1000;
+/** A quote shorter than this proves little about where a rule came from. */
+const MIN_QUOTE_LENGTH = 12;
 /** Phrases that say a statement outlives the request it came with. */
 const LASTING =
   /\b(from now on|going forward|from here on|(all|any|every) (later|future|subsequent)\b)/i;
@@ -36,6 +38,46 @@ const projectRulesSchema = z
   .object({ version: z.literal(1), rules: z.array(projectRuleSchema) })
   .strict();
 export type ProjectRule = z.infer<typeof projectRuleSchema>;
+
+export interface StatedRule {
+  readonly rule: string;
+  /** A verbatim excerpt of the prompt stating the rule. */
+  readonly quote: string;
+}
+export type RuleExtractor = (prompt: string) => Promise<readonly StatedRule[]>;
+
+/**
+ * Rules the prompts state for later work. A model reads them however they are phrased, and a
+ * rule is kept only when its quote appears in the prompt, so none is invented. Without a
+ * model, or when it fails, the phrase-based reading below applies.
+ */
+export async function statedRules(
+  prompts: readonly string[],
+  extractor?: RuleExtractor,
+): Promise<string[]> {
+  const found = await Promise.all(
+    prompts.map(async (prompt) => {
+      if (!extractor) return standingRules(prompt);
+      try {
+        return quotedRules(prompt, await extractor(prompt));
+      } catch {
+        return standingRules(prompt);
+      }
+    }),
+  );
+  return found.flat();
+}
+
+function quotedRules(prompt: string, rules: readonly StatedRule[]): string[] {
+  const text = comparable(prompt);
+  return rules
+    .filter((rule) => {
+      const quote = comparable(rule.quote);
+      return rule.rule.trim() && quote.length >= MIN_QUOTE_LENGTH && text.includes(quote);
+    })
+    .slice(0, MAX_RULES_PER_PROMPT)
+    .map((rule) => rule.rule.trim().slice(0, MAX_RULE_LENGTH));
+}
 
 /** The rules a prompt states for later work: the list that follows such a statement, or the sentence itself. */
 export function standingRules(prompt: string): string[] {

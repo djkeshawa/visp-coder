@@ -31,9 +31,11 @@ import {
   type ProjectRule,
   projectRulesMutation,
   projectRulesText,
+  type RuleExtractor,
   readProjectRules,
-  standingRules,
+  statedRules,
 } from "./project-rules.js";
+import { codexRuleExtractor } from "./rule-extraction.js";
 import { withProductMutation } from "./runtime.js";
 import { productAuthorizationSchema } from "./scopes.js";
 import {
@@ -145,7 +147,7 @@ async function featureProjectRules(
 > {
   const recorded = await readProjectRules(workspace);
   if (!recorded.ok) return recorded;
-  const stated = (host?.prompts ?? []).flatMap(standingRules);
+  const stated = await statedRules(host?.prompts ?? [], await ruleReader(workspace));
   const merged = mergeProjectRules(recorded.value.rules, stated, feature, capturedAt);
   return ok({
     earlier: recorded.value.rules,
@@ -157,6 +159,14 @@ async function featureProjectRules(
 }
 
 /** The user's recorded request, followed by the rules they stated for later work in earlier features. */
+/** With a VISP-launched Codex reviewer, its model reads the rules; otherwise phrase matching does. */
+async function ruleReader(workspace: WorkspaceState): Promise<RuleExtractor | undefined> {
+  if (workspace.config.critic?.launch !== "codex-exec") return undefined;
+  const critic = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
+  const model = critic.ok ? critic.value.config?.model : undefined;
+  return model ? codexRuleExtractor({ model }) : undefined;
+}
+
 async function featureRequest(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,

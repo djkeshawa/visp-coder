@@ -3,6 +3,7 @@ import {
   mergeProjectRules,
   projectRulesText,
   standingRules,
+  statedRules,
 } from "../../../../src/workflow/product/project-rules.js";
 
 // A user stated team conventions for "all later work, including future sessions". A fresh
@@ -48,6 +49,33 @@ describe("standing rules in a user's prompt", () => {
         "Add pagination to the items list.\n\n- limit defaults to 20\n- cursor is opaque\n\nWe may add filters in a future release.",
       ),
     ).toEqual([]);
+  });
+});
+
+// Phrase matching found 4 of 18 held-out prompts that stated lasting rules.
+describe("rules read by a model", () => {
+  const prompt =
+    "Add a CSV export. House style: timestamps are always UTC ISO 8601, in every export we ship.";
+
+  it("keeps a rule only when its quote appears in the prompt", async () => {
+    const rules = await statedRules([prompt], async () => [
+      {
+        rule: "Timestamps are UTC ISO 8601 in every export.",
+        quote: "timestamps are  always UTC ISO 8601",
+      },
+      { rule: "Exports are gzip-compressed.", quote: "exports are gzip-compressed" },
+      { rule: "CSV only.", quote: "CSV" },
+    ]);
+    expect(rules).toEqual(["Timestamps are UTC ISO 8601 in every export."]);
+  });
+
+  it("falls back to phrase matching when the model fails", async () => {
+    const failing = async () => {
+      throw new Error("offline");
+    };
+    expect(await statedRules(["From now on, never log request bodies."], failing)).toEqual([
+      "From now on, never log request bodies.",
+    ]);
   });
 });
 
