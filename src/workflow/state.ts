@@ -327,6 +327,12 @@ export interface ScopeOptions {
    * fresh checkout — which is all CI ever has — can only ask the second one.
    */
   readonly source?: ScopeSource;
+  /**
+   * The host session asking, as its hook reports it. An authorization granted to another
+   * session permits no edits; without it, the session of the latest recorded prompt or
+   * shell command stands in.
+   */
+  readonly hostSession?: string;
 }
 
 /**

@@ -52,6 +52,10 @@ export function guardCommand(): Command {
     )
     .option("--feature <id>", "Which feature's graph to judge against, with --scope tasks")
     .option(
+      "--session <id>",
+      "The host session asking; another session's authorization permits no edits",
+    )
+    .option(
       "--branch <name>",
       "Which branch this checkout represents, when git cannot say (a CI checkout is detached)",
     )
@@ -68,6 +72,7 @@ interface GuardCliOptions extends GlobalOptions {
   readonly includeDone?: boolean;
   readonly task?: string;
   readonly scope?: string;
+  readonly session?: string;
   readonly feature?: string;
   readonly branch?: string;
 }
@@ -265,7 +270,7 @@ async function explainEarlierSession(
 ): Promise<Result<GuardViolation[]>> {
   if (opts.scope === "tasks" || !violations.some((v) => v.reason === "no-authorization"))
     return ok([...violations]);
-  const earlier = await earlierSessionAuthorization(state, feature ? { feature } : {});
+  const earlier = await earlierSessionAuthorization(state, scopeFilter(opts, feature));
   if (!earlier.ok) return earlier;
   const auth = earlier.value;
   if (!auth) return ok([...violations]);
@@ -344,22 +349,28 @@ type GuardMarkerSelection =
   | { readonly kind: "unscoped" }
   | { readonly kind: "markers"; readonly markers: ImplementMarker[] };
 
+/** The feature and asking session every scope lookup of one guard call shares. */
+function scopeFilter(opts: GuardCliOptions, feature: string | undefined) {
+  return {
+    ...(feature ? { feature } : {}),
+    ...(opts.session ? { hostSession: opts.session } : {}),
+  };
+}
+
 async function selectGuardMarkers(
   state: WorkspaceState,
   opts: GuardCliOptions,
   feature: string | undefined,
 ): Promise<Result<GuardMarkerSelection>> {
   if (opts.ifAuthorized && opts.scope !== "tasks") {
-    const active = await authorizedScopes(state, {
-      ...(feature ? { feature } : {}),
-    });
+    const active = await authorizedScopes(state, scopeFilter(opts, feature));
     if (!active.ok) return active;
     if (active.value.length === 0) return ok({ kind: "unscoped" });
   }
   const markers = await authorizedScopes(state, {
     includeDone: opts.includeDone === true,
     ...(opts.scope ? { source: opts.scope as "markers" | "tasks" } : {}),
-    ...(feature ? { feature } : {}),
+    ...scopeFilter(opts, feature),
   });
   if (!markers.ok) return markers;
   if (opts.ifAuthorized && markers.value.length === 0) return ok({ kind: "unscoped" });

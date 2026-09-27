@@ -408,11 +408,11 @@ describe("edit authorization across host sessions", () => {
     });
   }
 
-  function write(path: string): { decision: string; reason: string } {
+  function write(path: string, session: string): { decision: string; reason: string } {
     const output = JSON.parse(
       execFileSync(process.execPath, [hook()], {
         cwd: project.root,
-        input: JSON.stringify({ session_id: "ignored", tool_input: { file_path: path } }),
+        input: JSON.stringify({ session_id: session, tool_input: { file_path: path } }),
         encoding: "utf8",
         env: env(),
       }),
@@ -427,7 +427,7 @@ describe("edit authorization across host sessions", () => {
     const { readFile } = await import("node:fs/promises");
     prompt("session-1", "Change the auth module");
     await setUpTask(project);
-    expect(write("src/auth/login.ts").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-1").decision).toBe("allow");
     const authorization = join(
       project.root,
       ".visp/state/product-authorizations/001-scoped-work.json",
@@ -435,7 +435,7 @@ describe("edit authorization across host sessions", () => {
     const baseline = JSON.parse(await readFile(authorization, "utf8")).baseline;
 
     prompt("session-2", "Add prices to items");
-    const refused = write("src/auth/login.ts");
+    const refused = write("src/auth/login.ts", "session-2");
     expect(refused.decision).toBe("deny");
     expect(refused.reason).toContain("earlier session");
     expect(refused.reason).toContain("visp feature");
@@ -445,8 +445,38 @@ describe("edit authorization across host sessions", () => {
     const worked = project.run("work", "--task", "T001");
     expect(worked.exitCode, worked.stdout + worked.stderr).toBe(0);
     prompt("session-2", "Also keep the login response unchanged");
-    expect(write("src/auth/login.ts").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
     expect(JSON.parse(await readFile(authorization, "utf8")).baseline).toEqual(baseline);
+  });
+
+  // Two sessions in one checkout: the latest prompt came from another session, but the
+  // hook names the session that is editing, and only the one that ran `visp work` may.
+  it("judges an edit by the session making it, not the one that prompted last", () => {
+    prompt("session-3", "Unrelated question in another window");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-3").decision).toBe("deny");
+  });
+
+  it("stamps the session whose shell command runs visp work", async () => {
+    const { readFile } = await import("node:fs/promises");
+    execFileSync(process.execPath, [hook()], {
+      cwd: project.root,
+      input: JSON.stringify({
+        session_id: "session-4",
+        tool_name: "Bash",
+        tool_input: { command: "visp work --task T001" },
+      }),
+      env: env(),
+    });
+    const worked = project.run("work", "--task", "T001");
+    expect(worked.exitCode, worked.stdout + worked.stderr).toBe(0);
+    const authorization = join(
+      project.root,
+      ".visp/state/product-authorizations/001-scoped-work.json",
+    );
+    expect(JSON.parse(await readFile(authorization, "utf8")).session).toBe("session-4");
+    expect(write("src/auth/login.ts", "session-4").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("deny");
   });
 });
 
