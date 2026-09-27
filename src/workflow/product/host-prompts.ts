@@ -61,6 +61,15 @@ export async function hostRequest(
   return ok({ request: latest, origin: "host-prompt", prompts, ...(mutation ? { mutation } : {}) });
 }
 
+/** Whether the host recorded user prompts that no feature has taken yet. */
+export async function hasUntakenPrompts(workspace: WorkspaceState): Promise<Result<boolean>> {
+  const text = await workspace.files.readTextIfExists(
+    join(workspace.paths.sessionDir, HOST_PROMPTS_FILE),
+  );
+  if (!text.ok) return text;
+  return ok(text.value !== undefined && promptLines(text.value).length > 0);
+}
+
 /** The host session that sent the latest user prompt, when the host's hook reports one. */
 export async function currentHostSession(
   workspace: WorkspaceState,

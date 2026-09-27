@@ -157,6 +157,18 @@ export async function earlierSessionAuthorization(
   return ok(earlier.value ? auth.value : undefined);
 }
 
+/** The feature's authorization, when it was granted in an earlier host session. */
+export async function earlierSessionGrant(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+): Promise<Result<ProductAuthorization | undefined>> {
+  const auth = await readProductAuthorization(workspace, record);
+  if (!auth.ok) return auth;
+  const earlier = await fromEarlierSession(workspace, auth.value);
+  if (!earlier.ok) return earlier;
+  return ok(earlier.value ? auth.value : undefined);
+}
+
 async function fromEarlierSession(
   workspace: WorkspaceState,
   auth: ProductAuthorization | undefined,
