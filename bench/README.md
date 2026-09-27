@@ -11,6 +11,7 @@ Fixed-contract tasks for comparing coding workflows (bare coding, Spec Kit, BMAD
 | `reservations-bundles` | Change to an existing multi-module service (`start/`) | 60, including the prior contract |
 | `spreadsheet-extend` | Larger change to an existing multi-module engine (`start/`) | 37 regression + 26 new |
 | `conventions-carryover` | Two sessions on the existing reservations service: the first states team API conventions and adds a list and an audit log; a fresh second session adds prices, retirement and a reservations list under those conventions | 20 core + 20 new + 9 code + 8 memory |
+| `sheet-carryover` | Two sessions on the existing spreadsheet engine: AVERAGE and ROUND, then MEDIAN and directed rounding carrying the empty-statistic rule and digits restriction | 22 core + 14 new + 8 memory |
 | `archive-carryover` | Two sessions on the existing reservations service: item archiving and a quantity cap, then bundles and restocking that must preserve those feature decisions | 15 core + 17 new + 7 memory |
 
 - `tasks/<task>/task.md` is the request every arm receives; `start/`, when present, is the existing codebase the project starts from.
