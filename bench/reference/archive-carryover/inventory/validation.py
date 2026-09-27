@@ -48,7 +48,7 @@ def lines_request(body):
         if not isinstance(line, dict):
             raise ApiError(422, "invalid_request")
         sku, quantity = line.get("sku"), line.get("quantity")
-        if not isinstance(sku, str) or not is_int(quantity) or quantity < 1:
+        if not isinstance(sku, str) or not SKU.fullmatch(sku) or not is_int(quantity) or quantity < 1:
             raise ApiError(422, "invalid_request")
         parsed.append((sku, quantity))
     if len({sku for sku, _ in parsed}) != len(parsed):
