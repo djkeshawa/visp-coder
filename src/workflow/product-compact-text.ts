@@ -1,3 +1,4 @@
+import { projectMemoryText } from "../memory/memory-service.js";
 import { projectRulesText } from "./product/project-rules.js";
 
 /** Where the reader runs: MCP tool text, or CLI text output read by a model through a shell. */
@@ -105,7 +106,12 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${skillText(data.skills)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}${skillText(data.skills)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+}
+
+function memoryText(memories: unknown): string {
+  const text = Array.isArray(memories) ? projectMemoryText(memories.map(String)) : "";
+  return text ? `\n${text}` : "";
 }
 
 /** Standing project rules are requirements, shown whole as plain lines on every reply that carries them. */
@@ -306,7 +312,7 @@ export function compactBriefText(
   const wording = WORDING[channel];
   const feature = String(brief.feature);
   const next = name.endsWith("feature") ? wording.template(feature) : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {

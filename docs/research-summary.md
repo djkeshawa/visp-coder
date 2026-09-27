@@ -66,7 +66,39 @@ The gain was smaller and mixed. The 53 run declared the program itself as its ch
 
 No worker ever ran `visp learn`, and workers that read a README stating the conventions still missed them half the time. Project rules close the gap: `visp feature` captures rules stated for later work from the recorded prompt and every later feature's request and `work` reply carries them. The same rounds exposed two workflow defects, now fixed: an edit authorization left by a first session's handoff let a later session edit for a new request without starting a feature (three of nine second sessions), and a worker discarded a previous session's uncommitted work with `git checkout` to get the clean tree `visp feature` asked for.
 
-**No demonstrated benefit yet** from the repository graph or retrieved memory notes in any run. They remain optional.
+Rules must be read by a model, not matched by phrase. Phrase matching found 4 of 18 held-out prompts that stated lasting rules; the reviewer's model at low effort found all 18, recorded nothing from 12 ordinary requests and, once told that instructions for carrying out a request are not rules, nothing from benchmark boilerplate. With the conventions restated as prose (`conventions-carryover-prose`), fresh second sessions applied 24 of 24 stated-only checks (26 of 27 code-shown) against 0 and 9 with VISP state reset.
+
+**Visp Memory carried decisions that were not stated as rules.** In `archive-carryover` the first request specifies item archiving: an archived item cannot be reserved, and items hold at most 10,000 units. The second request adds bundle reservations and restocking without mentioning either. Three runs, second sessions paired on one first session each, no project rules captured (correctly: nothing was stated for later work):
+
+| Second session | Carried decisions (18) | Mean time | Output tokens |
+| --- | --- | --- | --- |
+| VISP with project rules | 9 | 8.2 min | 34.6k |
+| VISP with Visp Memory (`memory.service`) | 18 | 7.3 min | 28.2k |
+| Decisions restated in the request | 18 | 11.2 min | 33.6k |
+
+Without memory every run kept the archive check, which the reservation code already had, and none capped restocking. Visp Memory's keyword selection is coarse (scores 0.55–0.72 for relevant and boilerplate paragraphs alike), so VISP drops what the new request already says; five decisions reached each second request.
+
+**A noisy store needs a model to choose.** The same task with ten earlier feature requests on the service already in Visp Memory (eight unrelated, two near-miss limits of other endpoints), three runs paired on one first session each:
+
+| Second session | Carried decisions (18) | Notes the request carried | Near-miss notes carried | Mean time |
+| --- | --- | --- | --- | --- |
+| No memory | 9 | 0 | 0 | 8.5 min |
+| Visp Memory keyword selection | 15 | 15–24 | 1 | 9.1 min |
+| Reviewer's model choosing among candidates | 18 | 3 | 0 | 10.6 min |
+
+Keyword relevance scored needed decisions and noise alike (0.54–0.57) and once cut the needed quantity limit. The model reads a wide candidate set (about 45 notes, some fourteen seconds at low effort); told that a resource's invariants apply to every operation on it while one endpoint's limits do not, it chose exactly the three decisions in every run. An earlier prompt without that distinction dropped the limit in one run. Workers ignored the near-miss note they were given, but carried 5–8 times more text. Times vary by several minutes between rounds and are not a result.
+
+**An outdated decision stayed out when the model chose.** After the first session, a simulated intermediate feature raised the item limit from 10,000 to 50,000 units: its code change committed and its request recorded after the first one, with the ten noisy features also in the store. The same three first sessions, scored against 50,000 (21 carried checks, including restocking past the old limit):
+
+| Second session | Carried checks (21) | Old limit delivered | Restock limit coded |
+| --- | --- | --- | --- |
+| No memory | 12 | — | none in 2 runs, 10,000 in 1 |
+| Visp Memory keyword selection (15–16 notes) | 17 | 3 of 3 runs, beside the new one | 50,000, 50,000, 10,000 |
+| Reviewer's model choosing (2–3 notes) | 21 | 0 of 3 | 50,000 in all 3 |
+
+The run that coded 10,000 with keyword selection also restored 10,000 without memory, from the first session's traces, so keyword memory's harm is not shown; the model's choice, which stated only the new limit, kept that run on 50,000. The intermediate request said "replacing the 10000 limit"; a change stated less plainly is untested.
+
+**No demonstrated benefit yet** from the repository graph or `visp learn` notes in any run. They remain optional.
 
 ## Design consequences
 

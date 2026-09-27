@@ -107,6 +107,14 @@ Other operations are `entity`, `neighbors`, `callees` and `tracePath`. `--depth`
 
 Project rules are different: they are requirements the user stated for all later work, such as "these conventions apply to this change and all later work" followed by a list, or "from now on, never log request bodies". `visp feature` finds them in the user's recorded prompts (never in a worker's text; with `critic.launch: codex-exec` the reviewer's model reads them and each must quote the prompt, otherwise phrase matching does), records them in `.visp/rules.json`, and the tester, the reviewer and every `work` reply read the current rules (a later message that replaces or withdraws a rule wins; a removed rule stops applying at once). `visp rules` lists them and `visp rules remove <id>` removes one that was not meant.
 
+With `memory.service` (experimental), [Visp Memory](https://github.com/djkeshawa/visp-memory) is the long-term store: when a feature starts, VISP records earlier features' requests there and adds the recorded decisions it selects for the new request to that request and to `work` replies. Visp Memory runs locally (SQLite, keyword recall by default); VISP calls its CLI and carries on without it when it fails.
+
+```yaml
+memory:
+  service:
+    command: visp-memory
+```
+
 Skills are procedures a person admits into the project. They are advice selected by a trigger; they cannot widen scope, change policy or satisfy a check.
 
 ```sh

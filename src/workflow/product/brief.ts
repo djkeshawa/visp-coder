@@ -9,6 +9,13 @@ import {
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import {
+  type EarlierFeature,
+  memoryBriefFor,
+  PROJECT_MEMORY_FILE,
+  projectMemoryText,
+  recordEarlierRequests,
+} from "../../memory/memory-service.js";
 import type { Intent } from "../artifacts/feature.js";
 import { captureAcceptanceBaseline } from "../evidence/acceptance.js";
 import { requireFeatureFoundation } from "../gates/readiness.js";
@@ -18,6 +25,7 @@ import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
 import { nextFeatureId } from "./feature-id.js";
 import { type HostRequest, hostRequest } from "./host-prompts.js";
+import { codexMemoryGate } from "./memory-gate.js";
 import {
   initialProductState,
   outcomeDigest,
@@ -58,6 +66,7 @@ export interface ProductFeatureOutcome {
   readonly brief: ProductBrief;
   readonly intent: Intent;
   readonly projectRules?: readonly ProjectRule[];
+  readonly projectMemory?: readonly string[];
   readonly branchCreated?: string;
   readonly branchWarning?: string;
 }
@@ -85,7 +94,7 @@ async function createProductFeatureLocked(
   const timestamp = new Date().toISOString();
   const request = await featureRequest(workspace, options, feature, timestamp);
   if (!request.ok) return request;
-  const { host, rules } = request.value;
+  const { host, rules, memory } = request.value;
   const parsed = parseProductBrief({
     version: 2,
     feature,
@@ -115,12 +124,14 @@ async function createProductFeatureLocked(
     status.value,
     ...(host?.mutation ? [host.mutation] : []),
     ...rules.mutations,
+    ...memory.mutations,
   ]);
   return saved.ok
     ? ok({
         brief,
         intent,
         ...rules.reported,
+        ...memory.reported,
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
       })
@@ -155,15 +166,45 @@ async function featureProjectRules(
   });
 }
 
-/** The user's recorded request; rules stated for later work are captured on the way. */
-/** With a VISP-launched Codex reviewer, its model reads the rules; otherwise phrase matching does. */
-async function ruleReader(workspace: WorkspaceState): Promise<RuleExtractor | undefined> {
+/** The model of a VISP-launched Codex reviewer, which also reads rules and chooses memories. */
+async function reviewerModel(workspace: WorkspaceState): Promise<string | undefined> {
   if (workspace.config.critic?.launch !== "codex-exec") return undefined;
   const critic = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
-  const model = critic.ok ? critic.value.config?.model : undefined;
+  return critic.ok ? critic.value.config?.model : undefined;
+}
+
+/** With a VISP-launched Codex reviewer, its model reads the rules; otherwise phrase matching does. */
+async function ruleReader(workspace: WorkspaceState): Promise<RuleExtractor | undefined> {
+  const model = await reviewerModel(workspace);
   return model ? codexRuleExtractor({ model }) : undefined;
 }
 
+/** Candidates wide enough to hold every note of a store with about fifty. */
+const GATE_CANDIDATE_TOKENS = 6000;
+
+/**
+ * Visp Memory's keyword selection alone, or, with a reviewer model and `select: model`, that
+ * model choosing from a wide candidate set; keyword selection is the fallback.
+ */
+async function selectMemories(
+  workspace: WorkspaceState,
+  command: string,
+  request: string,
+): Promise<string[]> {
+  const model =
+    workspace.config.memory.service?.select === "keyword"
+      ? undefined
+      : await reviewerModel(workspace);
+  if (!model) return memoryBriefFor(workspace, command, request);
+  const candidates = await memoryBriefFor(workspace, command, request, GATE_CANDIDATE_TOKENS);
+  try {
+    return await codexMemoryGate({ model })(request, candidates);
+  } catch {
+    return memoryBriefFor(workspace, command, request);
+  }
+}
+
+/** The user's recorded request, with the decisions Visp Memory selects for it; rules are captured on the way. */
 async function featureRequest(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
@@ -174,13 +215,65 @@ async function featureRequest(
   if (!host.ok) return host;
   const rules = await featureProjectRules(workspace, host.value, feature, timestamp);
   if (!rules.ok) return rules;
+  const request = host.value?.request ?? options.sourceBrief ?? options.goal;
+  const memory = await featureMemory(workspace, feature, request);
+  if (!memory.ok) return memory;
   // Earlier rules are not copied into the fixed request: work replies, the reviewer and the
   // tester read the current rules, so a removed rule stops applying at once.
   return ok({
     host: host.value,
     rules: rules.value,
-    originalRequest: host.value?.request ?? options.sourceBrief ?? options.goal,
+    memory: memory.value,
+    originalRequest: [request, projectMemoryText(memory.value.memories)]
+      .filter(Boolean)
+      .join("\n\n"),
   });
+}
+
+/**
+ * With `memory.service`, earlier features' requests are recorded in Visp Memory and the
+ * decisions it selects for this request join it; the feature keeps them for `work` replies.
+ */
+async function featureMemory(
+  workspace: WorkspaceState,
+  feature: string,
+  request: string,
+): Promise<
+  Result<{
+    memories: string[];
+    mutations: FileMutation[];
+    reported: { projectMemory?: string[] };
+  }>
+> {
+  // memory.enabled switches off every memory path, the long-term store included.
+  const command = workspace.config.memory.enabled
+    ? workspace.config.memory.service?.command
+    : undefined;
+  if (!command) return ok({ memories: [], mutations: [], reported: {} });
+  const listed = await workspace.store.listFeatures();
+  if (!listed.ok) return listed;
+  const earlier: EarlierFeature[] = [];
+  for (const id of listed.value) {
+    const intent = await workspace.store.readIntent(id);
+    if (intent.ok && intent.value.sourceBrief)
+      earlier.push({
+        feature: id,
+        goal: intent.value.goal,
+        originalRequest: intent.value.sourceBrief,
+      });
+  }
+  const recorded = await recordEarlierRequests(workspace, command, earlier);
+  if (!recorded.ok) return recorded;
+  const memories = await selectMemories(workspace, command, request);
+  const mutations: FileMutation[] = recorded.value ? [recorded.value] : [];
+  if (memories.length)
+    mutations.push({
+      kind: "write",
+      path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
+      content: json({ version: 1, memories }),
+      expectedBefore: { existed: false },
+    });
+  return ok({ memories, mutations, reported: memories.length ? { projectMemory: memories } : {} });
 }
 
 function criticStateFields(critic: {

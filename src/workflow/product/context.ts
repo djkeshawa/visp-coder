@@ -6,6 +6,7 @@ import {
   type QueryRow,
   refreshRepository,
 } from "../../graph/index.js";
+import { featureMemories } from "../../memory/memory-service.js";
 import { recallRelevant } from "../../memory/store.js";
 import { recordActivity } from "../../orchestrate/session.js";
 import { checkOutputNotes } from "../product-output-guidance.js";
@@ -105,6 +106,7 @@ export async function buildProductContext(
   const skills = await productSkills(workspace, slice, remaining);
   if (!skills.ok) return skills;
   const rules = await readProjectRules(workspace);
+  const memories = await featureMemories(workspace, brief.feature);
   notes.push(...skills.value.notes);
   return ok(
     fitProductContext(
@@ -116,7 +118,7 @@ export async function buildProductContext(
         task: slice.id,
         ...(slice.taskClass === undefined ? {} : { taskClass: slice.taskClass }),
         originalRequest: brief.originalRequest,
-        ...projectRulesField(rules),
+        ...standingContext(rules, memories),
         objective: slice.goal,
         outcomes: brief.outcomes.filter((outcome) => slice.outcomes.includes(outcome.id)),
         examples: brief.examples.filter((example) =>
@@ -290,9 +292,16 @@ function priorReviewFeedback(
     .filter((review) => review.assessments.length || review.summary || review.limitations?.length);
 }
 
-/** An unreadable rules file fails `visp feature` and `visp rules`; work goes on without it. */
-function projectRulesField(rules: Result<{ rules: ProjectRule[] }>): {
-  projectRules?: readonly ProjectRule[];
-} {
-  return rules.ok && rules.value.rules.length ? { projectRules: rules.value.rules } : {};
+/**
+ * Rules and recorded decisions the request carries, shown on every reply. An unreadable
+ * rules file fails `visp feature` and `visp rules`; work goes on without it.
+ */
+function standingContext(
+  rules: Result<{ rules: ProjectRule[] }>,
+  memories: readonly string[],
+): { projectRules?: readonly ProjectRule[]; projectMemory?: readonly string[] } {
+  return {
+    ...(rules.ok && rules.value.rules.length ? { projectRules: rules.value.rules } : {}),
+    ...(memories.length ? { projectMemory: memories } : {}),
+  };
 }
