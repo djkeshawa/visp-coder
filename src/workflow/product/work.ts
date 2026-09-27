@@ -12,6 +12,7 @@ import { correctionReasons } from "./corrections.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
 import { criticUnderstanding } from "./critic-understanding.js";
 import { prepareWorkEnvironment } from "./environment.js";
+import { currentHostSession } from "./host-prompts.js";
 import { independentTestsBeforeWork, type TestsStarter } from "./independent-tests.js";
 import {
   checksFor,
@@ -216,18 +217,16 @@ async function runProductWorkLocked(
   const path = authorizationPath(workspace, record.value.brief.feature);
   const before = await workspace.files.readTextIfExists(path);
   if (!before.ok) return before;
-  const prior = await readProductAuthorization(workspace, record.value);
-  if (!prior.ok) return prior;
   const timestamp = new Date().toISOString();
-  const auth: ProductAuthorization = {
-    version: 2,
-    feature: record.value.brief.feature,
-    task: slice.id,
-    createdAt: timestamp,
-    root: hashValue(workspace.paths.root),
-    contractDigest: sliceDigest(record.value.brief, slice),
-    baseline: prior.value?.task === slice.id ? prior.value.baseline : snapshot.value,
-  };
+  const granted = await grantAuthorization(
+    workspace,
+    record.value,
+    slice,
+    snapshot.value,
+    timestamp,
+  );
+  if (!granted.ok) return granted;
+  const auth = granted.value;
   const status = await statusMutation(workspace, record.value.brief.feature, slice.id, "work");
   if (!status.ok) return status;
   const next = workingState(current, slice, auth, timestamp, reopen, subject.value, findings);
@@ -241,6 +240,33 @@ async function runProductWorkLocked(
         criticUnderstanding: understanding.value,
       })
     : saved;
+}
+
+/**
+ * Re-authorizing the same slice keeps its baseline, so edits made under an earlier grant
+ * still count as the slice's own. The grant records the host session that asked for it.
+ */
+async function grantAuthorization(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice,
+  snapshot: Record<string, string>,
+  createdAt: string,
+): Promise<Result<ProductAuthorization>> {
+  const prior = await readProductAuthorization(workspace, record);
+  if (!prior.ok) return prior;
+  const session = await currentHostSession(workspace);
+  if (!session.ok) return session;
+  return ok({
+    version: 2,
+    feature: record.brief.feature,
+    task: slice.id,
+    createdAt,
+    root: hashValue(workspace.paths.root),
+    contractDigest: sliceDigest(record.brief, slice),
+    baseline: prior.value?.task === slice.id ? prior.value.baseline : snapshot,
+    ...(session.value ? { session: session.value } : {}),
+  });
 }
 
 async function workUnderstanding(

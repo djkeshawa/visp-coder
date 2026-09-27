@@ -8,6 +8,8 @@ import type { WorkspaceState } from "../state.js";
 
 /** Written by the Claude Code hook on every user prompt; git-ignored session state. */
 export const HOST_PROMPTS_FILE = "user-prompts.jsonl";
+/** The host session of the latest user prompt, written beside the prompts; never consumed. */
+export const HOST_SESSION_FILE = "host-session.json";
 
 export interface HostRequest {
   /** The request to preserve: a verbatim excerpt the worker quoted, or the latest prompt. */
@@ -54,6 +56,22 @@ export async function hostRequest(
       ...(mutation ? { mutation } : {}),
     });
   return ok({ request: latest, origin: "host-prompt", ...(mutation ? { mutation } : {}) });
+}
+
+/** The host session that sent the latest user prompt, when the host's hook reports one. */
+export async function currentHostSession(
+  workspace: WorkspaceState,
+): Promise<Result<string | undefined>> {
+  const text = await workspace.files.readTextIfExists(
+    join(workspace.paths.sessionDir, HOST_SESSION_FILE),
+  );
+  if (!text.ok || text.value === undefined) return text.ok ? ok(undefined) : text;
+  try {
+    const session = (JSON.parse(text.value) as { session?: unknown }).session;
+    return ok(typeof session === "string" && session ? session : undefined);
+  } catch {
+    return ok(undefined);
+  }
 }
 
 function promptLines(text: string): string[] {

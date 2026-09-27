@@ -13,7 +13,10 @@ import {
   hasPendingCriticReview,
   PENDING_REVIEW_MESSAGE,
 } from "../../workflow/product/critic-policy.js";
-import { productScopes as authorizedScopes } from "../../workflow/product/scopes.js";
+import {
+  productScopes as authorizedScopes,
+  earlierSessionAuthorization,
+} from "../../workflow/product/scopes.js";
 import { featureForBranch, isStatePath, type WorkspaceState } from "../../workflow/state.js";
 import {
   type GlobalOptions,
@@ -49,6 +52,10 @@ export function guardCommand(): Command {
     )
     .option("--feature <id>", "Which feature's graph to judge against, with --scope tasks")
     .option(
+      "--session <id>",
+      "The host session asking; another session's authorization permits no edits",
+    )
+    .option(
       "--branch <name>",
       "Which branch this checkout represents, when git cannot say (a CI checkout is detached)",
     )
@@ -65,6 +72,7 @@ interface GuardCliOptions extends GlobalOptions {
   readonly includeDone?: boolean;
   readonly task?: string;
   readonly scope?: string;
+  readonly session?: string;
   readonly feature?: string;
   readonly branch?: string;
 }
@@ -218,16 +226,18 @@ async function evaluateGuard(
     state.overrides,
     ruleContextFor(state, { ...(opts.task ? { task: opts.task } : {}) }),
   );
-  const violations: GuardViolation[] = checkPaths(paths.value, {
+  const checked = checkPaths(paths.value, {
     markers,
     blockedPaths: state.config.workflow.blockedPaths,
     enforceAllowedFiles: allowedFilesRule.active,
   });
+  const violations = await explainEarlierSession(state, opts, feature, checked);
+  if (!violations.ok) return violations;
   const guarded = await pendingReviewViolations(
     state,
     feature ?? state.status?.activeFeature ?? markers[0]?.feature,
     paths.value,
-    violations,
+    violations.value,
   );
   if (!guarded.ok) return guarded;
   const checkedViolations = guarded.value;
@@ -246,6 +256,34 @@ async function evaluateGuard(
       authorizedTasks: markers.map((marker) => marker.task),
     },
   });
+}
+
+/**
+ * A refusal because the only authorization came from an earlier host session says so,
+ * and names both ways on: a new feature for a new request, or re-confirming the old task.
+ */
+async function explainEarlierSession(
+  state: WorkspaceState,
+  opts: GuardCliOptions,
+  feature: string | undefined,
+  violations: readonly GuardViolation[],
+): Promise<Result<GuardViolation[]>> {
+  if (opts.scope === "tasks" || !violations.some((v) => v.reason === "no-authorization"))
+    return ok([...violations]);
+  const earlier = await earlierSessionAuthorization(state, scopeFilter(opts, feature));
+  if (!earlier.ok) return earlier;
+  const auth = earlier.value;
+  if (!auth) return ok([...violations]);
+  return ok(
+    violations.map((violation) =>
+      violation.reason === "no-authorization"
+        ? {
+            ...violation,
+            message: `${violation.path} was authorized for ${auth.task} of ${auth.feature} in an earlier session, which no longer permits edits. For a new request, start it with \`visp feature "<request>"\`; to continue ${auth.task}, run \`visp work --task ${auth.task}\``,
+          }
+        : violation,
+    ),
+  );
 }
 
 async function evaluateUnscopedGuard(
@@ -311,22 +349,28 @@ type GuardMarkerSelection =
   | { readonly kind: "unscoped" }
   | { readonly kind: "markers"; readonly markers: ImplementMarker[] };
 
+/** The feature and asking session every scope lookup of one guard call shares. */
+function scopeFilter(opts: GuardCliOptions, feature: string | undefined) {
+  return {
+    ...(feature ? { feature } : {}),
+    ...(opts.session ? { hostSession: opts.session } : {}),
+  };
+}
+
 async function selectGuardMarkers(
   state: WorkspaceState,
   opts: GuardCliOptions,
   feature: string | undefined,
 ): Promise<Result<GuardMarkerSelection>> {
   if (opts.ifAuthorized && opts.scope !== "tasks") {
-    const active = await authorizedScopes(state, {
-      ...(feature ? { feature } : {}),
-    });
+    const active = await authorizedScopes(state, scopeFilter(opts, feature));
     if (!active.ok) return active;
     if (active.value.length === 0) return ok({ kind: "unscoped" });
   }
   const markers = await authorizedScopes(state, {
     includeDone: opts.includeDone === true,
     ...(opts.scope ? { source: opts.scope as "markers" | "tasks" } : {}),
-    ...(feature ? { feature } : {}),
+    ...scopeFilter(opts, feature),
   });
   if (!markers.ok) return markers;
   if (opts.ifAuthorized && markers.value.length === 0) return ok({ kind: "unscoped" });
