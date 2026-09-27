@@ -15,6 +15,7 @@ const trustBoundaryTests = [
   "tests/unit/workflow/evidence/product-critic-budget.test.ts",
   "tests/unit/workflow/evidence/product-recheck-routing.test.ts",
   "tests/unit/workflow/evidence/product-scope-settings.test.ts",
+  "tests/unit/workflow/evidence/product-next-new-session.test.ts",
   "tests/unit/workflow/evidence/product-repair-recheck.test.ts",
   "tests/unit/workflow/evidence/product-reproduction.test.ts",
   "tests/unit/workflow/evidence/product-runtime-agreement.test.ts",
