@@ -98,6 +98,17 @@ Keyword relevance scored needed decisions and noise alike (0.54–0.57) and once
 
 The run that coded 10,000 with keyword selection also restored 10,000 without memory, from the first session's traces, so keyword memory's harm is not shown; the model's choice, which stated only the new limit, kept that run on 50,000. The intermediate request said "replacing the 10000 limit"; a change stated less plainly is untested.
 
+**A second domain: rules carried, memory added nothing.** `sheet-carryover` extends the spreadsheet engine. The first request adds AVERAGE with a stated house rule ("a statistic over no numbers is #DIV/0!, now and for every statistic we add") and ROUND with a feature-only decision (digits must be a whole number from 0 to 10); the second adds MEDIAN, ROUNDUP and ROUNDDOWN without mentioning either. Five runs, second sessions paired on one first session each, eight earlier features and two near-miss limits in the store:
+
+| Second session | Carried checks (40) | Mean time |
+| --- | --- | --- |
+| Project rules only | 40 | 5.0 min |
+| Rules and Visp Memory, first gate prompt | 36 | 6.5 min |
+| Rules and Visp Memory, gate prompt with argument kinds | 38 | 8.6 min |
+| Decisions restated in the request | 40 | 8.7 min |
+
+Every first session captured the statistic rule and not the feature-only one. Without memory, workers reused ROUND's digits check from the code, so rules and code carried everything. The first gate prompt never passed the digits decision (it read it as ROUND's own); told that decisions about a kind of argument carry to operations taking the same kind, it passed it in every run that started a feature, still without near-miss notes. The remaining miss came from a run whose worker continued the first session's open task instead of starting a feature for the new request, so memory was never consulted; the two first-prompt misses accepted digits above 10. Memory helps where knowledge is in neither the request nor the code, as in `archive-carryover`; here it only cost time.
+
 **No demonstrated benefit yet** from the repository graph or `visp learn` notes in any run. They remain optional.
 
 ## Design consequences
