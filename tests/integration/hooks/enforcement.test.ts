@@ -491,12 +491,14 @@ describe("shell commands that would discard uncommitted work", () => {
     project = await TestProject.create({
       "src/auth/login.ts": "export const login = () => null;\n",
       "src/auth/token.ts": "export const token = () => null;\n",
+      "src/auth/foo bar.ts": "export const spaced = 1;\n",
     });
     project.run("init", "--harness", "generic");
     project.run("install", "--harness", "claude-code", "--hooks", "claude", "git");
     await project.installShim();
     project.commit("add visp");
     await project.write("src/auth/login.ts", "export const login = () => 'earlier work';\n");
+    await project.write("src/auth/foo bar.ts", "export const spaced = 2;\n");
   });
 
   afterAll(async () => {
@@ -525,6 +527,12 @@ describe("shell commands that would discard uncommitted work", () => {
     "git restore src/auth/login.ts",
     "git reset --hard",
     "git reset --hard HEAD",
+    // Review: shell quoting and forced modes also discard work.
+    "git checkout -- 'src/auth/foo bar.ts'",
+    'git checkout "src/auth/foo bar.ts"',
+    "git checkout -f main",
+    "git checkout --force main",
+    "git switch --discard-changes main",
   ])("refuses %s", (command) => {
     expect(shell(command)).toBe("deny");
   });
@@ -538,6 +546,41 @@ describe("shell commands that would discard uncommitted work", () => {
     "git add -A && git commit -m 'earlier work'",
   ])("leaves %s to the host", (command) => {
     expect(shell(command)).toBe("");
+  });
+});
+
+// A hard reset to a commit that tracks a path deletes the untracked file there.
+describe("hard resets over untracked work", () => {
+  let project: TestProject;
+
+  beforeAll(async () => {
+    project = await TestProject.create({ "src/app.ts": "export const app = 1;\n" });
+    project.run("init", "--harness", "generic");
+    project.run("install", "--harness", "claude-code", "--hooks", "claude", "git");
+    await project.installShim();
+    project.commit("add visp");
+    await project.write("src/new-work.ts", "export const earlier = true;\n");
+  });
+
+  afterAll(async () => {
+    await project.destroy();
+  });
+
+  it("refuses a hard reset while untracked work exists", () => {
+    const output = execFileSync(
+      process.execPath,
+      [join(project.root, ".visp/hooks/claude-pretooluse.mjs")],
+      {
+        cwd: project.root,
+        input: JSON.stringify({
+          tool_name: "Bash",
+          tool_input: { command: "git reset --hard HEAD^" },
+        }),
+        env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
+        encoding: "utf8",
+      },
+    );
+    expect(JSON.parse(output).hookSpecificOutput.permissionDecision).toBe("deny");
   });
 });
 
