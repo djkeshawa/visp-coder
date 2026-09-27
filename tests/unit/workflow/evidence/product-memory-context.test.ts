@@ -67,7 +67,7 @@ describe("memory delivered with product context", () => {
     const disabled = value(
       await runProductContext({
         ...disabledState,
-        config: { ...disabledState.config, memory: { enabled: false } },
+        config: { ...disabledState.config, memory: { enabled: false, recall: true } },
       }),
     );
     expect(disabled.memory).toEqual([]);

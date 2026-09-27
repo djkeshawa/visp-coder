@@ -23,6 +23,9 @@ second session, so the modes are paired on one first session. Modes:
           the first two, the store holds the ten noisy features, the first request and then the
           intermediate one, recorded in that order as VISP would have; model choice, keyword
           choice, and no memory. Score with the task's -raised variant.
+- recall, recall-outdated: gated and outdated with VISP's own store (no memory.service): the
+          same earlier requests are written to .visp/state/request-history.json, and the
+          reviewer's model chooses among every recorded note.
 - memory: like fresh, with Visp Memory as VISP's long-term store (`memory.service`, set up
           before the second session; needs $VISP_BENCH_RUNS/visp-memory-venv and a VISP build
           that supports it).
@@ -46,7 +49,7 @@ from run_claude import MODEL, run_session
 
 BENCH = pathlib.Path(__file__).resolve().parent
 MODES = ("wiped", "fresh", "oracle", "resume", "memory", "noisy", "gated",
-         "outdated", "outdated-kw", "outdated-none")
+         "outdated", "outdated-kw", "outdated-none", "recall", "recall-outdated")
 MEMORY = RUNS / "visp-memory-venv" / "bin" / "visp-memory"
 NOTES = ("CLAUDE.md", "AGENTS.md")
 # Where each first-session convention could have been written down. C1 and C2 are also visible
@@ -145,6 +148,27 @@ def record_request(project, request, label, goal):
                        cwd=project, check=True, capture_output=True)
 
 
+def noise_requests(task):
+    for index, request in enumerate((BENCH / "tasks" / task / "noise.md").read_text().split("\n---\n"), start=1):
+        yield f"n{index:02d}", request.strip().splitlines()[0].removeprefix("Feature:").strip(), request.strip().split("\n", 1)[1]
+
+
+def seed_history(project, requests):
+    """Earlier feature requests in VISP's own store, oldest first, as VISP records them."""
+    state = project / ".visp" / "state" / "request-history.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    history = json.loads(state.read_text()) if state.exists() else {"version": 1, "requests": []}
+    history["requests"] += [{"feature": label, "goal": goal, "notes": request_chunks(body)}
+                            for label, goal, body in requests]
+    state.write_text(json.dumps(history, indent=2) + "\n")
+
+
+def first_feature(project):
+    first = next((project / ".visp" / "features").iterdir())
+    intent = json.loads((first / "intent.json").read_text())
+    return first.name, intent["goal"], intent["sourceBrief"]
+
+
 # The item limit as code or prose may spell it: 10000, 10_000, 10,000, 10001, 10 ** 4, 1e4.
 OLD_LIMIT = re.compile(r"(?<!\w)(?<!\d\.)(?:10([_,]?)00([01])|10\s*\*\*\s*4|1e4)(?!\w|\.\d)")
 
@@ -172,7 +196,9 @@ def verify_intermediate(project, mode):
 
 def apply_intermediate(project, task, remember, mode):
     """The intermediate feature: its code change, and, with memory, the store's history."""
-    if remember:
+    if remember == "builtin":
+        seed_history(project, [first_feature(project)])
+    elif remember:
         first = next((project / ".visp" / "features").iterdir())
         intent = json.loads((first / "intent.json").read_text())
         record_request(project, intent["sourceBrief"], first.name, intent["goal"])
@@ -195,7 +221,10 @@ def apply_intermediate(project, task, remember, mode):
     if remember:
         request = (BENCH / "tasks" / task / "intermediate.md").read_text()
         goal = request.strip().splitlines()[0].removeprefix("Feature:").strip()
-        record_request(project, request.strip().split("\n", 1)[1], "n11", goal)
+        if remember == "builtin":
+            seed_history(project, [("n11", goal, request.strip().split("\n", 1)[1])])
+        else:
+            record_request(project, request.strip().split("\n", 1)[1], "n11", goal)
 
 
 def refresh_install(project, arm):
@@ -296,9 +325,12 @@ def run_modes(args, run, project, arm, first, result, modes):
             enable_memory(project, "keyword" if mode in ("noisy", "outdated-kw") else "model")
         if mode in ("noisy", "gated", "outdated", "outdated-kw"):
             seed_noise(project, arm["task"])
-        if mode.startswith("outdated"):
+        if mode.startswith("recall"):
+            seed_history(project, noise_requests(arm["task"]))
+        if mode.startswith("outdated") or mode == "recall-outdated":
+            remember = "builtin" if mode == "recall-outdated" else mode != "outdated-none"
             try:
-                apply_intermediate(project, arm["task"], mode != "outdated-none", mode)
+                apply_intermediate(project, arm["task"], remember, mode)
             except IntermediateFailed as failure:
                 failed.append(str(failure))
                 print(json.dumps({"run": args.run, "mode": mode, "error": str(failure)}))

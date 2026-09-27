@@ -132,17 +132,25 @@ export async function memoryBriefFor(
     return [];
   }
   if (parsed.abstained) return [];
+  return notInRequest(
+    request,
+    ["warnings", "decisions", "knowledge"]
+      .flatMap((section) => parsed.sections?.[section] ?? [])
+      .map((memory) => (typeof memory.content === "string" ? memory.content : ""))
+      .map((content) =>
+        content
+          .replace(/\nReasoning: .*$/s, "")
+          .replace(/^Decision: /, "")
+          .trim(),
+      )
+      .filter(Boolean),
+  );
+}
+
+/** Notes the request does not already state word for word. */
+export function notInRequest(request: string, notes: readonly string[]): string[] {
   const said = comparable(request);
-  return ["warnings", "decisions", "knowledge"]
-    .flatMap((section) => parsed.sections?.[section] ?? [])
-    .map((memory) => (typeof memory.content === "string" ? memory.content : ""))
-    .map((content) =>
-      content
-        .replace(/\nReasoning: .*$/s, "")
-        .replace(/^Decision: /, "")
-        .trim(),
-    )
-    .filter((content) => content && !said.includes(comparable(content)));
+  return notes.filter((note) => !said.includes(comparable(note)));
 }
 
 export function projectMemoryText(memories: readonly string[]): string {

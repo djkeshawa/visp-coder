@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { TestWorkspace } from "../../support/workspace.js";
 
@@ -29,7 +29,11 @@ afterEach(() => {
 });
 
 /** A project whose Visp Memory is a script that logs every call and returns two notes. */
-async function project(memory: Record<string, unknown>, critic?: Record<string, unknown>) {
+async function project(
+  memory: Record<string, unknown>,
+  critic?: Record<string, unknown>,
+  service = true,
+) {
   workspace = await TestWorkspace.create(
     { "src/items.ts": "export const items = 1;\n" },
     {
@@ -49,7 +53,7 @@ async function project(memory: Record<string, unknown>, critic?: Record<string, 
   config.memory = {
     ...config.memory,
     ...memory,
-    service: { command: fake, ...(memory.service ?? {}) },
+    ...(service ? { service: { command: fake, ...(memory.service ?? {}) } } : {}),
   };
   if (critic) config.critic = { ...config.critic, ...critic };
   await workspace.write("visp.yml", stringify(config));
@@ -86,7 +90,7 @@ it("carries only the notes the reviewer's model chooses", async () => {
   gate.mockResolvedValue([NOTES[1]]);
   await feature("Archive items", "Add archiving.");
   const second = await feature("Restock", "Add restocking.");
-  expect(gate).toHaveBeenCalledWith(expect.stringContaining("Add restocking."), NOTES);
+  expect(gate).toHaveBeenCalledWith(expect.stringContaining("Add restocking."), NOTES, []);
   expect(second.projectMemory).toEqual([NOTES[1]]);
 });
 
@@ -116,4 +120,47 @@ it("never calls the service when memory is turned off", async () => {
   const second = await feature("Bundles", "Add bundles.");
   expect(second.projectMemory).toBeUndefined();
   await expect(readFile(log, "utf8")).rejects.toThrow();
+});
+
+const REVIEWER = { enabled: true, harness: "codex", launch: "codex-exec" };
+const ARCHIVING = "Add archiving.\n\n1. An archived item cannot be reserved: 409 item_archived.";
+
+describe("without Visp Memory", () => {
+  it("gives the reviewer's model every recorded note and carries what it chooses", async () => {
+    await project({}, REVIEWER, false);
+    gate.mockResolvedValue(["1. An archived item cannot be reserved: 409 item_archived."]);
+    await feature("Archive items", ARCHIVING);
+    const second = await feature("Restock", "Add restocking.");
+    expect(gate).toHaveBeenLastCalledWith(
+      expect.stringContaining("Add restocking."),
+      // "Add archiving." is too short to record as a decision.
+      ["1. An archived item cannot be reserved: 409 item_archived."],
+      [],
+    );
+    expect(second.projectMemory).toEqual([
+      "1. An archived item cannot be reserved: 409 item_archived.",
+    ]);
+    const history = JSON.parse(
+      await readFile(join(workspace?.root ?? "", ".visp/state/request-history.json"), "utf8"),
+    );
+    expect(history.requests.map((request: { feature: string }) => request.feature)).toHaveLength(1);
+  });
+
+  it("carries nothing when the model fails", async () => {
+    await project({}, REVIEWER, false);
+    gate.mockRejectedValue(new Error("offline"));
+    await feature("Archive items", ARCHIVING);
+    const second = await feature("Restock", "Add restocking.");
+    expect(second.projectMemory).toBeUndefined();
+  });
+
+  it("does not recall without a reviewer model or when recall is off", async () => {
+    await project({}, undefined, false);
+    await feature("Archive items", ARCHIVING);
+    expect((await feature("Restock", "Add restocking.")).projectMemory).toBeUndefined();
+    await project({ recall: false }, REVIEWER, false);
+    await feature("Archive items", ARCHIVING);
+    expect((await feature("Restock", "Add restocking.")).projectMemory).toBeUndefined();
+    expect(gate).not.toHaveBeenCalled();
+  });
 });
