@@ -78,6 +78,16 @@ Rules must be read by a model, not matched by phrase. Phrase matching found 4 of
 
 Without memory every run kept the archive check, which the reservation code already had, and none capped restocking. Visp Memory's keyword selection is coarse (scores 0.55–0.72 for relevant and boilerplate paragraphs alike), so VISP drops what the new request already says; five decisions reached each second request.
 
+**A noisy store needs a model to choose.** The same task with ten earlier feature requests on the service already in Visp Memory (eight unrelated, two near-miss limits of other endpoints), three runs paired on one first session each:
+
+| Second session | Carried decisions (18) | Notes the request carried | Near-miss notes carried | Mean time |
+| --- | --- | --- | --- | --- |
+| No memory | 9 | 0 | 0 | 8.5 min |
+| Visp Memory keyword selection | 15 | 15–24 | 1 | 9.1 min |
+| Reviewer's model choosing among candidates | 18 | 3 | 0 | 10.6 min |
+
+Keyword relevance scored needed decisions and noise alike (0.54–0.57) and once cut the needed quantity limit. The model reads a wide candidate set (about 45 notes, some fourteen seconds at low effort); told that a resource's invariants apply to every operation on it while one endpoint's limits do not, it chose exactly the three decisions in every run. An earlier prompt without that distinction dropped the limit in one run. Workers ignored the near-miss note they were given, but carried 5–8 times more text. Times vary by several minutes between rounds and are not a result.
+
 **No demonstrated benefit yet** from the repository graph or `visp learn` notes in any run. They remain optional.
 
 ## Design consequences
