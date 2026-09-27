@@ -38,6 +38,8 @@ const trustBoundaryTests = [
   "tests/unit/workflow/evidence/product-critic-native.test.ts",
   "tests/unit/workflow/evidence/product-candidate-boundaries.test.ts",
   "tests/unit/workflow/evidence/product-critic.test.ts",
+  "tests/unit/workflow/evidence/product-memory-service.test.ts",
+  "tests/unit/workflow/evidence/product-project-rules.test.ts",
   "tests/unit/workflow/evidence/product-critic-understanding.test.ts",
   "tests/unit/workflow/evidence/product-feather-brief-probes.test.ts",
   "tests/unit/mcp/critic-host.test.ts",

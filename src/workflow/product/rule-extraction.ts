@@ -13,11 +13,9 @@ import type { RuleExtractor } from "./project-rules.js";
  * instructions for carrying out the request, it recorded a benchmark's operating
  * instructions (paths, "do not ask questions") as project rules when no real rule was stated.
  */
-const INSTRUCTIONS = `You read one message a user sent to an AI coding assistant working in their repository. List the STANDING RULES the message states: requirements the user says also apply beyond this request, to later requests, future sessions or the whole project (conventions, house style, "from now on", "always when you touch X", "for the rest of this project").
-Only list a requirement when the message itself says or clearly implies that it lasts beyond this request. Do NOT list: requirements that only concern the current task or this change's specification, acceptance criteria, plans that might happen later, or instructions for how to carry out this request (where to work, which directories or commands to use, tools, dependencies, whether to ask questions, how to report).
-For each standing rule return "rule": the rule as one self-contained sentence that keeps every exact name, number, status code and example, and "quote": a verbatim excerpt of the message (copied exactly, at least a few words) that states it. Return {"rules": []} when there are none. Do not read files or run commands.
-
-Message:
+const INSTRUCTIONS = `You read the messages a user sent to an AI coding assistant working in their repository, in order. List the STANDING RULES they state, as they stand after the last message (a later message may withdraw or replace an earlier rule; then list only the current one): requirements the user says also apply beyond this request, to later requests, future sessions or the whole project (conventions, house style, "from now on", "always when you touch X", "for the rest of this project").
+Only list a requirement when the messages themselves say or clearly imply that it lasts beyond this request. Do NOT list: requirements that only concern the current task or this change's specification, acceptance criteria, plans that might happen later, or instructions for how to carry out this request (where to work, which directories or commands to use, tools, dependencies, whether to ask questions, how to report).
+For each standing rule return "rule": the rule as one self-contained sentence that keeps every exact name, number, status code and example, and "quote": a verbatim excerpt of one message (copied exactly, at least a few words) that states it in its current form. Return {"rules": []} when there are none. Do not read files or run commands.
 `;
 
 const RESPONSE_SCHEMA = {
@@ -46,7 +44,7 @@ export function codexRuleExtractor(options: {
   executable?: string;
   lookup?: (host: string) => Promise<unknown>;
 }): RuleExtractor {
-  return async (prompt) => {
+  return async (prompts) => {
     const { lookup: dnsLookup } = await import("node:dns/promises");
     if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)))))
       throw new Error("The rule reader cannot reach its model from this process");
@@ -59,7 +57,9 @@ export function codexRuleExtractor(options: {
         model: options.model,
         reasoningEffort: "low",
         schema: RESPONSE_SCHEMA,
-        prompt: `${INSTRUCTIONS}${prompt}`,
+        prompt: `${INSTRUCTIONS}\n${prompts
+          .map((prompt, index) => `Message ${index + 1}:\n${prompt}`)
+          .join("\n\n")}`,
         signal: AbortSignal.timeout(90_000),
       });
       return responseSchema.parse(response).rules;

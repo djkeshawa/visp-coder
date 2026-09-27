@@ -26,17 +26,37 @@ export interface EarlierFeature {
   readonly originalRequest: string;
 }
 
-/** Paragraphs and list items of a request: the units a later request can relate to. */
+/**
+ * Paragraphs and list items of a request: the units a later request can relate to. Prose
+ * before a list stays a unit of its own, and an item keeps its wrapped continuation lines.
+ */
 export function requestChunks(request: string): string[] {
   return request
     .split(/\n\s*\n/)
     .filter((block) => !APPENDED.some((heading) => block.trimStart().startsWith(heading)))
-    .flatMap((block) => {
-      const items = block.split("\n").filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+\S/.test(line));
-      return items.length ? items.map((line) => line.trim()) : [block.replace(/\s+/g, " ").trim()];
-    })
+    .flatMap(blockChunks)
+    .map((chunk) => chunk.replace(/\s+/g, " ").trim())
     .filter((chunk) => chunk.length >= MIN_CHUNK)
     .map((chunk) => chunk.slice(0, MAX_CHUNK));
+}
+
+function blockChunks(block: string): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  let inItem = false;
+  for (const line of block.split("\n")) {
+    const item = /^\s*(?:[-*•]|\d+[.)])\s+\S/.test(line);
+    const continues = inItem && /^\s+\S/.test(line);
+    if (item || (!continues && inItem)) {
+      if (current.trim()) chunks.push(current);
+      current = line;
+      inItem = item;
+    } else {
+      current += `\n${line}`;
+    }
+  }
+  if (current.trim()) chunks.push(current);
+  return chunks;
 }
 
 /**

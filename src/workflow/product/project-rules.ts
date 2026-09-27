@@ -25,6 +25,8 @@ const MIN_QUOTE_LENGTH = 12;
 const LASTING =
   /\b(from now on|going forward|from here on|(all|any|every) (later|future|subsequent)\b)/i;
 const LIST_ITEM = /^\s*(?:[-*•]|\d+[.)])\s+(.*\S)\s*$/;
+const RULES_HEADING =
+  /^[^\n]*\b(rules?|conventions?|guidelines?|standards?|style|principles?|polic(?:y|ies))\b[^\n]*:\s*$/i;
 
 const projectRuleSchema = z
   .object({
@@ -44,7 +46,11 @@ export interface StatedRule {
   /** A verbatim excerpt of the prompt stating the rule. */
   readonly quote: string;
 }
-export type RuleExtractor = (prompt: string) => Promise<readonly StatedRule[]>;
+/** Reads a conversation's messages in order and returns the rules as they stand after the last. */
+export type RuleExtractor = (prompts: readonly string[]) => Promise<readonly StatedRule[]>;
+
+/** One reading covers at most this many recent prompts, so a long conversation stays bounded. */
+const MAX_PROMPTS = 10;
 
 /**
  * Rules the prompts state for later work. A model reads them however they are phrased, and a
@@ -55,17 +61,17 @@ export async function statedRules(
   prompts: readonly string[],
   extractor?: RuleExtractor,
 ): Promise<string[]> {
-  const found = await Promise.all(
-    prompts.map(async (prompt) => {
-      if (!extractor) return standingRules(prompt);
-      try {
-        return quotedRules(prompt, await extractor(prompt));
-      } catch {
-        return standingRules(prompt);
-      }
-    }),
-  );
-  return found.flat();
+  if (prompts.length === 0) return [];
+  // Read together, so a later message that withdraws or replaces a rule wins.
+  const recent = prompts.slice(-MAX_PROMPTS);
+  if (extractor) {
+    try {
+      return quotedRules(recent.join("\n\n"), await extractor(recent));
+    } catch {
+      // Phrase matching below.
+    }
+  }
+  return prompts.flatMap(standingRules);
 }
 
 function quotedRules(prompt: string, rules: readonly StatedRule[]): string[] {
@@ -109,13 +115,16 @@ function listItems(block: string): string[] {
   return items;
 }
 
-/** List blocks right after the statement; a one-line heading ending in ":" may come first. */
+/**
+ * List blocks right after the statement. A one-line heading may come first only when it names
+ * rules ("Our API conventions:"), so a task list under "The change:" is not taken as rules.
+ */
 function followingList(blocks: readonly string[]): string[] {
   const collected: string[] = [];
   for (const block of blocks) {
     const items = listItems(block);
     if (items.length) collected.push(...items);
-    else if (collected.length === 0 && /^[^\n]*:\s*$/.test(block.trim())) continue;
+    else if (collected.length === 0 && RULES_HEADING.test(block.trim())) continue;
     else break;
   }
   return collected;
@@ -200,6 +209,22 @@ export function removeProjectRule(
     ]);
     return saved.ok ? ok(rule) : saved;
   });
+}
+
+/**
+ * The rules a feature's reviewer and tester judge against, read when they run rather than
+ * copied into the feature's fixed request, so a removed rule stops applying at once. Rules
+ * the feature's own request stated are already in it.
+ */
+export async function rulesForRequest(workspace: WorkspaceState, feature: string): Promise<string> {
+  const recorded = await readProjectRules(workspace);
+  if (!recorded.ok) return "";
+  return projectRulesText(recorded.value.rules.filter((rule) => rule.feature !== feature));
+}
+
+/** The request as the reviewer and tester read it: the user's words, then the current rules. */
+export function withRules(request: string, rules: string): string {
+  return rules ? `${request}\n\n${rules}` : request;
 }
 
 /** Plain numbered lines: workers follow plain text where they skim escaped JSON. */

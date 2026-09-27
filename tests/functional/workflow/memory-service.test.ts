@@ -89,6 +89,19 @@ it("records earlier requests and carries the selected decisions into the next re
   expect(work.stdout).toContain("M1 An archived item cannot be reserved: 409 item_archived.");
 });
 
+// Review: prose before a list and wrapped item lines were dropped, and never recorded.
+it("keeps prose before a list and each item's wrapped lines", () => {
+  expect(
+    requestChunks(
+      "Errors follow one contract for every endpoint:\n- A missing item is 404 not_found,\n  with a message naming the SKU.\n- A bad body is 422 invalid_request.",
+    ),
+  ).toEqual([
+    "Errors follow one contract for every endpoint:",
+    "- A missing item is 404 not_found, with a message naming the SKU.",
+    "- A bad body is 422 invalid_request.",
+  ]);
+});
+
 it("does not record the blocks VISP appended to a request", () => {
   expect(
     requestChunks(

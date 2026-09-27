@@ -38,7 +38,6 @@ import {
   mergeProjectRules,
   type ProjectRule,
   projectRulesMutation,
-  projectRulesText,
   type RuleExtractor,
   readProjectRules,
   statedRules,
@@ -140,9 +139,9 @@ async function createProductFeatureLocked(
 }
 
 /**
- * Rules the user stated for later work in the prompts this feature consumes are recorded;
- * rules recorded by earlier features join this feature's request, so the worker, tester and
- * reviewer all hold it to them. Only recorded user prompts count, never a worker's text.
+ * Rules the user stated for later work in the prompts this feature consumes are recorded.
+ * Work replies, the tester and the reviewer read the current rules. Only recorded user
+ * prompts count, never a worker's text.
  */
 async function featureProjectRules(
   workspace: WorkspaceState,
@@ -151,7 +150,6 @@ async function featureProjectRules(
   capturedAt: string,
 ): Promise<
   Result<{
-    earlier: ProjectRule[];
     mutations: FileMutation[];
     reported: { projectRules?: ProjectRule[] };
   }>
@@ -161,7 +159,6 @@ async function featureProjectRules(
   const stated = await statedRules(host?.prompts ?? [], await ruleReader(workspace));
   const merged = mergeProjectRules(recorded.value.rules, stated, feature, capturedAt);
   return ok({
-    earlier: recorded.value.rules,
     mutations: merged.added.length
       ? [projectRulesMutation(workspace, recorded.value.before, merged.rules)]
       : [],
@@ -169,7 +166,6 @@ async function featureProjectRules(
   });
 }
 
-/** The user's recorded request, followed by the rules they stated for later work in earlier features. */
 /** The model of a VISP-launched Codex reviewer, which also reads rules and chooses memories. */
 async function reviewerModel(workspace: WorkspaceState): Promise<string | undefined> {
   if (workspace.config.critic?.launch !== "codex-exec") return undefined;
@@ -208,6 +204,7 @@ async function selectMemories(
   }
 }
 
+/** The user's recorded request, with the decisions Visp Memory selects for it; rules are captured on the way. */
 async function featureRequest(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
@@ -221,15 +218,13 @@ async function featureRequest(
   const request = host.value?.request ?? options.sourceBrief ?? options.goal;
   const memory = await featureMemory(workspace, feature, request);
   if (!memory.ok) return memory;
+  // Earlier rules are not copied into the fixed request: work replies, the reviewer and the
+  // tester read the current rules, so a removed rule stops applying at once.
   return ok({
     host: host.value,
     rules: rules.value,
     memory: memory.value,
-    originalRequest: [
-      request,
-      projectRulesText(rules.value.earlier),
-      projectMemoryText(memory.value.memories),
-    ]
+    originalRequest: [request, projectMemoryText(memory.value.memories)]
       .filter(Boolean)
       .join("\n\n"),
   });
@@ -250,7 +245,10 @@ async function featureMemory(
     reported: { projectMemory?: string[] };
   }>
 > {
-  const command = workspace.config.memory.service?.command;
+  // memory.enabled switches off every memory path, the long-term store included.
+  const command = workspace.config.memory.enabled
+    ? workspace.config.memory.service?.command
+    : undefined;
   if (!command) return ok({ memories: [], mutations: [], reported: {} });
   const listed = await workspace.store.listFeatures();
   if (!listed.ok) return listed;

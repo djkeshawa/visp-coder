@@ -74,9 +74,10 @@ it("captures rules stated for later work and puts them in every later feature", 
   await userPrompt("Add prices to items. Our conventions from before still apply.");
   const second = project.run("feature", "Add prices");
   expect(second.exitCode, second.stdout + second.stderr).toBe(0);
+  // Rules are read when used, not copied into the fixed request, so removal takes effect.
   const brief = await project.read(".visp/features/002-add-prices/brief.yaml");
   expect(brief).toContain("Add prices to items.");
-  expect(brief).toContain("R002 Nothing is hard-deleted");
+  expect(brief).not.toContain("R002 Nothing is hard-deleted");
 
   const work = await workOn("002-add-prices");
   expect(work.exitCode, work.stdout + work.stderr).toBe(0);

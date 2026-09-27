@@ -43,6 +43,13 @@ describe("standing rules in a user's prompt", () => {
     ).toEqual(["run the linter", "keep the changelog"]);
   });
 
+  // Review: a task list under an unrelated heading is not a list of rules.
+  it("keeps the lasting sentence when a task list under another heading follows", () => {
+    expect(
+      standingRules("From now on, keep accessibility in mind.\n\nThe change:\n\n- Add a button"),
+    ).toEqual(["From now on, keep accessibility in mind."]);
+  });
+
   it("takes nothing from an ordinary request, even one that mentions the future", () => {
     expect(
       standingRules(
@@ -67,6 +74,22 @@ describe("rules read by a model", () => {
       { rule: "CSV only.", quote: "CSV" },
     ]);
     expect(rules).toEqual(["Timestamps are UTC ISO 8601 in every export."]);
+  });
+
+  // Review: "use tabs" then "scratch that, use spaces" must not record both.
+  it("reads all prompts in one call so a later message can replace a rule", async () => {
+    const calls: (readonly string[])[] = [];
+    const rules = await statedRules(
+      ["From now on, use tabs.", "Scratch that: from now on use four spaces."],
+      async (prompts) => {
+        calls.push(prompts);
+        return [{ rule: "Use four spaces.", quote: "from now on use four spaces" }];
+      },
+    );
+    expect(calls).toEqual([
+      ["From now on, use tabs.", "Scratch that: from now on use four spaces."],
+    ]);
+    expect(rules).toEqual(["Use four spaces."]);
   });
 
   it("falls back to phrase matching when the model fails", async () => {
