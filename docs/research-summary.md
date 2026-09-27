@@ -109,6 +109,16 @@ The run that coded 10,000 with keyword selection also restored 10,000 without me
 
 Every first session captured the statistic rule and not the feature-only one. Without memory, workers reused ROUND's digits check from the code, so rules and code carried everything. The first gate prompt never passed the digits decision (it read it as ROUND's own); told that decisions about a kind of argument carry to operations taking the same kind, it passed it in every run that started a feature, still without near-miss notes. The remaining miss came from a run whose worker continued the first session's open task instead of starting a feature for the new request, so memory was never consulted; the two first-prompt misses accepted digits above 10. Memory helps where knowledge is in neither the request nor the code, as in `archive-carryover`; here it only cost time.
 
+**VISP now keeps the store itself.** At these sizes the gate read every note Visp Memory offered it, so Visp Memory's search added nothing the gate used. VISP now records earlier requests in `.visp/state/request-history.json` and, with a VISP-launched reviewer, gives its model every recorded note (the newest 40,000 characters), oldest first, with the current project rules; the model is told a later note replaces an earlier one it conflicts with. No service, Python or Docker is needed, and it is on by default (`memory.recall: false` turns it off; `memory.service` keeps Visp Memory). Offline, reading 35–68 notes, it chose every needed decision in 15 of 15 selections across the three stores, with no near-miss note and never the replaced limit. Rerun on the same first sessions, with the current scorer (which gained one check per store since the tables above):
+
+| Store | No memory | Visp Memory, keyword | Visp Memory with gate | VISP's own store |
+| --- | --- | --- | --- | --- |
+| Noisy inventory (21) | 9, 8.5 min | 17, 9.1 min | 21, 10.6 min | 21, 7.3 min |
+| Outdated limit (24) | 12, 8.8 min | 19 | 24, 11.8 min | 24, 9.2 min |
+| Spreadsheet (40) | 40, 5.0 min | — | 38, 8.6 min | 40, 6.2 min |
+
+Every inventory run carried three notes and every spreadsheet run that started a feature one or two. One spreadsheet worker again continued the first session's open task, but ROUND's code carried the digits check there anyway. Core checks were unchanged against the earlier modes; four of five spreadsheet runs share a ROUND argument-count failure also present without memory.
+
 **No demonstrated benefit yet** from the repository graph or `visp learn` notes in any run. They remain optional.
 
 ## Design consequences
