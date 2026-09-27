@@ -3,11 +3,18 @@ import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses, type ProductOutcomeStatus } from "./assessment.js";
 import { criticNext } from "./critic-guidance.js";
+import { hasUntakenPrompts } from "./host-prompts.js";
 import type { ProductBrief, ProductState } from "./model.js";
 import { productReviewDocument } from "./review-document.js";
+import { earlierSessionGrant } from "./scopes.js";
 import type { ProductIdentity } from "./status-history.js";
 import { nextFromRecord } from "./status-next.js";
-import { briefPath, type ProductSelection, readProductRecord } from "./store.js";
+import {
+  briefPath,
+  type ProductRecord,
+  type ProductSelection,
+  readProductRecord,
+} from "./store.js";
 import {
   productImplementationDigest,
   productSourceDigest,
@@ -62,6 +69,8 @@ export async function runProductNext(
 ): Promise<Result<ProductNext>> {
   const loaded = await readProductRecord(workspace, options);
   if (!loaded.ok) return unavailableNext(loaded.error, workspace, options);
+  const untaken = await newSessionRequestNext(workspace, loaded.value, options);
+  if (!untaken.ok || untaken.value) return untaken.ok ? ok(untaken.value as ProductNext) : untaken;
   const next = await nextFromRecord(workspace, loaded.value, options, () =>
     currentProductIdentity(workspace, loaded.value.brief),
   );
@@ -149,6 +158,35 @@ export async function runProductReport(
   return status.ok
     ? ok({ feature: status.value.feature, markdown: status.value.report, next: status.value.next })
     : status;
+}
+
+/**
+ * A later session's request goes to a feature of its own. Workers in a new session asked
+ * `visp next`, were sent to the earlier session's open task, and built the new request there,
+ * without its rules, recalled decisions or a review of its own. A prompt no feature has taken,
+ * sent after the open task's authorization lapsed with its session, is that new request.
+ */
+async function newSessionRequestNext(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  options: ProductSelection,
+): Promise<Result<ProductNext | undefined>> {
+  // A worker that names the feature or task has already chosen to continue it.
+  if (options.feature || options.task) return ok(undefined);
+  const earlier = await earlierSessionGrant(workspace, record);
+  if (!earlier.ok || !earlier.value) return earlier.ok ? ok(undefined) : earlier;
+  const untaken = await hasUntakenPrompts(workspace);
+  if (!untaken.ok || !untaken.value) return untaken.ok ? ok(undefined) : untaken;
+  const { task } = earlier.value;
+  return ok({
+    action: "understand",
+    objective: `The user's request in this session is not part of ${record.brief.feature}, which an earlier session left open: start it as its own feature`,
+    command: 'visp feature "<the user\'s request>"',
+    evidence: [
+      `Only if the user asked to continue "${record.brief.goal}": visp work --feature ${record.brief.feature} --task ${task}`,
+    ],
+    mayEdit: false,
+  });
 }
 
 function unavailableNext(

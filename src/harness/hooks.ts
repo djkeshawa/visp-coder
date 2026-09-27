@@ -17,7 +17,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 12;
+export const HOOK_TEMPLATE_VERSION = 13;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -94,7 +94,8 @@ if (input?.hook_event_name === "Stop") {
     const recent = Date.now() - Date.parse(status.updatedAt) < 60 * 60 * 1000;
     if (!status.activeFeature || !recent) process.exit(0);
     const envelope = JSON.parse(
-      execFileSync("${PRODUCT_NAME}", ["next", "--feature", status.activeFeature, "--json"], {
+      // Unselected, so a later session's untaken request is sent to a feature of its own.
+      execFileSync("${PRODUCT_NAME}", ["next", "--json"], {
         cwd: root,
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 170000,
@@ -114,7 +115,9 @@ if (input?.hook_event_name === "Stop") {
     if (used >= (handoff ? 1 : 3)) process.exit(0);
     mkdirSync(join(root, ".visp", "session"), { recursive: true });
     writeFileSync(counts, JSON.stringify({ ...blocked, [key]: used + 1 }));
-    const reason = handoff
+    const reason = !next.feature
+      ? \`\${next.objective}. Run: \${next.command}\`
+      : handoff
       ? \`Independent review of \${status.activeFeature} is spent with findings open. Run \${next.command} and summarize the open findings in your final message for the human reviewer.\`
       : \`Feature \${status.activeFeature} is not accepted yet. Next: \${next.objective} Run: \${next.command}. Continue until visp accept succeeds, or state in your final message why it cannot.\`;
     process.stdout.write(JSON.stringify({ decision: "block", reason }));

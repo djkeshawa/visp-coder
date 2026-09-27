@@ -440,6 +440,21 @@ describe("edit authorization across host sessions", () => {
     expect(refused.reason).toContain("earlier session");
     expect(refused.reason).toContain("visp feature");
     expect(refused.reason).toContain("visp work --task T001");
+    // Asked what to do, VISP sent that worker back to the old task, where it built the new
+    // request with no feature of its own; the request no feature has taken starts one.
+    const next = project.run("next", "--json");
+    expect(next.stdout).toContain('visp feature \\"<the user\'s request>\\"');
+    expect(next.stdout).not.toMatch(/"task":\s*"T001"/);
+    const stopped = JSON.parse(
+      execFileSync(process.execPath, [hook()], {
+        cwd: project.root,
+        input: JSON.stringify({ hook_event_name: "Stop", session_id: "session-2" }),
+        encoding: "utf8",
+        env: env(),
+      }),
+    );
+    expect(stopped.reason).toContain("visp feature");
+    expect(stopped.reason).not.toContain("not accepted yet");
 
     // A follow-up in the same session keeps the authorization it re-confirms.
     const worked = project.run("work", "--task", "T001");
