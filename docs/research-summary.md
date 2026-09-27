@@ -55,7 +55,18 @@ The gain was smaller and mixed. The 53 run declared the program itself as its ch
 
 **A bundled testing skill gave a small, uncertain gain.** `edge-cases-first` asks the worker to pin current behavior and the request's edge cases as tests before changing code. The first round exposed two delivery faults: an over-budget pack dropped skills before source excerpts that the compact reply never shows, and a skill arrived as one escaped JSON string. With both fixed, Haiku on one build, three runs per arm (control, then with the skill seeded and admitted): reservations 44, 40, 41 and 43, 44, 43; spreadsheet engine 36, 36, 36 and 37, 37, 37; extending an existing engine 58, 63, 62 and 63, 58, 58. That is 420 of 435 hidden checks against 416, at 20% more wall time and 26% more output tokens. No worker pinned existing behavior before editing, and the `#REF!` regression the skill targets appeared in one run of each arm. The skill stays opt-in.
 
-**No demonstrated benefit yet** from the repository graph or memory notes in any run. They remain optional.
+**Stored knowledge helps only when VISP delivers it.** A two-session task (`bench/tasks/conventions-carryover`) states four API conventions for all later work in the first request; a fresh second session gets the next request with "our conventions from before still apply". Hidden checks split conventions the first session's code shows (27 checks over three runs) from ones only the conversation states (24). Haiku, three runs per arm, each second session paired on one first session:
+
+| Second session | Code-shown | Stated only |
+| --- | --- | --- |
+| VISP state reset | 0–18 | 3–9 |
+| VISP state kept (feature records hold the conventions) | 1–11 | 3–10 |
+| Conventions restated in the request | 25–27 | 23–24 |
+| State kept, with project rules | 25 | 24 |
+
+No worker ever ran `visp learn`, and workers that read a README stating the conventions still missed them half the time. Project rules close the gap: `visp feature` captures rules stated for later work from the recorded prompt and every later feature's request and `work` reply carries them. The same rounds exposed two workflow defects, now fixed: an edit authorization left by a first session's handoff let a later session edit for a new request without starting a feature (three of nine second sessions), and a worker discarded a previous session's uncommitted work with `git checkout` to get the clean tree `visp feature` asked for.
+
+**No demonstrated benefit yet** from the repository graph or retrieved memory notes in any run. They remain optional.
 
 ## Design consequences
 

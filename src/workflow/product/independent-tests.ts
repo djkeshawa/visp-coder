@@ -22,6 +22,7 @@ import {
 } from "./brief.js";
 import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
 import { hostRequest } from "./host-prompts.js";
+import { rulesForRequest, withRules } from "./project-rules.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
 
 /**
@@ -401,11 +402,16 @@ export async function writeIndependentTests(
   const marked = await saveTestsRecord(workspace, feature, running, existing.value);
   if (!marked.ok) return marked;
   const existingCodebase = await existingCode(workspace.paths.root);
+  const rules = await rulesForRequest(workspace, feature);
   const request = {
     root: workspace.paths.root,
     model,
     ...testerEffort(policy.value.config?.reasoningEffort),
-    prompt: testerPrompt(loaded.value.brief.originalRequest, feature, existingCodebase),
+    prompt: testerPrompt(
+      withRules(loaded.value.brief.originalRequest, rules),
+      feature,
+      existingCodebase,
+    ),
     schema: TESTER_OUTPUT_SCHEMA,
     ...(existingCodebase
       ? { explore: true, blockedPaths: workspace.config.workflow.blockedPaths }

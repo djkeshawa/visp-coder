@@ -22,6 +22,7 @@ import {
   type ProductSlice,
 } from "./model.js";
 import { observationSequence } from "./observation-preview.js";
+import { withRules } from "./project-rules.js";
 import { hasRequiredFindings, productRefinement } from "./refinement.js";
 import { reproductionContextDigest } from "./reproduction-bindings.js";
 import type { ProductReviewBundle } from "./review.js";
@@ -32,6 +33,8 @@ import type { ProductRecord } from "./store.js";
 
 interface ReviewBundleInput {
   workspace: WorkspaceState;
+  /** Current project rules, appended to the request the reviewer judges against. */
+  rules?: string;
   record: ProductRecord;
   slice: ProductSlice | undefined;
   subject: string;
@@ -91,7 +94,7 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
       reproductionDigest: reproductionContextDigest(record),
       images: images.images.map(({ id, sha256 }) => ({ id, sha256 })),
     },
-    originalRequest: record.brief.originalRequest,
+    originalRequest: withRules(record.brief.originalRequest, input.rules ?? ""),
     outcomes,
     executions: latestExecutionsByOwner(applicableExecutions(record, subject, slice)).slice(-12),
     controls: record.state.controls

@@ -21,6 +21,8 @@ export interface ProductContextContent {
   readonly task: string;
   readonly taskClass?: ProductSlice["taskClass"];
   readonly originalRequest: string;
+  /** Rules the user stated for all later work; never trimmed by the context budget. */
+  readonly projectRules?: readonly import("./project-rules.js").ProjectRule[];
   readonly objective: string;
   readonly outcomes: ProductBrief["outcomes"];
   readonly examples: ProductBrief["examples"];

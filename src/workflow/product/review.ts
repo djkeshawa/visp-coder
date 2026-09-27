@@ -26,6 +26,7 @@ import {
   reviewerContextSchema,
 } from "./model.js";
 import type { observationSequence } from "./observation-preview.js";
+import { rulesForRequest } from "./project-rules.js";
 import { assembleReviewBundle } from "./review-bundle.js";
 import {
   previousReviewAssessments,
@@ -215,9 +216,11 @@ async function review(
       ).values(),
     ];
   }
+  const rules = await rulesForRequest(workspace, record.brief.feature);
   return ok(
     assembleReviewBundle({
       workspace,
+      rules,
       record,
       slice,
       subject: subject.value,
