@@ -139,6 +139,9 @@ def main():
     parser.add_argument("--modes", default="wiped,fresh,oracle")
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--timeout", type=int, default=2700)
+    parser.add_argument("--reuse", metavar="LABEL",
+                        help="reuse the run's first session and write each mode to <mode>-LABEL")
+    parser.add_argument("--build", help="with --reuse, run the second sessions on this VISP build")
     args = parser.parse_args()
     modes = args.modes.split(",")
     unknown = set(modes) - set(MODES)
@@ -150,7 +153,12 @@ def main():
     run = RUNS / "runs" / args.run
     project = run / "project"
     arm = json.loads((run / "arm.json").read_text())
+    if args.build:
+        arm["shim"] = str(RUNS / "shims" / args.build)
     first = run / "session1"
+    if args.reuse:
+        run_modes(args, run, project, arm, first, json.loads((first / "result.json").read_text()), modes)
+        return
     first.mkdir(exist_ok=False)
 
     before = mentions(project)
@@ -180,6 +188,13 @@ def main():
     print(json.dumps({"run": args.run, "session": 1, "seconds": result["seconds"],
                       "timedOut": result["timedOut"], "stage1": stage1, "carriers": carried}))
 
+    run_modes(args, run, project, arm, first, result, modes)
+
+
+def run_modes(args, run, project, arm, first, result, modes):
+    snapshot = first / "snapshot.tar"
+    workflow_state = first / "visp-scaffold.tar"
+    project.mkdir(exist_ok=True)
     for mode in modes:
         restore(project, snapshot)
         if mode == "wiped":
@@ -194,7 +209,7 @@ def main():
             print(json.dumps({"run": args.run, "mode": mode, "skipped": "first session has no id"}))
             continue
         second = run_session(project, arm, prompt, args.model, args.timeout, resume)
-        out = run / mode
+        out = run / (f"{mode}-{args.reuse}" if args.reuse else mode)
         out.mkdir()
         (out / "result.json").write_text(json.dumps({"run": args.run, "mode": mode, **second}, indent=2))
         shutil.move(str(project), out / "project")
