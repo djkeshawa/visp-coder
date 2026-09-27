@@ -15,6 +15,8 @@ from pathlib import Path
 
 ROOT = Path(sys.argv[1]).resolve()
 STAGE = int(sys.argv[sys.argv.index("--stage") + 1]) if "--stage" in sys.argv else 2
+# The item limit; the outdated-decision variant raises it after the first session.
+CAP = int(sys.argv[sys.argv.index("--cap") + 1]) if "--cap" in sys.argv else 10000
 RESULTS = []
 PORT = None
 
@@ -199,14 +201,14 @@ def core():
     check("archiving preserves existing holds, confirmation and release", existing_reservations)
 
     def cap_rejected():
-        rejected = item("CAP-1", 10001)
+        rejected = item("CAP-1", CAP + 1)
         absent = read("CAP-1")
         return (error(rejected, 422, "invalid_request")[0]
                 and error(absent, 404, "not_found")[0]), [rejected, absent]
-    check("create above 10000 is rejected without creating an item", cap_rejected)
-    check("create exactly 10000 succeeds", lambda: (
-        lambda r: (r == (201, {"sku": "CAP-2", "quantity": 10000, "available": 10000, "archived": False}), r)
-    )(item("CAP-2", 10000)))
+    check(f"create above {CAP} is rejected without creating an item", cap_rejected)
+    check(f"create exactly {CAP} succeeds", lambda: (
+        lambda r: (r == (201, {"sku": "CAP-2", "quantity": CAP, "available": CAP, "archived": False}), r)
+    )(item("CAP-2", CAP)))
 
 
 def new():
@@ -351,15 +353,21 @@ def memory():
         ok = error(rejected, 422, "invalid_request")[0] and before == after
         details = [rejected, before, after]
         if boundary:
-            accepted = restock(sku, 10000 - quantity)
+            accepted = restock(sku, CAP - quantity)
             fetched = read(sku)
-            expected = {"sku": sku, "quantity": 10000, "available": 10000 - held, "archived": False}
+            expected = {"sku": sku, "quantity": CAP, "available": CAP - held, "archived": False}
             ok = ok and accepted == (200, expected) and fetched == accepted
             details.extend([accepted, fetched])
         return ok, details
-    check("restock above cap changes nothing; exactly 10000 succeeds", lambda: capped_restock("M-4", 9995, 6, boundary=True))
-    check("restock at cap rejects one extra unit without changes", lambda: capped_restock("M-5", 10000, 1))
-    check("restock cap uses quantity, not available stock", lambda: capped_restock("M-6", 9998, 3, held=10))
+    check(f"restock above cap changes nothing; exactly {CAP} succeeds", lambda: capped_restock("M-4", CAP - 5, 6, boundary=True))
+    check("restock at cap rejects one extra unit without changes", lambda: capped_restock("M-5", CAP, 1))
+    check("restock cap uses quantity, not available stock", lambda: capped_restock("M-6", CAP - 2, 3, held=10))
+    if CAP != 10000:
+        def past_old_limit():
+            item("M-7", 9000)
+            grown = restock("M-7", 6000)
+            return grown[0] == 200 and grown[1].get("quantity") == 15000, grown
+        check("restock past the replaced 10000 limit succeeds", past_old_limit)
 
 
 GROUPS = [("core", core)] if STAGE == 1 else [("core", core), ("new", new), ("memory", memory)]

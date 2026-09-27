@@ -18,6 +18,11 @@ second session, so the modes are paired on one first session. Modes:
           task's noise.md (unrelated features and near-miss traps), recorded as VISP would;
           Visp Memory's keyword selection alone chooses what the request carries.
 - gated:  noisy, with the reviewer's model choosing among the candidates.
+- outdated, outdated-kw, outdated-none: an intermediate feature (the task's intermediate.md)
+          raised the item limit after the first session: the code change is committed and, in
+          the first two, the store holds the ten noisy features, the first request and then the
+          intermediate one, recorded in that order as VISP would have; model choice, keyword
+          choice, and no memory. Score with the task's -raised variant.
 - memory: like fresh, with Visp Memory as VISP's long-term store (`memory.service`, set up
           before the second session; needs $VISP_BENCH_RUNS/visp-memory-venv and a VISP build
           that supports it).
@@ -40,7 +45,8 @@ from common import RUNS
 from run_claude import MODEL, run_session
 
 BENCH = pathlib.Path(__file__).resolve().parent
-MODES = ("wiped", "fresh", "oracle", "resume", "memory", "noisy", "gated")
+MODES = ("wiped", "fresh", "oracle", "resume", "memory", "noisy", "gated",
+         "outdated", "outdated-kw", "outdated-none")
 MEMORY = RUNS / "visp-memory-venv" / "bin" / "visp-memory"
 NOTES = ("CLAUDE.md", "AGENTS.md")
 # Where each first-session convention could have been written down. C1 and C2 are also visible
@@ -133,6 +139,49 @@ def seed_noise(project, task):
                            cwd=project, check=True, capture_output=True)
 
 
+def record_request(project, request, label, goal):
+    for chunk in request_chunks(request):
+        subprocess.run([str(MEMORY), "decision", chunk, f"Stated by the user for feature {label}: {goal}"],
+                       cwd=project, check=True, capture_output=True)
+
+
+def apply_intermediate(project, task, remember):
+    """The intermediate feature: its code change, and, with memory, the store's history."""
+    if remember:
+        first = next((project / ".visp" / "features").iterdir())
+        intent = json.loads((first / "intent.json").read_text())
+        record_request(project, intent["sourceBrief"], first.name, intent["goal"])
+        state = project / ".visp" / "state" / "memory-service.json"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({"version": 1, "recorded": [first.name]}))
+    for path in git(project, "ls-files").split():
+        file = project / path
+        # The project's own code, tests and README; never VISP's installed assets.
+        own = path == "README.md" or (file.suffix in (".py", ".sh") and not path.startswith("."))
+        if not own or not file.is_file():
+            continue
+        text = file.read_text()
+        if "10000" in text or "10001" in text:
+            file.write_text(text.replace("10001", "50001").replace("10000", "50000"))
+            git(project, "add", path)
+    git(project, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Raise the item limit to 50000 units")
+    if remember:
+        request = (BENCH / "tasks" / task / "intermediate.md").read_text()
+        goal = request.strip().splitlines()[0].removeprefix("Feature:").strip()
+        record_request(project, request.strip().split("\n", 1)[1], "n11", goal)
+
+
+def refresh_install(project, arm):
+    """A kept first session carries the old build's hooks, which a newer build refuses."""
+    env = {**os.environ, "PATH": f"{arm['shim']}:{os.environ['PATH']}"}
+    subprocess.run(["visp", "install", "--harness", "claude-code", "--json"], cwd=project, env=env,
+                   check=True, capture_output=True)
+    installed = [path for path in (".claude", ".visp/hooks", "CLAUDE.md", "AGENTS.md", ".mcp.json")
+                 if (project / path).exists()]
+    git(project, "add", "-A", *installed)
+    git(project, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Refresh VISP install")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("run")
@@ -197,12 +246,16 @@ def run_modes(args, run, project, arm, first, result, modes):
     project.mkdir(exist_ok=True)
     for mode in modes:
         restore(project, snapshot)
+        if args.build:
+            refresh_install(project, arm)
         if mode == "wiped":
             wipe_notes(project, workflow_state)
-        if mode in ("memory", "noisy", "gated"):
-            enable_memory(project, "keyword" if mode == "noisy" else "model")
-        if mode in ("noisy", "gated"):
+        if mode in ("memory", "noisy", "gated", "outdated", "outdated-kw"):
+            enable_memory(project, "keyword" if mode in ("noisy", "outdated-kw") else "model")
+        if mode in ("noisy", "gated", "outdated", "outdated-kw"):
             seed_noise(project, arm["task"])
+        if mode.startswith("outdated"):
+            apply_intermediate(project, arm["task"], mode != "outdated-none")
         prompt = (run / ("prompt2-oracle.txt" if mode == "oracle" else "prompt2.txt")).read_text()
         resume = result["sessionId"] if mode == "resume" else None
         if mode == "resume" and not resume:
