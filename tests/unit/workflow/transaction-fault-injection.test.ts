@@ -157,8 +157,16 @@ describe("workflow transaction fault injection", () => {
         await setMode(productStatePath(state, brief.feature), 0o640);
         await setMode(state.paths.status, 0o600);
         const observed: FaultObservation = {};
+        const failClosure = faultRunner(failAt, observed, original);
         vi.spyOn(transactions, "applyFileTransaction").mockImplementation(
-          faultRunner(failAt, observed, original),
+          (root, label, mutations) =>
+            mutations.some(
+              (mutation) =>
+                relativeMutationPath(root, mutation.path) ===
+                relativeMutationPath(root, authorizationPath(state, brief.feature)),
+            )
+              ? failClosure(root, label, mutations)
+              : original(root, label, mutations),
         );
         const result = await runProductDone(state, { feature: brief.feature, task: "T001" });
         vi.restoreAllMocks();
