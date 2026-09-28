@@ -101,6 +101,11 @@ function hasPromptHook(settings: ClaudeSettings, hookPath: string): boolean {
   );
 }
 
+export function hasClaudeSessionHooks(current: string | undefined, hookPath: string): boolean {
+  const settings = parseSettings(current);
+  return settings !== "malformed" && hasPromptHook(settings, hookPath);
+}
+
 function entryFor(hookPath: string): HookEntry {
   return {
     matcher: PRE_TOOL_USE_MATCHER,

@@ -17,7 +17,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 13;
+export const HOOK_TEMPLATE_VERSION = 14;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -420,11 +420,12 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
 }
 
 /** Pre-commit hook: the last checkpoint before out-of-scope work is recorded. */
-export function renderPreCommitHook(): string {
+export function renderPreCommitHook(chained = false): string {
   const installedNode = shellLiteral(process.execPath);
   return `#!/bin/sh
 # ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 # Refuses a commit whose staged files fall outside the active task's scope.
+${chained ? '\n# Preserve the project hook that preceded VISP.\nif [ -x "$0.local" ]; then "$0.local" "$@" || exit $?; fi\n' : ""}
 
 authorization_dir=".visp/state/implement-allowed"
 product_authorization_dir=".visp/state/product-authorizations"
@@ -559,6 +560,8 @@ export function renderCiWorkflow(version: string): string {
 on:
   pull_request:
 
+permissions: contents: read
+
 jobs:
   scope-and-evidence:
     runs-on: ubuntu-latest
@@ -573,7 +576,9 @@ jobs:
       - name: Check the diff against what the feature declared it would touch
         # actions/checkout detaches HEAD for a pull_request, so git cannot name
         # the branch and visp is told it explicitly.
-        run: ${PRODUCT_NAME} guard --base \${{ github.event.pull_request.base.sha }} --scope tasks --branch \${{ github.head_ref }}
+        env:
+          HEAD_REF: \${{ github.head_ref }}
+        run: ${PRODUCT_NAME} guard --base \${{ github.event.pull_request.base.sha }} --scope tasks --branch "$HEAD_REF"
 `;
 }
 

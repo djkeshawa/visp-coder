@@ -107,7 +107,7 @@ export type IndependentTestsRecord = z.infer<typeof independentTestsRecordSchema
 
 /** What `work` tells the worker about the pinned tests. */
 export interface IndependentTestsSummary {
-  readonly status: IndependentTestsRecord["status"];
+  readonly status: IndependentTestsRecord["status"] | "skipped";
   readonly file?: string;
   readonly command?: readonly string[];
   readonly reason?: string;
@@ -144,7 +144,10 @@ export type TestsStarter = (
 const TESTS_WAIT_MS = { cli: 100_000, mcp: 50_000 } as const;
 
 export function testsWaitMs(workspace: WorkspaceState, channel: "cli" | "mcp"): number {
-  return workspace.config.critic?.launch === "codex-exec" ? TESTS_WAIT_MS[channel] : 0;
+  return workspace.config.critic?.launch === "codex-exec" &&
+    workspace.config.critic.harness === "codex"
+    ? TESTS_WAIT_MS[channel]
+    : 0;
 }
 
 /** The tester VISP launches for this project, or undefined when it launches no model. */
@@ -152,7 +155,11 @@ export function configuredTestsStarter(
   workspace: WorkspaceState,
   channel: "cli" | "mcp" = "cli",
 ): TestsStarter | undefined {
-  if (workspace.config.critic?.launch !== "codex-exec") return undefined;
+  if (
+    workspace.config.critic?.launch !== "codex-exec" ||
+    workspace.config.critic.harness !== "codex"
+  )
+    return undefined;
   // Codex's sandbox ends every process a shell command started, so a detached tester never
   // finished there; a Codex worker's CLI runs it inside `visp feature` instead. The MCP
   // server outlives each call, so it keeps the background process.
@@ -251,7 +258,11 @@ export async function independentTestsBeforeWork(
   starter: TestsStarter | undefined,
   waitMs: number,
 ): Promise<Result<IndependentTestsSummary | undefined>> {
-  if (!starter) return ok(undefined);
+  if (!starter)
+    return workspace.config.critic?.launch === "codex-exec" &&
+      workspace.config.critic.harness !== "codex"
+      ? ok({ status: "skipped", reason: "The independent tester requires critic.harness: codex" })
+      : ok(undefined);
   const loaded = await readProductRecord(workspace, feature ? { feature } : {});
   if (!loaded.ok) return ok(undefined);
   const { brief } = loaded.value;

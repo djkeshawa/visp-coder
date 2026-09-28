@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { applyFileTransaction } from "../../../src/core/file-transaction.js";
 import { err, ok } from "../../../src/core/result.js";
@@ -40,7 +40,74 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await workspace.destroy();
+});
+
+it("warns when an active browser journey has no available browser", async () => {
+  await workspace.destroy();
+  const product = await productWorkspace();
+  workspace = product.workspace;
+  const revised = await updateProductBrief(await workspace.state(), {
+    brief: {
+      ...product.brief,
+      checks: [
+        ...product.brief.checks,
+        {
+          id: "C002",
+          outcomes: ["O001"],
+          command: {
+            kind: "browser-journey" as const,
+            journey: { url: "http://localhost/", actions: [] },
+          },
+        },
+      ],
+    },
+    reason: "Check the browser journey",
+  });
+  expect(revised.ok).toBe(true);
+  vi.stubEnv("CHROME_BIN", "/missing/chrome-for-doctor");
+  expect(await check("browser")).toMatchObject({
+    status: "warn",
+    recovery: expect.stringContaining("CHROME_BIN"),
+  });
+});
+
+it("reports Codex hook trust as unknown until the project and hooks are trusted", async () => {
+  await setConfigScalar((await workspace.state()).paths, "harness", "codex");
+  const codexHome = join(workspace.root, "codex-home");
+  await mkdir(codexHome);
+  vi.stubEnv("CODEX_HOME", codexHome);
+  expect(await check("codex hooks trust")).toMatchObject({ status: "unknown" });
+  const hook = `${workspace.root}/.codex/hooks.json`;
+  await writeFile(
+    join(codexHome, "config.toml"),
+    [
+      `[projects.${JSON.stringify(workspace.root)}]`,
+      'trust_level = "trusted"',
+      ...["user_prompt_submit", "pre_tool_use", "stop"].flatMap((event) => [
+        `[hooks.state.${JSON.stringify(`${hook}:${event}:0:0`)}]`,
+        'trusted_hash = "sha256:test"',
+      ]),
+    ].join("\n"),
+  );
+  expect(await check("codex hooks trust")).toMatchObject({ status: "ok" });
+});
+
+it("repeats the manual activation step for a generic host", async () => {
+  expect(await check("harness activation")).toMatchObject({
+    status: "warn",
+    recovery: expect.stringContaining("AGENTS.visp.md"),
+  });
+});
+
+it("warns when codex-exec is selected but the Codex CLI is unavailable", async () => {
+  const state = await workspace.state();
+  const config = parse(await readFile(state.paths.config, "utf8"));
+  config.critic = { ...(config.critic ?? {}), harness: "codex", launch: "codex-exec" };
+  await writeFile(state.paths.config, stringify(config));
+  vi.stubEnv("PATH", "");
+  expect(await check("codex critic CLI")).toMatchObject({ status: "warn" });
 });
 
 async function check(name: string, runtime: DoctorRuntime = healthyDoctorRuntime): Promise<Check> {
@@ -65,6 +132,35 @@ async function installEverything(): Promise<void> {
 }
 
 describe("the enforcement check", () => {
+  it("detects and restores missing Claude prompt, Stop and Bash registrations", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    const path = join(workspace.root, ".claude/settings.json");
+    const settings = JSON.parse(await readFile(path, "utf8"));
+    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(
+      (entry: { matcher?: string }) => entry.matcher !== "Bash",
+    );
+    delete settings.hooks.UserPromptSubmit;
+    delete settings.hooks.Stop;
+    await writeFile(path, JSON.stringify(settings));
+    expect(await check("enforcement")).toMatchObject({ status: "warn" });
+    const state = await workspace.state();
+    await applyFixes(state, [await check("enforcement")], { guardHandshake: healthyGuard });
+    expect(await check("enforcement")).toMatchObject({ status: "ok" });
+  });
+  it("detects and repairs a deleted Codex MCP registration", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "codex");
+    const state = await workspace.state();
+    const installed = await installHarness(state.paths, { harness: "codex", hooks: [], mcp: true });
+    expect(installed.ok).toBe(true);
+    await rm(join(workspace.root, CODEX_CONFIG_FILE));
+    expect(await check("mcp registration")).toMatchObject({ status: "warn" });
+    const refreshed = await workspace.state();
+    const repairs = await applyFixes(refreshed, [await check("mcp registration")]);
+    expect(repairs.some((repair) => repair.done)).toBe(true);
+    expect(await check("mcp registration")).toMatchObject({ status: "ok" });
+  });
+
   it("keeps a project or environment recovery instead of prescribing a global reinstall", async () => {
     await installEverything();
     const result = await check("enforcement", {

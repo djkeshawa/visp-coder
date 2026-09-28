@@ -121,11 +121,17 @@ function renderFeatureReadiness(
     active ? "Before continuing feature work:" : "Before starting a feature:",
     ...blockers.map(
       ({ requirement, error }) =>
-        `  ${requirement}: ${error.message}${error.recovery ? ` Recovery: ${error.recovery}` : ""}`,
+        `  ${requirement}: ${error.message}${error.recovery ? `. Recovery: ${error.recovery}` : ""}`,
     ),
     ...(active
       ? []
-      : ["Finish installation before reviewing and committing the project baseline."]),
+      : [
+          blockers.some(
+            ({ requirement }) => requirement === "harness" || requirement === "enforcement",
+          )
+            ? "Finish installation before reviewing and committing the project baseline."
+            : "Commit the project baseline, then start a feature.",
+        ]),
   ];
 }
 

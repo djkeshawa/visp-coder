@@ -16,6 +16,7 @@ import {
   installHarness,
 } from "../harness/install.js";
 import { readInstallState } from "../harness/install-state.js";
+import { MCP_AWARE_HARNESSES } from "../harness/mcp-registration.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import { type Check, inconsistentAuthorizationMarkers } from "./checks.js";
 
@@ -55,7 +56,12 @@ export async function applyFixes(
   if (failing.has("authorization markers")) {
     repairs.push(await clearInconsistentAuthorizations(state));
   }
-  if (failing.has("harness assets") || failing.has("harness activation") || enforcement) {
+  if (
+    failing.has("harness assets") ||
+    (failing.has("harness activation") && state.config.harness !== "generic") ||
+    failing.has("mcp registration") ||
+    enforcement
+  ) {
     repairs.push(await reinstallAssets(state, enforcement, runtime));
   }
   if (failing.has("repository index")) repairs.push(await rebuildIndex(state));
@@ -126,7 +132,22 @@ async function reinstallAssets(
   );
 
   if (!installed.ok) {
-    return { name: "harness assets", done: false, detail: installed.error.message };
+    return {
+      name: "harness assets",
+      done: false,
+      detail: [installed.error.message, installed.error.recovery]
+        .filter(Boolean)
+        .join(". Recovery: "),
+    };
+  }
+  if (installed.value.mcp === "malformed" || installed.value.mcp === "customized") {
+    return {
+      name: "harness assets",
+      done: false,
+      detail:
+        installed.value.manualSteps.join(" ") ||
+        "MCP registration needs manual repair; rerun visp install --no-mcp to skip it",
+    };
   }
 
   const written = installed.value.assets.filter((asset) => asset.status === "written");
@@ -200,12 +221,13 @@ function installedEnforcement(
   const surfaces: string[] = [];
   if (hooks.includes("claude") && installed.claudeSettings) surfaces.push("edit hook");
   if (hooks.includes("git")) surfaces.push("pre-commit");
-  if (installed.mcp && installed.mcp !== "malformed") surfaces.push("mcp");
+  if (installed.mcp && installed.mcp !== "malformed" && installed.mcp !== "customized")
+    surfaces.push("mcp");
   return { surfaces };
 }
 
 function mcpAware(harness: WorkspaceState["config"]["harness"]): boolean {
-  return ["claude-code", "codex", "cursor", "opencode"].includes(harness);
+  return MCP_AWARE_HARNESSES.includes(harness);
 }
 
 async function rebuildIndex(state: WorkspaceState): Promise<Repair> {
