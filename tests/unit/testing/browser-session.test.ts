@@ -121,6 +121,7 @@ describe("browser session ownership", () => {
       "Move pointer to 30,40",
       "Click 30,40",
     ]);
+    expect(capture.operationIndex).toBe(session.operations.length - 1);
     expect(session.operations.filter((entry) => entry.kind === "pointer")).toHaveLength(2);
     expect(session.operations.find((entry) => entry.kind === "capture")?.captureId).toBe(
       capture.id,

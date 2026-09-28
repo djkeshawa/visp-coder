@@ -83,5 +83,16 @@ export function buildProgram(
   program.addCommand(skillCommand());
   program.addCommand(serveCommand());
 
+  const enableUsageErrors = (command: Command): void => {
+    command.exitOverride();
+    command.configureOutput({
+      writeErr: (message) => {
+        if (!process.argv.includes("--json")) process.stderr.write(message);
+      },
+    });
+    for (const child of command.commands) enableUsageErrors(child);
+  };
+  enableUsageErrors(program);
+
   return program;
 }

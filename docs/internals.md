@@ -52,11 +52,12 @@ Verification and review history is append-only; current projections update in th
 
 ## Telemetry
 
-Usage is recorded as a hash-chained event journal under `.visp/telemetry.json.events/`, with `telemetry.json` as a derived projection. Reads replay the whole chain and reject gaps, duplicates and altered content. If only the projection is damaged, rebuild it with `visp usage rebuild`. `visp usage import --source codex --file <rollout.jsonl>` imports measured usage from a Codex rollout, and `visp report` summarizes what VISP measured separately from what agents claimed. Telemetry never leaves the machine.
+Usage is recorded as a hash-chained event journal under `.visp/telemetry.json.events/`, with `telemetry.json` as a derived projection. Reads replay the whole chain and reject gaps, duplicates and altered content. If only the projection is damaged, rebuild it with `visp usage rebuild`. To import a Codex rollout from `$CODEX_HOME/sessions`, copy it into the project first, then run `visp usage import --source codex --file <project-relative rollout.jsonl>`. The import will not read an absolute or `../` path. `visp report` summarizes what VISP measured separately from what agents claimed. Telemetry never leaves the machine.
 
 ## Skills
 
 A skill is advice selected by a structural trigger. It cannot grant file access, change policy, skip checks or supply an acceptance verdict, and a person admits every skill (`skills.mode: review`).
+For a catch-all slice scope (`**`), path triggers are matched against current project files. A task-class trigger still needs an explicit `taskClass` on the slice; the one-slice `work --check` shortcut does not infer one from the request.
 
 - **Proposal.** `visp skill propose` records an inert proposal. A derived skill must cite closed product slices whose closure, passing evidence and contract are still intact; repeated citations of one slice do not add support.
 - **Revisions.** Each revision binds the document, trigger, origin and support to a SHA-256 version saved under `.visp/skills/<id>/revisions/`; transitions are immutable records under `history/`. If a cited slice is reopened or its evidence changes, an admitted derived skill is suspended as `orphaned` until readmitted.

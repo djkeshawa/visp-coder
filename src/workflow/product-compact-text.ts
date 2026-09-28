@@ -7,7 +7,7 @@ export type ReplyChannel = "mcp" | "cli";
 const WORDING = {
   mcp: {
     full: "Read structuredContent.data for complete context.",
-    detail: "Full result: detail:true.",
+    detail: "Full data is already in structuredContent.data.",
     readBrief: (feature: string) => `visp_brief {feature:"${feature}"}`,
     template: (feature: string) =>
       `visp_work {feature:"${feature}", check:"<command that runs your tests>"} works the whole request as one slice. Only for several independently usable parts, plan slices: visp_brief {feature:"${feature}", template:true}`,
@@ -106,7 +106,7 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}${skillText(data.skills)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}${skillText(data.skills)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
 }
 
 function memoryText(memories: unknown): string {
@@ -190,8 +190,10 @@ function addObservationSummary(data: Record<string, unknown>, summary: Record<st
   if (data.images) summary.images = Array.isArray(data.images) ? data.images.length : undefined;
 }
 
-function detailCommand(name: string, data: Record<string, unknown>): string {
+function detailCommand(name: string, data: Record<string, unknown>, channel: ReplyChannel): string {
   if (!name.endsWith("work") || typeof data.feature !== "string") return "";
+  if (channel === "mcp")
+    return `\nRead-only details: visp_work ${JSON.stringify({ feature: data.feature, ...(typeof data.task === "string" ? { task: data.task } : {}), inspect: true })}`;
   return `\nRead-only details: visp work --inspect --feature ${data.feature}${typeof data.task === "string" ? ` --task ${data.task}` : ""}`;
 }
 
@@ -311,6 +313,9 @@ export function compactBriefText(
       checks: entry.checks,
     })),
     normalized: data.normalized,
+    authorizationRevoked: data.authorizationRevoked,
+    mayEdit: data.mayEdit,
+    resetSlices: data.resetSlices,
     branchCreated: data.branchCreated,
     branchWarning: data.branchWarning,
     redactionNotice: data.redactionNotice,
@@ -318,7 +323,12 @@ export function compactBriefText(
   // The adapter does not choose the next slice; visp_next owns that decision.
   const wording = WORDING[channel];
   const feature = String(brief.feature);
-  const next = name.endsWith("feature") ? wording.template(feature) : wording.next(feature);
+  const next =
+    typeof data.nextCommand === "string"
+      ? data.nextCommand
+      : name.endsWith("feature")
+        ? wording.template(feature)
+        : wording.next(feature);
   return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 

@@ -162,7 +162,9 @@ function registerIndex(server: McpServer, root: string): void {
         detail: z
           .boolean()
           .optional()
-          .describe("Use false for a bounded count summary; omit or use true for all file paths"),
+          .describe(
+            "Use true for complete changed and skipped path lists; default is a bounded summary",
+          ),
       },
     },
     async (args) => {
@@ -184,12 +186,17 @@ function registerIndex(server: McpServer, root: string): void {
       }
 
       return reply(TOOL.index, report, {
-        ...(args.detail === false
+        ...(args.detail !== true
           ? {
               data: (value: IndexReport) => ({
                 ...value,
                 diff: Object.fromEntries(
-                  Object.entries(value.diff).map(([kind, paths]) => [kind, paths.length]),
+                  Object.entries(value.diff).map(([kind, paths]) => [
+                    kind,
+                    kind === "unchanged"
+                      ? { count: paths.length }
+                      : { count: paths.length, sample: paths.slice(0, 10) },
+                  ]),
                 ),
                 skipped: { count: value.skipped.length, sample: value.skipped.slice(0, 10) },
                 detail: "File paths omitted; use detail:true for the complete report",

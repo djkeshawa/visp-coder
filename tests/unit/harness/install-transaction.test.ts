@@ -34,7 +34,7 @@ describe("transactional harness installation", () => {
 
     expect(first.ok).toBe(true);
     expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(true);
-    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(true);
+    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(false);
 
     const second = await installHarness(state.paths, {
       harness: "codex",
@@ -81,7 +81,7 @@ describe("transactional harness installation", () => {
     if (!result.ok) throw new Error(result.error.message);
     expect(result.ok).toBe(true);
     expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(true);
-    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(true);
+    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(false);
   });
 
   it("refuses a reviewer policy changed between planning reads without writing assets", async () => {
@@ -165,7 +165,7 @@ describe("transactional harness installation", () => {
     const blocked = vi
       .spyOn(ProjectFileSystem.prototype, "writeBytesAtomic")
       .mockImplementation(function (this: ProjectFileSystem, path, bytes, mode) {
-        return path.includes(".codex/agents/")
+        return path.includes(".agents/skills/")
           ? Promise.resolve(err(vispError("IO_ERROR", "injected nested asset failure")))
           : write.call(this, path, bytes, mode);
       });

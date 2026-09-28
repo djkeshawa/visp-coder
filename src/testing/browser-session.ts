@@ -228,7 +228,9 @@ export async function openBrowserSession(options: {
           route,
           steps: operations
             .filter((operation) => operation.kind !== "measure" && operation.kind !== "capture")
+            .slice(-4)
             .map((operation) => operation.description),
+          operationIndex: operations.length - 1,
           viewport: { ...viewport },
           createdAt: new Date().toISOString(),
           provenance: "runner-captured",

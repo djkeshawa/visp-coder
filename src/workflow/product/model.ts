@@ -334,8 +334,7 @@ export function sliceDigest(brief: ProductBrief, slice: ProductSlice): string {
     checks: checksFor(brief, slice),
     decisions: brief.decisions.filter(
       (decision) =>
-        decision.outcomes.length === 0 ||
-        decision.outcomes.some((id) => slice.outcomes.includes(id)),
+        decision.outcomes.length > 0 && decision.outcomes.some((id) => slice.outcomes.includes(id)),
     ),
     // Pinned acceptance files are protected by their hashes and by the intent-change rule;
     // leaving them out lets tests written in the background be pinned mid-slice.

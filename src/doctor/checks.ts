@@ -8,9 +8,7 @@ import { inspectFileTransactions } from "../core/file-transaction.js";
 import { isRepository } from "../core/git.js";
 import { ok, type Result } from "../core/result.js";
 import { inspectStateLock, STATE_LOCK_DIRECTORY } from "../core/state-lock.js";
-import { runtimeIdentity } from "../core/version.js";
 import { checkCurrency, openProjectStore } from "../graph/index.js";
-import { readInstallState } from "../harness/install-state.js";
 import { skillCatalog } from "../skills/catalog.js";
 import { SKILL_STATES } from "../skills/schema.js";
 import { readIndex } from "../skills/store.js";
@@ -25,7 +23,7 @@ import {
   checkMcpRegistration,
   checkPreviousHarnessAssets,
 } from "./installation.js";
-import { checkInstalledRuntime } from "./runtime.js";
+import { checkInstalledRuntime, checkPathRuntime } from "./runtime.js";
 
 /**
  * One health command for the whole tool. A check that cannot determine its
@@ -99,50 +97,6 @@ export async function runChecks(
       )
     : checks;
   return { verdict: verdictFor(reported), checks: reported };
-}
-
-async function checkPathRuntime(state: WorkspaceState): Promise<Check> {
-  const installed = await readInstallState(state.paths, state.files);
-  if (!installed.ok || !installed.value?.runtime) {
-    return { name: "PATH visp", status: "unknown", detail: "No installed runtime to compare" };
-  }
-  const found = await run("visp", ["guard", "--handshake", "--json"], {
-    cwd: state.paths.root,
-    timeoutMs: 5_000,
-  });
-  if (!found.ok || found.value.exitCode !== 0) {
-    return {
-      name: "PATH visp",
-      status: "warn",
-      detail: "The shell's visp command could not be identified",
-      recovery: `Run node ${JSON.stringify(installed.value.runtime.executable)} for this installation, or use its MCP tools`,
-    };
-  }
-  try {
-    const runtime = JSON.parse(found.value.stdout)?.data?.runtime;
-    if (
-      runtime?.buildId === installed.value.runtime.buildId &&
-      runtime?.version === installed.value.runtime.version &&
-      runtime?.executable === installed.value.runtime.executable
-    )
-      return {
-        name: "PATH visp",
-        status: "ok",
-        detail: "The shell resolves the installed VISP build",
-      };
-    return {
-      name: "PATH visp",
-      status: "warn",
-      detail: `The shell resolves ${runtime?.executable ?? "an unidentified VISP"}, while installed assets use ${installed.value.runtime.executable}`,
-      recovery: `Run node ${JSON.stringify(installed.value.runtime.executable)} or use the installed MCP tools; this CLI is ${runtimeIdentity().executable}`,
-    };
-  } catch {
-    return {
-      name: "PATH visp",
-      status: "warn",
-      detail: "The shell's visp returned no valid runtime identity",
-    };
-  }
 }
 
 async function checkBrowser(state: WorkspaceState): Promise<Check> {

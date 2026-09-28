@@ -9,6 +9,7 @@ import { inspectStateLock, withStateLock } from "../../../../src/core/state-lock
 import * as probe from "../../../../src/testing/browser-capability.js";
 import type { BrowserOperation } from "../../../../src/testing/browser-session.js";
 import { BrowserUnavailableError } from "../../../../src/testing/chrome-transport.js";
+import { runProductCapture } from "../../../../src/workflow/evidence/product-capture.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { productCheckSchema } from "../../../../src/workflow/product/model.js";
@@ -118,6 +119,24 @@ async function fixture() {
 }
 
 describe("runner-owned browser product checks", () => {
+  it("reuses a completed capture with the same subject and journey during done", async () => {
+    const workspace = await fixture();
+    const record = await store.readProductRecord(await workspace.state());
+    if (!record.ok) throw new Error(record.error.message);
+    const command = record.value.brief.checks[0]?.command;
+    if (!command || typeof command !== "object" || Array.isArray(command))
+      throw new Error("Missing browser check");
+    const captured = await runProductCapture(await workspace.state(), {
+      task: "T001",
+      journey: command.journey,
+    });
+    expect(captured.ok).toBe(true);
+    const done = await runProductDone(await workspace.state());
+    expect(done.ok && done.value.executions).toContainEqual(
+      expect.objectContaining({ provenance: "supervisor-reused", status: "passed" }),
+    );
+    expect(browser.open).toHaveBeenCalledOnce();
+  });
   it("uses the shared journey engine and atomically publishes observed evidence with the execution", async () => {
     const workspace = await fixture();
     const result = await runProductVerify(await workspace.state());

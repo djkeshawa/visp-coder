@@ -2,8 +2,10 @@ import { redactText } from "../../core/redaction.js";
 import type { Result } from "../../core/result.js";
 import {
   type PreparedProductCapture,
+  type ProductCaptureResult,
   prepareProductCapture,
 } from "../evidence/product-capture-execution.js";
+import { productJourneyKey } from "../evidence/product-journey.js";
 import type { WorkspaceState } from "../state.js";
 import { browserFailureRecovery } from "./browser-recovery.js";
 import type { ExecutedProductCheck, ExecutionIdentity } from "./check-execution.js";
@@ -20,6 +22,7 @@ export async function executeBrowserCheck(
   retryEnvironment: boolean,
   signal?: AbortSignal,
   timeoutMs?: number,
+  reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
   const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
   const browserSignal = timeout ? AbortSignal.any([timeout, ...(signal ? [signal] : [])]) : signal;
@@ -30,6 +33,7 @@ export async function executeBrowserCheck(
     base,
     retryEnvironment,
     browserSignal,
+    reuseCapture,
   );
   return timeout?.aborted && !signal?.aborted
     ? {
@@ -50,8 +54,32 @@ async function runBrowserCheck(
   base: ExecutionIdentity,
   retryEnvironment: boolean,
   signal?: AbortSignal,
+  reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
   const environmentDigest = await browserEnvironmentIdentity(workspace.paths.root);
+  const prior = reuseCapture
+    ? reusableRun(
+        record.state.captureRuns,
+        base.subjectDigest,
+        productJourneyKey(command.journey, base.task),
+      )
+    : undefined;
+  if (prior)
+    return {
+      execution: {
+        ...base,
+        environmentDigest,
+        provenance: "supervisor-reused",
+        assertions: "runner-observed",
+        status: "passed",
+        captureRunId: prior.id,
+        exitCode: 0,
+        durationMs: 0,
+        output: `Reused completed capture ${prior.id} for the same subject and journey`,
+      },
+      state: record.state,
+      mutations: [],
+    };
   const cached = record.state.browserCapability;
   if (
     !retryEnvironment &&
@@ -118,6 +146,26 @@ async function runBrowserCheck(
   };
 }
 
+function reusableRun(
+  runs: readonly unknown[],
+  subject: string,
+  journeyKey: string,
+): { id: string } | undefined {
+  return runs
+    .flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object") return [];
+      const run = candidate as Record<string, unknown>;
+      return typeof run.id === "string" &&
+        run.provenance === "runner-executed" &&
+        run.status === "completed" &&
+        run.subjectDigest === subject &&
+        run.journeyKey === journeyKey
+        ? [{ id: run.id }]
+        : [];
+    })
+    .at(-1);
+}
+
 function browserExecution(
   base: ExecutionIdentity,
   state: ProductState,
@@ -159,7 +207,10 @@ function browserExecution(
       captureRunId: result.runId,
       exitCode: { passed: 0, failed: 1, "environment-failed": -1, "timed-out": -1 }[status],
       durationMs,
-      output: [JSON.stringify(result), browserFailureRecovery(result.failure?.message ?? "", url)]
+      output: [
+        browserCheckSummary(result),
+        browserFailureRecovery(result.failure?.message ?? "", url),
+      ]
         .filter(Boolean)
         .join("\n")
         .slice(-8000),
@@ -167,4 +218,21 @@ function browserExecution(
     state: captured.value.state,
     mutations: captured.value.mutations,
   };
+}
+
+export function browserCheckSummary(result: ProductCaptureResult): string {
+  return JSON.stringify({
+    status: result.status,
+    ...(result.failure
+      ? {
+          failure: {
+            kind: result.failure.kind,
+            message: result.failure.message.slice(0, 2000),
+            actionIndex: result.failure.actionIndex,
+          },
+        }
+      : {}),
+    runId: result.runId,
+    captures: result.captures.map((capture) => capture.id),
+  });
 }

@@ -173,16 +173,6 @@ class BoundedOutput {
  * metacharacters is rejected rather than passed to a shell.
  */
 export function parseCommand(input: string): Result<string[], ShellSyntaxError> {
-  const metacharacter = /[|&;<>$`(){}[\]!*?~\n]/.exec(input);
-  if (metacharacter) {
-    return {
-      ok: false,
-      error: {
-        kind: "shell-syntax",
-        message: `Command contains shell syntax (${metacharacter[0]}) and cannot run without a shell: ${input}`,
-      },
-    };
-  }
   return splitCommandWords(input);
 }
 
@@ -202,6 +192,14 @@ function splitCommandWords(input: string): Result<string[], ShellSyntaxError> {
       if (started) argv.push(word);
       word = "";
       started = false;
+    } else if (/[|&;<>$`(){}[\]!*?~]/.test(character)) {
+      return {
+        ok: false,
+        error: {
+          kind: "shell-syntax",
+          message: `Command contains shell syntax (${character}) and cannot run without a shell: ${input}`,
+        },
+      };
     } else {
       word += character;
       started = true;

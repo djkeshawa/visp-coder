@@ -53,7 +53,16 @@ export async function nextFromRecord(
       evidence: ["This is historical completion, not fresh product verification"],
       mayEdit: false,
     });
-  if (record.brief.incomplete || !record.brief.outcomes.length || !record.brief.slices.length)
+  if (record.brief.incomplete || (record.brief.slices.length > 0 && !record.brief.outcomes.length))
+    return ok({
+      ...base,
+      action: "understand",
+      objective: "Complete the brief: declare outcomes and set incomplete:false before working",
+      command: `visp brief --feature ${record.brief.feature}`,
+      evidence: record.brief.uncertainties,
+      mayEdit: false,
+    });
+  if (!record.brief.slices.length)
     return ok({
       ...base,
       action: "understand",

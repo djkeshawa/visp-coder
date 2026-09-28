@@ -1,6 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { VispError } from "../core/errors.js";
 import type { Result } from "../core/result.js";
+import { mcpAction, mcpActionText } from "./action.js";
 
 /**
  * One output shape for every tool: prose for a reader and `structuredContent`
@@ -56,6 +57,8 @@ export function failure(tool: string, error: VispError): CallToolResult {
       recovery:
         "Another VISP operation owns this worktree. Wait for that MCP call to finish or cancel it, then retry. Inspect visp_doctor for owner details if the lock remains; do not delete a live owner's lock.",
     };
+  const recovery = error.recovery ? (mcpActionText(error.recovery) ?? error.recovery) : undefined;
+  const nextAction = error.recovery ? mcpAction(error.recovery) : undefined;
   return {
     isError: true,
     content: [
@@ -64,7 +67,7 @@ export function failure(tool: string, error: VispError): CallToolResult {
         text: [
           error.message,
           error.details ? errorDetails(error.details) : undefined,
-          error.recovery ? `Try: ${error.recovery}` : undefined,
+          recovery ? `Try: ${recovery}` : undefined,
         ]
           .filter(Boolean)
           .join("\n"),
@@ -79,6 +82,7 @@ export function failure(tool: string, error: VispError): CallToolResult {
         ...(error.recovery ? { recovery: error.recovery } : {}),
         ...(error.details ? { details: error.details } : {}),
       },
+      ...(nextAction ? { nextAction } : {}),
     },
   };
 }

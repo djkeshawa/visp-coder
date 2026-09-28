@@ -100,6 +100,7 @@ export async function executeChecks(
       options.retryEnvironment,
       verifierSnapshot,
       options.signal,
+      close,
     );
     if (options.signal?.aborted) return cancelledExecution();
     const saved = await publishCheck(workspace, record, current, checked, batch, options.signal);

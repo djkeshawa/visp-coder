@@ -37,6 +37,7 @@ export async function executeProductCheck(
   retryEnvironment = false,
   verifierSnapshot: Record<string, string> = {},
   signal?: AbortSignal,
+  reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
   const environment = await productComparisonEnvironmentDigest(workspace, record.brief);
   const base = {
@@ -62,6 +63,7 @@ export async function executeProductCheck(
       retryEnvironment,
       signal,
       check.timeoutMs,
+      reuseCapture,
     );
   const started = Date.now();
   const argv = resolveCommand(check.command);

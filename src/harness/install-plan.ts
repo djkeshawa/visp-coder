@@ -86,7 +86,7 @@ export async function buildInstallPlan(
     harness: reviewer,
   });
   if (!critic.ok) return critic;
-  const harnessPlan = planFor(options.harness, profile, critic.value);
+  const harnessPlan = planFor(options.harness, profile, critic.value ?? null);
   const planned: InstallPlan = {
     assets: [],
     mutations: [],

@@ -1,14 +1,15 @@
+import { compactProductReply } from "../product-compact-text.js";
 import type { ProductContextContent, ProductWorkContext } from "./context-types.js";
 
-/** Approximation includes both MCP representations and pretty CLI framing, not just code. */
+/** Approximation prices one full payload: MCP text is a bounded summary of structured data. */
 export function estimateProductContextTokens(value: ProductWorkContext): number {
-  const text = JSON.stringify(value, null, 2);
   const cli = JSON.stringify({ command: "handoff", ok: true, data: value }, null, 2);
   const mcp = JSON.stringify({
-    content: [{ type: "text", text }],
+    content: [{ type: "text", text: compactProductReply("visp_work", value, "mcp") ?? "" }],
     structuredContent: { tool: "visp_work", ok: true, data: value },
   });
-  return Math.ceil(Math.max(cli.length + 1, mcp.length) / 4);
+  // Leave room for the next action and envelope fields without pricing a second full context.
+  return Math.ceil(Math.max(cli.length + 1, mcp.length + 256) / 4);
 }
 
 /** Keep authored intent and safety boundaries whole; a tiny budget cannot weaken them. */

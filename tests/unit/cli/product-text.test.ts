@@ -42,3 +42,16 @@ it("acknowledges a CLI brief update without reprinting the brief, but prints a b
   const read = await runCli(workspace.root, "brief");
   expect(read.stdout).toContain('"originalRequest"');
 });
+
+it("keeps status JSON compact unless full is requested and reserves the reviewer document for pr", async () => {
+  const fixture = await productWorkspace();
+  workspace = fixture.workspace;
+  const compact = await runJson<Record<string, unknown>>(workspace.root, "status");
+  const full = await runJson<Record<string, unknown>>(workspace.root, "status", "--full");
+  expect(compact.envelope.data).not.toHaveProperty("state");
+  expect(full.envelope.data).toHaveProperty("state");
+  expect(compact.envelope.nextCommand).toContain("visp work");
+  const status = await runCli(workspace.root, "status");
+  const pr = await runCli(workspace.root, "pr");
+  expect(status.stdout).not.toBe(pr.stdout);
+});

@@ -9,6 +9,8 @@ export interface ProductReviewCapture {
   readonly subjectDigest: string;
   readonly route: string;
   readonly steps: readonly string[];
+  /** Position in the run's full operation log; steps are a bounded local summary. */
+  readonly operationIndex?: number;
   readonly viewport: { readonly width: number; readonly height: number };
   readonly createdAt: string;
   readonly provenance: "runner-captured" | "agent-supplied";

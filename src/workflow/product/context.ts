@@ -55,6 +55,7 @@ export async function buildProductContext(
     feedbackPlan.trace.question,
     feedbackPlan.research?.question ?? "",
     slice.goal,
+    brief.originalRequest,
     ...productBehaviorProbes(record, slice).probes.map((probe) => probe.question),
   ].join(" ");
   // The problem is already delivered in findings; do not repeat its full prose in routing hints.
@@ -75,6 +76,21 @@ export async function buildProductContext(
   const neighborhood = await productNeighborhood(workspace, paths, refresh, question);
   if (!neighborhood.ok) return neighborhood;
   const { graph, notes } = neighborhood.value;
+  const excerptPaths = paths.filter(usefulExcerptPath).sort(
+    (a, b) =>
+      excerptScore(
+        b,
+        question,
+        graph,
+        checks.flatMap((check) => check.files),
+      ) -
+      excerptScore(
+        a,
+        question,
+        graph,
+        checks.flatMap((check) => check.files),
+      ),
+  );
   notes.unshift(...(await productInputWarnings(workspace, brief)));
   notes.push(...checkOutputNotes(checks));
   const memory = await recallRelevant(workspace, {
@@ -102,10 +118,10 @@ export async function buildProductContext(
     notes.push(
       "Project memory is advisory and unverified; its freshness is unknown. Confirm it against current files.",
     );
-  const { files, remaining } = await productExcerpts(workspace, paths, question);
-  if (paths.length > files.length)
+  const { files, remaining } = await productExcerpts(workspace, excerptPaths, question);
+  if (excerptPaths.length > files.length)
     notes.push("Context is bounded; read additional relevant files when needed.");
-  const skills = await productSkills(workspace, slice, remaining);
+  const skills = await productSkills(workspace, slice, remaining, excerptPaths);
   if (!skills.ok) return skills;
   const rules = await readProjectRules(workspace);
   const memories = await featureMemories(workspace, brief.feature);
@@ -183,6 +199,29 @@ export async function buildProductContext(
           : []),
       ],
     ),
+  );
+}
+
+function usefulExcerptPath(path: string): boolean {
+  return (
+    !path.split("/").some((part) => part.startsWith(".")) &&
+    !["AGENTS.visp.md", "VISP.commands.md"].includes(path.split("/").at(-1) ?? "")
+  );
+}
+
+function excerptScore(
+  path: string,
+  question: string,
+  graph: QueryRow[],
+  checkFiles: string[],
+): number {
+  return (
+    Number(question.includes(path)) * 5 +
+    Number(checkFiles.includes(path)) * 4 +
+    graph.reduce(
+      (score, row) => score + (row.path === path ? (row.kind === "entrypoint" ? 3 : 1) : 0),
+      0,
+    )
   );
 }
 
