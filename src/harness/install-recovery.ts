@@ -42,6 +42,7 @@ function retryInstallCommand(options: InstallOptions): string {
     hooks.length > 0 ? `--hooks ${hooks.join(" ")}` : "--no-hooks",
     ...(options.mcp === true ? [] : ["--no-mcp"]),
     ...(options.force ? ["--force"] : []),
+    ...(options.replaceRuntime ? ["--replace-runtime"] : []),
     ...(options.prunePreviousHarness ? ["--prune-previous-harness"] : []),
   ].join(" ");
 }

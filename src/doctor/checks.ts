@@ -5,12 +5,14 @@ import {
   PRODUCT_NAME,
   STATE_DIR,
 } from "../core/constants.js";
-import { describeCommand, resolveCommand } from "../core/exec.js";
+import { describeCommand, resolveCommand, run } from "../core/exec.js";
 import { inspectFileTransactions } from "../core/file-transaction.js";
 import { isRepository } from "../core/git.js";
 import { ok, type Result } from "../core/result.js";
 import { inspectStateLock, STATE_LOCK_DIRECTORY } from "../core/state-lock.js";
+import { runtimeIdentity } from "../core/version.js";
 import { checkCurrency, openProjectStore } from "../graph/index.js";
+import { readInstallState } from "../harness/install-state.js";
 import { skillCatalog } from "../skills/catalog.js";
 import { SKILL_STATES } from "../skills/schema.js";
 import { readIndex } from "../skills/store.js";
@@ -64,6 +66,7 @@ export async function runChecks(
     await checkState(state),
     await checkConfig(state),
     await checkInstalledRuntime(state),
+    await checkPathRuntime(state),
     await checkGit(state),
     await checkHarnessAssets(state),
     await checkHarnessActivation(state),
@@ -77,7 +80,66 @@ export async function runChecks(
     await checkFeature(state),
   ];
 
-  return { verdict: verdictFor(checks), checks };
+  const runtimeMismatch = checks.find(
+    (check) => check.name === "installed runtime" && check.status === "fail",
+  );
+  const reported = runtimeMismatch
+    ? checks.map((check) =>
+        ["harness assets", "harness activation", "enforcement"].includes(check.name)
+          ? {
+              ...check,
+              status: "unknown" as const,
+              detail: `This CLI build differs from the installed runtime; ${check.name} cannot be judged against its templates`,
+              recovery: undefined,
+            }
+          : check,
+      )
+    : checks;
+  return { verdict: verdictFor(reported), checks: reported };
+}
+
+async function checkPathRuntime(state: WorkspaceState): Promise<Check> {
+  const installed = await readInstallState(state.paths, state.files);
+  if (!installed.ok || !installed.value?.runtime) {
+    return { name: "PATH visp", status: "unknown", detail: "No installed runtime to compare" };
+  }
+  const found = await run("visp", ["guard", "--handshake", "--json"], {
+    cwd: state.paths.root,
+    timeoutMs: 5_000,
+  });
+  if (!found.ok || found.value.exitCode !== 0) {
+    return {
+      name: "PATH visp",
+      status: "warn",
+      detail: "The shell's visp command could not be identified",
+      recovery: `Run node ${JSON.stringify(installed.value.runtime.executable)} for this installation, or use its MCP tools`,
+    };
+  }
+  try {
+    const runtime = JSON.parse(found.value.stdout)?.data?.runtime;
+    if (
+      runtime?.buildId === installed.value.runtime.buildId &&
+      runtime?.version === installed.value.runtime.version &&
+      runtime?.executable === installed.value.runtime.executable
+    )
+      return {
+        name: "PATH visp",
+        status: "ok",
+        detail: "The shell resolves the installed VISP build",
+      };
+    return {
+      name: "PATH visp",
+      status: "warn",
+      detail: `The shell resolves ${runtime?.executable ?? "an unidentified VISP"}, while installed assets use ${installed.value.runtime.executable}`,
+      recovery: `Run node ${JSON.stringify(installed.value.runtime.executable)} or use the installed MCP tools; this CLI is ${runtimeIdentity().executable}`,
+    };
+  } catch {
+    return {
+      name: "PATH visp",
+      status: "warn",
+      detail: "The shell's visp returned no valid runtime identity",
+    };
+  }
 }
 
 async function checkStateOwnership(state: WorkspaceState): Promise<Check> {

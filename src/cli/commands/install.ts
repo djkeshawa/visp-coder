@@ -39,6 +39,7 @@ export function installCommand(): Command {
       "Remove only fingerprint-matched VISP assets from other harnesses",
     )
     .option("--force", "Overwrite files that have been edited since install")
+    .option("--replace-runtime", "Replace assets pinned to another VISP build; restart its hosts")
     .action(handleInstallCommand);
 }
 
@@ -47,6 +48,7 @@ interface InstallCliOptions {
   readonly profile?: string;
   readonly hooks?: string[] | boolean;
   readonly force?: boolean;
+  readonly replaceRuntime?: boolean;
   readonly mcp?: boolean;
   readonly prunePreviousHarness?: boolean;
   readonly dryRun?: boolean;
@@ -78,6 +80,7 @@ async function handleInstallCommand(_flags: unknown, command: Command): Promise<
     },
     ...(opts.prunePreviousHarness ? { prunePreviousHarness: true } : {}),
     ...(opts.force ? { force: true } : {}),
+    ...(opts.replaceRuntime ? { replaceRuntime: true } : {}),
   };
   if (opts.dryRun) {
     process.exitCode = emit(

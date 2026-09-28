@@ -64,7 +64,7 @@ export function doctorCommand(): Command {
             )
           : checked;
       const remaining = report.checks.filter((check) => check.recovery);
-      const featureReadiness = await readFeatureReadiness(state.value);
+      const featureReadiness = await readDoctorFeatureReadiness(state.value, report.checks);
       const settings = await requestedSettings(state.value, opts.settings);
 
       process.exitCode = emit(
@@ -138,6 +138,24 @@ async function readFeatureReadiness(state: WorkspaceState) {
         !state.status?.activeFeature,
       )
     : [{ requirement: "inspection", error: foundation.error }];
+}
+
+async function readDoctorFeatureReadiness(state: WorkspaceState, checks: readonly Check[]) {
+  const mismatch = checks.find(
+    (check) => check.name === "installed runtime" && check.status === "fail",
+  );
+  if (!mismatch) return readFeatureReadiness(state);
+  return [
+    {
+      requirement: "harness" as const,
+      error: {
+        code: "RUNTIME_MISMATCH" as const,
+        message:
+          "Installed assets differ from this CLI build; readiness cannot be assessed from this process",
+        recovery: mismatch.recovery,
+      },
+    },
+  ];
 }
 
 function renderCheck(check: Check): string {

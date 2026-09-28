@@ -72,8 +72,8 @@ export async function buildInstallPlan(
   profile: Profile,
   fs: ProjectFileSystem,
 ): Promise<Result<InstallPlan>> {
-  const identified = requireRuntimeAgreement(runtimeIdentity());
-  if (!identified.ok) return identified;
+  const installed = await checkInstallRuntime(paths, fs, options);
+  if (!installed.ok) return installed;
   const manifest = await readAssetManifest(paths, fs);
   if (!manifest.ok) return manifest;
   const configuration = await readInstallConfig(fs, paths);
@@ -124,6 +124,29 @@ export async function buildInstallPlan(
   planned.expectedConfig = config.value.expected;
   if (config.value.mutation !== undefined) planned.mutations.push(config.value.mutation);
   return ok(planned);
+}
+
+async function checkInstallRuntime(
+  paths: ProjectPaths,
+  fs: ProjectFileSystem,
+  options: InstallOptions,
+): Promise<Result<void>> {
+  const identified = requireRuntimeAgreement(runtimeIdentity());
+  if (!identified.ok) return identified;
+  const installed = await readInstallState(paths, fs);
+  if (!installed.ok) return installed;
+  if (!installed.value?.runtime || options.replaceRuntime) return ok(undefined);
+  const agreement = requireRuntimeAgreement(
+    installed.value.runtime,
+    runtimeIdentity(),
+    "installed assets",
+  );
+  return agreement.ok
+    ? agreement
+    : err({
+        ...agreement.error,
+        recovery: `Installed assets use node ${JSON.stringify(installed.value.runtime.executable)}; run that build or use visp install --replace-runtime and restart MCP and host processes that use the old build. --force only replaces edited files.`,
+      });
 }
 
 async function readInstallConfig(fs: ProjectFileSystem, paths: ProjectPaths) {
@@ -637,7 +660,11 @@ async function planMcp(
   const path = configFileForHarness(options.harness);
   const current = await fs.readTextIfExists(path);
   if (!current.ok) return current;
-  const registration = planMcpRegistration(current.value, options.force === true, options.harness);
+  const registration = planMcpRegistration(
+    current.value,
+    options.force === true || options.replaceRuntime === true,
+    options.harness,
+  );
   if (!registration.ok) return registration;
   plan.mcp = registration.value.status;
   plan.mcpConfigFile = path;

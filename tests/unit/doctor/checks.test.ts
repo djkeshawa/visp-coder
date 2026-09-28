@@ -207,15 +207,15 @@ describe("the enforcement check", () => {
    * Installed but unrunnable is worse than not installed: the edit hook then
    * denies every write, and the pre-commit hook lets every commit through.
    */
-  it("fails when the hooks are installed but visp is not on PATH", async () => {
+  it("checks the pinned guard while reporting a missing PATH visp separately", async () => {
     await installEverything();
 
     const original = process.env.PATH;
-    process.env.PATH = "/nonexistent";
+    process.env.PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
     try {
       const result = await check("enforcement", {});
-      expect(result.status, result.detail).toBe("fail");
-      expect(result.detail).toContain("not on PATH");
+      expect(result.status, result.detail).toBe("ok");
+      expect((await check("PATH visp")).status).toBe("warn");
     } finally {
       process.env.PATH = original;
     }
