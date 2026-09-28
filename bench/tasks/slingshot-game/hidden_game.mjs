@@ -192,31 +192,57 @@ await check("turn ends and the next bird is ready", async () => {
   const t = await shoot(page, 45, 0.6);
   const a = await attrs(page);
   const s = await snap(page);
-  return (t > 0 && t <= 9000 && ((a.state === "aiming" && a.birds === 2 && s.bird) || a.state === "won")) || JSON.stringify({ t, a });
+  return (t > 0 && t <= 9000 && ((a.state === "aiming" && a.birds === 2 && !!s.bird) || a.state === "won")) || JSON.stringify({ t, a });
 });
 
-// A body count change for one shot from a fresh level; used by several checks.
-async function trial(level, angle, power, before) {
+// One shot from a fresh level, followed in the page: body changes, score and which blocks
+// the bird's center came near (it cannot pass through a block unaffected).
+async function trial(level, angle, power) {
   await fresh(page, level);
-  const t = await shoot(page, angle, power);
-  const after = await snap(page);
-  const count = (s, k) => s.bodies.filter((b) => b.kind === k).length;
-  return {
-    angle, power, t,
-    pigs: count(before, "pig") - count(after, "pig"),
-    blocks: count(before, "block") - count(after, "block"),
-    score: after.score,
-    state: after.state,
-  };
+  return page.evaluate(([angle, power]) => {
+    const g = window.gameTest;
+    const game = document.querySelector("#game");
+    const before = g.snapshot().bodies;
+    const blocks = before.filter((b) => b.kind === "block").map((b) => ({ ...b, near: Infinity }));
+    g.launch(angle, power);
+    let t = 0;
+    for (; t < 9500; t += 1000 / 60) {
+      const bird = g.snapshot().bird;
+      if (bird && game.dataset.state === "flying")
+        for (const b of blocks) b.near = Math.min(b.near, Math.hypot(bird.x - b.x, bird.y - b.y));
+      g.step(1000 / 60);
+      if (game.dataset.state !== "flying") break;
+    }
+    const after = g.snapshot();
+    const count = (list, k) => list.filter((b) => b.kind === k).length;
+    const reached = blocks.filter((b) => b.near < 12).map((b) => {
+      const same = after.bodies
+        .filter((a) => a.kind === "block")
+        .find((a) => Math.hypot(a.x - b.x, a.y - b.y) < 2 && a.hp === b.hp);
+      return !same; // removed, moved or damaged
+    });
+    return {
+      angle, power, t,
+      pigs: count(before, "pig") - count(after.bodies, "pig"),
+      blocks: count(before, "block") - count(after.bodies, "block"),
+      score: after.score,
+      state: after.state,
+      reached,
+    };
+  }, [angle, power]);
 }
 let sweep = [];
 await check("shots can destroy bodies", async () => {
-  await fresh(page);
-  const before = await snap(page);
   for (const power of [1, 0.8, 0.6]) {
-    for (let angle = 5; angle <= 70; angle += 5) sweep.push(await trial(1, angle, power, before));
+    for (let angle = 5; angle <= 70; angle += 5) sweep.push(await trial(1, angle, power));
   }
   return sweep.some((r) => r.pigs + r.blocks > 0) || "no shot from 5–70° at power 0.6–1 destroyed anything";
+});
+await check("the bird cannot pass through blocks", async () => {
+  const reached = sweep.flatMap((r) => r.reached);
+  // A solid block keeps the bird's center out, so correct games usually reach none.
+  const untouched = reached.filter((hit) => !hit).length;
+  return untouched === 0 || `${untouched} of ${reached.length} blocks the bird reached were unaffected`;
 });
 await check("a pig can be destroyed", async () => sweep.some((r) => r.pigs > 0) || "no single shot destroyed a pig");
 await check("score counts removed blocks and pigs", async () => {
