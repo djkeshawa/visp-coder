@@ -83,6 +83,7 @@ interface ProductOptions extends GlobalOptions {
   check?: string;
   session?: string;
   group?: string[];
+  dispute?: string[];
 }
 
 type Operation = (state: WorkspaceState, opts: ProductOptions) => Promise<Result<unknown>>;
@@ -369,17 +370,36 @@ export const statusCommand = () =>
   ).option("--full", "Include the full brief and product state in --json output");
 export const verifyCommand = () =>
   command("verify", "Run the selected slice's behavior checks", true, runProductVerify);
+const DISPUTE_HELP = `\nA pinned acceptance test that fails and contradicts the request can be disputed instead of edited: --dispute "<test name>" --reason "<quote the request sentence + why>". The independent reviewer rules; only failing tests can be disputed, and a rejected dispute needs a product change before it is filed again.`;
+const disputeOptions = (operation: Command) =>
+  operation
+    .option("--dispute <tests...>", "Dispute failing pinned acceptance tests by name")
+    .option("--reason <text>", "Why the disputed test contradicts the request (with --dispute)")
+    .addHelpText("after", DISPUTE_HELP);
 export const doneCommand = () =>
-  command("done", "Check, review and close the selected slice", true, (state, opts) =>
-    runProductDoneReviewed(state, opts, configuredReviewStarter(state), reviewWaitMs(state, "cli")),
+  disputeOptions(
+    command("done", "Check, review and close the selected slice", true, (state, opts) =>
+      runProductDoneReviewed(
+        state,
+        { ...opts, disputeReason: opts.reason },
+        configuredReviewStarter(state),
+        reviewWaitMs(state, "cli"),
+      ),
+    ),
   );
 export const acceptCommand = () =>
-  command("accept", "Check the assembled product against preserved outcomes", true, (state, opts) =>
-    runProductAcceptReviewed(
-      state,
-      opts,
-      configuredReviewStarter(state),
-      reviewWaitMs(state, "cli"),
+  disputeOptions(
+    command(
+      "accept",
+      "Check the assembled product against preserved outcomes",
+      true,
+      (state, opts) =>
+        runProductAcceptReviewed(
+          state,
+          { ...opts, disputeReason: opts.reason },
+          configuredReviewStarter(state),
+          reviewWaitMs(state, "cli"),
+        ),
     ),
   );
 export const prCommand = () =>

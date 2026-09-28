@@ -165,7 +165,29 @@ function acceptanceSection(record: IndependentTestsRecord | undefined) {
         ]
       : []),
     ...(record.notes?.trim() ? ["", `Tester notes: ${cell(record.notes)}`] : []),
+    ...disputeLines(record),
     "",
+  ];
+}
+
+function disputeStatus(entry: NonNullable<IndependentTestsRecord["disputes"]>[number]) {
+  if (entry.status === "upheld") return "upheld, waived";
+  return entry.status === "open" && entry.reviews >= 2
+    ? "unresolved: the reviewer did not rule twice, so it needs the human reviewer"
+    : entry.status;
+}
+
+/** Waived tests are the human reviewer's business: who said what, and who ruled. */
+function disputeLines(record: IndependentTestsRecord) {
+  if (!record.disputes?.length) return [];
+  return [
+    "",
+    "Disputed tests (the implementer's reason, then the independent reviewer's ruling):",
+    "",
+    ...record.disputes.map(
+      (entry) =>
+        `- ${cell(entry.test)}: ${disputeStatus(entry)}. Reason: ${cell(entry.reason)}${entry.ruling ? ` Ruling${entry.ruling.model ? ` (${entry.ruling.model})` : ""}: ${cell(entry.ruling.reasoning)}` : ""}`,
+    ),
   ];
 }
 

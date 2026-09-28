@@ -26,6 +26,9 @@ export interface ProductSelection {
   readonly onProgress?: (event: { check: string; status: string }) => void | Promise<void>;
   /** Internal acceptance continuation after a review of the same checked subject. */
   readonly reusePassed?: boolean;
+  /** `done` and `accept` only: failing pinned tests the worker disputes, with one shared reason. */
+  readonly dispute?: readonly string[];
+  readonly disputeReason?: string;
   readonly feature?: string;
   readonly task?: string;
   /** Mutating work/check operations only; does not change host permissions. */

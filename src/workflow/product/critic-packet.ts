@@ -8,6 +8,7 @@ import { findingAppliesToSlice, outstandingFeedback } from "./findings.js";
 import { independentReviewJsonSchema, independentReviewTemplate } from "./independent-review.js";
 import { independentSources } from "./independent-sources.js";
 import type { ProductBrief } from "./model.js";
+import { disputePacketEntries, type PacketDispute } from "./pinned-disputes.js";
 import { deliveredReviewEvidenceIds } from "./review-context.js";
 import {
   SOURCE_ADVICE_INSTRUCTIONS,
@@ -32,6 +33,11 @@ export interface CriticPacket {
    * worker's claims; without their IDs no later review could resolve them.
    */
   openFindings?: readonly { id: string; problem: string; nextCheck: string }[];
+  /**
+   * Pinned acceptance tests the worker says contradict the request. The reviewer rules on
+   * each; the worker never does.
+   */
+  disputes?: readonly PacketDispute[];
   responseShape: ReturnType<typeof independentReviewTemplate>;
   responseSchema: ReturnType<typeof independentReviewJsonSchema>;
 }
@@ -39,15 +45,25 @@ export interface CriticPacket {
 const OPEN_FINDINGS_INSTRUCTIONS =
   "openFindings lists problems an earlier independent review reported. Re-check each against the current source and evidence. If it is fixed, add a resolutions entry with its id, what changed, and the current passing check evidence IDs that exercise it. If it is not fixed, report it again as a finding.";
 
+export const DISPUTE_INSTRUCTIONS =
+  "disputes lists pinned acceptance tests the implementer says contradict the original request. Each has the tester's own quote, the implementer's reason, the failing output and the test source. Rule on every dispute in the disputes response: upheld only when the original request itself contradicts what the test asserts, or the failure comes from the test rather than the product (an assertion about incidental ordering the request does not state, cleanup errors, an impossible case); quote the deciding request sentence in reasoning. Effort, inconvenience or a preferred design is never a reason. Otherwise rejected: the product must satisfy the test. priorRulings holds earlier rulings on the same test: a repeat filing is not new evidence, so keep a prior rejection unless the new reason shows the request contradicts the test. A disputed failing test is the subject of the dispute, not a product finding; report it as a finding only when you reject the dispute and the product violates the request.";
+
 function packetInstructions(
   product: string,
   sourceOnly: boolean,
   understanding: boolean,
   openFindings: number,
+  disputes: number,
 ) {
   if (sourceOnly) return SOURCE_ADVICE_INSTRUCTIONS;
   if (understanding) return UNDERSTANDING_CRITIC_INSTRUCTIONS;
-  return openFindings ? `${product}\n${OPEN_FINDINGS_INSTRUCTIONS}` : product;
+  return [
+    product,
+    openFindings ? OPEN_FINDINGS_INSTRUCTIONS : "",
+    disputes ? DISPUTE_INSTRUCTIONS : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function openFindingsFor(selected: CriticSelection) {
@@ -84,6 +100,10 @@ export async function criticPacket(
       (!sourceOnly || entry.kind !== "image"),
   );
   const open = understanding || sourceOnly ? [] : openFindingsFor(selected);
+  const disputes =
+    understanding || sourceOnly
+      ? []
+      : await disputePacketEntries(workspace, selected.record.brief.feature);
   const packet: CriticPacket = {
     phase: selected.phase,
     ...(sourceOnly ? { sourceOnly: true } : {}),
@@ -95,8 +115,15 @@ export async function criticPacket(
     selection: sourceOnly
       ? { ...current.submission.selection, images: [] }
       : current.submission.selection,
-    instructions: packetInstructions(current.instructions, sourceOnly, understanding, open.length),
+    instructions: packetInstructions(
+      current.instructions,
+      sourceOnly,
+      understanding,
+      open.length,
+      disputes.length,
+    ),
     ...(open.length ? { openFindings: open } : {}),
+    ...(disputes.length ? { disputes } : {}),
     current: {
       ...independent,
       sources: sources.value,
@@ -117,6 +144,7 @@ export async function criticPacket(
     responseSchema: independentReviewJsonSchema(
       deliveredReviewEvidenceIds(evidence, independent.interactionEvidence),
       independent.outcomes.map((outcome) => outcome.id),
+      disputes.map((dispute) => dispute.test),
     ),
   };
   if (
