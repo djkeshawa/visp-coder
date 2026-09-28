@@ -158,7 +158,7 @@ it("upgrades the prior block and switches to CLAUDE.md while preserving user byt
   expect(await readFile(join(workspace.root, "AGENTS.md"), "utf8")).toBe(`${original}\nafter\r\n`);
   const claude = await readFile(join(workspace.root, "CLAUDE.md"), "utf8");
   expect(claude.startsWith("Claude user rules\r\n")).toBe(true);
-  expect(claude).toContain("visp critic --preflight");
+  expect(claude).toContain("visp work --check");
 });
 
 it("upgrades the exact prior command map without treating user changes as generated content", async () => {

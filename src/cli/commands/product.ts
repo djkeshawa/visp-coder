@@ -106,7 +106,7 @@ function command(
   });
 }
 
-/** Models read CLI text through a shell; --json keeps the complete result for tools. */
+/** Models read CLI text through a shell; --full keeps complete status data for tools. */
 function cliText(name: string, opts: ProductOptions, value: unknown): string {
   if (name === "status" || name === "handoff") {
     const status = value as {

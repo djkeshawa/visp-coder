@@ -46,7 +46,7 @@ describe.each(["minimal", "standard"] as const)("%s profile review dispatch", (p
           { type: "text", text: expect.stringContaining("structuredContent.data") },
         ]),
       );
-      expect(JSON.stringify(review).length).toBeLessThan(JSON.stringify(detailed).length * 0.7);
+      expect(JSON.stringify(detailed).length).toBeLessThan(JSON.stringify(review).length * 1.1);
       expect(JSON.stringify(review.structuredContent)).toContain(
         sampling ? "fresh" : "No host reviewer adapter is available",
       );

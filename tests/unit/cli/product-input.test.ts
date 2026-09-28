@@ -222,14 +222,16 @@ describe("editable product templates", () => {
     expect(rejected.envelope.error?.recovery).not.toContain("visp review --template");
   });
 
-  it("shows a concise status while JSON retains complete state", async () => {
+  it("shows a concise status and requires --full for complete JSON state", async () => {
     const { workspace } = await productWorkspace();
     workspaces.push(workspace);
     const text = await runCli(workspace.root, "status");
     const json = await runJson(workspace.root, "status");
-    expect(text.stdout).toContain("## Next");
+    const full = await runJson(workspace.root, "status", "--full");
+    expect(text.stdout).toContain("Next:");
     expect(text.stdout).not.toContain('"executions"');
-    expect(text.stdout.length).toBeLessThan(json.stdout.length / 2);
-    expect(json.envelope.data).toHaveProperty("state");
+    expect(text.stdout.length).toBeLessThan(full.stdout.length / 2);
+    expect(json.envelope.data).not.toHaveProperty("state");
+    expect(full.envelope.data).toHaveProperty("state");
   });
 });
