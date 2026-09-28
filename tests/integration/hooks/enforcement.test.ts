@@ -445,16 +445,13 @@ describe("edit authorization across host sessions", () => {
     const next = project.run("next", "--json");
     expect(next.stdout).toContain('visp feature \\"<the user\'s request>\\"');
     expect(next.stdout).not.toMatch(/"task":\s*"T001"/);
-    const stopped = JSON.parse(
-      execFileSync(process.execPath, [hook()], {
-        cwd: project.root,
-        input: JSON.stringify({ hook_event_name: "Stop", session_id: "session-2" }),
-        encoding: "utf8",
-        env: env(),
-      }),
-    );
-    expect(stopped.reason).toContain("visp feature");
-    expect(stopped.reason).not.toContain("not accepted yet");
+    const stopped = execFileSync(process.execPath, [hook()], {
+      cwd: project.root,
+      input: JSON.stringify({ hook_event_name: "Stop", session_id: "session-2" }),
+      encoding: "utf8",
+      env: env(),
+    });
+    expect(stopped).toBe("");
 
     // A follow-up in the same session keeps the authorization it re-confirms.
     const worked = project.run("work", "--task", "T001");
@@ -466,13 +463,13 @@ describe("edit authorization across host sessions", () => {
 
   // Two sessions in one checkout: the latest prompt came from another session, but the
   // hook names the session that is editing, and only the one that ran `visp work` may.
-  it("judges an edit by the session making it, not the one that prompted last", () => {
+  it("leaves an anonymous grant unstamped when several sessions are active", () => {
     prompt("session-3", "Unrelated question in another window");
     expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
-    expect(write("src/auth/login.ts", "session-3").decision).toBe("deny");
+    expect(write("src/auth/login.ts", "session-3").decision).toBe("allow");
   });
 
-  it("stamps the session whose shell command runs visp work", async () => {
+  it("does not use a shell heartbeat to guess an anonymous caller among active sessions", async () => {
     const { readFile } = await import("node:fs/promises");
     execFileSync(process.execPath, [hook()], {
       cwd: project.root,
@@ -489,9 +486,9 @@ describe("edit authorization across host sessions", () => {
       project.root,
       ".visp/state/product-authorizations/001-scoped-work.json",
     );
-    expect(JSON.parse(await readFile(authorization, "utf8")).session).toBe("session-4");
+    expect(JSON.parse(await readFile(authorization, "utf8")).session).toBeUndefined();
     expect(write("src/auth/login.ts", "session-4").decision).toBe("allow");
-    expect(write("src/auth/login.ts", "session-2").decision).toBe("deny");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
   });
 });
 

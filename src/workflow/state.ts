@@ -40,6 +40,7 @@ export interface WorkspaceState {
   readonly policy: Policy;
   readonly overrides: readonly Override[];
   readonly status: Status | undefined;
+  readonly checkoutNotice?: string;
 }
 
 export async function loadWorkspace(root: string): Promise<Result<WorkspaceState>> {
@@ -73,7 +74,15 @@ export async function loadWorkspace(root: string): Promise<Result<WorkspaceState
   const resolved = await withLatestFeature(store, status.value);
   if (!resolved.ok) return resolved;
 
+  const missing =
+    status.value?.activeFeature && status.value.activeFeature !== resolved.value?.activeFeature;
+  const branch = missing ? await currentBranch(root) : undefined;
   return ok({
+    ...(missing
+      ? {
+          checkoutNotice: `Feature ${status.value?.activeFeature} is absent from branch ${branch?.ok ? branch.value : "HEAD"}; switch back to its branch or select an existing feature explicitly.`,
+        }
+      : {}),
     paths,
     files,
     store,
@@ -101,16 +110,15 @@ async function withLatestFeature(
   store: ArtifactStore,
   status: Status | undefined,
 ): Promise<Result<Status | undefined>> {
-  if (status?.activeFeature) return ok(status);
-
   const features = await store.listFeatures();
   if (!features.ok) return features;
 
+  if (status?.activeFeature && features.value.includes(status.activeFeature)) return ok(status);
   const latest = features.value[0];
-  if (!latest) return ok(status);
+  if (!latest && !status?.activeFeature) return ok(status);
 
   const base = status ?? { kind: "status" as const, createdAt: now(), updatedAt: now() };
-  return ok({ ...base, activeFeature: latest });
+  return ok({ ...base, activeFeature: latest, activeTask: undefined });
 }
 
 /**
@@ -175,8 +183,8 @@ export function resolveFeature(state: WorkspaceState, explicit?: string): Result
   const feature = explicit ?? state.status?.activeFeature;
   if (!feature) {
     return err(
-      vispError("NO_ACTIVE_FEATURE", "No feature is active", {
-        recovery: 'visp feature "<goal>"',
+      vispError("NO_ACTIVE_FEATURE", state.checkoutNotice ?? "No feature is active", {
+        recovery: state.checkoutNotice ? "git switch -" : 'visp feature "<goal>"',
       }),
     );
   }

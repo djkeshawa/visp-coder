@@ -6,6 +6,7 @@ import {
   type FileMutation,
   filePrecondition,
 } from "../../core/file-transaction.js";
+import { currentBranch } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
@@ -97,16 +98,17 @@ async function readRecord(
 async function missingBrief(workspace: WorkspaceState, feature: string): Promise<Result<never>> {
   const legacy = await workspace.files.exists(workspace.paths.featureFile(feature, "intent.json"));
   if (!legacy.ok) return legacy;
+  const branch = await currentBranch(workspace.paths.root);
   return err(
     vispError(
       legacy.value ? "MIGRATION_REQUIRED" : "ARTIFACT_MISSING",
       legacy.value
         ? `Feature ${feature} uses the replaced workflow`
-        : `Feature ${feature} does not exist`,
+        : `Feature ${feature} does not exist in this checkout (branch ${branch.ok ? branch.value : "HEAD"})`,
       {
         recovery: legacy.value
           ? `visp migrate --feature ${feature} --dry-run`
-          : "visp feature <goal>",
+          : "Switch to the feature’s branch, or select an existing feature with --feature <id>; inspect branches with git branch --all",
       },
     ),
   );

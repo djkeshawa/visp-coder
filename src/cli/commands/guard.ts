@@ -9,6 +9,7 @@ import { requireInstalledRuntime } from "../../harness/runtime.js";
 import { checkPaths, decideScope, type ScopeViolation } from "../../orchestrate/guard.js";
 import type { ImplementMarker } from "../../workflow/artifacts/evidence.js";
 import { resolveRule, ruleContextFor } from "../../workflow/policy/resolve.js";
+import { branchFeatures } from "../../workflow/product/branch-scope.js";
 import {
   hasPendingCriticReview,
   PENDING_REVIEW_MESSAGE,
@@ -17,7 +18,7 @@ import {
   productScopes as authorizedScopes,
   earlierSessionAuthorization,
 } from "../../workflow/product/scopes.js";
-import { featureForBranch, isStatePath, type WorkspaceState } from "../../workflow/state.js";
+import { isStatePath, type WorkspaceState } from "../../workflow/state.js";
 import {
   type GlobalOptions,
   isJson,
@@ -185,22 +186,9 @@ async function resolveGuardFeature(
   state: WorkspaceState,
   opts: GuardCliOptions,
 ): Promise<Result<string | undefined>> {
-  const feature =
-    opts.scope === "tasks"
-      ? (opts.feature ?? (await featureForBranch(state, opts.branch)))
-      : opts.feature;
-  if (opts.scope !== "tasks" || feature) return ok(feature);
-  return {
-    ok: false,
-    error: vispError(
-      "NO_ACTIVE_FEATURE",
-      "No feature matches this branch, so there is no graph to judge against",
-      {
-        recovery:
-          "visp guard --scope tasks --feature <id>, or --branch <name> if this checkout is detached",
-      },
-    ),
-  };
+  if (opts.scope !== "tasks") return ok(opts.feature);
+  const features = await branchFeatures(state, opts);
+  return features.ok ? ok(features.value[0]) : features;
 }
 
 async function evaluateGuard(
@@ -362,6 +350,17 @@ async function selectGuardMarkers(
   opts: GuardCliOptions,
   feature: string | undefined,
 ): Promise<Result<GuardMarkerSelection>> {
+  if (opts.scope === "tasks") {
+    const features = await branchFeatures(state, opts);
+    if (!features.ok) return features;
+    const markers: ImplementMarker[] = [];
+    for (const id of features.value) {
+      const scopes = await authorizedScopes(state, { feature: id, source: "tasks" });
+      if (!scopes.ok) return scopes;
+      markers.push(...scopes.value);
+    }
+    return ok({ kind: "markers", markers });
+  }
   if (opts.ifAuthorized && opts.scope !== "tasks") {
     const active = await authorizedScopes(state, scopeFilter(opts, feature));
     if (!active.ok) return active;
@@ -429,7 +428,9 @@ function guardRefusalText(
         ? `  ... and ${violations.length - SHOWN_VIOLATIONS} more (--json for all of them)`
         : "",
       "",
-      guardClosing(evaluation),
+      opts.scope === "tasks"
+        ? "CI checks the union of declared feature scopes. Commit the matching briefs or correct the PR scope before retrying."
+        : guardClosing(evaluation),
     ].join("\n"),
   );
 }

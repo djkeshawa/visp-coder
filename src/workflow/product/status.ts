@@ -6,7 +6,7 @@ import { criticNext } from "./critic-guidance.js";
 import { hasUntakenPrompts } from "./host-prompts.js";
 import type { ProductBrief, ProductState } from "./model.js";
 import { productReviewDocument } from "./review-document.js";
-import { earlierSessionGrant } from "./scopes.js";
+import { earlierSessionGrant, staleTaskNote } from "./scopes.js";
 import type { ProductIdentity } from "./status-history.js";
 import { nextFromRecord } from "./status-next.js";
 import {
@@ -75,7 +75,10 @@ export async function runProductNext(
     currentProductIdentity(workspace, loaded.value.brief),
   );
   if (!next.ok) return next;
-  const result = await criticNext(workspace, next.value);
+  const result = await criticNext(workspace, {
+    ...next.value,
+    evidence: [...next.value.evidence, ...staleTaskNote(workspace, loaded.value)],
+  });
   if (!result.ok || (!loaded.value.state.criticManual && !loaded.value.state.userFeedback?.length))
     return result;
   const subject = await productSourceDigest(workspace, loaded.value.brief);
@@ -132,7 +135,10 @@ export async function runProductStatus(
   const getIdentity = () => (snapshot ??= currentProductIdentity(workspace, record.value.brief));
   const planned = await nextFromRecord(workspace, record.value, options, getIdentity);
   if (!planned.ok) return planned;
-  const next = await criticNext(workspace, planned.value);
+  const next = await criticNext(workspace, {
+    ...planned.value,
+    evidence: [...planned.value.evidence, ...staleTaskNote(workspace, record.value)],
+  });
   if (!next.ok) return next;
   const identity = await getIdentity();
   if (!identity.ok) return identity;
@@ -166,7 +172,7 @@ export async function runProductReport(
  * without its rules, recalled decisions or a review of its own. A prompt no feature has taken,
  * sent after the open task's authorization lapsed with its session, is that new request.
  */
-async function newSessionRequestNext(
+export async function newSessionRequestNext(
   workspace: WorkspaceState,
   record: ProductRecord,
   options: ProductSelection,
@@ -197,8 +203,10 @@ function unavailableNext(
   if (error.code === "NO_ACTIVE_FEATURE")
     return ok({
       action: "understand",
-      objective: "Record the original request and define the next useful outcome",
-      command: 'visp feature "<goal>"',
+      objective:
+        workspace.checkoutNotice ??
+        "Record the original request and define the next useful outcome",
+      command: workspace.checkoutNotice ? "git switch -" : 'visp feature "<goal>"',
       evidence: [],
       mayEdit: false,
     });

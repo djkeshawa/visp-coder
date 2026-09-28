@@ -98,12 +98,12 @@ describe("the pull request check", () => {
     expect(result.stdout).toContain("No task is authorized");
   });
 
-  it("names the feature to pass when the branch matches none", async () => {
+  it("finds the changed feature when the branch has a new name", async () => {
     const base = await asPullRequest();
     project.git("checkout", "-q", "-b", "unrelated-branch");
 
     const result = project.run("guard", "--base", base, "--scope", "tasks");
-    expect(result.stdout + result.stderr).toContain("--feature");
+    expect(result.exitCode).toBe(0);
   });
 
   it("accepts the feature explicitly", async () => {
@@ -130,18 +130,18 @@ describe("the pull request check", () => {
     expect(project.git("rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("HEAD");
 
     const without = project.run("guard", "--base", base, "--scope", "tasks");
-    expect(without.exitCode).not.toBe(0);
+    expect(without.exitCode).toBe(0);
 
     const withBranch = project.run("guard", "--base", base, "--scope", "tasks", "--branch", branch);
     expect(withBranch.exitCode).toBe(0);
   });
 
-  it("tells you --branch exists when the checkout is detached", async () => {
+  it("uses changed feature history when the checkout is detached", async () => {
     const base = await asPullRequest();
     project.git("checkout", "-q", "--detach", "HEAD");
 
     const result = project.run("guard", "--base", base, "--scope", "tasks");
-    expect(result.stdout + result.stderr).toContain("--branch");
+    expect(result.exitCode).toBe(0);
   });
 
   it("generates a workflow that passes the branch explicitly", async () => {

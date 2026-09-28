@@ -25,7 +25,7 @@ import type { WorkspaceState } from "../state.js";
 import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
-import { nextFeatureId } from "./feature-id.js";
+import { allocateFeatureId } from "./feature-id.js";
 import { type HostRequest, hostRequest } from "./host-prompts.js";
 import { codexMemoryGate } from "./memory-gate.js";
 import {
@@ -92,7 +92,9 @@ async function createProductFeatureLocked(
   if (!listed.ok) return listed;
   const baseline = await captureAcceptanceBaseline(workspace);
   if (!baseline.ok) return baseline;
-  const feature = nextFeatureId(listed.value, options.goal);
+  const allocated = await allocateFeatureId(workspace.paths.root, listed.value, options.goal);
+  if (!allocated.ok) return allocated;
+  const feature = allocated.value;
   const timestamp = new Date().toISOString();
   const request = await featureRequest(workspace, options, feature, timestamp);
   if (!request.ok) return request;

@@ -48,3 +48,23 @@ it("judges an earlier-session grant by the session that asks", async () => {
   expect(await asked("session-2")).toBe("T001");
   expect(await asked("session-1")).toBeUndefined();
 });
+
+it("refuses bare work before changing an earlier session's grant", async () => {
+  const workspace = await laterSession("session-2", "Add MEDIAN");
+  const worked = await runProductWork(workspace, { check: "node --test" });
+  expect(worked.ok).toBe(false);
+  expect(!worked.ok && worked.error.message).toContain("earlier session");
+  expect((await runProductWork(workspace, { task: "T001" })).ok).toBe(true);
+});
+
+it("does not attribute an anonymous MCP grant to another active session", async () => {
+  const workspace = await laterSession("session-1");
+  for (const session of ["session-1", "session-2"])
+    await project?.write(
+      `.visp/session/hosts/${session}.json`,
+      JSON.stringify({ session, at: new Date().toISOString() }),
+    );
+  expect((await runProductWork(workspace, { task: "T001" })).ok).toBe(true);
+  const auth = await earlierSessionAuthorization(workspace, { hostSession: "session-2" });
+  expect(auth.ok && auth.value).toBeUndefined();
+});

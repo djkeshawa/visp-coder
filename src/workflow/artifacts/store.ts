@@ -190,10 +190,22 @@ export class ArtifactStore {
     return ok(markers);
   }
 
-  /** Feature directories, newest id first. */
+  /** Feature directories, newest intent first; malformed history remains independently readable. */
   async listFeatures(): Promise<Result<string[]>> {
     const entries = await this.files.listDirectories(this.paths.featuresDir);
     if (!entries.ok) return entries;
-    return ok(entries.value.filter((name) => featureIdSchema.safeParse(name).success).reverse());
+    const features = await Promise.all(
+      entries.value
+        .filter((name) => featureIdSchema.safeParse(name).success)
+        .map(async (name) => {
+          const intent = await this.readIntent(name);
+          return { name, createdAt: intent.ok ? intent.value.createdAt : "" };
+        }),
+    );
+    return ok(
+      features
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.name.localeCompare(a.name))
+        .map(({ name }) => name),
+    );
   }
 }
