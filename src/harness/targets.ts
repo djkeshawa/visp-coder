@@ -44,7 +44,7 @@ export function planFor(
     ...plan,
     assets: [
       ...plan.assets,
-      { path: "VISP.commands.md", content: commandGuide(false) },
+      { path: "VISP.commands.md", content: commandGuide(false, critic !== null) },
       ...criticAgentAssets(harness, critic),
       ...codexHookAssets(harness),
     ],

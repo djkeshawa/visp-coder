@@ -103,14 +103,19 @@ export function commandMap(includeNext = true, includeCritic = includeNext) {
   ].join("\n");
 }
 
-export function commandGuide(criticEnabled = true) {
+/**
+ * The installed guide leaves out the long reviewer prose, which work/next deliver when it
+ * applies; the short critic rows stay whenever a critic is configured, so the commands
+ * remain discoverable after a later `visp critic --on`.
+ */
+export function commandGuide(criticEnabled = true, criticCommands = criticEnabled) {
   const guide = `# VISP command guide
 
 The executable is \`visp\`; the package is \`visp-coder\`. Commands accept \`--help\`.
 
 \`visp next\` only reports the next action; it does not record final acceptance. Run \`visp accept\` when that action directs it.
 
-${commandMap(true, criticEnabled)}
+${commandMap(true, criticCommands)}
 
 For a literal request containing backticks, dollar signs or quotes, use a quoted heredoc:
 
