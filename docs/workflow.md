@@ -89,13 +89,14 @@ checks:
 - **Commands** run as an argument vector, never through a shell. A string is split into arguments; shell syntax such as `&&`, pipes or `VAR=value` prefixes is refused. Use two checks or a script the project owns.
 - **Browser journeys** use `command: {kind: browser-journey, journey: {...}}`. VISP drives an installed Chrome/Chromium with an isolated profile and records operations, measurements and screenshots. See [product review](product-review.md).
 - **`files`** lists the product and test files the check depends on; changes to them make earlier results stale.
+- **`environmentVariables`** optionally lists application environment variable names (for example `[APP_MODE, API_ENDPOINT]`) whose values must affect evidence freshness. Runtime variables (`PATH`, `NODE_*`, `PYTHON*`, `LANG`, `LC_*`, `TZ`, `CI`) are always included; terminal and host session variables are excluded by default.
 - **`verifierFiles`** lists the assertion program and its helpers, fixtures and configuration. VISP hashes them separately from the product so a repair can be compared against the same verifier. An explicit Node script, preload or `--env-file` argument must be listed, or the check stops before running with an environment failure. Use repository-relative paths.
 
 A check must exercise behavior to count as functional evidence. Syntax-only or static commands (for example `node --check`) still run but do not establish behavior. A check may not run a VISP workflow command (`visp done`, `visp capture` and similar) against its own workspace.
 
 `workflow.validationCommands` from `visp.yml` run alongside every slice's checks as `CONFIG_1`, `CONFIG_2`, and so on. `workflow.acceptanceChecks` are pinned when a feature is created and run at acceptance.
 
-Supervised checks run with a filtered environment and Python bytecode redirected away from the project, so a check does not change the product it checks. A command that could not start (for example, the executable is not installed) is recorded as an environment failure with the note that no product behavior was tested, not as a test failure.
+Supervised checks inherit the operator’s environment, including tokens and other credentials, except for shell bookkeeping (`_`, `SHLVL`, `PWD`, `OLDPWD`). Their output is recorded as evidence. Python bytecode is redirected to a private per-user cache outside the project unless `PYTHONPYCACHEPREFIX` is explicitly set. A command that could not start (for example, the executable is not installed) is recorded as an environment failure with the note that no product behavior was tested, not as a test failure.
 
 ## Work, done, next, accept
 

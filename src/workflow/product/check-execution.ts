@@ -15,7 +15,7 @@ import {
 } from "./check-command.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
 import type { ProductRecord } from "./store.js";
-import { productContractDigest, productSourceDigest } from "./subject.js";
+import { productComparisonEnvironmentDigest, productContractDigest } from "./subject.js";
 import { productVerifierDigest } from "./verifier-identity.js";
 
 export interface ExecutedProductCheck {
@@ -33,7 +33,7 @@ export async function executeProductCheck(
   retryEnvironment = false,
   verifierSnapshot: Record<string, string> = {},
 ): Promise<ExecutedProductCheck> {
-  const environment = await productSourceDigest(workspace, record.brief, {});
+  const environment = await productComparisonEnvironmentDigest(workspace, record.brief);
   const base = {
     id: randomUUID(),
     comparisonEnvironment: environment.ok ? environment.value : undefined,
@@ -51,7 +51,7 @@ export async function executeProductCheck(
   if (isBrowserCheckCommand(check.command))
     return executeBrowserCheck(workspace, record, check.command, base, retryEnvironment);
   const started = Date.now();
-  const output = await executeCommand(workspace, check);
+  const output = await executeCommand(workspace, check, !!base.verifierDigest);
   const commandVerifier =
     base.verifierDigest && output.ok && output.value.executableDigest
       ? {
@@ -106,7 +106,7 @@ function unavailableVerifier(
         status: "environment-failed",
         exitCode: -1,
         durationMs: 0,
-        output: `Check ${check.id} was not executed: verifier inputs are missing, unavailable, or omit an explicit Node assertion entry (${check.verifierFiles.join(", ")}). Use repository-relative Node script paths, declare the assertion entry and its helpers in verifierFiles, or restore missing files before rerunning. No product behavior was tested.`,
+        output: `Check ${check.id} was not executed: verifier inputs are missing, unavailable, or omit an explicit Node assertion entry (${check.verifierFiles.join(", ")}). If VISP could not identify the entry after a Node option, use --flag=value. Use repository-relative Node script paths, declare the assertion entry and its helpers in verifierFiles, or restore missing files before rerunning. No product behavior was tested.`,
       },
       state,
       mutations: [],
@@ -129,6 +129,7 @@ export type ExecutionIdentity = Pick<
 async function executeCommand(
   workspace: WorkspaceState,
   check: ProductCheck,
+  identifyExecutable: boolean,
 ): Promise<Result<CommandOutput & { executableDigest?: string }>> {
   const valid = validateProductCheckCommand(check);
   if (!valid.ok) return valid;
@@ -142,14 +143,18 @@ async function executeCommand(
       check.id,
       async (environment) => {
         const binary = argv.value[0] ?? "";
-        const before = await commandExecutableDigest(binary, workspace.paths.root, environment);
+        const before = identifyExecutable
+          ? await commandExecutableDigest(binary, workspace.paths.root, environment)
+          : undefined;
         const executed = await run(binary, argv.value.slice(1), {
           cwd: workspace.paths.root,
           env: environment,
           replaceEnv: true,
         });
         if (!executed.ok) return executed;
-        const after = await commandExecutableDigest(binary, workspace.paths.root, environment);
+        const after = before
+          ? await commandExecutableDigest(binary, workspace.paths.root, environment)
+          : undefined;
         return {
           ok: true as const,
           value: {

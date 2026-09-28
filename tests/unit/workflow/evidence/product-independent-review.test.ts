@@ -813,7 +813,7 @@ it("reuses browser evidence when only the host terminal color capability changes
     }),
   ).toMatchObject({ ok: true, value: { action: "normal-acceptance", callsUsed: 1 } });
   vi.stubEnv("FORCE_COLOR", "0");
-  expect(await browserEnvironmentIdentity(p.workspace.root)).not.toBe(environment);
+  expect(await browserEnvironmentIdentity(p.workspace.root)).toBe(environment);
   vi.unstubAllEnvs();
 });
 

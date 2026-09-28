@@ -19,6 +19,15 @@ const NODE_VALUE_FLAGS = new Set([
   "--test-skip-pattern",
   "--test-reporter",
   "--test-reporter-destination",
+  "--test-timeout",
+  "--test-concurrency",
+  "--test-shard",
+  "--test-isolation",
+  "--test-coverage-lines",
+  "--test-coverage-branches",
+  "--test-coverage-functions",
+  "--test-coverage-include",
+  "--test-coverage-exclude",
   "--input-type",
 ]);
 

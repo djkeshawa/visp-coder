@@ -1,6 +1,5 @@
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { browserExecutableIdentity } from "./browser-executable.js";
+import { pythonCacheDirectory } from "./python-cache.js";
 
 /** Ignore shell bookkeeping consistently in execution and evidence identity. */
 export function productExecutionEnvironment(): Record<string, string> {
@@ -12,16 +11,16 @@ export function productExecutionEnvironment(): Record<string, string> {
   );
 }
 
-/** Browser aliases, host routing and terminal capability hints are not product configuration. */
-export function productIdentityEnvironment(): Record<string, string> {
-  const {
-    CHROME_BIN: _browser,
-    CODEX_THREAD_ID: _hostThread,
-    CODEX_SESSION_ID: _hostSession,
-    COLORTERM: _terminalCapability,
-    ...environment
-  } = productExecutionEnvironment();
-  return environment;
+/** Only runtime configuration and explicitly declared application variables affect freshness. */
+export function productIdentityEnvironment(
+  declared: readonly string[] = [],
+): Record<string, string> {
+  const names = new Set(["PATH", "LANG", "TZ", "CI", ...declared]);
+  return Object.fromEntries(
+    Object.entries(productExecutionEnvironment()).filter(
+      ([name]) => names.has(name) || /^(?:NODE_|PYTHON|LC_)/.test(name),
+    ),
+  );
 }
 
 /**
@@ -32,9 +31,10 @@ export function productIdentityEnvironment(): Record<string, string> {
  */
 export async function resolvedProductExecutionEnvironment(): Promise<Record<string, string>> {
   const browser = await browserExecutableIdentity();
+  const inherited = productExecutionEnvironment();
   return {
-    PYTHONPYCACHEPREFIX: join(tmpdir(), "visp-python-cache"),
-    ...productExecutionEnvironment(),
+    PYTHONPYCACHEPREFIX: inherited.PYTHONPYCACHEPREFIX ?? (await pythonCacheDirectory()),
+    ...inherited,
     CHROME_BIN: "path" in browser ? browser.path : browser.binary,
   };
 }

@@ -114,3 +114,22 @@ it("does not certify an exact declared path recorded as missing by the source sn
     }),
   ).toBeUndefined();
 });
+
+it.each([
+  ["--test-timeout", "5000"],
+  ["--test-concurrency", "2"],
+  ["--test-shard", "1/2"],
+  ["--test-isolation", "process"],
+  ["--test-coverage-lines", "80"],
+  ["--test-coverage-branches", "80"],
+  ["--test-coverage-functions", "80"],
+  ["--test-coverage-include", "src/**"],
+  ["--test-coverage-exclude", "test/**"],
+])("recognizes the value for Node %s before the assertion entry", (flag, value) => {
+  expect(
+    productVerifierDigest(
+      { ...check, command: ["node", "--test", flag, value, "test/check.mjs"] },
+      snapshot,
+    ),
+  ).toMatch(/^[a-f0-9]{64}$/);
+});

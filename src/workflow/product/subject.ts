@@ -1,6 +1,9 @@
 import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { vispError } from "../../core/errors.js";
-import { productIdentityEnvironment } from "../../core/execution-environment.js";
+import {
+  productExecutionEnvironment,
+  productIdentityEnvironment,
+} from "../../core/execution-environment.js";
 import { repositoryFiles, repositoryGitlinks } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
@@ -104,7 +107,10 @@ export async function productSourceDigest(
   workspace: WorkspaceState,
   brief?: ProductBrief,
   snapshot?: Record<string, string>,
+  environment?: Record<string, string>,
 ): Promise<Result<string>> {
+  const selected = await subjectBrief(workspace, brief);
+  if (!selected.ok) return selected;
   const files = snapshot ? ok(snapshot) : await productSourceSnapshot(workspace, brief);
   if (!files.ok) return files;
   const controls: Record<string, string | null> = {};
@@ -125,10 +131,22 @@ export async function productSourceDigest(
         platform: process.platform,
         arch: process.arch,
       },
-      environment: productIdentityEnvironment(),
+      environment:
+        environment ??
+        productIdentityEnvironment(
+          selected.value?.checks.flatMap((check) => check.environmentVariables ?? []),
+        ),
       browser: await browserExecutableIdentity(),
     }),
   );
+}
+
+/** Full inherited environment is comparison context, never product freshness or plaintext state. */
+export function productComparisonEnvironmentDigest(
+  workspace: WorkspaceState,
+  brief?: ProductBrief,
+) {
+  return productSourceDigest(workspace, brief, {}, productExecutionEnvironment());
 }
 
 async function subjectBrief(
