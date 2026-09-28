@@ -1,7 +1,9 @@
 import { vispError } from "../../core/errors.js";
 import { changesSince, currentBranch } from "../../core/git.js";
 import { err, ok, type Result } from "../../core/result.js";
+import type { ImplementMarker } from "../artifacts/evidence.js";
 import type { WorkspaceState } from "../state.js";
+import { productScopes } from "./scopes.js";
 
 /** CI identifies every feature carried by the PR, even after a branch rename. */
 export async function branchFeatures(
@@ -11,22 +13,15 @@ export async function branchFeatures(
   if (options.feature) return ok([options.feature]);
   const listed = await workspace.store.listFeatures();
   if (!listed.ok) return listed;
-  const changed = new Set<string>();
-  if (options.base) {
-    const diff = await changesSince(workspace.paths.root, options.base);
-    if (!diff.ok) return diff;
-    for (const file of diff.value.files) {
-      const feature = /^\.visp\/features\/([^/]+)\//.exec(file.path)?.[1];
-      if (feature) changed.add(feature);
-    }
-  }
+  const changed = await changedFeatures(workspace, options.base);
+  if (!changed.ok) return changed;
   const branch = options.branch ? ok(options.branch) : await currentBranch(workspace.paths.root);
   if (!branch.ok) return branch;
   const selected: string[] = [];
   for (const feature of listed.value) {
     const intent = await workspace.store.readIntent(feature);
     if (
-      changed.has(feature) ||
+      changed.value.has(feature) ||
       (branch.value !== "HEAD" && intent.ok && intent.value.branch === branch.value)
     )
       selected.push(feature);
@@ -43,4 +38,35 @@ export async function branchFeatures(
           },
         ),
       );
+}
+
+async function changedFeatures(
+  workspace: WorkspaceState,
+  base?: string,
+): Promise<Result<Set<string>>> {
+  const changed = new Set<string>();
+  if (base) {
+    const diff = await changesSince(workspace.paths.root, base);
+    if (!diff.ok) return diff;
+    for (const file of diff.value.files) {
+      const feature = /^\.visp\/features\/([^/]+)\//.exec(file.path)?.[1];
+      if (feature) changed.add(feature);
+    }
+  }
+  return ok(changed);
+}
+
+export async function branchScopes(
+  workspace: WorkspaceState,
+  options: { base?: string; branch?: string; feature?: string },
+): Promise<Result<ImplementMarker[]>> {
+  const features = await branchFeatures(workspace, options);
+  if (!features.ok) return features;
+  const markers: ImplementMarker[] = [];
+  for (const feature of features.value) {
+    const scopes = await productScopes(workspace, { feature, source: "tasks" });
+    if (!scopes.ok) return scopes;
+    markers.push(...scopes.value);
+  }
+  return ok(markers);
 }

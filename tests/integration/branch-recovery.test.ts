@@ -108,3 +108,37 @@ it("selects every changed feature after branch rename and merge", async () => {
   const selected = await branchFeatures(await project.state(), { base, branch: "renamed" });
   expect(selected.ok && selected.value.sort()).toEqual([feature, "002-second"].sort());
 });
+
+it("reserves ordinals across linked worktrees, including simultaneous allocation", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  ({ workspace: project } = await productWorkspace());
+  project.commit("feature");
+  const linked = await mkdtemp(join(tmpdir(), "visp-branch-audit-"));
+  try {
+    project.git("worktree", "add", "-b", "parallel", linked, "main");
+    const allocated = await Promise.all([
+      allocateFeatureId(project.root, [], "Identical goal"),
+      allocateFeatureId(linked, [], "Identical goal"),
+    ]);
+    expect(allocated.every((result) => result.ok)).toBe(true);
+    expect(new Set(allocated.map((result) => result.ok && result.value)).size).toBe(2);
+  } finally {
+    project.git("worktree", "remove", linked);
+    await rm(linked, { recursive: true, force: true });
+  }
+});
+
+it("selects the newest intent in a fresh checkout instead of the highest name", async () => {
+  const { rm, readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  ({ workspace: project } = await productWorkspace());
+  const feature = (await project.state()).status?.activeFeature;
+  await project.withFeature("999-older");
+  const path = ".visp/features/999-older/intent.json";
+  const intent = JSON.parse(await readFile(join(project.root, path), "utf8"));
+  await project.write(path, JSON.stringify({ ...intent, createdAt: "2000-01-01T00:00:00.000Z" }));
+  await rm(join(project.root, ".visp/status.json"));
+  expect((await project.state()).status?.activeFeature).toBe(feature);
+});

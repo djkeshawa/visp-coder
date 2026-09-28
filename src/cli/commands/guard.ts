@@ -9,7 +9,7 @@ import { requireInstalledRuntime } from "../../harness/runtime.js";
 import { checkPaths, decideScope, type ScopeViolation } from "../../orchestrate/guard.js";
 import type { ImplementMarker } from "../../workflow/artifacts/evidence.js";
 import { resolveRule, ruleContextFor } from "../../workflow/policy/resolve.js";
-import { branchFeatures } from "../../workflow/product/branch-scope.js";
+import { branchFeatures, branchScopes } from "../../workflow/product/branch-scope.js";
 import {
   hasPendingCriticReview,
   PENDING_REVIEW_MESSAGE,
@@ -351,17 +351,10 @@ async function selectGuardMarkers(
   feature: string | undefined,
 ): Promise<Result<GuardMarkerSelection>> {
   if (opts.scope === "tasks") {
-    const features = await branchFeatures(state, opts);
-    if (!features.ok) return features;
-    const markers: ImplementMarker[] = [];
-    for (const id of features.value) {
-      const scopes = await authorizedScopes(state, { feature: id, source: "tasks" });
-      if (!scopes.ok) return scopes;
-      markers.push(...scopes.value);
-    }
-    return ok({ kind: "markers", markers });
+    const markers = await branchScopes(state, opts);
+    return markers.ok ? ok({ kind: "markers", markers: markers.value }) : markers;
   }
-  if (opts.ifAuthorized && opts.scope !== "tasks") {
+  if (opts.ifAuthorized) {
     const active = await authorizedScopes(state, scopeFilter(opts, feature));
     if (!active.ok) return active;
     if (active.value.length === 0) return ok({ kind: "unscoped" });

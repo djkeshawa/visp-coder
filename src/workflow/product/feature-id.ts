@@ -53,11 +53,7 @@ export async function allocateFeatureId(root: string, existing: readonly string[
 }
 
 async function featureNamesAcrossRefs(root: string): Promise<Result<string[]>> {
-  const refs = await run(
-    "git",
-    ["for-each-ref", "--format=%(objectname)", "refs/heads", "refs/remotes"],
-    { cwd: root },
-  );
+  const refs = await run("git", ["for-each-ref", "--format=%(objectname)"], { cwd: root });
   if (!refs.ok) return refs;
   if (refs.value.exitCode !== 0)
     return err(vispError("COMMAND_FAILED", "Cannot inspect feature branches"));

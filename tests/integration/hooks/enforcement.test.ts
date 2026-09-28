@@ -105,10 +105,14 @@ describe("generated hooks", () => {
 
   // Weak workers stopped with slices open; the Stop hook sends them back a few times.
   it("sends a stopping worker back to an unfinished feature at most three times", async () => {
-    const stop = () =>
+    const stop = (session = "first") =>
       execFileSync(process.execPath, [join(project.root, ".visp/hooks/claude-pretooluse.mjs")], {
         cwd: project.root,
-        input: JSON.stringify({ hook_event_name: "Stop", stop_hook_active: false }),
+        input: JSON.stringify({
+          hook_event_name: "Stop",
+          stop_hook_active: false,
+          session_id: session,
+        }),
         env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
         encoding: "utf8",
       });
@@ -117,6 +121,7 @@ describe("generated hooks", () => {
     stop();
     stop();
     expect(stop()).toBe("");
+    expect(JSON.parse(stop("second"))).toMatchObject({ decision: "block" });
     const { rm } = await import("node:fs/promises");
     await rm(join(project.root, ".visp/session/stop-blocks.json"));
   });
