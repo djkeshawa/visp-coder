@@ -11,7 +11,7 @@ import { findingSchema } from "./evidence.js";
 import { behaviorScenarioSchema, qualityRequirementSchema, requirementSchema } from "./feature.js";
 
 /** Why a file was included, so a reader can judge the selection. */
-export const selectionReasonSchema = z.enum([
+const selectionReasonSchema = z.enum([
   "allowed-file",
   "expected-file",
   "structural-neighbour",
@@ -33,7 +33,7 @@ export type SelectionReason = z.infer<typeof selectionReasonSchema>;
  * pack's primary answer is these ranges — an agent that can read files needs
  * "where to look", not a copy of what is already on disk.
  */
-export const contextRegionSchema = z
+const contextRegionSchema = z
   .object({
     startLine: z.number().int().positive(),
     endLine: z.number().int().positive(),
@@ -44,7 +44,7 @@ export const contextRegionSchema = z
 
 export type ContextRegion = z.infer<typeof contextRegionSchema>;
 
-export const contextFileSchema = z
+const contextFileSchema = z
   .object({
     path: z.string(),
     reason: selectionReasonSchema,
@@ -78,7 +78,7 @@ export type ContextFile = z.infer<typeof contextFileSchema>;
  * masquerade as one. The files the failure named do go through the ordinary
  * selection machinery, under `named-in-failure`.
  */
-export const attemptFeedbackSchema = z
+const attemptFeedbackSchema = z
   .object({
     source: z.enum(["verification", "review"]),
     /** `createdAt` of the failed record this feedback was read from. */
@@ -104,7 +104,7 @@ export const attemptFeedbackSchema = z
 
 export type AttemptFeedback = z.infer<typeof attemptFeedbackSchema>;
 
-export const contextContractSchema = z
+const contextContractSchema = z
   .object({
     schemaVersion: z.literal(1),
     featureGoal: z.string(),

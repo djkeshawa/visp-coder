@@ -140,7 +140,7 @@ export function reviewInteractionEvidence(
 }
 
 /** Shown operation IDs only; layout capture IDs may refer to undelivered images. */
-export function reviewInteractionEvidenceIds(
+function reviewInteractionEvidenceIds(
   interactionEvidence: ReturnType<typeof reviewInteractionEvidence>,
 ): string[] {
   return [

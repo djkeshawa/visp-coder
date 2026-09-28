@@ -15,7 +15,7 @@ export function isDeclaredJourney(
 }
 
 /** Historical ownership survives a method revision; it is not the current assertion. */
-export function isCurrentDeclaredJourney(
+function isCurrentDeclaredJourney(
   record: ProductRecord,
   run: { task?: string; journeyKey?: string },
 ) {

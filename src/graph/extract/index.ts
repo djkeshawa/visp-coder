@@ -311,7 +311,7 @@ export function dedupeRelations(relations: readonly Relation[]): Relation[] {
   return [...seen.values()].sort(byRelation);
 }
 
-export function byRelation(a: Relation, b: Relation): number {
+function byRelation(a: Relation, b: Relation): number {
   return (
     compare(a.path, b.path) ||
     a.line - b.line ||

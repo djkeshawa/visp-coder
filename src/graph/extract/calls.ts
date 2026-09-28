@@ -170,7 +170,7 @@ function throughImport(binding: string, name: string, scope: CallScope): Resolve
 }
 
 /** The innermost function-like entity around a line, or the file itself. */
-export function enclosingEntityId(scope: CallScope, line: number): string {
+function enclosingEntityId(scope: CallScope, line: number): string {
   let best: Entity | undefined;
   for (const entity of scope.enclosing) {
     if (entity.kind === "file") continue;

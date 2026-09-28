@@ -116,7 +116,7 @@ const TESTER_OUTPUT_SCHEMA = {
   },
 } as const;
 
-export const independentTestsRecordSchema = z
+const independentTestsRecordSchema = z
   .object({
     version: z.literal(1),
     status: z.enum(["running", "pinned", "rejected", "failed", "declined"]),

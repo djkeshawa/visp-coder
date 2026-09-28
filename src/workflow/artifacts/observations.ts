@@ -21,17 +21,17 @@ export const observationSourceSchema = z.enum(["browser", "manual"]);
 
 export const observationResultSchema = z.enum(["satisfied", "failed", "unclear"]);
 
-export const observationImageDimensionsSchema = z
+const observationImageDimensionsSchema = z
   .object({
     width: z.number().int().positive(),
     height: z.number().int().positive(),
   })
   .strict();
 
-export const observationCaptureSchema = z.enum(["viewport", "full-page"]);
+const observationCaptureSchema = z.enum(["viewport", "full-page"]);
 export type ObservationCapture = z.infer<typeof observationCaptureSchema>;
 
-export const observationAttachmentSchema = z
+const observationAttachmentSchema = z
   .object({
     /** The project-relative path supplied by the observer. */
     sourcePath: observationPathSchema,
@@ -45,7 +45,7 @@ export const observationAttachmentSchema = z
 
 export type ObservationAttachment = z.infer<typeof observationAttachmentSchema>;
 
-export const observationViewportSchema = z
+const observationViewportSchema = z
   .object({
     width: z.number().int().positive().max(16_384),
     height: z.number().int().positive().max(16_384),
@@ -54,7 +54,7 @@ export const observationViewportSchema = z
 
 export type ObservationViewport = z.infer<typeof observationViewportSchema>;
 
-export const observationEnvironmentSchema = z
+const observationEnvironmentSchema = z
   .object({
     /** Rendering engine or browser family, for example chromium or webkit. */
     browserEngine: z.string().trim().min(1).max(100).optional(),
@@ -74,7 +74,7 @@ export type ObservationEnvironment = z.infer<typeof observationEnvironmentSchema
  * hashes let later readers say whether it still describes the artifacts under
  * review without promoting the observation into mechanical evidence.
  */
-export const observationReceiptSchema = z
+const observationReceiptSchema = z
   .object({
     ...artifactEnvelope("observation"),
     id: z.string().regex(/^OBS-[0-9a-f]{12}$/),

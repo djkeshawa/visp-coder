@@ -7,7 +7,7 @@ import { type CriticSelection, criticSelection, readCriticState } from "./critic
 import type { ProductSelection } from "./store.js";
 
 /** An early consultation shares the selection's budget and always leaves a product call. */
-export function understandingReservationGap(
+function understandingReservationGap(
   selected: CriticSelection,
   state: CriticState,
   retryAfter: string | undefined,

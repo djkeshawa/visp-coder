@@ -6,7 +6,7 @@ export const CRITIC_MAX_CALLS = 6;
  * contract gap the hidden tests checked; later ones raised untested edge cases and
  * doubled the time. Repair gains also flatten after 2–3 rounds in published studies.
  */
-export const CRITIC_DEFAULT_CALLS = 3;
+const CRITIC_DEFAULT_CALLS = 3;
 export const CRITIC_CALL_TIMEOUT_MS = 180_000;
 export const CRITIC_FEATURE_TIMEOUT_MS = 18 * 60 * 1000;
 
@@ -51,7 +51,7 @@ export function configuredCriticMode(
  * `codex-exec`: VISP launches a read-only, ephemeral `codex exec` reviewer itself, so a
  * worker that never orchestrates delegation still receives independent review.
  */
-export const criticLaunchSchema = z.enum(["host", "codex-exec"]);
+const criticLaunchSchema = z.enum(["host", "codex-exec"]);
 
 export const criticDefaultsSchema = criticConfigSchema
   .partial()

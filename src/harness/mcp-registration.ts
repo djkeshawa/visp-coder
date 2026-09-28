@@ -18,8 +18,8 @@ import {
 
 export const MCP_CONFIG_FILE = ".mcp.json";
 export const OPENCODE_CONFIG_FILE = "opencode.json";
-export const CURSOR_CONFIG_FILE = ".cursor/mcp.json";
-export const COPILOT_CONFIG_FILE = ".vscode/mcp.json";
+const CURSOR_CONFIG_FILE = ".cursor/mcp.json";
+const COPILOT_CONFIG_FILE = ".vscode/mcp.json";
 export const MCP_SERVER_NAME = PRODUCT_NAME;
 export const MCP_AWARE_HARNESSES: readonly Harness[] = [
   "claude-code",

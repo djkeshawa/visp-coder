@@ -4,7 +4,7 @@ import { ok } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { sourceEntryHash } from "./source-entry.js";
 
-export const gitSourceIdentity = (entry: GitSourceEntry) => `git:${entry.mode}:${entry.object}`;
+const gitSourceIdentity = (entry: GitSourceEntry) => `git:${entry.mode}:${entry.object}`;
 
 export function repositorySourceIdentity(
   workspace: WorkspaceState,

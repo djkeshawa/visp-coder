@@ -14,7 +14,7 @@ import type { WorkspaceState } from "../workflow/state.js";
  * for in earlier features and, when a new feature starts, adds the recorded decisions Visp
  * Memory selects for the new request (none when nothing is relevant enough) to that request.
  */
-export const MEMORY_SERVICE_STATE = "state/memory-service.json";
+const MEMORY_SERVICE_STATE = "state/memory-service.json";
 const MEMORY_SERVICE_PROGRESS = "state/memory-service-progress.json";
 /** Per feature: the recorded decisions its request carries, shown on every `work` reply. */
 export const PROJECT_MEMORY_FILE = "project-memory.json";

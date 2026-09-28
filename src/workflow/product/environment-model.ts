@@ -48,7 +48,7 @@ export async function browserExecutionEnvironmentIdentity(root: string, binary?:
   });
 }
 
-export function supportedHostCaptureOption(input: SupportedHostCaptureInput) {
+function supportedHostCaptureOption(input: SupportedHostCaptureInput) {
   const args = {
     ...(input.feature ? { feature: input.feature } : {}),
     ...(input.task ? { task: input.task } : {}),

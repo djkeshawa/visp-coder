@@ -25,7 +25,7 @@ export const SKILL_STATES = ["proposed", "admitted", "rejected", "retired", "orp
  * `declared` names a proposed check, never an executed one. `verified` is a
  * legacy spelling read conservatively as `declared` by the store.
  */
-export const SKILL_TRUST = ["declared", "verified", "advisory"] as const;
+const SKILL_TRUST = ["declared", "verified", "advisory"] as const;
 export type SkillTrust = (typeof SKILL_TRUST)[number];
 
 /**
@@ -41,7 +41,7 @@ export type SkillTrust = (typeof SKILL_TRUST)[number];
 export const SKILL_ORIGINS = ["derived", "seeded"] as const;
 export type SkillOrigin = (typeof SKILL_ORIGINS)[number];
 
-export const skillEvidenceSchema = z
+const skillEvidenceSchema = z
   .object({
     verification: z
       .object({
@@ -58,7 +58,7 @@ export const skillEvidenceSchema = z
 export type SkillEvidence = z.infer<typeof skillEvidenceSchema>;
 
 /** Content-addressed observations of closed local work; no producer authentication implied. */
-export const skillSupportSchema = z
+const skillSupportSchema = z
   .object({
     ...taskRefSchema.shape,
     taskHash: sha256Schema,
@@ -68,7 +68,7 @@ export const skillSupportSchema = z
   .strict();
 export type SkillSupport = z.infer<typeof skillSupportSchema>;
 
-export const skillIdSchema = z
+const skillIdSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]{1,63}$/, "Skill id must be lowercase words joined by dashes");
 

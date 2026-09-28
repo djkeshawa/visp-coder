@@ -11,7 +11,7 @@ import { type EarlierFeature, requestChunks } from "./memory-service.js";
  * selection, which the model's candidates came from, fell short alone (15 and 17). At these
  * sizes every note fits in one call, so VISP keeps the notes itself and needs no service.
  */
-export const REQUEST_HISTORY_STATE = "state/request-history.json";
+const REQUEST_HISTORY_STATE = "state/request-history.json";
 /** The newest notes the gate reads; beyond this a project wants Visp Memory's search first. */
 const MAX_CANDIDATE_CHARS = 40_000;
 

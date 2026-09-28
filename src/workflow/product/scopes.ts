@@ -81,7 +81,7 @@ export function selectProductSlice(
   );
 }
 
-export function markerForProduct(
+function markerForProduct(
   brief: ProductBrief,
   slice: ProductSlice,
   createdAt: string,

@@ -43,7 +43,7 @@ export async function repositorySourceObjects(root: string) {
 }
 
 /** Git streams large regular files without loading their bytes into VISP. No object is written. */
-export async function workingFileObject(root: string, path: string): Promise<Result<string>> {
+async function workingFileObject(root: string, path: string): Promise<Result<string>> {
   const result = await gitOutput(root, ["hash-object", "--no-filters", "--", path]);
   return result.ok ? ok(result.value.trim()) : result;
 }

@@ -67,12 +67,6 @@ export const pathPatternSchema = z
   .refine((value) => !value.startsWith("/"), "Path must be repository-relative")
   .refine((value) => !value.includes(".."), "Path must not escape the repository");
 
-/** Provenance of an artifact this one was derived from. */
-export const provenanceSchema = z.object({
-  path: z.string(),
-  hash: sha256Schema,
-});
-
 /** Every artifact carries its kind and when it was written. */
 export function artifactEnvelope<Kind extends string>(kind: Kind) {
   return {

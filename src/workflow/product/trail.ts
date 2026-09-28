@@ -5,7 +5,7 @@ import type { ProductState } from "./model.js";
 import { withProductMutation } from "./runtime.js";
 import { readProductRecord, saveProductState } from "./store.js";
 
-export const TRAIL_LIMITS = { executions: 100, captureRuns: 20, captures: 40 };
+const TRAIL_LIMITS = { executions: 100, captureRuns: 20, captures: 40 };
 
 function strings(value: unknown, into = new Set<string>()): Set<string> {
   if (typeof value === "string") into.add(value);

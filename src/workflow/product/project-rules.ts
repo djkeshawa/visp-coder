@@ -17,7 +17,7 @@ import { withProductMutation } from "./runtime.js";
  * in the request, the same workers applied them. So VISP captures them without the worker's
  * help and puts them in every later feature's request and work context.
  */
-export const PROJECT_RULES_FILE = "rules.json";
+const PROJECT_RULES_FILE = "rules.json";
 
 const MAX_RULES_PER_PROMPT = 20;
 const MAX_RULE_LENGTH = 1000;

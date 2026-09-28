@@ -12,7 +12,7 @@ import { productReviewSubmissionSchema } from "./review-request.js";
 
 export { type CriticConfig, criticConfigSchema } from "../../config/critic.js";
 
-export const criticPhaseSchema = z.enum(["understanding", "product"]);
+const criticPhaseSchema = z.enum(["understanding", "product"]);
 export type CriticPhase = z.infer<typeof criticPhaseSchema>;
 
 export const nativeCapabilitySchema = z
@@ -26,7 +26,7 @@ export const nativeCapabilitySchema = z
     delegationAllowed: z.boolean().optional(),
   })
   .strict();
-export const nativeResultSchema = z
+const nativeResultSchema = z
   .object({
     attempt: z.string().uuid(),
     model: z.string().min(1).max(200),

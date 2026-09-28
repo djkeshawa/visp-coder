@@ -146,14 +146,14 @@ export const specSchema = z
 
 export type Spec = z.infer<typeof specSchema>;
 
-export const decisionSchema = z
+const decisionSchema = z
   .object({
     statement: z.string().min(1),
     rationale: z.string().default(""),
   })
   .strict();
 
-export const moduleBoundarySchema = z
+const moduleBoundarySchema = z
   .object({
     name: z.string().min(1),
     /** Execution boundary for functional checks; HTML delivery paths also establish browser work. */
@@ -166,7 +166,7 @@ export const moduleBoundarySchema = z
   })
   .strict();
 
-export const testStrategyEntrySchema = z
+const testStrategyEntrySchema = z
   .object({
     layer: validationLayerSchema,
     covers: z.array(engineeringReferenceSchema).min(1),

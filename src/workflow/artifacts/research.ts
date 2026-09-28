@@ -5,7 +5,7 @@ const researchQuestionIdSchema = z
   .string()
   .regex(/^RQ\d{3,}$/, "Research question id must look like RQ001");
 
-export const researchSourceSchema = z
+const researchSourceSchema = z
   .object({
     kind: z.enum(["repository", "experiment", "official-docs", "external", "user"]),
     reference: z.string().min(1),
@@ -13,14 +13,14 @@ export const researchSourceSchema = z
   })
   .strict();
 
-export const researchImplicationSchema = z
+const researchImplicationSchema = z
   .object({
     kind: z.enum(["functional", "quality", "architecture", "test", "task"]),
     statement: z.string().min(1),
   })
   .strict();
 
-export const researchChallengeSchema = z
+const researchChallengeSchema = z
   .object({
     method: z.enum(["repository-trace", "experiment", "source-check", "user-decision"]),
     outcome: z.enum(["supported", "rejected", "inconclusive"]),
@@ -32,7 +32,7 @@ export const researchChallengeSchema = z
   })
   .strict();
 
-export const researchQuestionSchema = z
+const researchQuestionSchema = z
   .object({
     id: researchQuestionIdSchema,
     /** What kind of uncertainty this question settles. Optional for legacy artifacts. */
@@ -47,7 +47,7 @@ export const researchQuestionSchema = z
   })
   .strict();
 
-export const researchFindingSchema = z
+const researchFindingSchema = z
   .object({
     id: researchFindingIdSchema,
     classification: z.enum(["fact", "inference"]),

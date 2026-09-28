@@ -244,7 +244,7 @@ function bounded(value: unknown): unknown {
  * output tail, what blocks closure and the next step; graph trace, digests and repeated
  * outcome statements stay in structured data.
  */
-export function compactVerificationText(
+function compactVerificationText(
   name: string,
   value: unknown,
   channel: ReplyChannel = "mcp",
@@ -308,11 +308,7 @@ function executionSummary(execution: Record<string, unknown>): unknown {
 }
 
 /** Feature creation and brief updates: the author already holds the content it wrote. */
-export function compactBriefText(
-  name: string,
-  value: unknown,
-  channel: ReplyChannel = "mcp",
-): string {
+function compactBriefText(name: string, value: unknown, channel: ReplyChannel = "mcp"): string {
   const data = object(value);
   const brief = data.brief === undefined ? data : object(data.brief);
   const summary = {
@@ -357,11 +353,7 @@ function rows(value: unknown): Record<string, unknown>[] {
  * The next step. Critic findings arrive both as evidence lines and as criticAdvice
  * findings; the worker needs each once, with the action and command.
  */
-export function compactNextText(
-  name: string,
-  value: unknown,
-  channel: ReplyChannel = "mcp",
-): string {
+function compactNextText(name: string, value: unknown, channel: ReplyChannel = "mcp"): string {
   const data = object(value);
   const advice = object(data.criticAdvice);
   const evidence = Array.isArray(data.evidence) ? [...new Set(data.evidence)] : [];

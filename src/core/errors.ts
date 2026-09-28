@@ -4,7 +4,7 @@ import { EXIT } from "./constants.js";
  * Error codes are part of the machine contract: they appear in `--json` output
  * and callers branch on them.
  */
-export const ERROR_CODES = [
+const ERROR_CODES = [
   "NOT_INITIALIZED",
   "ALREADY_INITIALIZED",
   "CONFIG_INVALID",

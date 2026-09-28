@@ -29,7 +29,7 @@ export async function exists(path: string): Promise<boolean> {
   }
 }
 
-export async function ensureDir(path: string): Promise<Result<void>> {
+async function ensureDir(path: string): Promise<Result<void>> {
   try {
     await mkdir(path, { recursive: true });
     return ok(undefined);
