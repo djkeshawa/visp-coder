@@ -18,3 +18,13 @@ it("starts the minimal guide with a one-slice check and a shell-safe request", (
   expect(renderMinimalGuide()).toContain("--source-brief -");
   expect(renderMinimalGuide()).toContain("<<'REQUEST'");
 });
+
+it("tells every guide to show user-readable information as labeled text", () => {
+  for (const guide of [renderAgentGuide(), renderMinimalGuide()]) {
+    expect(guide).toContain(
+      "If the request has a UI, show status, counts, errors as word-labeled text",
+    );
+    expect(guide).toContain("Score: 1500");
+    expect(guide).toContain("not only canvas/icons");
+  }
+});
