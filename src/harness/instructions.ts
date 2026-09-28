@@ -9,7 +9,8 @@ export const COMPACT_RULES = `- Keep original request with --source-brief. Prese
 - Run visp work before editing; build a small runnable behavior. Each functional outcome needs a check: a test command, or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
 - Stateful work: act, settle, act again; check failure and restart.
 - When checks pass, visp done may start an independent review; visp next waits for it. Fix required findings, then visp done again. An accepted critic response records the review; otherwise use visp review --prepare, then --session <id> --from -.
-- Sandbox blocked sockets? Rerun with escalation.
+- Run visp done, verify, accept and next with the host's maximum shell timeout (at least 10 minutes when supported). Retain the command handle and poll it; completed checks are saved for retry after interruption.
+- Sandbox blocked process, filesystem or socket access? Inspect the denial and rerun with supported escalation.
 - Missing product evidence stays unresolved. Report reviewer.context honestly. Do not force extra review rounds.
 - Before the final answer, run \`visp next\`; follow its action and respect execution refusals.`;
 

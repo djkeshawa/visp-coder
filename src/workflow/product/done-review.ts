@@ -3,9 +3,11 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
+import { cancelledExecution } from "./check-lifecycle.js";
 import { type ProductCriticHost, runProductCritic } from "./critic.js";
 import { codexExecCriticHost, configuredCriticLauncher } from "./critic-exec.js";
 import { hasPendingCriticReview } from "./critic-policy.js";
@@ -33,7 +35,7 @@ export type ProductDoneReviewed = ProductVerification & {
   readonly next?: ProductNext;
 };
 
-interface ReviewSelection {
+interface ReviewSelection extends ProductSelection {
   readonly feature: string;
   readonly task?: string;
 }
@@ -54,13 +56,16 @@ export async function runProductDoneReviewed(
   startReview?: ReviewStarter,
   waitMs = 0,
 ): Promise<Result<ProductDoneReviewed>> {
+  const deadline = callDeadline(options, waitMs);
   const checked = await runProductDone(workspace, options);
   if (!checked.ok) return checked;
   const progress = await acceptanceProgress(
     workspace,
     checked.value.feature,
     checked.value.executions.map((execution) => execution.check),
+    { ...options, deadline },
   );
+  if (options.signal?.aborted) return cancelledExecution();
   const done = ok(
     progress.length ? { ...checked.value, acceptanceTests: progress } : checked.value,
   );
@@ -68,14 +73,21 @@ export async function runProductDoneReviewed(
   const skipped = await reviewNotNeeded(workspace, done.value.feature, done.value.task);
   if (skipped) return ok({ ...done.value, critic: skipped });
   const { feature } = done.value;
+  await options.onProgress?.({
+    check: "review",
+    status: "starting; run visp next if still pending",
+  });
   let critic = await startReview(workspace, {
+    signal: options.signal,
+    deadline,
     feature,
     ...(done.value.closed || !done.value.task ? {} : { task: done.value.task }),
   });
   // Weak workers kept editing while a review ran, and the changed source discarded it.
   // Holding `done` until the review returns delivers findings in the same step.
-  if (critic.running && !(await pendingReview(workspace, feature, waitMs)))
+  if (critic.running && !(await pendingReview(workspace, feature, deadline ?? Date.now(), options)))
     critic = summarize(await runProductCritic(workspace, { operation: "status", feature }));
+  if (options.signal?.aborted) return cancelledExecution();
   const next = critic.running ? waitingNext(feature) : await runProductNext(workspace, { feature });
   return ok({
     ...done.value,
@@ -95,16 +107,27 @@ export async function runProductAcceptReviewed(
   startReview?: ReviewStarter,
   waitMs = 0,
 ): Promise<Result<ProductVerification & { readonly critic?: DoneCriticSummary }>> {
+  const deadline = callDeadline(options, waitMs);
   const accepted = await runProductAccept(workspace, options);
   if (!accepted.ok || accepted.value.passed || !startReview || !checksPassed(accepted.value))
     return accepted;
   const { feature } = accepted.value;
-  let critic = await startReview(workspace, { feature });
-  if (critic.running && !(await pendingReview(workspace, feature, waitMs)))
+  if (options.signal?.aborted) return cancelledExecution();
+  await options.onProgress?.({
+    check: "review",
+    status: "starting; run visp next if still pending",
+  });
+  let critic = await startReview(workspace, { feature, signal: options.signal, deadline });
+  if (critic.running && !(await pendingReview(workspace, feature, deadline ?? Date.now(), options)))
     critic = summarize(await runProductCritic(workspace, { operation: "status", feature }));
   if (critic.running || !critic.reviewed) return ok({ ...accepted.value, critic });
-  const again = await runProductAccept(workspace, options);
+  if (options.signal?.aborted) return cancelledExecution();
+  const again = await runProductAccept(workspace, { ...options, reusePassed: true });
   return again.ok ? ok({ ...again.value, critic }) : again;
+}
+
+function callDeadline(options: ProductSelection, waitMs: number) {
+  return options.deadline ?? (waitMs > 0 ? Date.now() + waitMs : undefined);
 }
 
 /**
@@ -152,17 +175,25 @@ export async function runProductNextAfterReview(
   channel: "cli" | "mcp" = "cli",
 ): Promise<Result<ProductNext>> {
   const feature = options.feature ?? workspace.status?.activeFeature;
-  if (feature && (await pendingReview(workspace, feature, reviewWaitMs(workspace, channel))))
+  if (
+    feature &&
+    (await pendingReview(
+      workspace,
+      feature,
+      options.deadline ?? Date.now() + reviewWaitMs(workspace, channel),
+      options,
+    ))
+  )
     return waitingNext(feature);
   return runProductNext(workspace, options);
 }
 
 /**
  * Reviews usually return in 40–100 s; weak workers asked once and stopped after a 30 s
- * wait. The CLI waits past a typical review inside the 180 s review deadline; MCP stays
- * under the ~60 s tool-call timeout hosts apply.
+ * wait. Polling uses the remaining whole-call budget: 100 s on CLI, 50 s on MCP.
+ * Checks may need a longer host timeout; they consume this budget before review waits.
  */
-const REVIEW_WAIT_MS = { cli: 120_000, mcp: 50_000 } as const;
+const REVIEW_WAIT_MS = { cli: 100_000, mcp: 50_000 } as const;
 
 /** How long `done` and `next` wait for a VISP-launched review on this channel. */
 export function reviewWaitMs(workspace: WorkspaceState, channel: "cli" | "mcp"): number {
@@ -191,7 +222,19 @@ export function configuredReviewStarter(
 /** Run the review in this process; used where the caller outlives the reviewer. */
 export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
   return async (workspace, selection) =>
-    summarize(await runProductCritic(workspace, { operation: "review", ...selection }, launcher));
+    summarize(
+      await runProductCritic(
+        workspace,
+        { operation: "review", feature: selection.feature, task: selection.task },
+        launcher,
+        selection.deadline === undefined
+          ? selection.signal
+          : AbortSignal.any([
+              AbortSignal.timeout(Math.max(1, selection.deadline - Date.now())),
+              ...(selection.signal ? [selection.signal] : []),
+            ]),
+      ),
+    );
 }
 
 /**
@@ -224,11 +267,16 @@ export function backgroundReview(cli: string, startupMs = 15_000): ReviewStarter
       exited = true;
     });
     child.unref();
-    const deadline = Date.now() + startupMs;
-    while (Date.now() < deadline && !exited) {
+    const deadline = Math.min(
+      Date.now() + startupMs,
+      selection.deadline ?? Number.POSITIVE_INFINITY,
+    );
+    while (Date.now() < deadline && !exited && !selection.signal?.aborted) {
       const pending = await hasPendingCriticReview(workspace, selection.feature);
       if (pending.ok && pending.value) return runningSummary();
-      await sleep(250);
+      await delay(Math.min(250, Math.max(1, deadline - Date.now())), undefined, {
+        signal: selection.signal,
+      }).catch(() => undefined);
     }
     if (!exited) return runningSummary();
     return summarizeEnvelope(await readFile(log, "utf8").catch(() => ""));
@@ -257,13 +305,24 @@ function waitingNext(feature: string): Result<ProductNext> {
   });
 }
 
-async function pendingReview(workspace: WorkspaceState, feature: string, waitMs: number) {
-  const deadline = Date.now() + waitMs;
+async function pendingReview(
+  workspace: WorkspaceState,
+  feature: string,
+  deadline: number,
+  options: ProductSelection,
+) {
+  let announced = false;
   for (;;) {
     const pending = await hasPendingCriticReview(workspace, feature);
     if (!pending.ok || !pending.value) return false;
-    if (Date.now() >= deadline) return true;
-    await sleep(1000);
+    if (Date.now() >= deadline || options.signal?.aborted) return true;
+    if (!announced) {
+      await options.onProgress?.({ check: "review", status: "waiting for independent findings" });
+      announced = true;
+    }
+    await delay(Math.min(1000, Math.max(1, deadline - Date.now())), undefined, {
+      signal: options.signal,
+    }).catch(() => undefined);
   }
 }
 
@@ -312,8 +371,4 @@ function summarize(result: Result<unknown>): DoneCriticSummary {
     ...(value.callsRemaining !== undefined ? { callsRemaining: value.callsRemaining } : {}),
     ...(reviewed ? {} : { reason: value.gaps?.join("; ") || "The critic did not review" }),
   };
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

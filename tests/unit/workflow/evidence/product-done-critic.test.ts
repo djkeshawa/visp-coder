@@ -1,17 +1,20 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ok } from "../../../../src/core/result.js";
 import {
   type CriticPacket,
   type ProductCriticHost,
   runProductCritic,
 } from "../../../../src/workflow/product/critic.js";
+import * as criticPolicy from "../../../../src/workflow/product/critic-policy.js";
 import {
   backgroundReview,
   inlineReview,
+  runProductAcceptReviewed,
   runProductDoneReviewed,
 } from "../../../../src/workflow/product/done-review.js";
-import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
+import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { legacyReview } from "../../support/legacy-critic.js";
@@ -57,6 +60,7 @@ beforeEach(async () => {
   expect(configured.ok).toBe(true);
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await setup.workspace.destroy();
 });
 
@@ -141,4 +145,41 @@ it("launches the critic when done closes on checks that already passed under ver
   );
   expect(done.ok, JSON.stringify(done)).toBe(true);
   expect(host.review).toHaveBeenCalledTimes(1);
+});
+
+it("passes the whole-call deadline and cancellation to review startup", async () => {
+  await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
+  const controller = new AbortController();
+  const deadline = Date.now() + 60;
+  vi.spyOn(criticPolicy, "hasPendingCriticReview").mockResolvedValue(ok(true));
+  const started = Date.now();
+  const starter = vi.fn(async () => ({ reviewed: false, running: true, findings: [] }));
+  await runProductDoneReviewed(
+    await setup.workspace.state(),
+    { task: "T001", deadline, signal: controller.signal },
+    starter,
+    5000,
+  );
+  expect(Date.now() - started).toBeLessThan(2500);
+  expect(starter).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ deadline, signal: controller.signal }),
+  );
+});
+
+it("does not execute acceptance checks twice after an inline review", async () => {
+  await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
+  const host = launcher(review("satisfied"));
+  await runProductDone(await setup.workspace.state());
+  const progress: string[] = [];
+  await runProductAcceptReviewed(
+    await setup.workspace.state(),
+    {
+      onProgress: (event) => {
+        if (event.status === "running") progress.push(event.check);
+      },
+    },
+    inlineReview(host),
+  );
+  expect(progress.filter((check) => check === "C001")).toHaveLength(1);
 });

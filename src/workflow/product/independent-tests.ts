@@ -137,8 +137,8 @@ export type TestsStarter = (
 ) => Promise<Result<IndependentTestsRecord>>;
 
 /**
- * Testers usually return in 1–3 minutes. The CLI stays under the 2-minute shell timeout
- * common agent hosts apply; MCP stays under the ~60 s tool-call timeout. `work` asks the
+ * Testers usually return in 1–3 minutes. These are polling budgets, not a bound on
+ * the whole command; hosts should use their maximum shell timeout. `work` asks the
  * worker to run it again while the tester is still writing.
  */
 const TESTS_WAIT_MS = { cli: 100_000, mcp: 50_000 } as const;
@@ -675,47 +675,28 @@ function testCommand(path: string): string[] {
  * One run of the pinned or candidate tests, in its own process group that is ended
  * afterwards: suites start servers, and one left two running after it finished.
  */
-async function runBaseline(root: string, command: string[], extra: Record<string, string> = {}) {
+async function runBaseline(
+  root: string,
+  command: string[],
+  extra: Record<string, string> = {},
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+) {
   const [file, ...args] = command as [string, ...string[]];
   const env = await resolvedProductExecutionEnvironment();
-  return new Promise<{ exitCode: number; timedOut: boolean; output: string }>((resolve) => {
-    let output = "";
-    let timedOut = false;
-    const child = spawn(file, args, {
-      cwd: root,
-      env: { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra },
-      // Its own process group on POSIX; on Windows detached would open a new console.
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const collect = (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-8000);
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
-    const endGroup = () => {
-      try {
-        // Windows has no process groups to signal; there the child itself is ended.
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // The group already exited.
-      }
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      endGroup();
-    }, BASELINE_TIMEOUT_MS);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ exitCode: -1, timedOut: false, output: error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      endGroup();
-      resolve({ exitCode: code ?? -1, timedOut, output: output.trim().slice(-2000) });
-    });
+  const result = await run(file, args, {
+    cwd: root,
+    env: { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra },
+    replaceEnv: true,
+    timeoutMs: options.timeoutMs ?? BASELINE_TIMEOUT_MS,
+    signal: options.signal,
   });
+  return result.ok
+    ? {
+        exitCode: result.value.exitCode,
+        timedOut: result.value.timedOut,
+        output: `${result.value.stdout}\n${result.value.stderr}`.trim().slice(-2000),
+      }
+    : { exitCode: -1, timedOut: false, output: result.error.message };
 }
 
 async function pinTests(
@@ -837,15 +818,29 @@ export async function acceptanceProgress(
   workspace: WorkspaceState,
   feature: string,
   executedChecks: readonly string[],
+  options: import("./store.js").ProductSelection = {},
 ): Promise<AcceptanceProgress[]> {
   if (executedChecks.some((check) => check.startsWith("PINNED_"))) return [];
   const loaded = await readProductRecord(workspace, { feature });
   if (!loaded.ok) return [];
   const results: AcceptanceProgress[] = [];
   for (const pinned of loaded.value.brief.acceptanceBaseline) {
+    if (options.signal?.aborted || Date.now() >= (options.deadline ?? Infinity)) break;
+    await options.onProgress?.({ check: "acceptance baseline", status: "running" });
     const command =
       typeof pinned.command === "string" ? pinned.command.split(" ") : [...pinned.command];
-    const outcome = await runBaseline(workspace.paths.root, command);
+    const outcome = await runBaseline(
+      workspace.paths.root,
+      command,
+      {},
+      {
+        signal: options.signal,
+        timeoutMs: Math.max(
+          1,
+          Math.min(BASELINE_TIMEOUT_MS, (options.deadline ?? Infinity) - Date.now()),
+        ),
+      },
+    );
     const passing = outcome.exitCode === 0 && !outcome.timedOut;
     results.push({
       passing,
