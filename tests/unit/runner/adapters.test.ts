@@ -556,6 +556,13 @@ describe("runner host adapters", () => {
     };
     expect(adapterFor("claude").arguments(spec as never)).not.toContain("--allowedTools");
     expect(adapterFor("claude").arguments(spec as never)).toContain("--strict-mcp-config");
+    const pinned = adapterFor("claude").arguments({
+      ...spec,
+      harness: { files: [{ path: ".mcp.json", sha256: "a".repeat(64) }] },
+    } as never);
+    expect(
+      pinned.slice(pinned.indexOf("--mcp-config"), pinned.indexOf("--mcp-config") + 2),
+    ).toEqual(["--mcp-config", ".mcp.json"]);
     expect(
       adapterFor("claude")
         .arguments({

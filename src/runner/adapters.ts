@@ -98,6 +98,8 @@ const claude: HostAdapter = {
       "project",
       "--strict-mcp-config",
     ];
+    if (spec.harness.files.some((file) => file.path === ".mcp.json"))
+      args.push("--mcp-config", ".mcp.json");
     if (spec.permissions.mode === "read-only") args.push("--tools", "Read,Glob,Grep");
     if (spec.permissions.allowedTools)
       args.push("--allowedTools", spec.permissions.allowedTools.join(","));
