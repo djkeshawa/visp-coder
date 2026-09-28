@@ -84,16 +84,20 @@ export async function runProductWork(
   testsWaitMs = 0,
 ): Promise<Result<ProductWorkContext>> {
   if (!options.feature && !options.task) {
-    const record = await readProductRecord(workspace, options);
-    if (!record.ok) return record;
-    const next = await newSessionRequestNext(workspace, record.value, options);
-    if (!next.ok) return next;
-    if (next.value)
-      return err(
-        vispError("STAGE_BLOCKED", next.value.objective, {
-          recovery: next.value.evidence.join("\n"),
-        }),
-      );
+    const routing = await withProductMutation(workspace, async () => {
+      const record = await readProductRecord(workspace, options);
+      if (!record.ok) return record;
+      const next = await newSessionRequestNext(workspace, record.value, options);
+      if (!next.ok) return next;
+      return next.value
+        ? err(
+            vispError("STAGE_BLOCKED", next.value.objective, {
+              recovery: next.value.evidence.join("\n"),
+            }),
+          )
+        : ok(undefined);
+    });
+    if (!routing.ok) return routing;
   }
   if (options.check?.trim()) {
     const quick = await singleSliceBrief(workspace, options.feature, options.check.trim());
