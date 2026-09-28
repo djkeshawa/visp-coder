@@ -10,6 +10,21 @@ export async function productWorkspace(options: { critic?: boolean } = {}): Prom
   workspace: TestWorkspace;
   brief: ProductBrief;
 }> {
+  // Setup commits run the installed hook, so it is built once per test file and copied.
+  const { workspace, value } = await TestWorkspace.cached(
+    `product:${options.critic === true}`,
+    async () => {
+      const built = await buildProductWorkspace(options);
+      return { workspace: built.workspace, value: built.brief };
+    },
+  );
+  return { workspace, brief: value };
+}
+
+async function buildProductWorkspace(options: { critic?: boolean }): Promise<{
+  workspace: TestWorkspace;
+  brief: ProductBrief;
+}> {
   const workspace = await TestWorkspace.create(
     {
       "src/value.mjs": "export const value = 1;\n",

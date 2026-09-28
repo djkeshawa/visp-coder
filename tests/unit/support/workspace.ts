@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { afterAll } from "vitest";
 import { parse, stringify } from "yaml";
 import { ok } from "../../../src/core/result.js";
 import { defaultHooks, installHarness } from "../../../src/harness/install.js";
@@ -35,16 +36,7 @@ export class TestWorkspace {
     options: { critic?: boolean } = {},
   ): Promise<TestWorkspace> {
     const root = await realpath(await mkdtemp(join(tmpdir(), "visp-workspace-")));
-    const bin = await mkdtemp(join(tmpdir(), "visp-test-bin-"));
-    const cli = fileURLToPath(new URL("../../../dist/cli.js", import.meta.url));
-    const quoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
-    // Installed hooks must exercise this build, never an unrelated global VISP version.
-    await writeFile(
-      join(bin, "visp"),
-      `#!/bin/sh\nexec ${quoted(process.execPath)} ${quoted(cli)} "$@"\n`,
-      { mode: 0o755 },
-    );
-    const workspace = new TestWorkspace(root, bin);
+    const workspace = new TestWorkspace(root, await writeShim());
 
     await workspace.write("package.json", '{"name":"fixture"}\n');
     for (const [path, content] of Object.entries(files)) await workspace.write(path, content);
@@ -69,6 +61,34 @@ export class TestWorkspace {
     workspace.commit("add visp");
 
     return workspace;
+  }
+
+  /**
+   * A workspace that needs slow setup (git commits run the installed hook, which
+   * starts a whole `visp` process) is built once per test file as a template,
+   * and each call gets a private copy of it, so tests still never share state.
+   * `build` must not depend on the workspace's own path, and its `value` must
+   * be plain data: each caller receives its own structured clone.
+   */
+  static async cached<T>(
+    key: string,
+    build: () => Promise<{ workspace: TestWorkspace; value: T }>,
+  ): Promise<{ workspace: TestWorkspace; value: T }> {
+    let template = templates.get(key);
+    if (!template) {
+      template = build();
+      templates.set(key, template);
+      template.catch(() => templates.delete(key));
+    }
+    const built = await template;
+    templateDirs.add(built.workspace.root);
+    templateDirs.add(built.workspace.bin);
+    const root = await realpath(await mkdtemp(join(tmpdir(), "visp-workspace-")));
+    await cp(built.workspace.root, root, { recursive: true, preserveTimestamps: true });
+    return {
+      workspace: new TestWorkspace(root, await writeShim()),
+      value: structuredClone(built.value) as T,
+    };
   }
 
   async write(path: string, content: string | Uint8Array): Promise<void> {
@@ -220,6 +240,28 @@ export class TestWorkspace {
     await rm(this.root, { recursive: true, force: true });
     await rm(this.bin, { recursive: true, force: true });
   }
+}
+
+const templates = new Map<string, Promise<{ workspace: TestWorkspace; value: unknown }>>();
+const templateDirs = new Set<string>();
+// Templates live for one test file, and this module is loaded once per file.
+afterAll(async () => {
+  templates.clear();
+  for (const dir of templateDirs) await rm(dir, { recursive: true, force: true });
+  templateDirs.clear();
+});
+
+/** A `visp` on PATH that runs this build, so installed hooks never reach an unrelated global VISP version. */
+async function writeShim(): Promise<string> {
+  const bin = await mkdtemp(join(tmpdir(), "visp-test-bin-"));
+  const cli = fileURLToPath(new URL("../../../dist/cli.js", import.meta.url));
+  const quoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
+  await writeFile(
+    join(bin, "visp"),
+    `#!/bin/sh\nexec ${quoted(process.execPath)} ${quoted(cli)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
 }
 
 /** Minimal PNG header with real dimensions; enough for attachment metadata tests. */

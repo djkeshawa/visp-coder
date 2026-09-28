@@ -121,7 +121,7 @@ describe("doctor", () => {
     expect(envelope.data?.runtime.version).toMatch(/^\d+\.\d+\.\d+|dev$/);
     expect(envelope.data?.runtime.buildId).toMatch(/^[a-f0-9]{16}$/);
     expect(envelope.data?.runtime.executable).toContain("dist/cli.js");
-    expect(envelope.data?.verdict).toBeTruthy();
+    expect(envelope.data?.verdict).toMatch(/^(healthy|degraded|unhealthy)$/);
     expect(envelope.data?.checks.length).toBeGreaterThan(4);
   });
 });
