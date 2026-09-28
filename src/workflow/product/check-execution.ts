@@ -32,6 +32,7 @@ export async function executeProductCheck(
   subjectDigest: string,
   retryEnvironment = false,
   verifierSnapshot: Record<string, string> = {},
+  reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
   const environment = await productSourceDigest(workspace, record.brief, {});
   const base = {
@@ -49,7 +50,14 @@ export async function executeProductCheck(
   const unavailable = unavailableVerifier(check, base, record.state);
   if (unavailable) return unavailable;
   if (isBrowserCheckCommand(check.command))
-    return executeBrowserCheck(workspace, record, check.command, base, retryEnvironment);
+    return executeBrowserCheck(
+      workspace,
+      record,
+      check.command,
+      base,
+      retryEnvironment,
+      reuseCapture,
+    );
   const started = Date.now();
   const output = await executeCommand(workspace, check);
   const commandVerifier =
