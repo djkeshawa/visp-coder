@@ -3,7 +3,7 @@ import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
-import { executeProductCheck } from "./check-execution.js";
+import { type ExecutedProductCheck, executeProductCheck } from "./check-execution.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
 import { withProductMutation } from "./runtime.js";
 import {
@@ -17,7 +17,7 @@ export function cancelledExecution() {
   return err(
     vispError(
       "COMMAND_FAILED",
-      "VISP execution cancelled; completed checks were saved and the slice remains open",
+      "VISP execution cancelled; completed checks were saved. No further closeout was performed",
       {
         recovery: "Retry the same command to continue from completed checks",
         details: { cancelled: true },
@@ -102,29 +102,40 @@ export async function executeChecks(
       options.signal,
     );
     if (options.signal?.aborted) return cancelledExecution();
-    const saved = await withProductMutation(workspace, async () => {
-      if (options.signal?.aborted) return cancelledExecution();
-      const loaded = await readProductRecord(workspace, { feature: record.brief.feature });
-      if (!loaded.ok) return loaded;
-      const contract = requireExecutionContract(record, loaded.value);
-      if (!contract.ok) return contract;
-      const state = {
-        ...mergeCaptureState(loaded.value.state, current.state, checked.state),
-        updatedAt: new Date().toISOString(),
-        pendingVerification: batch,
-        executions: [...loaded.value.state.executions, checked.execution],
-      };
-      const published = await saveProductState(workspace, loaded.value, state, checked.mutations);
-      return published.ok
-        ? readProductRecord(workspace, { feature: record.brief.feature })
-        : published;
-    });
+    const saved = await publishCheck(workspace, record, current, checked, batch, options.signal);
     if (!saved.ok) return saved;
     current = saved.value;
     executions.push(checked.execution);
     await options.onProgress?.({ check: check.id, status: checked.execution.status });
   }
   return options.signal?.aborted ? cancelledExecution() : ok(executions);
+}
+
+function publishCheck(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  current: ProductRecord,
+  checked: ExecutedProductCheck,
+  batch: string,
+  signal?: AbortSignal,
+) {
+  return withProductMutation(workspace, async () => {
+    if (signal?.aborted) return cancelledExecution();
+    const loaded = await readProductRecord(workspace, { feature: record.brief.feature });
+    if (!loaded.ok) return loaded;
+    const contract = requireExecutionContract(record, loaded.value);
+    if (!contract.ok) return contract;
+    const state = {
+      ...mergeCaptureState(loaded.value.state, current.state, checked.state),
+      updatedAt: new Date().toISOString(),
+      pendingVerification: batch,
+      executions: [...loaded.value.state.executions, checked.execution],
+    };
+    const published = await saveProductState(workspace, loaded.value, state, checked.mutations);
+    return published.ok
+      ? readProductRecord(workspace, { feature: record.brief.feature })
+      : published;
+  });
 }
 
 export function executionOwnerKey(check: string, task?: string) {

@@ -1,11 +1,9 @@
-import { setTimeout as delay } from "node:timers/promises";
 import { Command } from "commander";
 import { BLOCK, GUARD_PROTOCOL_VERSION, STATE_DIR } from "../../core/constants.js";
 import { type VispError, vispError } from "../../core/errors.js";
-import { inspectFileTransactions } from "../../core/file-transaction.js";
 import { changesSince, stagedChanges, trackedFiles, workingTreeChanges } from "../../core/git.js";
 import { ok, type Result } from "../../core/result.js";
-import { inspectStateLock } from "../../core/state-lock.js";
+import { inspectSettledTransactions } from "../../core/transaction-inspection.js";
 import { type RuntimeIdentity, runtimeIdentity } from "../../core/version.js";
 import { requireInstalledRuntime } from "../../harness/runtime.js";
 import { checkPaths, decideScope, type ScopeViolation } from "../../orchestrate/guard.js";
@@ -116,19 +114,10 @@ async function executeGuardCommand(opts: GuardCliOptions): Promise<number> {
   if (sourceError) return emitError("guard", sourceError, { json: isJson(opts) });
   const identifiers = validateArtifactSelection(opts);
   if (!identifiers.ok) return emitError("guard", identifiers.error, { json: isJson(opts) });
-  const root = projectRoot(opts);
-  let transactions = await inspectFileTransactions(root);
-  const deadline = Date.now() + 1500;
-  let saving = false;
-  while (transactions.ok && transactions.value.pending.length > 0) {
-    const lock = await inspectStateLock(root);
-    saving = lock.ok && lock.value.state === "active";
-    if (!saving || Date.now() >= deadline) break;
-    await delay(25);
-    transactions = await inspectFileTransactions(root);
-  }
+  const transactions = await inspectSettledTransactions(projectRoot(opts));
   if (!transactions.ok) return emitError("guard", transactions.error, { json: isJson(opts) });
   if (transactions.value.pending.length > 0) {
+    const { saving } = transactions.value;
     const message = saving
       ? "VISP is saving an update; retry this edit shortly"
       : "An interrupted VISP update is pending, so scope cannot be checked safely";

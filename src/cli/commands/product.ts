@@ -118,18 +118,8 @@ function cliText(name: string, opts: ProductOptions, value: unknown): string {
 }
 
 async function execute(name: string, opts: ProductOptions, mutate: boolean, run: Operation) {
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  process.once("SIGINT", cancel);
-  process.once("SIGTERM", cancel);
-  opts = {
-    ...opts,
-    signal: controller.signal,
-    deadline: Date.now() - process.uptime() * 1000 + 100_000,
-    onProgress: (event) => {
-      process.stderr.write(`VISP ${event.check}: ${event.status}\n`);
-    },
-  };
+  const execution = cliExecutionOptions(name, opts);
+  opts = execution.options;
   try {
     const mode = productCommandMode(name, opts);
     if (!mode.ok) {
@@ -173,9 +163,33 @@ async function execute(name: string, opts: ProductOptions, mutate: boolean, run:
       json: isJson(opts),
     });
   } finally {
-    process.removeListener("SIGINT", cancel);
-    process.removeListener("SIGTERM", cancel);
+    execution.release();
   }
+}
+
+function cliExecutionOptions(name: string, opts: ProductOptions) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  const cancellable = ["verify", "done", "accept", "next"].includes(name);
+  if (cancellable) {
+    process.once("SIGINT", cancel);
+    process.once("SIGTERM", cancel);
+  }
+  opts = {
+    ...opts,
+    signal: controller.signal,
+    deadline: Date.now() - process.uptime() * 1000 + 100_000,
+    onProgress: (event) => {
+      process.stderr.write(`VISP ${event.check}: ${event.status}\n`);
+    },
+  };
+  return {
+    options: opts,
+    release() {
+      process.removeListener("SIGINT", cancel);
+      process.removeListener("SIGTERM", cancel);
+    },
+  };
 }
 
 function productCommandMode(name: string, opts: ProductOptions): Result<void> {

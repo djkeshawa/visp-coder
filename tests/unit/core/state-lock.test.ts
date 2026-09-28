@@ -38,6 +38,25 @@ function signal(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("worktree state ownership", () => {
+  it("recognizes its owner while the owner record is still returning from publication", async () => {
+    const project = await root();
+    const write = ProjectFileSystem.prototype.writeJson;
+    let observed: unknown;
+    const publishing = vi
+      .spyOn(ProjectFileSystem.prototype, "writeJson")
+      .mockImplementation(async function (this: ProjectFileSystem, path, value, mode) {
+        const written = await write.call(this, path, value, mode);
+        if (path.endsWith("mutation.lock/owner.json")) observed = await inspectStateLock(project);
+        return written;
+      });
+    try {
+      expect(await withStateLock(project, async () => ok(true))).toEqual(ok(true));
+      expect(observed).toMatchObject({ ok: true, value: { state: "active" } });
+    } finally {
+      publishing.mockRestore();
+    }
+  });
+
   it("requires the observed token to recover ambiguous ownership and refuses live owners", async () => {
     const project = await root();
     await withStateLock(project, async () => {

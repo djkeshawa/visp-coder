@@ -47,17 +47,10 @@ export function doctorCommand(): Command {
         process.exitCode = emitError("doctor", layer.error, { json: isJson(opts) });
         return;
       }
-      if (opts.recoverLock) {
-        const recovered = opts.fix
-          ? await recoverStateLock(projectRoot(opts), opts.recoverLock)
-          : err({
-              code: "ARTIFACT_INVALID" as const,
-              message: "--recover-lock requires --fix after confirming the named owner has stopped",
-            });
-        if (!recovered.ok) {
-          process.exitCode = emitError("doctor", recovered.error, { json: isJson(opts) });
-          return;
-        }
+      const recovered = await recoverRequestedLock(projectRoot(opts), opts);
+      if (!recovered.ok) {
+        process.exitCode = emitError("doctor", recovered.error, { json: isJson(opts) });
+        return;
       }
       const state = opts.fix ? await mutatingWorkspace(opts) : await workspace(opts);
       if (!state.ok) {
@@ -127,6 +120,21 @@ export function doctorCommand(): Command {
 
       if (report.verdict === "unhealthy") process.exitCode = EXIT.refused;
     });
+}
+
+function recoverRequestedLock(
+  root: string,
+  opts: { fix?: boolean; recoverLock?: string },
+): Promise<Result<boolean>> {
+  if (!opts.recoverLock) return Promise.resolve(ok(false));
+  return opts.fix
+    ? recoverStateLock(root, opts.recoverLock)
+    : Promise.resolve(
+        err({
+          code: "ARTIFACT_INVALID",
+          message: "--recover-lock requires --fix after confirming the named owner has stopped",
+        }),
+      );
 }
 
 function renderFeatureReadiness(

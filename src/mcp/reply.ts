@@ -50,7 +50,7 @@ export function reply<T>(
  * refusal (a gate saying no) is not — that is a successful answer of "no".
  */
 export function failure(tool: string, error: VispError): CallToolResult {
-  if (error.code === "STATE_BUSY")
+  if (error.code === "STATE_BUSY" && error.details?.lock)
     error = {
       ...error,
       recovery:

@@ -13,12 +13,18 @@ import { productObservationPlan } from "../product/observation-plan.js";
 import { withProductMutation } from "../product/runtime.js";
 import { selectProductSlice } from "../product/scopes.js";
 import { type ProductNext, runProductNext } from "../product/status.js";
-import { type ProductSelection, readProductRecord, saveProductState } from "../product/store.js";
+import {
+  type ProductRecord,
+  type ProductSelection,
+  readProductRecord,
+  saveProductState,
+} from "../product/store.js";
 import { productSourceDigest } from "../product/subject.js";
 import type { WorkspaceState } from "../state.js";
 import { replayCommand, replayJourney } from "./capture-replay.js";
 import {
   type ProductCaptureResult as ExecutedProductCaptureResult,
+  type PreparedProductCapture,
   withProductCapture,
 } from "./product-capture-execution.js";
 
@@ -70,30 +76,7 @@ export async function runProductCapture(
       record.value,
       { journey: journey.data, task, binary: options.binary, signal: options.signal },
       async (prepared) => {
-        const saved = await withProductMutation(workspace, async () => {
-          if (options.signal?.aborted) return cancelledExecution();
-          const current = await readProductRecord(workspace, {
-            feature: record.value.brief.feature,
-          });
-          if (!current.ok) return current;
-          const contract = requireExecutionContract(record.value, current.value);
-          if (!contract.ok) return contract;
-          const subject = await productSourceDigest(workspace, current.value.brief);
-          if (!subject.ok) return subject;
-          if (subject.value !== prepared.subjectDigest)
-            return err(
-              vispError(
-                "EVIDENCE_FAILED",
-                "Product changed before capture publication; capture the current version again",
-              ),
-            );
-          return saveProductState(
-            workspace,
-            current.value,
-            mergeCaptureState(current.value.state, record.value.state, prepared.state),
-            prepared.mutations,
-          );
-        });
+        const saved = await publishCapture(workspace, record.value, prepared, options.signal);
         if (!saved.ok)
           return saved.error.code === "INTERNAL"
             ? err({ ...saved.error, code: "EVIDENCE_FAILED" })
@@ -142,6 +125,39 @@ export async function runProductCapture(
     next: next.value,
     nextCommand:
       criticRouteCommand(next.value) ?? next.value.command ?? recovered.value.nextCommand,
+  });
+}
+
+function publishCapture(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  prepared: PreparedProductCapture,
+  signal?: AbortSignal,
+) {
+  return withProductMutation(workspace, async () => {
+    if (signal?.aborted) return cancelledExecution();
+    const current = await readProductRecord(workspace, {
+      feature: record.brief.feature,
+    });
+    if (!current.ok) return current;
+    const contract = requireExecutionContract(record, current.value);
+    if (!contract.ok) return contract;
+    const subject = await productSourceDigest(workspace, current.value.brief);
+    if (!subject.ok) return subject;
+    if (subject.value !== prepared.subjectDigest)
+      return err(
+        vispError(
+          "EVIDENCE_FAILED",
+          "Product changed before capture publication; capture the current version again",
+        ),
+      );
+    if (signal?.aborted) return cancelledExecution();
+    return saveProductState(
+      workspace,
+      current.value,
+      mergeCaptureState(current.value.state, record.state, prepared.state),
+      prepared.mutations,
+    );
   });
 }
 

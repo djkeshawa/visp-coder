@@ -208,8 +208,10 @@ async function createOwner(files: ProjectFileSystem, owner: Owner): Promise<Resu
       return ok(false);
     return err(fromUnknown(cause, "IO_ERROR"));
   }
+  activeTokens.add(owner.token);
   const written = await files.writeJson(OWNER_FILE, owner, 0o600);
   if (!written.ok) {
+    activeTokens.delete(owner.token);
     await files.removeDir(STATE_LOCK_DIRECTORY);
     return written;
   }

@@ -18,6 +18,37 @@ export async function executeBrowserCheck(
   base: ExecutionIdentity,
   retryEnvironment: boolean,
   signal?: AbortSignal,
+  timeoutMs?: number,
+): Promise<ExecutedProductCheck> {
+  const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+  const browserSignal = timeout ? AbortSignal.any([timeout, ...(signal ? [signal] : [])]) : signal;
+  const result = await runBrowserCheck(
+    workspace,
+    record,
+    command,
+    base,
+    retryEnvironment,
+    browserSignal,
+  );
+  return timeout?.aborted && !signal?.aborted
+    ? {
+        ...result,
+        execution: {
+          ...result.execution,
+          status: "timed-out",
+          output: `${result.execution.output}\nVISP: check timed out; inspect the journey and its timeoutMs budget.`,
+        },
+      }
+    : result;
+}
+
+async function runBrowserCheck(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  command: Extract<ProductCheck["command"], { kind: "browser-journey" }>,
+  base: ExecutionIdentity,
+  retryEnvironment: boolean,
+  signal?: AbortSignal,
 ): Promise<ExecutedProductCheck> {
   const environmentDigest = await browserEnvironmentIdentity(workspace.paths.root);
   const cached = record.state.browserCapability;

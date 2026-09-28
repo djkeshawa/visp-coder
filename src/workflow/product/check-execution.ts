@@ -50,30 +50,16 @@ export async function executeProductCheck(
   };
   const unavailable = unavailableVerifier(check, base, record.state);
   if (unavailable) return unavailable;
-  if (isBrowserCheckCommand(check.command)) {
-    const timeout = check.timeoutMs ? AbortSignal.timeout(check.timeoutMs) : undefined;
-    const browserSignal = timeout
-      ? AbortSignal.any([timeout, ...(signal ? [signal] : [])])
-      : signal;
-    const result = await executeBrowserCheck(
+  if (isBrowserCheckCommand(check.command))
+    return executeBrowserCheck(
       workspace,
       record,
       check.command,
       base,
       retryEnvironment,
-      browserSignal,
+      signal,
+      check.timeoutMs,
     );
-    return timeout?.aborted && !signal?.aborted
-      ? {
-          ...result,
-          execution: {
-            ...result.execution,
-            status: "timed-out",
-            output: `${result.execution.output}\nVISP: check timed out; inspect the journey and its timeoutMs budget.`,
-          },
-        }
-      : result;
-  }
   const started = Date.now();
   const output = await executeCommand(workspace, check, signal);
   const commandVerifier =

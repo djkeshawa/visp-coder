@@ -10,6 +10,7 @@ import {
   productEvidenceGaps,
   productImageEvidenceGaps,
 } from "./assessment.js";
+import { browserFailureRecovery } from "./browser-recovery.js";
 import {
   currentProductFailures,
   failedCheckOwners,
@@ -620,11 +621,16 @@ function environmentJourneyNext(
   const run = replay ?? ordered[0];
   const owner = run?.task;
   const task = selectedTask ?? owner;
+  const recovery = browserFailureRecovery(
+    run?.failure?.message ?? "",
+    run?.journey?.url ?? "the configured URL",
+  );
   return {
     feature: record.brief.feature,
     ...(task ? { task } : {}),
     action: "understand",
     objective:
+      recovery ??
       "Recover the browser execution environment, then rerun the same journey before judging product behavior",
     command: replay?.id
       ? replayCommand(record.brief.feature, replay.id, owner)
@@ -636,6 +642,7 @@ function environmentJourneyNext(
     mayEdit: false,
     completion: "unresolved-environment",
     recovery:
+      recovery ??
       "Inspect the recorded browser error, restore the host or runtime access it needs, and rerun the journey. An incomplete journey is neither a product failure nor a pass.",
   };
 }
