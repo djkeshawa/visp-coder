@@ -79,13 +79,15 @@ describe("doctor", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Repaired:");
-    expect(result.stdout).toContain("healthy");
+    expect(result.stdout).toContain("degraded");
+    expect(result.stdout).toContain("Point your coding agent at AGENTS.visp.md");
   });
 
   it("is idempotent, so running it twice changes nothing", () => {
     project.run("doctor", "--fix");
     const second = project.run("doctor", "--fix");
-    expect(second.stdout).toContain("healthy");
+    expect(second.stdout).toContain("Already in place");
+    expect(second.stdout).toContain("degraded");
   });
 
   /**
