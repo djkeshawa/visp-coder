@@ -42,6 +42,7 @@ skills:
 
 memory:
   enabled: true
+  recall: true
 
 telemetry:
   enabled: true
@@ -66,8 +67,10 @@ telemetry:
 | `context.tokenBudget` | Approximate budget for the complete context `work` delivers. |
 | `context.maxSnippets` | Maximum source excerpts in delivered context. |
 | `skills.*` | Skill selection: `minSupport` closed slices a derived proposal must cite; `maxPerPack` admitted skills per context (0 selects none). |
-| `memory.enabled` | Deliver matching project notes in `work` context. |
-| `telemetry.enabled` | Local attempt and usage records. They never leave the machine. |
+| `memory.enabled` | Enable project notes and earlier-request recall. |
+| `memory.recall` | With a VISP-launched reviewer and no `memory.service`, use its model to select decisions from earlier requests and append them to a new feature's original request and `work` replies. Defaults to `true`; set `false` to skip this recall. |
+| `memory.service.command`, `memory.service.select` | Optional Visp Memory CLI and selection mode (`model` or `keyword`) for long-term request decisions. |
+| `telemetry.enabled` | Local usage import; activity recording is independent. Records stay on the machine. |
 
 `visp doctor --settings` (MCP `visp_doctor` with `settings: true`) shows each effective value, whether it came from the file or a default, and which controls are inactive.
 
@@ -104,6 +107,8 @@ Other operations are `entity`, `neighbors`, `callees` and `tracePath`. `--depth`
 ## Memory and skills
 
 `visp learn "<note>"` records a project note under `.visp/memory/`; `visp recall [query]` lists notes. `work` delivers up to four matching notes (6,000 bytes) labeled with their source; notes are untrusted context, not instructions.
+
+With the default `memory.recall: true` and a VISP-launched reviewer, each new feature can receive relevant decisions from earlier feature requests. The selected decisions are appended to the feature's original request, so the tester and reviewer see them as part of that request. Set `memory.recall: false` to disable this step when no `memory.service` is configured.
 
 Project rules are different: they are requirements the user stated for all later work, such as "these conventions apply to this change and all later work" followed by a list, or "from now on, never log request bodies". `visp feature` finds them in the user's recorded prompts (never in a worker's text; with `critic.launch: codex-exec` the reviewer's model reads them and each must quote the prompt, otherwise phrase matching does), records them in `.visp/rules.json`, and the tester, the reviewer and every `work` reply read the current rules (a later message that replaces or withdraws a rule wins; a removed rule stops applying at once). `visp rules` lists them and `visp rules remove <id>` removes one that was not meant.
 

@@ -100,12 +100,13 @@ export { loadWorkspace } from "./workflow/state.js";
 
 /**
  * 0.1 embedders constructed this object before project-confined storage was a
- * field. Keep that source shape valid; public entry points supply the safe
- * filesystem when it is absent. States returned by loadWorkspace include it.
+ * field. Keep that source shape valid for resolveFeature. Other entry points
+ * require a loaded state with project-confined storage.
  */
 export type WorkspaceState = Omit<InternalWorkspaceState, "files"> & {
   readonly files?: InternalWorkspaceState["files"];
 };
+export type LoadedWorkspaceState = InternalWorkspaceState;
 
 export function resolveFeature(state: WorkspaceState, explicit?: string) {
   return resolveFeatureInternal(normalizeWorkspaceState(state), explicit);
