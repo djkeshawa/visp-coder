@@ -24,7 +24,7 @@ import {
   checkHarnessAssets,
   checkPreviousHarnessAssets,
 } from "./installation.js";
-import { checkInstalledRuntime } from "./runtime.js";
+import { checkInstalledRuntime, checkPathRuntime } from "./runtime.js";
 
 /**
  * One health command for the whole tool. A check that cannot determine its
@@ -64,6 +64,7 @@ export async function runChecks(
     await checkState(state),
     await checkConfig(state),
     await checkInstalledRuntime(state),
+    await checkPathRuntime(state),
     await checkGit(state),
     await checkHarnessAssets(state),
     await checkHarnessActivation(state),

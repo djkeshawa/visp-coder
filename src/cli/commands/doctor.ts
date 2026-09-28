@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { renderSettings, requestedSettings } from "../../config/effective.js";
 import { EXIT } from "../../core/constants.js";
 import { err, ok, type Result } from "../../core/result.js";
@@ -21,6 +21,7 @@ export function doctorCommand(): Command {
       "Explain configured/default values, effective policy and inactive controls",
     )
     .option("--fix", "Repair what can be repaired without a decision")
+    .addOption(new Option("--runtime-identity").hideHelp())
     .option(
       "--check-command <command>",
       "Run an explicit smoke command through the verification subprocess (executes project code)",
@@ -35,7 +36,15 @@ export function doctorCommand(): Command {
         settings?: boolean;
         checkCommand?: string;
         checkLayer?: string;
+        runtimeIdentity?: boolean;
       }>(command);
+      if (opts.runtimeIdentity) {
+        process.exitCode = emit("doctor", ok({ runtime: runtimeIdentity() }), {
+          json: isJson(opts),
+          text: (value) => JSON.stringify(value),
+        });
+        return;
+      }
       const layer = smokeLayer(opts);
       if (!layer.ok) {
         process.exitCode = emitError("doctor", layer.error, { json: isJson(opts) });
