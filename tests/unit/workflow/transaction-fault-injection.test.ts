@@ -143,44 +143,62 @@ describe("workflow transaction fault injection", () => {
     expect(kinds?.get("visp.yml")).toBe("write");
   }, 120_000);
 
-  it("restores evidence, private logs, authorization and status after every slice closure mutation", async () => {
-    let mutationCount = 1;
-    for (let failAt = 1; failAt <= mutationCount; failAt++) {
-      const { workspace, brief } = await productWorkspace();
-      const original = applyFileTransaction;
-      try {
-        const worked = await runProductWork(await workspace.state());
-        if (!worked.ok) throw new Error(worked.error.message);
-        await workspace.write("src/value.mjs", "export const value = 2;\n");
-        const state = await workspace.state();
-        await setMode(authorizationPath(state, brief.feature), 0o600);
-        await setMode(productStatePath(state, brief.feature), 0o640);
-        await setMode(state.paths.status, 0o600);
-        const observed: FaultObservation = {};
-        vi.spyOn(transactions, "applyFileTransaction").mockImplementation(
-          faultRunner(failAt, observed, original),
-        );
-        const result = await runProductDone(state, { feature: brief.feature, task: "T001" });
-        vi.restoreAllMocks();
-        expect(result.ok).toBe(false);
-        const paths = requireObservation(workspace.root, observed, "product-state");
-        mutationCount = paths.length;
-        expect(paths).toEqual([
-          relativeMutationPath(workspace.root, briefPath(state, brief.feature)),
-          relativeMutationPath(workspace.root, productStatePath(state, brief.feature)),
-          expect.stringMatching(/^\.visp\/session\/check-output\/[^/]+\.log$/),
-          relativeMutationPath(workspace.root, authorizationPath(state, brief.feature)),
-          ".visp/status.json",
-        ]);
-        expect(observed.mutations?.[2]).toMatchObject({ kind: "write", mode: 0o600 });
-        await expectRollback(workspace.root, observed);
-      } finally {
-        vi.restoreAllMocks();
-        await workspace.destroy();
+  it.each(["check publication", "slice closure"])(
+    "restores exact files and modes after every %s mutation",
+    async (phase) => {
+      let mutationCount = 1;
+      for (let failAt = 1; failAt <= mutationCount; failAt++) {
+        const { workspace, brief } = await productWorkspace();
+        const original = applyFileTransaction;
+        try {
+          const worked = await runProductWork(await workspace.state());
+          if (!worked.ok) throw new Error(worked.error.message);
+          await workspace.write("src/value.mjs", "export const value = 2;\n");
+          const state = await workspace.state();
+          await setMode(authorizationPath(state, brief.feature), 0o600);
+          await setMode(productStatePath(state, brief.feature), 0o640);
+          await setMode(state.paths.status, 0o600);
+          const observed: FaultObservation = {};
+          const failSelected = faultRunner(failAt, observed, original);
+          vi.spyOn(transactions, "applyFileTransaction").mockImplementation(
+            (root, label, mutations) =>
+              mutations.some((mutation) =>
+                phase === "check publication"
+                  ? relativeMutationPath(root, mutation.path).startsWith(
+                      ".visp/session/check-output/",
+                    )
+                  : relativeMutationPath(root, mutation.path) ===
+                    relativeMutationPath(root, authorizationPath(state, brief.feature)),
+              )
+                ? failSelected(root, label, mutations)
+                : original(root, label, mutations),
+          );
+          const result = await runProductDone(state, { feature: brief.feature, task: "T001" });
+          vi.restoreAllMocks();
+          expect(result.ok).toBe(false);
+          const paths = requireObservation(workspace.root, observed, "product-state");
+          mutationCount = paths.length;
+          expect(paths).toEqual([
+            relativeMutationPath(workspace.root, briefPath(state, brief.feature)),
+            relativeMutationPath(workspace.root, productStatePath(state, brief.feature)),
+            ...(phase === "check publication"
+              ? [expect.stringMatching(/^\.visp\/session\/check-output\/[^/]+\.log$/)]
+              : [
+                  relativeMutationPath(workspace.root, authorizationPath(state, brief.feature)),
+                  ".visp/status.json",
+                ]),
+          ]);
+          if (phase === "check publication")
+            expect(observed.mutations?.[2]).toMatchObject({ kind: "write", mode: 0o600 });
+          await expectRollback(workspace.root, observed);
+        } finally {
+          vi.restoreAllMocks();
+          await workspace.destroy();
+        }
       }
-    }
-    expect(mutationCount).toBe(5);
-  });
+      expect(mutationCount).toBe(phase === "check publication" ? 3 : 4);
+    },
+  );
 });
 
 function faultRunner(

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
 import { PRODUCT_STATE_VERSION } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
@@ -20,6 +21,11 @@ import {
 import { compactTrail } from "./trail.js";
 
 export interface ProductSelection {
+  readonly signal?: AbortSignal;
+  readonly deadline?: number;
+  readonly onProgress?: (event: { check: string; status: string }) => void | Promise<void>;
+  /** Internal acceptance continuation after a review of the same checked subject. */
+  readonly reusePassed?: boolean;
   readonly feature?: string;
   readonly task?: string;
   /** Mutating work/check operations only; does not change host permissions. */
@@ -64,6 +70,19 @@ async function readRecord(
   const resolved = resolveFeature(workspace, options.feature);
   if (!resolved.ok) return resolved;
   const feature = resolved.value;
+  for (let attempt = 0; ; attempt++) {
+    const result = await readRecordSnapshot(workspace, feature, allowDraft, migrateVersionTwo);
+    if (result.ok || !result.error.details?.externalBriefEdit || attempt >= 20) return result;
+    await delay(25);
+  }
+}
+
+async function readRecordSnapshot(
+  workspace: WorkspaceState,
+  feature: string,
+  allowDraft: boolean,
+  migrateVersionTwo: boolean,
+): Promise<Result<ProductRecord>> {
   const content = await workspace.files.readTextIfExists(briefPath(workspace, feature));
   if (!content.ok) return content;
   if (content.value === undefined) return missingBrief(workspace, feature);
@@ -71,6 +90,14 @@ async function readRecord(
   if (!brief.ok) return brief;
   const stored = await workspace.files.readText(productStatePath(workspace, feature));
   if (!stored.ok) return stored;
+  const repeated = await workspace.files.readTextIfExists(briefPath(workspace, feature));
+  if (!repeated.ok) return repeated;
+  if (repeated.value !== content.value)
+    return err(
+      vispError("STATE_BUSY", "Brief changed while reading product state; retry", {
+        details: { externalBriefEdit: true },
+      }),
+    );
   const state = parseStateText(stored.value, feature, migrateVersionTwo);
   if (!state.ok) return state;
   if (!allowDraft && brief.value.originalRequest !== state.value.intentSnapshot.originalRequest)

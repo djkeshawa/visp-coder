@@ -38,6 +38,8 @@ visp accept                                   # check the assembled product
 visp pr                                       # reviewer document for the pull request
 ```
 
+Run `visp done`, `verify`, `accept` and `next` with the coding host's maximum shell timeout (at least 10 minutes when supported). VISP prints check progress to stderr and saves each completed execution, so an interrupted run can resume current passing checks. Review polling uses the time remaining in a 100-second CLI or 50-second MCP call budget; long checks can still require a longer host timeout.
+
 In practice the coding agent runs these commands itself. Claude Code and trusted Codex hooks can send it back when it stops early; other hosts rely on instructions and explicit `visp next` calls.
 When supplying the original request explicitly, use `--source-brief -` with a quoted heredoc as shown in [the workflow guide](docs/workflow.md#starting-a-feature), so shell characters in the request stay literal.
 

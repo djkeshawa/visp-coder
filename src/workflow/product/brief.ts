@@ -15,15 +15,16 @@ import {
   recordEarlierRequests,
 } from "../../memory/memory-service.js";
 import { recordRequestHistory } from "../../memory/request-history.js";
+import type { AcceptanceBaseline } from "../artifacts/acceptance.js";
 import type { Intent } from "../artifacts/feature.js";
 import { captureAcceptanceBaseline } from "../evidence/acceptance.js";
-import { requireFeatureFoundation } from "../gates/readiness.js";
+import { requireFeatureFoundation, requireImplementationFoundation } from "../gates/readiness.js";
 import type { WorkspaceState } from "../state.js";
 import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
 import { allocateFeatureId } from "./feature-id.js";
-import { type HostRequest, hostRequest } from "./host-prompts.js";
+import { hostRequest } from "./host-prompts.js";
 import { codexMemoryGate } from "./memory-gate.js";
 import {
   closedSlice,
@@ -72,39 +73,51 @@ export interface ProductFeatureOutcome {
   readonly redactionNotice?: string;
 }
 
-export function createProductFeature(
-  workspace: WorkspaceState,
-  options: ProductFeatureOptions,
-): Promise<Result<ProductFeatureOutcome>> {
-  return withProductMutation(workspace, () => createProductFeatureLocked(workspace, options));
-}
-
-async function createProductFeatureLocked(
+export async function createProductFeature(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
 ): Promise<Result<ProductFeatureOutcome>> {
   if (!options.goal.trim())
     return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
-  const foundation = await requireFeatureFoundation(workspace, "visp feature <goal>");
+  const baseline = await withProductMutation(workspace, async () => {
+    const foundation = await requireFeatureFoundation(workspace, "visp feature <goal>");
+    return foundation.ok ? captureAcceptanceBaseline(workspace) : foundation;
+  });
+  if (!baseline.ok) return baseline;
+  const request = await featureRequest(workspace, options);
+  if (!request.ok) return request;
+  return withProductMutation(workspace, () =>
+    createProductFeatureLocked(workspace, options, request.value, baseline.value),
+  );
+}
+
+async function createProductFeatureLocked(
+  workspace: WorkspaceState,
+  options: ProductFeatureOptions,
+  request: Extract<Awaited<ReturnType<typeof featureRequest>>, { ok: true }>["value"],
+  baseline: AcceptanceBaseline,
+): Promise<Result<ProductFeatureOutcome>> {
+  if (!options.goal.trim())
+    return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
+  // Cleanliness was checked before model/service calls, which may write their own logs.
+  const foundation = await requireImplementationFoundation(workspace, "visp feature <goal>");
   if (!foundation.ok) return foundation;
   const listed = await workspace.store.listFeatures();
   if (!listed.ok) return listed;
-  const baseline = await captureAcceptanceBaseline(workspace);
-  if (!baseline.ok) return baseline;
   const goal = redactRequest(options.goal, workspace.paths.root);
   const allocated = await allocateFeatureId(workspace.paths.root, listed.value, goal);
   if (!allocated.ok) return allocated;
   const feature = allocated.value;
   const timestamp = new Date().toISOString();
-  const request = await featureRequest(workspace, options, feature, timestamp);
-  if (!request.ok) return request;
-  const { host, rules, memory } = request.value;
+  const { host, memory } = request;
+  const rules = await featureProjectRules(workspace, request.stated, feature, timestamp);
+  if (!rules.ok) return rules;
   const parsed = parseProductBrief({
     version: 2,
     feature,
     goal,
-    originalRequest: request.value.originalRequest,
-    acceptanceBaseline: baseline.value,
+    originalRequest: request.originalRequest,
+    acceptanceBaseline: baseline,
   });
   if (!parsed.ok) return parsed;
   const brief = parsed.value;
@@ -127,16 +140,26 @@ async function createProductFeatureLocked(
     },
     status.value,
     ...(host?.mutation ? [host.mutation] : []),
-    ...rules.mutations,
+    ...rules.value.mutations,
     ...memory.mutations,
+    ...(memory.memories.length
+      ? [
+          {
+            kind: "write" as const,
+            path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
+            content: json({ version: 1, memories: memory.memories }),
+            expectedBefore: { existed: false as const },
+          },
+        ]
+      : []),
   ]);
   return saved.ok
     ? ok({
         brief,
         intent,
-        ...rules.reported,
+        ...rules.value.reported,
         ...memory.reported,
-        redactionNotice: featureRedactionNotice(request.value.redacted, goal, options.goal),
+        redactionNotice: featureRedactionNotice(request.redacted, goal, options.goal),
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
       })
@@ -150,7 +173,7 @@ async function createProductFeatureLocked(
  */
 async function featureProjectRules(
   workspace: WorkspaceState,
-  host: HostRequest | undefined,
+  stated: readonly string[],
   feature: string,
   capturedAt: string,
 ): Promise<
@@ -161,7 +184,6 @@ async function featureProjectRules(
 > {
   const recorded = await readProjectRules(workspace);
   if (!recorded.ok) return recorded;
-  const stated = await statedRules(host?.prompts ?? [], await ruleReader(workspace));
   const merged = mergeProjectRules(recorded.value.rules, stated, feature, capturedAt);
   return ok({
     mutations: merged.added.length
@@ -251,23 +273,24 @@ async function recallMemories(
 }
 
 /** The user's recorded request, with the decisions Visp Memory selects for it; rules are captured on the way. */
-async function featureRequest(
-  workspace: WorkspaceState,
-  options: ProductFeatureOptions,
-  feature: string,
-  timestamp: string,
-) {
+async function featureRequest(workspace: WorkspaceState, options: ProductFeatureOptions) {
   const host = await hostRequest(workspace, options.sourceBrief);
   if (!host.ok) return host;
-  const rules = await featureProjectRules(workspace, host.value, feature, timestamp);
-  if (!rules.ok) return rules;
+  const recorded = await readProjectRules(workspace);
+  if (!recorded.ok) return recorded;
+  const stated = await statedRules(host.value?.prompts ?? [], await ruleReader(workspace));
+  const rules = mergeProjectRules(
+    recorded.value.rules,
+    stated,
+    "pending",
+    new Date().toISOString(),
+  );
   const raw = host.value?.request ?? options.sourceBrief ?? options.goal;
   const request = redactRequest(raw, workspace.paths.root);
   const memory = await featureMemory(
     workspace,
-    feature,
     request,
-    (rules.value.reported.projectRules ?? []).map((rule) => rule.text),
+    rules.rules.map((rule) => rule.text),
   );
   if (!memory.ok) return memory;
   // Earlier rules are not copied into the fixed request: work replies, the reviewer and the
@@ -275,7 +298,7 @@ async function featureRequest(
   return ok({
     redacted: raw !== request,
     host: host.value,
-    rules: rules.value,
+    stated,
     memory: memory.value,
     originalRequest: [request, projectMemoryText(memory.value.memories)]
       .filter(Boolean)
@@ -290,7 +313,6 @@ async function featureRequest(
  */
 async function featureMemory(
   workspace: WorkspaceState,
-  feature: string,
   request: string,
   rules: readonly string[],
 ): Promise<
@@ -315,13 +337,6 @@ async function featureMemory(
   if (!chosen.ok) return chosen;
   const { memories } = chosen.value;
   const mutations: FileMutation[] = chosen.value.mutation ? [chosen.value.mutation] : [];
-  if (memories.length)
-    mutations.push({
-      kind: "write",
-      path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
-      content: json({ version: 1, memories }),
-      expectedBefore: { existed: false },
-    });
   return ok({ memories, mutations, reported: memories.length ? { projectMemory: memories } : {} });
 }
 

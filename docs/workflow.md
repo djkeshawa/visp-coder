@@ -91,6 +91,7 @@ checks:
     files: [src/save.js, test/save.test.mjs]
     verifierFiles: [test/save.test.mjs]
     environment: node                              # node, browser or other
+    timeoutMs: 120000                               # optional per-check timeout
 ```
 
 - **Commands** run as an argument vector, never through a shell. A string is split into arguments; shell syntax such as `&&`, pipes or `VAR=value` prefixes is refused. Use two checks or a script the project owns.
@@ -102,6 +103,8 @@ checks:
 A check must exercise behavior to count as functional evidence. Syntax-only or static commands (for example `node --check`) still run but do not establish behavior. A check may not run a VISP workflow command (`visp done`, `visp capture` and similar) against its own workspace.
 
 `workflow.validationCommands` from `visp.yml` run alongside every slice's checks as `CONFIG_1`, `CONFIG_2`, and so on. `workflow.acceptanceChecks` are pinned when a feature is created and run at acceptance.
+
+Checks accept an optional `timeoutMs` (1–3,600,000 ms); command checks otherwise use 10 minutes and browser journeys retain their 60-second journey deadline. Timeouts are recorded as `timed-out`, with advice to inspect the check and its wait budget. On POSIX, VISP terminates the whole owned process group when a check exits, times out or is cancelled. Verbose output is bounded while retaining its beginning and end.
 
 Supervised checks inherit the operator’s environment, including tokens and other credentials, except for shell bookkeeping (`_`, `SHLVL`, `PWD`, `OLDPWD`). Their output is recorded as evidence. Python bytecode is redirected to a private per-user cache outside the project unless `PYTHONPYCACHEPREFIX` is explicitly set. A command that could not start (for example, the executable is not installed) is recorded as an environment failure with the note that no product behavior was tested, not as a test failure.
 
@@ -130,15 +133,17 @@ Without a check, `done` has nothing to execute and the reviewer has no evidence.
 
 **`visp verify`** runs the slice's checks without closing it.
 
-**`visp done`** runs the checks and records each execution. When all pass and any required review is current, the slice closes. If `critic.launch: codex-exec` is set and every check passed, `done` then starts the independent reviewer and waits for it (up to 120 seconds, 50 over MCP), so its findings usually arrive in the same step; see [the critic guide](critic.md). On the last open slice `done` also runs the pinned acceptance tests; on earlier slices it reports them without blocking. While a review is pending, editing, closing and acceptance wait for it.
+**`visp done`** runs the checks and records each execution. When all pass and any required review is current, the slice closes. If `critic.launch: codex-exec` is set and every check passed, `done` then starts the independent reviewer and waits for it (using the time left in a 100-second CLI or 50-second MCP call budget), so its findings usually arrive in the same step; see [the critic guide](critic.md). On the last open slice `done` also runs the pinned acceptance tests; on earlier slices it reports them without blocking. While a review is pending, editing, closing and acceptance wait for it.
 
-**`visp next`** is read-only and returns one action with its command. When a background review is running it waits up to 120 seconds (50 seconds over MCP); if the review is still running it returns `action: wait` with `visp next --feature <id>` to run again. `visp status` shows outcomes, slice progress, evidence and open findings.
+**`visp next`** is read-only and returns one action with its command. When a background review is running it waits within a 100-second CLI or 50-second MCP call budget; if the review is still running it returns `action: wait` with `visp next --feature <id>` to run again. `visp status` shows outcomes, slice progress, evidence and open findings.
 
 **Host hooks.** For Claude Code, `visp install` wires hooks into `.claude/settings.json` that refuse out-of-scope edits made with Edit, Write and NotebookEdit, record user prompts for `visp feature`, refuse agent edits under `.visp/` (except drafts) and shell commands that would delete VISP state or pinned tests, and on Stop send the worker back to an unfinished, recently active feature (at most three times, once for a handoff). The shell hook does not intercept general shell writes. For Codex, it writes the same prompt, shell and Stop hooks to `.codex/hooks.json`; Codex runs project hooks only after you trust them once with `/hooks`, including for later headless runs. Untrusted headless runs have no Stop reminder. Codex edits through `apply_patch`, so edit scope there is checked at commit and by `visp done`.
 
 **`visp accept`** reruns the checks against the assembled product, including pinned acceptance checks (which `done` also runs on the last open slice), and requires a current assessment of every mandatory outcome and expectation. Passing commands alone do not satisfy it.
 
-Environment failures (a missing browser, or a sandbox that denies sockets to a check) are recorded as `environment-failed`, not as product failures. Fix the environment, or rerun the same command with the host's sandbox escalation, then use `--retry-environment` on `work`, `verify`, `done` or `accept`. Do not change the product to work around them.
+Run `done`, `verify`, `accept` and `next` with the host's maximum shell timeout (at least 10 minutes when supported). Each check prints progress to stderr; MCP callers requesting progress receive notifications. Every completed execution is saved immediately, and a retry after interruption reuses current passing checks. A completed explicit `verify` or `accept` is rerun on the next fresh invocation.
+
+Environment failures (a missing browser, or denied process, filesystem or socket access) are recorded as `environment-failed`. Follow the recorded cause: for `app-unreachable`, start or restart the app at the reported URL and rerun the journey; for a missing browser or shared library, restore the installation; for a confirmed sandbox denial, use the host's supported escalation. Only deterministic missing-browser failures are reused from the startup probe; transient startup and permission failures are retried. `--retry-environment` explicitly bypasses the cache. Journey timeouts require inspecting authored selectors, expected states and waits.
 
 After a failure, `work` includes the failing output and says whether it describes the current version. Repeated identical failures ask for a different hypothesis.
 

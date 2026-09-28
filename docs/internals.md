@@ -30,11 +30,11 @@ With `critic.launch: codex-exec`, VISP itself starts `codex exec` sessions for t
 
 ## State ownership
 
-Every VISP writer in a checkout takes one exclusive lock, `.visp/state/mutation.lock`. CLI and MCP share it; nested operations are reentrant and concurrent ones serialize. Model calls and check commands run outside the lock, and results are committed after re-checking that the subject and evidence revision have not changed.
+Every VISP writer in a checkout takes one exclusive lock, `.visp/state/mutation.lock`. CLI and MCP share it; nested operations are reentrant and concurrent ones serialize. Feature rule extraction and memory selection, check commands, and browser journeys run outside the lock. Each completed check is committed under a short lock after checking the current contract; source identity is checked again before closing or accepting. Concurrent state changes are merged from the latest record, while a changed brief requires a retry. A cancellation stops owned subprocesses and prevents further closeout.
 
-An owner records a random token, PID, host and timestamp. VISP reclaims a lock only when its owner is a process on the same host that no longer exists; there is no age-based stealing. `STATE_BUSY` means another writer is active. `visp doctor` reports active, abandoned and ambiguous owners, and `visp doctor --fix` recovers abandoned transactions.
+An owner records a random token, PID, host and timestamp, plus Linux boot ID, process start ticks and PID namespace when available. VISP reclaims exited owners and mismatched process identities, without age-based stealing. Owners in another PID namespace remain ambiguous. `STATE_BUSY` includes the observed owner; same-process writers queue by canonical root. `visp doctor --fix` recovers abandoned transactions. After confirming that an ambiguous owner has stopped, use `visp doctor --fix --recover-lock <owner-token>`; the token must still match, and a known live owner is refused. Older lock records without process identity remain conservative.
 
-File changes go through recoverable transactions: a journal records each target's previous bytes, mode and existence before anything changes, and the next mutating command (or `doctor --fix`) rolls back an interrupted one. Journals are not fsynced, so they recover process interruption, not power loss.
+File changes go through recoverable transactions: a journal records each target's previous bytes, mode and existence before anything changes, and the next mutating command (or `doctor --fix`) rolls back an interrupted one. Reads tolerate journals that disappear during commit, and guard briefly waits for a live writer instead of calling its journal interrupted. Restrictive umasks do not change requested file modes; recovery accepts unchanged content with a mode-only difference. Journals are not fsynced, so they recover process interruption, not power loss.
 
 This coordinates cooperating local processes. It does not stop an editor, a shell command or a hostile same-user process from changing files, and local hashes identify content without authenticating who produced it.
 
@@ -45,6 +45,8 @@ Checks inherit the operator’s environment except shell bookkeeping (`_`, `SHLV
 Source snapshots read the declared slice scopes, check inputs and control files directly. Other tracked paths retain Git object identities, with working-tree edits hashed separately; unrelated repository size does not consume the declared-input byte budget. Symlinks are identified by their link target text, including directory, dangling and external links, without reading their targets. Candidates preserve only the selected slice’s declared inputs and controls, with recoverable link-aware restoration.
 
 An execution is bound to the product source, the slice contract, the verifier inputs, the environment and the VISP runtime. For declared command verifiers on POSIX, the resolved executable's path and content are also recorded. Browser executables that resolve to the same file share an identity.
+
+Command output is streamed into bounded head and tail buffers. On POSIX, VISP owns and terminates the command process group on exit, timeout or cancellation; Windows currently terminates the direct child. Completed checks are saved individually, and an interrupted verify/done/accept can reuse current passing checks on retry. Timeouts are recorded as `timed-out`, separately from product assertion failures.
 
 Verification and review history is append-only; current projections update in the same transaction. A result computed against a stale revision is saved to history without replacing the newer record.
 

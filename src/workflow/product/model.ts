@@ -65,6 +65,7 @@ export const productCheckSchema = z
     outcomes: z.array(id).default([]),
     files: z.array(pathPatternSchema).default([]),
     verifierFiles: z.array(pathPatternSchema).optional(),
+    timeoutMs: z.number().int().positive().max(3_600_000).optional(),
     environment: z.enum(["node", "browser", "other"]).default("other"),
     environmentVariables: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
   })
@@ -403,7 +404,7 @@ export const executionSchema = z
     contractDigest: z.string(),
     createdAt: z.string(),
     command: z.string(),
-    status: z.enum(["passed", "failed", "environment-failed"]),
+    status: z.enum(["passed", "failed", "environment-failed", "timed-out"]),
     exitCode: z.number(),
     durationMs: z.number(),
     output: z.string(),
@@ -520,6 +521,7 @@ export const productStateSchema = z
       )
       .default([]),
     executions: z.array(executionSchema).default([]),
+    pendingVerification: z.string().optional(),
     reproductions: z.array(reproductionSchema).optional(),
     captures: z.array(z.unknown()).default([]),
     captureRuns: z.array(z.unknown()).default([]),

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
+import { inspectStateLock } from "../../../../src/core/state-lock.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
 // The model call is replaced: these tests cover which path `visp feature` takes.
@@ -87,4 +88,18 @@ it("falls back to phrase matching when the model fails", async () => {
   extractor.mockRejectedValue(new Error("offline"));
   await feature("List items", "Going forward, every endpoint logs the request id.");
   expect(await recorded()).toEqual(["Going forward, every endpoint logs the request id."]);
+});
+
+it("runs the rule extractor unlocked after checking the clean baseline", async () => {
+  await project({ enabled: true, harness: "codex", launch: "codex-exec" });
+  let ownership: unknown;
+  extractor.mockImplementation(async () => {
+    if (!workspace) throw new Error("no workspace");
+    ownership = await inspectStateLock(workspace.root);
+    await workspace.write(".model-log", "model call\n");
+    return [];
+  });
+  await feature("List items", "Always use tabs from now on.");
+  expect(extractor).toHaveBeenCalled();
+  expect(ownership).toMatchObject({ ok: true, value: { state: "unlocked" } });
 });

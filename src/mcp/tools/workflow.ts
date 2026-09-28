@@ -37,6 +37,7 @@ import type { WorkspaceState } from "../../workflow/state.js";
 import { mcpAction, mcpActionText } from "../action.js";
 import { TOOL } from "../constants.js";
 import { mutatingWorkspaceFor, workspaceFor } from "../context.js";
+import { mcpOperationOptions } from "../operation-progress.js";
 import { failure, reply } from "../reply.js";
 
 export const productSelectionInput = {
@@ -162,10 +163,11 @@ export function registerWorkflowTools(server: McpServer, root: string): void {
           .strict(),
         annotations: { readOnlyHint: true },
       },
-      async (args) => {
+      async (args, extra) => {
+        const operation = mcpOperationOptions(extra);
         const state = await workspaceFor(root);
         return state.ok
-          ? productReply(name, await run(state.value, args), args.detail)
+          ? productReply(name, await run(state.value, { ...args, ...operation }), args.detail)
           : failure(name, state.error);
       },
     );

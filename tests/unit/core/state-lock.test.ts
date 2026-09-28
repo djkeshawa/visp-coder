@@ -13,6 +13,7 @@ import { ProjectFileSystem } from "../../../src/core/fs.js";
 import { ok } from "../../../src/core/result.js";
 import {
   inspectStateLock,
+  recoverStateLock,
   STATE_LOCK_DIRECTORY,
   withStateLock,
 } from "../../../src/core/state-lock.js";
@@ -37,6 +38,74 @@ function signal(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("worktree state ownership", () => {
+  it("recognizes its owner while the owner record is still returning from publication", async () => {
+    const project = await root();
+    const write = ProjectFileSystem.prototype.writeJson;
+    let observed: unknown;
+    const publishing = vi
+      .spyOn(ProjectFileSystem.prototype, "writeJson")
+      .mockImplementation(async function (this: ProjectFileSystem, path, value, mode) {
+        const written = await write.call(this, path, value, mode);
+        if (path.endsWith("mutation.lock/owner.json")) observed = await inspectStateLock(project);
+        return written;
+      });
+    try {
+      expect(await withStateLock(project, async () => ok(true))).toEqual(ok(true));
+      expect(observed).toMatchObject({ ok: true, value: { state: "active" } });
+    } finally {
+      publishing.mockRestore();
+    }
+  });
+
+  it("requires the observed token to recover ambiguous ownership and refuses live owners", async () => {
+    const project = await root();
+    await withStateLock(project, async () => {
+      const lock = await inspectStateLock(project);
+      if (!lock.ok || !lock.value.owner) throw new Error("missing owner");
+      expect((await recoverStateLock(project, lock.value.owner.token)).ok).toBe(false);
+      return ok(undefined);
+    });
+    const token = randomUUID();
+    await mkdir(join(project, STATE_LOCK_DIRECTORY));
+    await writeFile(
+      join(project, STATE_LOCK_DIRECTORY, "owner.json"),
+      JSON.stringify({
+        version: 1,
+        token,
+        pid: process.pid,
+        host: "other-host",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    expect((await recoverStateLock(project, randomUUID())).ok).toBe(false);
+    expect(await recoverStateLock(project, token)).toEqual(ok(true));
+    expect(await inspectStateLock(project)).toEqual(ok({ state: "unlocked" }));
+  });
+
+  it("reclaims a reused PID with a different recorded process start", async () => {
+    const project = await root();
+    let saved: Record<string, unknown> = {};
+    await withStateLock(project, async () => {
+      saved = JSON.parse(await readFile(join(project, STATE_LOCK_DIRECTORY, "owner.json"), "utf8"));
+      return ok(undefined);
+    });
+    await mkdir(join(project, STATE_LOCK_DIRECTORY));
+    await writeFile(
+      join(project, STATE_LOCK_DIRECTORY, "owner.json"),
+      JSON.stringify({
+        ...saved,
+        processStart: "old-process",
+      }),
+    );
+    expect(await inspectStateLock(project)).toMatchObject({
+      ok: true,
+      value: { state: "abandoned" },
+    });
+    expect(await withStateLock(project, async () => ok("recovered"), { timeoutMs: 0 })).toEqual(
+      ok("recovered"),
+    );
+  });
+
   it.each(["missing", "changed", "symlink"])(
     "refuses a %s command-check receipt instead of crediting an exit-zero wrapper",
     async (kind) => {
@@ -171,7 +240,7 @@ describe("worktree state ownership", () => {
     });
     await entered.promise;
     pauseNext = true;
-    const contender = withStateLock(project, async () => ok("second"));
+    const contender = withStateLock(project, async () => ok("second"), { timeoutMs: 5000 });
     let stableParent = false;
     try {
       await preparing.promise;
@@ -277,7 +346,10 @@ describe("worktree state ownership", () => {
       return ok(undefined);
     });
     expect(!changed.ok && changed.error.code).toBe("STATE_BUSY");
-    expect(await inspectStateLock(project)).toMatchObject({ ok: true, value: { state: "active" } });
+    expect(await inspectStateLock(project)).toMatchObject({
+      ok: true,
+      value: { state: "ambiguous" },
+    });
   });
 
   it("serializes sibling mutations inside an already owned operation", async () => {

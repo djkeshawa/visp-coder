@@ -24,6 +24,7 @@ import type { ProductSelection } from "../../workflow/product/store.js";
 import type { WorkspaceState } from "../../workflow/state.js";
 import { TOOL } from "../constants.js";
 import { mutatingWorkspaceFor, workspaceFor } from "../context.js";
+import { mcpOperationOptions } from "../operation-progress.js";
 import { mcpProductFeedbackHost } from "../product-feedback-host.js";
 import { failure } from "../reply.js";
 import { productReply, productSelectionInput } from "./workflow.js";
@@ -105,10 +106,11 @@ export function registerEvidenceTools(server: McpServer, root: string): void {
           })
           .strict(),
       },
-      async (args) => {
+      async (args, extra) => {
+        const operation = mcpOperationOptions(extra);
         const state = await mutatingWorkspaceFor(root);
         return state.ok
-          ? productReply(name, await run(state.value, args), args.detail)
+          ? productReply(name, await run(state.value, { ...args, ...operation }), args.detail)
           : failure(name, state.error);
       },
     );

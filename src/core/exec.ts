@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { LIMITS } from "./constants.js";
 import { fromUnknown } from "./errors.js";
 import { err, ok, type Result } from "./result.js";
@@ -10,6 +10,7 @@ export interface CommandOutput {
   readonly stdout: string;
   readonly stderr: string;
   readonly timedOut: boolean;
+  readonly aborted?: boolean;
   readonly durationMs: number;
 }
 
@@ -17,103 +18,153 @@ export interface RunOptions {
   readonly cwd: string;
   readonly input?: string;
   readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
   readonly env?: Record<string, string>;
   /** Use exactly the supplied environment instead of extending the caller's. */
   readonly replaceEnv?: boolean;
 }
 
-/**
- * Runs a command as an argv vector. There is no shell, so nothing in a command
- * string can be interpolated into one.
- */
+/** Runs argv without a shell; owns the process group and bounds retained output. */
 export function run(
   file: string,
   args: readonly string[],
   options: RunOptions,
 ): Promise<Result<CommandOutput>> {
   const started = Date.now();
-  const timeout = options.timeoutMs ?? LIMITS.commandTimeoutMs;
-  const env = options.replaceEnv
-    ? (options.env ?? {})
-    : options.env
-      ? { ...process.env, ...options.env }
-      : process.env;
-  const prepared = prepareCommand(file, args, env);
-
-  return new Promise((resolvePromise) => {
+  const timeoutMs = options.timeoutMs ?? LIMITS.commandTimeoutMs;
+  return new Promise((resolve) => {
+    let child: ChildProcess;
     try {
-      const child = execFile(
-        prepared.file,
-        prepared.args,
-        {
-          cwd: options.cwd,
-          timeout,
-          encoding: "utf8",
-          maxBuffer: 8 * 1024 * 1024,
-          env,
-          windowsVerbatimArguments: prepared.windowsVerbatimArguments,
-        },
-        (error, stdout, stderr) => {
-          resolvePromise(
-            commandResult(error, stdout, stderr, [file, ...args].join(" "), Date.now() - started),
-          );
-        },
-      );
-      if (options.input !== undefined) {
-        child.stdin?.on("error", () => undefined);
-        child.stdin?.end(options.input);
-      }
+      options.signal?.throwIfAborted();
+      if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new Error("Invalid command timeout");
+      const env = options.replaceEnv ? (options.env ?? {}) : { ...process.env, ...options.env };
+      const prepared = prepareCommand(file, args, env);
+      child = spawn(prepared.file, prepared.args, {
+        cwd: options.cwd,
+        detached: process.platform !== "win32",
+        stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        env,
+        windowsVerbatimArguments: prepared.windowsVerbatimArguments,
+      });
     } catch (cause) {
-      resolvePromise(err(fromUnknown(cause, "COMMAND_FAILED")));
+      resolve(err(fromUnknown(cause, "COMMAND_FAILED")));
+      return;
     }
+    const stdout = new BoundedOutput();
+    const stderr = new BoundedOutput();
+    let timedOut = false;
+    let aborted = false;
+    let finished = false;
+    let exitCode = 1;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            stop();
+          }, timeoutMs)
+        : undefined;
+    const finish = (failure?: Error & { code?: string }) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      clearTimeout(grace);
+      options.signal?.removeEventListener("abort", cancel);
+      killCommandGroup(child, "SIGKILL");
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      if (failure) {
+        const error = fromUnknown(failure, "COMMAND_FAILED");
+        resolve(err({ ...error, details: { ...error.details, errno: failure.code } }));
+      } else
+        resolve(
+          ok({
+            command: [file, ...args].join(" "),
+            exitCode: timedOut || aborted ? 1 : exitCode,
+            stdout: stdout.text(),
+            stderr: stderr.text(),
+            timedOut,
+            aborted,
+            durationMs: Date.now() - started,
+          }),
+        );
+    };
+    const stop = () => {
+      killCommandGroup(child, "SIGTERM");
+      grace ??= setTimeout(() => finish(), 200);
+    };
+    const cancel = () => {
+      aborted = true;
+      stop();
+    };
+    child.stdout?.on("data", (chunk: Buffer) => stdout.add(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => stderr.add(chunk));
+    child.once("error", finish);
+    child.once("exit", (code) => {
+      exitCode = code ?? 1;
+      clearTimeout(timer);
+      // A descendant may retain stdout after its parent exits. Drain briefly, then reap it.
+      stop();
+    });
+    child.once("close", () => finish());
+    if (options.input !== undefined) {
+      child.stdin?.on("error", () => undefined);
+      child.stdin?.end(options.input);
+    }
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) cancel();
   });
 }
 
-type ProcessError = Error & {
-  readonly code?: string | number | null;
-  readonly killed?: boolean;
-  readonly signal?: string;
-};
+function killCommandGroup(child: ChildProcess, signal: NodeJS.Signals) {
+  if (!child.pid) return;
+  try {
+    if (process.platform === "win32") child.kill(signal);
+    else process.kill(-child.pid, signal);
+  } catch {
+    /* The process group has already exited. */
+  }
+}
 
-function commandResult(
-  error: ProcessError | null,
-  stdout: string,
-  stderr: string,
-  command: string,
-  durationMs: number,
-): Result<CommandOutput> {
-  // A process that exited carries a numeric `code`. A spawn that never
-  // happened carries an errno string — those are not a failing check, they are
-  // no check, and must not be reported as a test failure.
-  if (isSpawnFailure(error)) {
-    const failure = fromUnknown(error, "COMMAND_FAILED");
-    return { ok: false, error: { ...failure, details: { ...failure.details, errno: error.code } } };
+class BoundedOutput {
+  private readonly head: Buffer[] = [];
+  private readonly tail: Buffer[] = [];
+  private headBytes = 0;
+  private tailBytes = 0;
+  private total = 0;
+  private readonly half = 4 * 1024 * 1024;
+
+  add(chunk: Buffer) {
+    this.total += chunk.length;
+    const keep = Math.min(this.half - this.headBytes, chunk.length);
+    if (keep > 0) {
+      this.head.push(chunk.subarray(0, keep));
+      this.headBytes += keep;
+    }
+    if (keep === chunk.length) return;
+    this.tail.push(chunk.subarray(keep));
+    this.tailBytes += chunk.length - keep;
+    while (this.tailBytes > this.half) {
+      const first = this.tail[0];
+      if (!first) break;
+      const excess = this.tailBytes - this.half;
+      if (first.length <= excess) {
+        this.tail.shift();
+        this.tailBytes -= first.length;
+      } else {
+        this.tail[0] = first.subarray(excess);
+        this.tailBytes -= excess;
+      }
+    }
   }
 
-  return ok({
-    command,
-    exitCode: exitCodeOf(error),
-    stdout,
-    stderr,
-    timedOut: timedOut(error),
-    durationMs,
-  });
-}
-
-function isSpawnFailure(error: ProcessError | null): error is ProcessError {
-  return error !== null && (!("code" in error) || typeof error.code === "string");
-}
-
-function exitCodeOf(error: ProcessError | null): number {
-  if (typeof error?.code === "number") return error.code;
-  return error ? 1 : 0;
-}
-
-function timedOut(error: ProcessError | null): boolean {
-  if (!error?.killed) return false;
-  // `killed` is true for any signal, not just ours. Calling a SIGINT a timeout
-  // would put a wrong reason in the evidence record.
-  return error.signal === "SIGTERM" || error.signal === undefined;
+  text() {
+    return Buffer.concat([
+      ...this.head,
+      ...(this.total > this.half * 2 ? [Buffer.from("\n[VISP: output truncated]\n")] : []),
+      ...this.tail,
+    ]).toString("utf8");
+  }
 }
 
 /**

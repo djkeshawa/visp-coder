@@ -98,7 +98,7 @@ describe("product command check execution boundary", () => {
     const result = await runProductVerify(await workspace.state());
     expect(result.ok && result.value.executions[0]).toMatchObject({
       status: "environment-failed",
-      output: expect.stringContaining("sandbox denied"),
+      output: expect.stringContaining("supported sandbox escalation"),
     });
   });
   it.each([

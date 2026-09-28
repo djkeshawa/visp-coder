@@ -12,7 +12,12 @@ import {
   productEvidenceGaps,
 } from "./assessment.js";
 import { checkBehaviorChanges } from "./behavior-changes.js";
-import { executeProductCheck } from "./check-execution.js";
+import {
+  cancelledExecution,
+  executeChecks,
+  executionOwnerKey,
+  requireExecutionContract,
+} from "./check-lifecycle.js";
 import { ensureProductCheckpoint } from "./checkpoint.js";
 import { productNeighborhood } from "./context.js";
 import { correctionChecks } from "./corrections.js";
@@ -73,18 +78,15 @@ export interface ProductVerification {
 export const runProductVerify = (
   workspace: WorkspaceState,
   options: ProductSelection = {},
-): Promise<Result<ProductVerification>> =>
-  withProductMutation(workspace, () => execute(workspace, options, false, false));
+): Promise<Result<ProductVerification>> => execute(workspace, options, false, false);
 export const runProductDone = (
   workspace: WorkspaceState,
   options: ProductSelection = {},
-): Promise<Result<ProductVerification>> =>
-  withProductMutation(workspace, () => execute(workspace, options, true, false));
+): Promise<Result<ProductVerification>> => execute(workspace, options, true, false);
 export const runProductAccept = (
   workspace: WorkspaceState,
   options: ProductSelection = {},
-): Promise<Result<ProductVerification>> =>
-  withProductMutation(workspace, () => execute(workspace, options, false, true));
+): Promise<Result<ProductVerification>> => execute(workspace, options, false, true);
 
 async function execute(
   workspace: WorkspaceState,
@@ -92,7 +94,10 @@ async function execute(
   close: boolean,
   accept: boolean,
 ): Promise<Result<ProductVerification>> {
-  const prepared = await prepareExecution(workspace, options, close, accept);
+  if (options.signal?.aborted) return cancelledExecution();
+  const prepared = await withProductMutation(workspace, () =>
+    prepareExecution(workspace, options, close, accept),
+  );
   if (!prepared.ok) return prepared;
   const { record, slice, source, snapshot, commands } = prepared.value;
   const checked = await executeChecks(
@@ -102,19 +107,58 @@ async function execute(
     source,
     commands,
     close,
-    options.retryEnvironment,
+    accept,
+    options,
     snapshot,
   );
-  const { executions } = checked;
+  if (!checked.ok) return checked;
+  return withProductMutation(workspace, async () => {
+    if (options.signal?.aborted) return cancelledExecution();
+    const loaded = await readProductRecord(workspace, { feature: record.brief.feature });
+    if (!loaded.ok) return loaded;
+    const contract = requireExecutionContract(record, loaded.value);
+    if (!contract.ok) return contract;
+    const available = await closeoutAvailability(workspace, record.brief.feature, close, accept);
+    if (!available.ok) return available;
+    return finishExecution(
+      workspace,
+      loaded.value,
+      slice,
+      source,
+      snapshot,
+      commands,
+      checked.value,
+      close,
+      accept,
+      prepared.value.committedChanges,
+      options.signal,
+    );
+  });
+}
+
+async function finishExecution(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice | undefined,
+  source: string,
+  snapshot: Record<string, string>,
+  commands: ProductCheck[],
+  executions: ProductExecution[],
+  close: boolean,
+  accept: boolean,
+  committedChanges: string[],
+  signal?: AbortSignal,
+): Promise<Result<ProductVerification>> {
   const afterSnapshot = await productSourceSnapshot(workspace, record.brief);
   if (!afterSnapshot.ok) return afterSnapshot;
   const after = await productSourceDigest(workspace, record.brief, afterSnapshot.value);
   if (!after.ok) return after;
   const timestamp = new Date().toISOString();
   const next = {
-    ...checked.state,
+    ...record.state,
+    pendingVerification: undefined,
     updatedAt: timestamp,
-    executions: [...record.state.executions, ...executions],
+    executions: record.state.executions,
   };
   const current: ProductRecord = { ...record, state: next };
   const gaps = await executionGaps(workspace, current, slice, after.value, commands, executions);
@@ -135,8 +179,8 @@ async function execute(
     subject: after.value,
   });
   if (!completion.ok) return completion;
+  if (signal?.aborted) return cancelledExecution();
   const saved = await saveProductState(workspace, record, completion.value.state, [
-    ...checked.mutations,
     ...completion.value.mutations,
   ]);
   if (!saved.ok) return saved;
@@ -151,6 +195,7 @@ async function execute(
   const repeated = failed.some((execution) =>
     record.state.executions.some(
       (before) =>
+        before.id !== execution.id &&
         before.check === execution.check &&
         before.status === "failed" &&
         productFailureSignature(before) === productFailureSignature(execution),
@@ -164,11 +209,13 @@ async function execute(
       passed,
       close,
       accept,
-      executions.some((entry) => entry.status === "environment-failed"),
+      executions
+        .filter((entry) => entry.status === "environment-failed" || entry.status === "timed-out")
+        .map((entry) => entry.output),
     ),
     checkpoint: checkpointDelivery(checkpoint),
     warnings: await productInputWarnings(workspace, record.brief),
-    committedChanges: prepared.value.committedChanges,
+    committedChanges,
     ...progress,
     ...(trace?.ok ? { trace: trace.value } : {}),
     feature: record.brief.feature,
@@ -180,7 +227,12 @@ async function execute(
     outcomes: outcomeStatuses(current, after.value, slice),
     gaps: [...new Set(gaps)],
     journeyFeedback: currentJourneyFeedback(current, after.value, slice?.id),
-    behaviorChanges: checkBehaviorChanges(record.state.executions, executions),
+    behaviorChanges: checkBehaviorChanges(
+      record.state.executions.filter(
+        (before) => !executions.some((entry) => entry.id === before.id),
+      ),
+      executions,
+    ),
     ...(repeated
       ? {
           recommendation:
@@ -216,9 +268,10 @@ function deliveryResult(
   passed: boolean,
   close: boolean,
   accept: boolean,
-  environmentFailed: boolean,
+  environmentFailures: string[],
 ) {
-  const recovery = environmentNext(feature, task, [], "verify");
+  const environmentFailed = environmentFailures.length > 0;
+  const recovery = environmentNext(feature, task, environmentFailures, "verify");
   const delivery = environmentFailed
     ? {
         status: "unresolved-environment",
@@ -323,7 +376,7 @@ function closeoutAvailability(
     ? requireNoPendingCriticReview(
         workspace,
         feature,
-        "Submit the pending reviewer result or wait for its deadline before closing or accepting",
+        "Run visp next to wait for the pending review and receive its findings before closing or accepting",
       )
     : Promise.resolve(ok(undefined));
 }
@@ -363,49 +416,6 @@ function executionCommands(
   return commands;
 }
 
-async function executeChecks(
-  workspace: WorkspaceState,
-  record: ProductRecord,
-  slice: ProductSlice | undefined,
-  source: string,
-  commands: ProductCheck[],
-  close: boolean,
-  retryEnvironment = false,
-  verifierSnapshot: Record<string, string> = {},
-): Promise<{ executions: ProductExecution[]; state: ProductState; mutations: FileMutation[] }> {
-  const executions: ProductExecution[] = [];
-  const mutations: FileMutation[] = [];
-  let state = record.state;
-  const existing = new Map(
-    applicableExecutions(record, source).map((execution) => [
-      executionOwnerKey(execution.check, execution.task),
-      execution,
-    ]),
-  );
-  for (const check of commands) {
-    // A check added by an assembled failure keeps its feature-wide contract identity.
-    // Binding it to a slice that does not declare it would hide later check revisions.
-    const owner = slice?.checks.includes(check.id) ? slice : undefined;
-    // `done` reuses only this owner's result. Explicit verify and acceptance rerun checks.
-    if (close && existing.get(executionOwnerKey(check.id, owner?.id))?.status === "passed")
-      continue;
-    const checked = await executeProductCheck(
-      workspace,
-      { ...record, state },
-      owner,
-      check,
-      source,
-      retryEnvironment,
-      verifierSnapshot,
-      close,
-    );
-    executions.push(checked.execution);
-    state = checked.state;
-    mutations.push(...checked.mutations);
-  }
-  return { executions, state, mutations };
-}
-
 async function executionGaps(
   workspace: WorkspaceState,
   current: ProductRecord,
@@ -432,10 +442,6 @@ async function executionGaps(
     )
       gaps.push(`${check.id}: no current passing execution`);
   return gaps;
-}
-
-function executionOwnerKey(check: string, task?: string) {
-  return JSON.stringify([check, task]);
 }
 
 function changedProductGap(before: Record<string, string>, after: Record<string, string>): string {

@@ -6,15 +6,18 @@ export const TOOL_ACCESS_GUIDANCE =
   "Use VISP MCP tools when connected: `visp_next({})`, then `visp_<command>` schemas; otherwise use CLI `visp next`.";
 
 export const COMPACT_RULES = `- Keep request with --source-brief; preserve outcomes, expectations and scope.allowed.
-- Run visp work before editing; build a small runnable behavior. Each functional outcome needs a check: a test command, or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
-- Stateful work: act, settle, repeat; check failure and restart.
-- After checks pass, visp done may start review; visp next waits. Fix findings and rerun done. An accepted critic response records the review; otherwise use visp review --prepare, then --session <id> --from -.
-- Blocked sockets? Retry with escalation.
+- Before editing run visp work; build runnable behavior. Functional outcomes need tests or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
+- Stateful: act, settle, repeat; test failure and restart.
+- visp done may start review; visp next waits. Fix findings; rerun done. An accepted critic response records the review; otherwise visp review --prepare, then --session <id> --from -.
+- Run done/verify/accept/next with the host's maximum shell timeout.
+- Sandbox denied access? Rerun with escalation.
 - Missing product evidence stays unresolved. Report reviewer.context honestly. Do not force extra review rounds.
 - Before the final answer, run \`visp next\`; respect execution refusals.`;
 
 export const RULES_FOR_AGENTS = `- The original request and independent acceptance expectations cannot be weakened by a method revision.
   An explicit intent change records the reason and provenance; it is not proof of human authorization.
+- Use at least 10 minutes for done/verify/accept/next when the host supports it. Retain and poll the command handle;
+  completed checks are saved for retry after interruption. Inspect sandbox denials before using supported escalation.
 - Write Given/When/Then examples and counterexamples for stateful behavior. Check downstream results,
   boundaries, failure, and recovery. Preview and runtime should share a model or a consistency check,
   and both must satisfy an expectation that does not come from the implementation.
@@ -65,7 +68,7 @@ Command examples and recovery: VISP.commands.md. Full guide: ${fullGuide}
 export function renderMinimalGuide(): string {
   return `# visp
 
-First: \`visp feature "<goal>" --source-brief - <<'REQUEST'\` (request, then REQUEST). \`visp work --check "<test command>"\`; \`visp brief --template\` for several slices.
+First: \`visp feature "<goal>" --source-brief - <<'REQUEST'\` (request, then REQUEST). \`visp work --check "<test command>"\`; \`visp brief --template\` for many slices.
 Loop: \`visp work\` → implement → \`visp done\` → \`visp next\`. Run \`visp accept\` only when \`visp next\` directs it.
 
 ${COMPACT_RULES}

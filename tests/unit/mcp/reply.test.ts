@@ -75,3 +75,20 @@ describe("reply", () => {
     });
   });
 });
+
+it("keeps non-lock STATE_BUSY recovery and gives lock failures MCP-specific advice", () => {
+  const changed = failure("visp_done", {
+    code: "STATE_BUSY",
+    message: "Brief changed",
+    recovery: "visp next",
+  });
+  expect(changed.structuredContent).toMatchObject({ error: { recovery: "visp next" } });
+  const locked = failure("visp_done", {
+    code: "STATE_BUSY",
+    message: "Writer active",
+    details: { lock: ".visp/state/mutation.lock", owner: { pid: 42 } },
+  });
+  expect(locked.structuredContent).toMatchObject({
+    error: { recovery: expect.stringContaining("MCP call"), details: { owner: { pid: 42 } } },
+  });
+});

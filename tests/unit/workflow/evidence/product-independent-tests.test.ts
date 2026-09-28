@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { ok } from "../../../../src/core/result.js";
 import { withStateLock } from "../../../../src/core/state-lock.js";
@@ -29,14 +29,9 @@ import { productWorkspace } from "../../support/product-workspace.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
 let workspace: TestWorkspace | undefined;
-const codexThread = process.env.CODEX_THREAD_ID;
-beforeEach(() => {
-  delete process.env.CODEX_THREAD_ID;
-});
 afterEach(async () => {
   await workspace?.destroy();
   workspace = undefined;
-  if (codexThread !== undefined) process.env.CODEX_THREAD_ID = codexThread;
 });
 
 // The fixture's module returns 1; the request promises 2.

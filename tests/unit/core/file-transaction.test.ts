@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyFileTransaction,
   filePrecondition,
@@ -18,6 +18,8 @@ import {
   RecoveringProjectFileSystem,
   recoverFileTransactions,
 } from "../../../src/core/file-transaction.js";
+
+import { ProjectFileSystem } from "../../../src/core/fs.js";
 
 const roots: string[] = [];
 
@@ -33,6 +35,71 @@ async function root(): Promise<string> {
 }
 
 describe("file transactions", () => {
+  it("rolls back a mode-only mutation even when both snapshots contain identical bytes", async () => {
+    const project = await root();
+    await writeFile(join(project, "mode-only"), "same");
+    await chmod(join(project, "mode-only"), 0o600);
+    await applyFileTransaction(
+      project,
+      "mode-only-rollback",
+      [{ kind: "write", path: "mode-only", content: "same", mode: 0o755 }],
+      {
+        leavePreparedOnError: true,
+        afterMutation() {
+          throw new Error("interrupted");
+        },
+      },
+    );
+    expect((await recoverFileTransactions(project)).ok).toBe(true);
+    expect((await stat(join(project, "mode-only"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("ignores a journal removed between listing and reading", async () => {
+    const project = await root();
+    const listing = vi
+      .spyOn(ProjectFileSystem.prototype, "listDir")
+      .mockResolvedValue({ ok: true, value: ["vanished.json"] });
+    try {
+      expect(await inspection(project)).toEqual({ pending: [], committed: [] });
+    } finally {
+      listing.mockRestore();
+    }
+  });
+
+  it("applies requested modes under a restrictive umask", async () => {
+    const project = await root();
+    const previous = process.umask(0o077);
+    try {
+      const result = await applyFileTransaction(project, "restrictive-umask", [
+        { kind: "write", path: "state.json", content: "{}\n" },
+      ]);
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      expect((await stat(join(project, "state.json"))).mode & 0o777).toBe(0o644);
+      expect((await inspection(project)).pending).toEqual([]);
+    } finally {
+      process.umask(previous);
+    }
+  });
+
+  it("recovers matching content even when its mode differs from the journal", async () => {
+    const project = await root();
+    await writeFile(join(project, "state.json"), "before");
+    await applyFileTransaction(
+      project,
+      "mode-only",
+      [{ kind: "write", path: "state.json", content: "after" }],
+      {
+        leavePreparedOnError: true,
+        afterMutation() {
+          throw new Error("interrupted");
+        },
+      },
+    );
+    await chmod(join(project, "state.json"), 0o600);
+    expect((await recoverFileTransactions(project)).ok).toBe(true);
+    expect(await readFile(join(project, "state.json"), "utf8")).toBe("before");
+  });
+
   // Snapshot guards restate unchanged files. Rewriting them failed inside host sandboxes
   // that protect agent directories such as .agents/ (EROFS), and touched every file.
   it("treats a write of identical bytes as a checked no-op", async () => {

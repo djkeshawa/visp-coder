@@ -69,6 +69,78 @@ it("resolves Windows npm shims through PATHEXT and escapes metacharacters", asyn
 });
 
 describe("run", () => {
+  it("delivers explicit stdin and closes it after the input", async () => {
+    const input = "first line\nUnicode: café\n";
+    const result = await run(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], {
+      cwd: process.cwd(),
+      input,
+      timeoutMs: 2000,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { exitCode: 0, stdout: input, timedOut: false },
+    });
+  });
+
+  it("tolerates a subprocess closing stdin before consuming all input", async () => {
+    const result = await run(process.execPath, ["-e", "process.exit(0)"], {
+      cwd: process.cwd(),
+      input: "x".repeat(1024 * 1024),
+      timeoutMs: 2000,
+    });
+    expect(result).toMatchObject({ ok: true, value: { exitCode: 0, timedOut: false } });
+  });
+
+  it("retains bounded head and tail output without killing a verbose check", async () => {
+    const result = await run(
+      process.execPath,
+      [
+        "-e",
+        "console.log('HEAD'); process.stdout.write('x'.repeat(9 * 1024 * 1024)); console.log('TAIL');",
+      ],
+      { cwd: process.cwd() },
+    );
+    expect(result).toMatchObject({ ok: true, value: { exitCode: 0 } });
+    if (!result.ok) return;
+    expect(result.value.stdout).toContain("HEAD");
+    expect(result.value.stdout).toContain("TAIL");
+    expect(result.value.stdout).toContain("output truncated");
+    expect(result.value.stdout.length).toBeLessThan(8 * 1024 * 1024 + 100);
+  });
+
+  it("does not wait for inherited pipes after the direct child exits", async () => {
+    const result = await run(
+      process.execPath,
+      [
+        "-e",
+        `
+      const {spawn} = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 2500)'], {stdio: 'inherit'});
+      child.unref();
+    `,
+      ],
+      { cwd: process.cwd(), timeoutMs: 1200 },
+    );
+    expect(result).toMatchObject({ ok: true, value: { exitCode: 0, timedOut: false } });
+    if (result.ok) expect(result.value.durationMs).toBeLessThan(1000);
+  });
+
+  it("aborts a running command promptly", async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 100);
+    try {
+      const result = await run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        cwd: process.cwd(),
+        signal: controller.signal,
+        timeoutMs: 1200,
+      });
+      expect(result).toMatchObject({ ok: true, value: { aborted: true, timedOut: false } });
+      if (result.ok) expect(result.value.durationMs).toBeLessThan(1000);
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
   it("captures stdout and a zero exit code", async () => {
     const result = await run("node", ["-e", "process.stdout.write('hi')"], {
       cwd: process.cwd(),

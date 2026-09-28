@@ -7,6 +7,7 @@ import {
 } from "../evidence/product-capture-execution.js";
 import { productJourneyKey } from "../evidence/product-journey.js";
 import type { WorkspaceState } from "../state.js";
+import { browserFailureRecovery } from "./browser-recovery.js";
 import type { ExecutedProductCheck, ExecutionIdentity } from "./check-execution.js";
 import { browserEnvironmentIdentity, failedBrowserCapability } from "./environment.js";
 import type { ProductCheck, ProductState } from "./model.js";
@@ -19,6 +20,40 @@ export async function executeBrowserCheck(
   command: Extract<ProductCheck["command"], { kind: "browser-journey" }>,
   base: ExecutionIdentity,
   retryEnvironment: boolean,
+  signal?: AbortSignal,
+  timeoutMs?: number,
+  reuseCapture = false,
+): Promise<ExecutedProductCheck> {
+  const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+  const browserSignal = timeout ? AbortSignal.any([timeout, ...(signal ? [signal] : [])]) : signal;
+  const result = await runBrowserCheck(
+    workspace,
+    record,
+    command,
+    base,
+    retryEnvironment,
+    browserSignal,
+    reuseCapture,
+  );
+  return timeout?.aborted && !signal?.aborted
+    ? {
+        ...result,
+        execution: {
+          ...result.execution,
+          status: "timed-out",
+          output: `${result.execution.output}\nVISP: check timed out; inspect the journey and its timeoutMs budget.`,
+        },
+      }
+    : result;
+}
+
+async function runBrowserCheck(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  command: Extract<ProductCheck["command"], { kind: "browser-journey" }>,
+  base: ExecutionIdentity,
+  retryEnvironment: boolean,
+  signal?: AbortSignal,
   reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
   const environmentDigest = await browserEnvironmentIdentity(workspace.paths.root);
@@ -49,6 +84,7 @@ export async function executeBrowserCheck(
   if (
     !retryEnvironment &&
     cached?.status === "unavailable" &&
+    cached.kind === "missing-browser" &&
     cached.environment === environmentDigest
   )
     return {
@@ -70,8 +106,15 @@ export async function executeBrowserCheck(
   const captured = await prepareProductCapture(workspace, record, {
     journey: command.journey,
     task: base.task,
+    signal,
   });
-  const checked = browserExecution(base, record.state, captured, Date.now() - started);
+  const checked = browserExecution(
+    base,
+    record.state,
+    captured,
+    Date.now() - started,
+    command.journey.url,
+  );
   const startupFailed = !captured.ok && captured.error.details?.gap === "browser-unavailable";
   return {
     ...checked,
@@ -86,6 +129,7 @@ export async function executeBrowserCheck(
         ? failedBrowserCapability(
             environmentDigest,
             redactText(checked.execution.output, { root: workspace.paths.root }),
+            !captured.ok ? captured.error.details?.browserFailureKind : undefined,
           )
         : captured.ok
           ? {
@@ -127,6 +171,7 @@ function browserExecution(
   state: ProductState,
   captured: Result<PreparedProductCapture>,
   durationMs: number,
+  url: string,
 ): ExecutedProductCheck {
   if (!captured.ok)
     return {
@@ -136,18 +181,23 @@ function browserExecution(
         status: "environment-failed",
         exitCode: -1,
         durationMs,
-        output: captured.error.message.slice(-8000),
+        output: [captured.error.message, captured.error.recovery]
+          .filter(Boolean)
+          .join("\n")
+          .slice(-8000),
       },
       state,
       mutations: [],
     };
   const { result } = captured.value;
   const status =
-    result.status === "completed"
-      ? "passed"
-      : result.failure?.kind === "behavior"
-        ? "failed"
-        : "environment-failed";
+    result.status === "timed-out"
+      ? "timed-out"
+      : result.status === "completed"
+        ? "passed"
+        : result.failure?.kind === "behavior"
+          ? "failed"
+          : "environment-failed";
   return {
     execution: {
       ...base,
@@ -155,9 +205,15 @@ function browserExecution(
       status,
       assertions: "runner-observed",
       captureRunId: result.runId,
-      exitCode: { passed: 0, failed: 1, "environment-failed": -1 }[status],
+      exitCode: { passed: 0, failed: 1, "environment-failed": -1, "timed-out": -1 }[status],
       durationMs,
-      output: browserCheckSummary(result),
+      output: [
+        browserCheckSummary(result),
+        browserFailureRecovery(result.failure?.message ?? "", url),
+      ]
+        .filter(Boolean)
+        .join("\n")
+        .slice(-8000),
     },
     state: captured.value.state,
     mutations: captured.value.mutations,

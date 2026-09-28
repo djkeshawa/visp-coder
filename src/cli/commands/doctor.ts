@@ -3,6 +3,7 @@ import { renderSettings, requestedSettings } from "../../config/effective.js";
 import { EXIT } from "../../core/constants.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { withRuntimeDiagnostic } from "../../core/runtime-agreement.js";
+import { recoverStateLock } from "../../core/state-lock.js";
 import { runtimeIdentity } from "../../core/version.js";
 import { type Check, runChecks } from "../../doctor/checks.js";
 import { applyFixes } from "../../doctor/fix.js";
@@ -10,7 +11,7 @@ import { withValidationSmoke } from "../../doctor/validation.js";
 import { type ValidationLayer, validationLayerSchema } from "../../workflow/artifacts/common.js";
 import { foundationBlockers } from "../../workflow/gates/readiness.js";
 import { buildFoundationContext, type WorkspaceState } from "../../workflow/state.js";
-import { isJson, mutatingWorkspace, options, workspace } from "../context.js";
+import { isJson, mutatingWorkspace, options, projectRoot, workspace } from "../context.js";
 import { emit, emitError } from "../output.js";
 
 export function doctorCommand(): Command {
@@ -23,6 +24,10 @@ export function doctorCommand(): Command {
     .option("--fix", "Repair what can be repaired without a decision")
     .addOption(new Option("--runtime-identity").hideHelp())
     .option(
+      "--recover-lock <token>",
+      "With --fix, confirm that this ambiguous lock owner has stopped",
+    )
+    .option(
       "--check-command <command>",
       "Run a smoke command with the current environment (executes project code; not product verification)",
     )
@@ -33,6 +38,7 @@ export function doctorCommand(): Command {
     .action(async (_flags: unknown, command: Command) => {
       const opts = options<{
         fix?: boolean;
+        recoverLock?: string;
         settings?: boolean;
         checkCommand?: string;
         checkLayer?: string;
@@ -48,6 +54,11 @@ export function doctorCommand(): Command {
       const layer = smokeLayer(opts);
       if (!layer.ok) {
         process.exitCode = emitError("doctor", layer.error, { json: isJson(opts) });
+        return;
+      }
+      const recovered = await recoverRequestedLock(projectRoot(opts), opts);
+      if (!recovered.ok) {
+        process.exitCode = emitError("doctor", recovered.error, { json: isJson(opts) });
         return;
       }
       const state = opts.fix ? await mutatingWorkspace(opts) : await workspace(opts);
@@ -118,6 +129,21 @@ export function doctorCommand(): Command {
 
       if (report.verdict === "unhealthy") process.exitCode = EXIT.refused;
     });
+}
+
+function recoverRequestedLock(
+  root: string,
+  opts: { fix?: boolean; recoverLock?: string },
+): Promise<Result<boolean>> {
+  if (!opts.recoverLock) return Promise.resolve(ok(false));
+  return opts.fix
+    ? recoverStateLock(root, opts.recoverLock)
+    : Promise.resolve(
+        err({
+          code: "ARTIFACT_INVALID",
+          message: "--recover-lock requires --fix after confirming the named owner has stopped",
+        }),
+      );
 }
 
 function renderFeatureReadiness(
