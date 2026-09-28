@@ -41,7 +41,10 @@ export function usageCommand(): Command {
         if (!file.ok) {
           process.exitCode = emitError(
             "usage import",
-            { ...file.error, recovery: "Copy the rollout into the project, then pass its project-relative path" },
+            {
+              ...file.error,
+              recovery: "Copy the rollout into the project, then pass its project-relative path",
+            },
             { json: isJson(opts) },
           );
           return;
