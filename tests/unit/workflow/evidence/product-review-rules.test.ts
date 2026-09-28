@@ -1,7 +1,11 @@
 import { expect, it } from "vitest";
 import { skippableReview } from "../../../../src/workflow/product/done-review.js";
 import { reviewerVerifiedRepair } from "../../../../src/workflow/product/feedback.js";
-import { CRITIC_INSTRUCTIONS } from "../../../../src/workflow/product/review-instructions.js";
+import {
+  CRITIC_INSTRUCTIONS,
+  SOURCE_ADVICE_INSTRUCTIONS,
+  UNDERSTANDING_CRITIC_INSTRUCTIONS,
+} from "../../../../src/workflow/product/review-instructions.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 
 function record(
@@ -42,6 +46,18 @@ it("sweeps stated rules and ordinary variants before spending findings on unstat
   expect(CRITIC_INSTRUCTIONS).toContain("required: false");
   expect(CRITIC_INSTRUCTIONS).toContain("recursion depth");
   expect(CRITIC_INSTRUCTIONS).toContain("Do not fail an outcome solely for advisory findings");
+});
+
+it("asks the reviewer to check that readable information is real, labeled text", () => {
+  expect(CRITIC_INSTRUCTIONS).toContain("appears as real text with a word label");
+  expect(CRITIC_INSTRUCTIONS).toContain("not only as canvas pixels or icons");
+  expect(CRITIC_INSTRUCTIONS).toContain("normal (not required) finding, after functional defects");
+  expect(CRITIC_INSTRUCTIONS).toContain(
+    "only when the request states the information must be shown",
+  );
+  // Product-review only: the shared basics also feed understanding and source-advice reviews.
+  expect(UNDERSTANDING_CRITIC_INSTRUCTIONS).not.toContain("word label");
+  expect(SOURCE_ADVICE_INSTRUCTIONS).not.toContain("word label");
 });
 
 it.each([false, true])("only required findings prevent skipping middle reviews: %s", (required) => {
