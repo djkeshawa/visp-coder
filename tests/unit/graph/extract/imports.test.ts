@@ -100,6 +100,19 @@ describe("import resolution", () => {
     expect(facts.unknowns.filter((unknown) => unknown.kind === "unresolved_call")).toEqual([]);
   });
 
+  it("treats missing modules in a namespace package as unresolved", async () => {
+    repo = await makeRepo({
+      "src/mypkg/utils.py": "def helper():\n    return 1\n",
+      "src/app.py": "import mypkg.missing\n",
+    });
+    const facts = await extractFixture(repo);
+    expect(facts.unknowns).toContainEqual({
+      kind: "unresolved_import",
+      path: "src/app.py",
+      detail: "mypkg.missing",
+    });
+  });
+
   it("marks a package outside the repository as external, not as an import", async () => {
     repo = await makeRepo({ "src/a.ts": 'import { z } from "zod";\nexport const s = z;\n' });
     const facts = await extractFixture(repo);

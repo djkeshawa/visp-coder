@@ -23,6 +23,12 @@ export function createResolutionContext(
   aliases: AliasTable,
 ): ResolutionContext {
   const paths = new Set(files);
+  const { pythonRoots, pythonPackages } = discoverPythonRoots(paths);
+  discoverNamespacePackages(paths, pythonRoots, pythonPackages);
+  return { files: paths, aliases, pythonRoots: [...pythonRoots], pythonPackages };
+}
+
+function discoverPythonRoots(paths: ReadonlySet<string>) {
   const pythonRoots = new Set(["", "src"]);
   const pythonPackages = new Set<string>();
   for (const path of paths) {
@@ -40,7 +46,24 @@ export function createResolutionContext(
     pythonPackages.add(packageName);
     pythonRoots.add(parts.slice(0, -2).join("/"));
   }
-  return { files: paths, aliases, pythonRoots: [...pythonRoots], pythonPackages };
+  return { pythonRoots, pythonPackages };
+}
+
+function discoverNamespacePackages(
+  paths: ReadonlySet<string>,
+  pythonRoots: ReadonlySet<string>,
+  pythonPackages: Set<string>,
+): void {
+  for (const path of paths) {
+    if (!path.endsWith(".py") && !path.endsWith(".pyi")) continue;
+    for (const root of pythonRoots) {
+      const prefix = root === "" ? "" : `${root}/`;
+      if (!path.startsWith(prefix)) continue;
+      const remaining = path.slice(prefix.length);
+      const separator = remaining.indexOf("/");
+      if (separator > 0) pythonPackages.add(remaining.slice(0, separator));
+    }
+  }
 }
 
 export function resolveScriptImport(
