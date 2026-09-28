@@ -23,6 +23,7 @@ export async function productSkills(
   workspace: WorkspaceState,
   slice: ProductSlice,
   remaining = 6_000,
+  candidatePaths: readonly string[] = [],
 ): Promise<Result<ProductSkills>> {
   const notes: string[] = [];
   const limit = Math.min(3, workspace.config.skills.maxPerPack);
@@ -45,7 +46,9 @@ export async function productSkills(
     ...graph.facts,
     taskClass: slice.taskClass,
     stages: ["context", "implement"],
-    scopePaths: [...slice.scope.allowed, ...slice.scope.expected],
+    scopePaths: slice.scope.allowed.includes("**")
+      ? [...candidatePaths, ...slice.scope.expected]
+      : [...slice.scope.allowed, ...slice.scope.expected],
   };
   const ranked = rankSkills({ skills: lineage.value, facts });
   notes.push(...skillSelectionNotes(lineage.value, ranked, facts));
