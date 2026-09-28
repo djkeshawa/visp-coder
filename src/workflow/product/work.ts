@@ -24,6 +24,7 @@ import {
 import { withProductMutation } from "./runtime.js";
 import {
   type ProductAuthorization,
+  productAuthorizationSchema,
   readProductAuthorization,
   selectProductSlice,
 } from "./scopes.js";
@@ -51,8 +52,8 @@ export async function runProductContext(
   if (!selected.ok) return selected;
   if (!selected.value)
     return err(
-      vispError("NO_ACTIVE_TASK", "Add the next usable slice to the brief", {
-        recovery: "visp brief",
+      vispError("NO_ACTIVE_TASK", "Start the request as one slice with a check", {
+        recovery: 'visp work --check "<command that runs your tests>"',
       }),
     );
   const snapshot = await productSourceSnapshot(workspace, record.value.brief);
@@ -111,10 +112,19 @@ async function singleSliceBrief(
   const record = await readProductRecord(workspace, feature ? { feature } : {});
   if (!record.ok) return record;
   const { brief } = record.value;
+  if (brief.incomplete || (brief.slices.length > 0 && !brief.outcomes.length))
+    return err(
+      vispError("ARTIFACT_INVALID", "Complete the brief before working", {
+        recovery: `visp brief --feature ${brief.feature}; set incomplete:false and declare outcomes`,
+      }),
+    );
   if (brief.slices.length) {
     const open = brief.slices.find((slice) => !slice.checks.length);
     if (!open) return ok(undefined);
-    const id = `${open.id}-C1`;
+    const id = unusedId(
+      brief.checks.map((entry) => entry.id),
+      `${open.id}-C`,
+    );
     const added = await updateProductBrief(workspace, {
       feature: brief.feature,
       reason: "Declare the slice check",
@@ -125,32 +135,55 @@ async function singleSliceBrief(
     });
     return added.ok ? ok(undefined) : added;
   }
+  const outcomes = brief.outcomes.length
+    ? brief.outcomes.filter((outcome) => outcome.priority === "must").map((outcome) => outcome.id)
+    : [unusedId([], "O")];
+  const linkedOutcomes = outcomes.length ? outcomes : brief.outcomes.map((outcome) => outcome.id);
+  const checkId = unusedId(
+    brief.checks.map((entry) => entry.id),
+    "C",
+  );
+  const taskId = unusedId(
+    brief.slices.map((entry) => entry.id),
+    "T",
+  );
   const created = await updateProductBrief(workspace, {
     feature: brief.feature,
     reason: "Work the whole request as one slice",
     patch: {
-      outcomes: [
-        {
-          id: "O001",
-          kind: "functional",
-          statement: `The original request is fulfilled: ${brief.goal}`,
-          priority: "must",
-          provenance: "user-stated",
-        },
-      ],
-      checks: [{ id: "C001", command: check, outcomes: ["O001"] }],
+      ...(!brief.outcomes.length
+        ? {
+            outcomes: [
+              {
+                id: linkedOutcomes[0],
+                kind: "functional",
+                statement: `The original request is fulfilled: ${brief.goal}`,
+                priority: "must",
+                provenance: "user-stated",
+              },
+            ],
+          }
+        : {}),
+      checks: [{ id: checkId, command: check, outcomes: linkedOutcomes }],
       slices: [
         {
-          id: "T001",
+          id: taskId,
           goal: "Deliver the original request",
-          outcomes: ["O001"],
+          outcomes: linkedOutcomes,
           scope: { allowed: ["**"] },
-          checks: ["C001"],
+          checks: [checkId],
         },
       ],
     },
   });
   return created.ok ? ok(undefined) : created;
+}
+
+function unusedId(existing: readonly string[], prefix: string): string {
+  const used = new Set(existing);
+  let ordinal = 1;
+  while (used.has(`${prefix}${String(ordinal).padStart(3, "0")}`)) ordinal++;
+  return `${prefix}${String(ordinal).padStart(3, "0")}`;
 }
 
 /**
@@ -255,6 +288,24 @@ async function grantAuthorization(
 ): Promise<Result<ProductAuthorization>> {
   const prior = await readProductAuthorization(workspace, record);
   if (!prior.ok) return prior;
+  const retained = await workspace.files.readTextIfExists(
+    authorizationPath(workspace, record.brief.feature),
+  );
+  if (!retained.ok) return retained;
+  let baseline = prior.value?.task === slice.id ? prior.value.baseline : snapshot;
+  if (!prior.value && retained.value) {
+    try {
+      const stale = productAuthorizationSchema.safeParse(JSON.parse(retained.value));
+      if (
+        stale.success &&
+        stale.data.task === slice.id &&
+        stale.data.root === hashValue(workspace.paths.root)
+      )
+        baseline = stale.data.baseline;
+    } catch {
+      // A malformed old grant cannot supply a baseline.
+    }
+  }
   const session = await currentHostSession(workspace);
   if (!session.ok) return session;
   return ok({
@@ -264,7 +315,7 @@ async function grantAuthorization(
     createdAt,
     root: hashValue(workspace.paths.root),
     contractDigest: sliceDigest(record.brief, slice),
-    baseline: prior.value?.task === slice.id ? prior.value.baseline : snapshot,
+    baseline,
     ...(session.value ? { session: session.value } : {}),
   });
 }
