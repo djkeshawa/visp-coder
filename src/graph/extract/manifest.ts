@@ -1,3 +1,4 @@
+import { optionalObject } from "../../core/validation-values.js";
 import type { Entrypoint, UnknownRecord } from "../types.js";
 
 /**
@@ -21,7 +22,7 @@ export function extractManifest(path: string, source: string): ManifestFacts {
     return { entrypoints: [], unknowns: [{ kind: "parser_error", path, detail }] };
   }
 
-  const record = asRecord(manifest);
+  const record = optionalObject(manifest);
   if (!record) {
     return {
       entrypoints: [],
@@ -63,7 +64,7 @@ function binEntrypoints(
   if (typeof bin === "string") {
     return [manifestEntry(path, "bin", line, `"bin": "${bin}"`)];
   }
-  const asObject = asRecord(bin);
+  const asObject = optionalObject(bin);
   if (!asObject) return [];
   return Object.entries(asObject)
     .filter((entry): entry is [string, string] => typeof entry[1] === "string")
@@ -84,7 +85,7 @@ function exportEntrypoints(
     return [manifestEntry(path, label, lineOfKey(lines, "exports"), `"${label}": "${value}"`)];
   }
 
-  const record = asRecord(value);
+  const record = optionalObject(value);
   if (!record) return [];
   return Object.entries(record).flatMap(([key, nested]) =>
     exportEntrypoints(path, nested, lines, `${label}${exportSuffix(key)}`, depth + 1),
@@ -97,7 +98,7 @@ function exportSuffix(key: string): string {
 }
 
 function scriptEntrypoints(path: string, value: unknown, lines: string[]): Entrypoint[] {
-  const record = asRecord(value);
+  const record = optionalObject(value);
   if (!record) return [];
   const scriptsLine = lineOfKey(lines, "scripts");
 
@@ -127,10 +128,4 @@ function lineOfKey(lines: string[], key: string, from = 1): number {
 
 function truncate(value: string): string {
   return value.length > 80 ? `${value.slice(0, 77)}...` : value;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 }

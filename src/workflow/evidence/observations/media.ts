@@ -10,6 +10,18 @@ export function imageDimensions(bytes: Buffer): { width: number; height: number 
   );
 }
 
+export function imageMimeType(bytes: Buffer): string | undefined {
+  if (bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+  if (/^GIF8[79]a$/.test(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
+  if (
+    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+    bytes.subarray(8, 12).toString("ascii") === "WEBP"
+  )
+    return "image/webp";
+  return undefined;
+}
+
 function pngDimensions(bytes: Buffer): { width: number; height: number } | undefined {
   const signature = "89504e470d0a1a0a";
   if (bytes.length < 24 || bytes.subarray(0, 8).toString("hex") !== signature) return undefined;

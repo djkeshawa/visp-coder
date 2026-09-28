@@ -6,7 +6,7 @@
 const CACHE = new Map<string, RegExp>();
 
 export function matchesPattern(path: string, pattern: string): boolean {
-  return toRegExp(pattern).test(normalize(path));
+  return toRegExp(pattern).test(normalizePath(path));
 }
 
 export function matchesAny(path: string, patterns: readonly string[]): boolean {
@@ -18,7 +18,7 @@ export function firstMatch(path: string, patterns: readonly string[]): string | 
   return patterns.find((pattern) => matchesPattern(path, pattern));
 }
 
-function normalize(path: string): string {
+export function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
@@ -26,7 +26,7 @@ function toRegExp(pattern: string): RegExp {
   const cached = CACHE.get(pattern);
   if (cached) return cached;
 
-  const compiled = new RegExp(`^${compile(normalize(pattern))}$`);
+  const compiled = new RegExp(`^${compile(normalizePath(pattern))}$`);
   CACHE.set(pattern, compiled);
   return compiled;
 }

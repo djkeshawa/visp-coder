@@ -1,4 +1,5 @@
 import type { Language } from "../../core/constants.js";
+import { compareCodeUnits } from "../../core/hash.js";
 import { ok, type Result } from "../../core/result.js";
 import { GRAMMAR_BY_EXTENSION, UNPARSED_SOURCE_EXTENSIONS } from "../constants.js";
 import {
@@ -313,26 +314,27 @@ export function dedupeRelations(relations: readonly Relation[]): Relation[] {
 
 function byRelation(a: Relation, b: Relation): number {
   return (
-    compare(a.path, b.path) ||
+    compareCodeUnits(a.path, b.path) ||
     a.line - b.line ||
-    compare(a.kind, b.kind) ||
-    compare(a.source, b.source) ||
-    compare(a.target, b.target)
+    compareCodeUnits(a.kind, b.kind) ||
+    compareCodeUnits(a.source, b.source) ||
+    compareCodeUnits(a.target, b.target)
   );
 }
 
 function byEntity(a: Entity, b: Entity): number {
-  return compare(a.path, b.path) || a.startLine - b.startLine || compare(a.id, b.id);
+  return (
+    compareCodeUnits(a.path, b.path) || a.startLine - b.startLine || compareCodeUnits(a.id, b.id)
+  );
 }
 
 function byEntrypoint(a: Entrypoint, b: Entrypoint): number {
   return (
-    compare(a.path, b.path) || a.line - b.line || compare(a.kind, b.kind) || compare(a.name, b.name)
+    compareCodeUnits(a.path, b.path) ||
+    a.line - b.line ||
+    compareCodeUnits(a.kind, b.kind) ||
+    compareCodeUnits(a.name, b.name)
   );
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export { parseCount, resetParseCount } from "./parser.js";

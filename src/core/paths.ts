@@ -290,7 +290,7 @@ function isParentTraversal(path: string): boolean {
   return path === ".." || path.startsWith(`..${sep}`);
 }
 
-function hasParentSegment(path: string): boolean {
+export function hasParentSegment(path: string): boolean {
   return path.split(/[\\/]+/).includes("..");
 }
 

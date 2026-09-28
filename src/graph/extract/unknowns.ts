@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "../../core/hash.js";
 import type { UnknownKind, UnknownRecord } from "../types.js";
 
 /**
@@ -24,9 +25,9 @@ export class UnknownCollector {
 }
 
 export function compareUnknowns(a: UnknownRecord, b: UnknownRecord): number {
-  return compare(a.path, b.path) || compare(a.kind, b.kind) || compare(a.detail, b.detail);
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+  return (
+    compareCodeUnits(a.path, b.path) ||
+    compareCodeUnits(a.kind, b.kind) ||
+    compareCodeUnits(a.detail, b.detail)
+  );
 }

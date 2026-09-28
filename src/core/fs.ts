@@ -17,7 +17,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { STATE_DIR } from "./constants.js";
 import { fromUnknown, isNodeError, type VispError, vispError } from "./errors.js";
-import { canonicalProjectRoot, isInside, isPortableAbsolute } from "./paths.js";
+import { canonicalProjectRoot, hasParentSegment, isInside, isPortableAbsolute } from "./paths.js";
 import { err, ok, type Result } from "./result.js";
 
 export async function exists(path: string): Promise<boolean> {
@@ -591,8 +591,4 @@ export class ProjectFileSystem {
     const target = this.confinedTarget(path);
     return target.ok ? target.value : path;
   }
-}
-
-function hasParentSegment(path: string): boolean {
-  return path.split(/[\\/]+/).includes("..");
 }

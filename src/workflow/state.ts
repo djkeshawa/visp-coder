@@ -9,6 +9,7 @@ import { currentBranch, headCommit, isRepository, workingTreeChanges } from "../
 import { parseFeatureId } from "../core/input.js";
 import { isExecutableMode } from "../core/mode.js";
 import { ProjectPaths } from "../core/paths.js";
+import { normalizePath } from "../core/patterns.js";
 import { discoverProjectRoot } from "../core/project-root.js";
 import { err, ok, type Result } from "../core/result.js";
 import {
@@ -288,7 +289,7 @@ async function changedFilesOf(state: WorkspaceState): Promise<string[] | undefin
 }
 
 export function isStatePath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "");
+  const normalized = normalizePath(path);
   return normalized === STATE_DIR || normalized.startsWith(`${STATE_DIR}/`);
 }
 

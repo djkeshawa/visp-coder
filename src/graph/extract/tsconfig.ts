@@ -3,6 +3,7 @@ import { relative, resolve } from "node:path";
 import { ProjectFileSystem } from "../../core/fs.js";
 import { sha256 } from "../../core/hash.js";
 import { isInside, isPortableAbsolute, toPosix } from "../../core/paths.js";
+import { optionalObject } from "../../core/validation-values.js";
 import { TSCONFIG_JSON } from "../constants.js";
 import { dirname, joinPosix } from "../paths.js";
 
@@ -106,11 +107,11 @@ function relativeConfigPath(root: string, base: string, path: string): string | 
 }
 
 function readAliases(config: Record<string, unknown>, configDir: string): PathAlias[] {
-  const options = asRecord(config.compilerOptions);
+  const options = optionalObject(config.compilerOptions);
   if (!options) return [];
 
   const baseUrl = typeof options.baseUrl === "string" ? options.baseUrl : ".";
-  const paths = asRecord(options.paths);
+  const paths = optionalObject(options.paths);
   if (!paths) return [];
 
   const aliases: PathAlias[] = [];
@@ -129,18 +130,12 @@ function readString(config: Record<string, unknown>, key: string): string | unde
   return typeof value === "string" ? value : undefined;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 /** tsconfig files are JSON with comments and trailing commas; both are stripped here. */
 export function parseJsonc(text: string): Record<string, unknown> | undefined {
   const withoutComments = stripTrailingCommas(stripComments(text));
   try {
     const parsed: unknown = JSON.parse(withoutComments);
-    return asRecord(parsed);
+    return optionalObject(parsed);
   } catch {
     return undefined;
   }
