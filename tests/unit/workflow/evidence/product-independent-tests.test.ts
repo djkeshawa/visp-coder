@@ -862,6 +862,37 @@ it("runs the tester on an existing codebase in a writable copy only when opted i
   expect(requests[0]?.prompt).toContain("run the program and observe it");
 });
 
+// Evidence: suites that covered only setup and shapes let a rewrite silently break the
+// central outcomes. The tester must cover them, reaching them by bounded search when the
+// request leaves the setup open, and drive time through the request's deterministic controls.
+it("tells the tester to cover central outcomes and to reach them by bounded search", async () => {
+  const fixture = await testerWorkspace();
+  const prompts: string[] = [];
+  const work = await runProductWork(
+    await fixture.workspace.state(),
+    { task: "T001" },
+    inlineTests(tester(null, prompts)),
+  );
+  expect(work.ok, JSON.stringify(work)).toBe(true);
+  const prompt = prompts[0] ?? "";
+  expect(prompt).toContain("Coverage priority");
+  expect(prompt).toContain("drop shape and format checks before central outcomes");
+  expect(prompt).toContain("bounded search over allowed inputs");
+  expect(prompt).toContain("covers the whole stated input domain");
+  expect(prompt).toContain("Bound every search by an iteration count");
+  expect(prompt).toContain("instead of real-time waits");
+  // Two stated-equivalent input paths are tested against one expected result, with
+  // geometry that cannot hide a flipped sign or swapped axis.
+  expect(prompt).toContain("Equivalent input paths");
+  expect(prompt).toContain("non-zero component on every axis");
+  // Precision rules stay, reconciled: ambiguity is about expected results, not open setup.
+  expect(prompt).toContain("A wrong test is worse than a missing one");
+  expect(prompt).toContain("different expected result");
+  expect(prompt).toContain("Quote the sentence each test relies on");
+  // Nothing domain- or benchmark-specific leaks into the generic prompt.
+  expect(prompt).not.toMatch(/\b(game|bird|pig|slingshot|benchmark)s?\b/i);
+});
+
 // Execution mode gives a model network access: no secrets in its copy, every command logged.
 it("keeps secret and blocked files out of the tester's copy and lists its commands", async () => {
   const fixture = await testerWorkspace();
