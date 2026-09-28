@@ -104,9 +104,10 @@ export function commandMap(includeNext = true, includeCritic = includeNext) {
 }
 
 /**
- * The installed guide leaves out the long reviewer prose, which work/next deliver when it
- * applies; the short critic rows stay whenever a critic is configured, so the commands
- * remain discoverable after a later `visp critic --on`.
+ * The installed guide must not depend on critic settings: readiness compares installed
+ * assets with the plan, so a later `visp critic --on` would make it look uninstalled. It
+ * leaves out the long reviewer prose, which work/next deliver when it applies, and keeps
+ * the short critic rows so those commands stay discoverable.
  */
 export function commandGuide(criticEnabled = true, criticCommands = criticEnabled) {
   const guide = `# VISP command guide
