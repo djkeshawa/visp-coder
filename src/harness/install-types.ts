@@ -33,7 +33,7 @@ export interface InstallPreview {
   readonly hasBaseline: boolean;
   readonly changedFiles?: readonly string[];
   readonly changes: readonly {
-    readonly operation: "write" | "remove";
+    readonly operation: "write" | "remove" | "symlink";
     readonly path: string;
     readonly mode?: number;
   }[];

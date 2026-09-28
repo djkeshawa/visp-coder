@@ -11,6 +11,7 @@ import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
 import { type ProductBrief, type ProductSlice, sliceDigest } from "./model.js";
+import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
 import { readProductRecord } from "./store.js";
 
 const INPUT_LIMITS = {
@@ -70,37 +71,16 @@ async function productFileHash(
   path: string,
   budget: InputBudget,
 ): Promise<Result<string>> {
-  const metadata = await workspace.files.readMetadata(path);
-  if (!metadata.ok) return metadata;
-  if (metadata.value && metadata.value.type !== "file")
-    return err(
-      vispError("UNSUPPORTED", `Product evidence requires regular files; cannot inspect ${path}`, {
-        details: { path, type: metadata.value.type },
-      }),
-    );
   budget.entries += 1;
-  budget.bytes += metadata.value?.size ?? 0;
-  if (
-    budget.entries > INPUT_LIMITS.entries ||
-    (metadata.value?.size ?? 0) > INPUT_LIMITS.fileBytes ||
-    budget.bytes > INPUT_LIMITS.totalBytes
-  )
-    return inputLimit(path);
-  const content = await workspace.files.readBytesIfExists(path);
-  if (!content.ok) return content;
-  // A file can grow between metadata and the confined read.
-  budget.bytes += (content.value?.byteLength ?? 0) - (metadata.value?.size ?? 0);
-  if (
-    (content.value?.byteLength ?? 0) > INPUT_LIMITS.fileBytes ||
-    budget.bytes > INPUT_LIMITS.totalBytes
-  )
-    return inputLimit(path);
-  return ok(
-    hashValue({
-      hash: content.value === undefined ? null : sha256(content.value),
-      mode: metadata.value?.mode,
-    }),
+  if (budget.entries > INPUT_LIMITS.entries) return inputLimit(path);
+  const entry = await readSourceEntry(
+    workspace.files,
+    path,
+    Math.min(INPUT_LIMITS.fileBytes, INPUT_LIMITS.totalBytes - budget.bytes),
   );
+  if (!entry.ok) return entry;
+  budget.bytes += entry.value.bytes?.byteLength ?? 0;
+  return ok(sourceEntryHash(entry.value.bytes, entry.value.mode, entry.value.symlink));
 }
 
 export async function productSourceDigest(
@@ -173,22 +153,30 @@ async function declaredCheckFiles(
   const paths = new Set<string>();
   const budget: InputBudget = { entries: 0, bytes: 0 };
   for (const pattern of patterns) {
-    const wildcard = pattern.search(/[*?[]/);
-    const prefix =
-      wildcard < 0
-        ? pattern
-        : pattern.slice(0, pattern.lastIndexOf("/", wildcard) + 1).replace(/\/$/, "");
-    const metadata = await workspace.files.readMetadata(prefix || ".");
-    if (!metadata.ok) return metadata;
-    if (wildcard < 0 && metadata.value?.type !== "directory") {
-      paths.add(pattern);
-      continue;
-    }
-    const selected = await matchingCheckFiles(workspace, prefix || ".", pattern, budget, 0);
+    const selected = await declaredPatternFiles(workspace, pattern, budget);
     if (!selected.ok) return selected;
     for (const path of selected.value) paths.add(path);
   }
   return ok([...paths]);
+}
+
+async function declaredPatternFiles(
+  workspace: WorkspaceState,
+  pattern: string,
+  budget: InputBudget,
+): Promise<Result<string[]>> {
+  const wildcard = pattern.search(/[*?[]/);
+  const prefix =
+    wildcard < 0
+      ? pattern
+      : pattern.slice(0, pattern.lastIndexOf("/", wildcard) + 1).replace(/\/$/, "");
+  const link = await workspace.files.readSymbolicLink(prefix || ".");
+  if (!link.ok) return link;
+  if (link.value !== undefined) return ok(wildcard < 0 ? [pattern] : []);
+  const metadata = await workspace.files.readMetadata(prefix || ".");
+  if (!metadata.ok) return metadata;
+  if (wildcard < 0 && metadata.value?.type !== "directory") return ok([pattern]);
+  return matchingCheckFiles(workspace, prefix || ".", pattern, budget, 0);
 }
 
 async function matchingCheckFiles(

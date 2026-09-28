@@ -30,7 +30,12 @@ export function withStateMutation<T>(
 
 export type FilePrecondition =
   | { readonly existed: false }
-  | { readonly existed: true; readonly hash: string; readonly mode?: number };
+  | {
+      readonly existed: true;
+      readonly hash: string;
+      readonly mode?: number;
+      readonly symlink?: true;
+    };
 
 interface MutationPrecondition {
   /** State observed while planning; prevents a later snapshot legitimising a concurrent edit. */
@@ -39,7 +44,7 @@ interface MutationPrecondition {
 
 export type FileMutation =
   | (MutationPrecondition & {
-      readonly kind: "write";
+      readonly kind: "write" | "symlink";
       readonly path: string;
       readonly content: string | Uint8Array;
       readonly mode?: number;
@@ -47,6 +52,7 @@ export type FileMutation =
   | (MutationPrecondition & { readonly kind: "remove"; readonly path: string });
 
 interface FileSnapshot {
+  readonly symlink?: true;
   readonly existed: boolean;
   readonly content?: string;
   readonly hash?: string;
@@ -84,11 +90,13 @@ export interface TransactionInspection {
 export function filePrecondition(
   content: string | Uint8Array | undefined,
   mode?: number,
+  symlink = false,
 ): FilePrecondition {
   if (content === undefined) return { existed: false };
   return {
     existed: true,
     hash: sha256(bytesOf(content)),
+    ...(symlink ? { symlink: true as const } : {}),
     ...(mode === undefined ? {} : { mode }),
   };
 }
@@ -112,12 +120,17 @@ export class RecoveringProjectFileSystem extends ProjectFileSystem {
     path: string,
     content: Uint8Array,
     mode = 0o644,
+    replaceLink = false,
   ): Promise<Result<void>> {
-    return this.withRecovery(() => super.writeBytesAtomic(path, content, mode));
+    return this.withRecovery(() => super.writeBytesAtomic(path, content, mode, replaceLink));
   }
 
-  override removeFile(path: string): Promise<Result<void>> {
-    return this.withRecovery(() => super.removeFile(path));
+  override writeSymlinkAtomic(path: string, content: Uint8Array): Promise<Result<void>> {
+    return this.withRecovery(() => super.writeSymlinkAtomic(path, content));
+  }
+
+  override removeFile(path: string, removeLink = false): Promise<Result<void>> {
+    return this.withRecovery(() => super.removeFile(path, removeLink));
   }
 
   override removeDir(path: string): Promise<Result<void>> {
@@ -299,14 +312,16 @@ async function prepareEntry(
   }
   seen.add(path.value);
 
-  const metadata = await fs.metadata(path.value);
-  if (!metadata.ok) return metadata;
-  if (metadata.value && metadata.value.type !== "file") {
-    return err(vispError("IO_ERROR", `Transaction target is not a file: ${path.value}`));
-  }
-  const bytes = await fs.readBytesIfExists(path.value);
-  if (!bytes.ok) return bytes;
-  const before = snapshot(bytes.value, metadata.value?.mode);
+  const read = await readEntrySnapshot(fs, path.value);
+  if (!read.ok) return read;
+  const before = read.value;
+  if (before.symlink && !(mutation.expectedBefore?.existed && mutation.expectedBefore.symlink))
+    return err(
+      vispError(
+        "IO_ERROR",
+        `Transaction symlink requires an explicit link precondition: ${path.value}`,
+      ),
+    );
   if (mutation.expectedBefore && !matchesPrecondition(before, mutation.expectedBefore)) {
     return err(
       vispError("IO_ERROR", `Concurrent change detected while planning ${path.value}`, {
@@ -322,7 +337,10 @@ async function prepareEntry(
     path: path.value,
     before,
     afterHash: sha256(content),
-    afterMode: mutation.mode ?? metadata.value?.mode ?? 0o644,
+    afterMode:
+      mutation.kind === "symlink"
+        ? 0o777
+        : (mutation.mode ?? (before.symlink ? undefined : before.mode) ?? 0o644),
   });
 }
 
@@ -372,16 +390,14 @@ async function applyPreparedMutation(
 }
 
 async function matchesAfter(fs: ProjectFileSystem, entry: JournalEntry): Promise<Result<boolean>> {
-  const metadata = await fs.metadata(entry.path);
-  if (!metadata.ok) return metadata;
-  const bytes = await fs.readBytesIfExists(entry.path);
-  if (!bytes.ok) return bytes;
-  if (entry.kind === "remove") return ok(bytes.value === undefined && metadata.value === undefined);
+  const current = await readEntrySnapshot(fs, entry.path);
+  if (!current.ok) return current;
+  if (entry.kind === "remove") return ok(!current.value.existed);
   return ok(
-    bytes.value !== undefined &&
-      metadata.value?.type === "file" &&
-      sameMode(metadata.value.mode, entry.afterMode) &&
-      sha256(bytes.value) === entry.afterHash,
+    current.value.existed &&
+      !!current.value.symlink === (entry.kind === "symlink") &&
+      sameMode(current.value.mode, entry.afterMode) &&
+      current.value.hash === entry.afterHash,
   );
 }
 
@@ -438,14 +454,22 @@ async function applyMutation(
   // Guards restate unchanged files; the precondition check already proved them.
   // Rewriting them touched every file and failed where hosts protect agent directories.
   if (alreadyInPlace(entry)) return ok(undefined);
-  if (mutation.kind === "remove") return fs.removeFile(entry.path);
-  return fs.writeBytesAtomic(entry.path, bytesOf(mutation.content), entry.afterMode ?? 0o644);
+  if (mutation.kind === "remove") return fs.removeFile(entry.path, !!entry.before.symlink);
+  if (mutation.kind === "symlink")
+    return fs.writeSymlinkAtomic(entry.path, bytesOf(mutation.content));
+  return fs.writeBytesAtomic(
+    entry.path,
+    bytesOf(mutation.content),
+    entry.afterMode ?? 0o644,
+    !!entry.before.symlink,
+  );
 }
 
 function alreadyInPlace(entry: JournalEntry): boolean {
   if (entry.kind === "remove") return !entry.before.existed;
   return (
     entry.before.existed &&
+    !!entry.before.symlink === (entry.kind === "symlink") &&
     entry.before.hash === entry.afterHash &&
     sameMode(entry.before.mode, entry.afterMode)
   );
@@ -493,14 +517,27 @@ async function classifyRecoveryEntry(
   );
 }
 
-function restoreEntry(fs: ProjectFileSystem, entry: JournalEntry): Promise<Result<void>> {
-  return entry.before.existed
-    ? fs.writeBytesAtomic(
-        entry.path,
-        Buffer.from(entry.before.content ?? "", "base64"),
-        entry.before.mode ?? 0o644,
-      )
-    : fs.removeFile(entry.path);
+async function restoreEntry(fs: ProjectFileSystem, entry: JournalEntry): Promise<Result<void>> {
+  if (!entry.before.existed) return fs.removeFile(entry.path, entry.kind === "symlink");
+  const bytes = Buffer.from(entry.before.content ?? "", "base64");
+  return entry.before.symlink
+    ? fs.writeSymlinkAtomic(entry.path, bytes)
+    : fs.writeBytesAtomic(entry.path, bytes, entry.before.mode ?? 0o644, entry.kind === "symlink");
+}
+
+async function readEntrySnapshot(
+  fs: ProjectFileSystem,
+  path: string,
+): Promise<Result<FileSnapshot>> {
+  const link = await fs.readSymbolicLink(path);
+  if (!link.ok) return link;
+  if (link.value !== undefined) return ok(snapshot(link.value, 0o777, true));
+  const metadata = await fs.metadata(path);
+  if (!metadata.ok) return metadata;
+  if (metadata.value && metadata.value.type !== "file")
+    return err(vispError("IO_ERROR", `Transaction target is not a file: ${path}`));
+  const bytes = await fs.readBytesIfExists(path);
+  return bytes.ok ? ok(snapshot(bytes.value, metadata.value?.mode)) : bytes;
 }
 
 async function matchesSnapshot(
@@ -508,28 +545,38 @@ async function matchesSnapshot(
   path: string,
   expected: FileSnapshot,
 ): Promise<Result<boolean>> {
-  const metadata = await fs.metadata(path);
-  if (!metadata.ok) return metadata;
-  const bytes = await fs.readBytesIfExists(path);
-  if (!bytes.ok) return bytes;
-  if (!expected.existed) return ok(bytes.value === undefined && metadata.value === undefined);
-  return ok(
-    bytes.value !== undefined &&
-      metadata.value?.type === "file" &&
-      sameMode(metadata.value.mode, expected.mode) &&
-      sha256(bytes.value) === expected.hash,
-  );
+  const current = await readEntrySnapshot(fs, path);
+  return current.ok
+    ? ok(
+        matchesPrecondition(
+          current.value,
+          expected.existed
+            ? {
+                existed: true,
+                hash: expected.hash ?? "",
+                mode: expected.mode,
+                symlink: expected.symlink,
+              }
+            : { existed: false },
+        ),
+      )
+    : current;
 }
 
 function sameMode(actual: number | undefined, expected: number | undefined): boolean {
   return process.platform === "win32" || actual === expected;
 }
 
-function snapshot(content: Uint8Array | undefined, mode: number | undefined): FileSnapshot {
+function snapshot(
+  content: Uint8Array | undefined,
+  mode: number | undefined,
+  symlink = false,
+): FileSnapshot {
   if (content === undefined) return { existed: false };
   return {
     existed: true,
     content: Buffer.from(content).toString("base64"),
+    ...(symlink ? { symlink: true as const } : {}),
     hash: sha256(content),
     mode: mode ?? 0o644,
   };
@@ -539,6 +586,7 @@ function matchesPrecondition(actual: FileSnapshot, expected: FilePrecondition): 
   if (!expected.existed) return !actual.existed;
   return (
     actual.existed &&
+    !!actual.symlink === !!expected.symlink &&
     actual.hash === expected.hash &&
     (expected.mode === undefined || sameMode(actual.mode, expected.mode))
   );
@@ -607,7 +655,7 @@ function parseJournal(value: unknown): Result<TransactionJournal> {
 function parseEntry(value: unknown): Result<JournalEntry> {
   if (
     !isRecord(value) ||
-    (value.kind !== "write" && value.kind !== "remove") ||
+    (value.kind !== "write" && value.kind !== "symlink" && value.kind !== "remove") ||
     typeof value.path !== "string" ||
     !isJournalPath(value.path) ||
     !isRecord(value.before) ||
@@ -615,13 +663,14 @@ function parseEntry(value: unknown): Result<JournalEntry> {
   ) {
     return err(vispError("ARTIFACT_INVALID", "Malformed VISP transaction entry"));
   }
+  const writes = value.kind !== "remove";
   const before = value.before;
   const existed = before.existed;
   if (!validBeforeSnapshot(before, existed)) {
     return err(vispError("ARTIFACT_INVALID", "Malformed VISP transaction entry metadata"));
   }
   if (
-    (value.kind === "write" && (!isSha256(value.afterHash) || !isFileMode(value.afterMode))) ||
+    (writes && (!isSha256(value.afterHash) || !isFileMode(value.afterMode))) ||
     (value.kind === "remove" && (value.afterHash !== undefined || value.afterMode !== undefined))
   ) {
     return err(vispError("ARTIFACT_INVALID", "Malformed VISP transaction post-image"));
@@ -633,11 +682,12 @@ function parseEntry(value: unknown): Result<JournalEntry> {
           content: before.content as string,
           hash: before.hash as string,
           mode: before.mode as number,
+          ...(before.symlink ? { symlink: true as const } : {}),
         }
       : { existed: false };
-  return value.kind === "write"
+  return writes
     ? ok({
-        kind: "write",
+        kind: value.kind,
         path: value.path,
         before: beforeSnapshot,
         afterHash: value.afterHash as string,
@@ -647,8 +697,14 @@ function parseEntry(value: unknown): Result<JournalEntry> {
 }
 
 function validBeforeSnapshot(before: Record<string, unknown>, existed: unknown): boolean {
+  if (before.symlink !== undefined && before.symlink !== true) return false;
   if (existed === false) {
-    return before.content === undefined && before.hash === undefined && before.mode === undefined;
+    return (
+      before.symlink === undefined &&
+      before.content === undefined &&
+      before.hash === undefined &&
+      before.mode === undefined
+    );
   }
   if (
     existed !== true ||
