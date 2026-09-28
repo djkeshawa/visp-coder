@@ -23,7 +23,7 @@ export function doctorCommand(): Command {
     .option("--fix", "Repair what can be repaired without a decision")
     .option(
       "--check-command <command>",
-      "Run an explicit smoke command through the verification subprocess (executes project code)",
+      "Run a smoke command with the current environment (executes project code; not product verification)",
     )
     .option(
       "--check-layer <layer>",

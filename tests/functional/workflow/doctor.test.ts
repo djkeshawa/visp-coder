@@ -56,11 +56,13 @@ describe("doctor", () => {
     expect(result.stdout).toContain("repository index");
   });
 
-  it("runs an explicit smoke command through the verification subprocess", async () => {
+  it("runs an explicit smoke command and explains its verification limitation", async () => {
     await project.write("smoke.mjs", "process.exit(0);\n");
     const passed = project.run("doctor", "--check-command", "node smoke.mjs");
     expect(passed.exitCode).toBe(0);
     expect(passed.stdout).toContain("validation smoke");
+    expect(passed.stdout).toContain("current shell environment");
+    expect(passed.stdout).toContain("product verification adds");
     await project.write("smoke.mjs", "process.exit(3);\n");
     const failed = project.run("doctor", "--check-command", "node smoke.mjs");
     expect(failed.exitCode).not.toBe(0);
