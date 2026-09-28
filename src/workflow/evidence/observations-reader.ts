@@ -13,6 +13,34 @@ export type ObservationsRead =
   | { workflow: "product"; bundle: ProductReviewBundle }
   | { workflow: "historical"; bundle: ObservationBundle };
 
+/** A bounded inventory for CLI readers; the MCP reader can still deliver actual pixels. */
+export function productObservationSummary(
+  workspace: WorkspaceState,
+  bundle: ProductReviewBundle,
+  outcome?: string,
+) {
+  const observations = bundle.evidence
+    .filter((entry) => !outcome || entry.outcomes.includes(outcome))
+    .slice(0, 30)
+    .map(({ id, kind, status, summary, outcomes }) => ({ id, kind, status, summary, outcomes }));
+  const imageIds = new Set(
+    observations.filter((entry) => entry.kind === "image").map((entry) => entry.id),
+  );
+  return {
+    feature: bundle.feature,
+    outcome,
+    observations,
+    omitted: Math.max(
+      0,
+      bundle.evidence.filter((entry) => !outcome || entry.outcomes.includes(outcome)).length -
+        observations.length,
+    ),
+    images: bundle.images
+      .filter((image) => !outcome || imageIds.has(image.id))
+      .map((image) => ({ id: image.id, path: workspace.paths.absolute(image.path) })),
+  };
+}
+
 type ObservationSelection = ProductSelection & {
   feature: string;
   outcome?: string;

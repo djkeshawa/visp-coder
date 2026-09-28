@@ -37,6 +37,7 @@ import {
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {
+  compactProductStatus,
   productNextCommand,
   productResultFailed,
   productWithoutImageBytes,
@@ -70,6 +71,7 @@ interface ProductOptions extends GlobalOptions {
   template?: boolean;
   checkTemplate?: string;
   detail?: boolean;
+  full?: boolean;
   handoff?: boolean;
   dispatch?: boolean;
   prepare?: boolean;
@@ -106,6 +108,14 @@ function command(
 
 /** Models read CLI text through a shell; --json keeps the complete result for tools. */
 function cliText(name: string, opts: ProductOptions, value: unknown): string {
+  if (name === "status" || name === "handoff") {
+    const status = value as {
+      feature?: string;
+      outcomes?: unknown[];
+      next?: { action?: string; objective?: string };
+    };
+    return `${status.feature ?? "No active feature"}: ${status.outcomes?.length ?? 0} outcomes\n${status.next?.action ?? "next"}: ${status.next?.objective ?? "Run visp next"}`;
+  }
   // Brief reads and review output are documents the actor edits and submits back.
   const document =
     name === "review" || (name === "brief" && opts.from === undefined && opts.patch === undefined);
@@ -143,9 +153,15 @@ async function execute(name: string, opts: ProductOptions, mutate: boolean, run:
       return;
     }
     const result = await run(loaded.value, opts);
+    const presented =
+      result.ok && ["status", "handoff"].includes(name) && !opts.full
+        ? compactProductStatus(result.value)
+        : result.ok
+          ? result.value
+          : undefined;
     process.exitCode = emit(
       name,
-      result.ok ? { ok: true, value: productWithoutImageBytes(result.value) } : result,
+      result.ok ? { ok: true, value: productWithoutImageBytes(presented) } : result,
       {
         json: isJson(opts),
         text: (value) => cliText(name, opts, value),
@@ -311,7 +327,7 @@ export const statusCommand = () =>
     "Show outcomes, progress, evidence and unresolved review",
     false,
     runProductStatus,
-  );
+  ).option("--full", "Include the full brief and product state in --json output");
 export const verifyCommand = () =>
   command("verify", "Run the selected slice's behavior checks", true, runProductVerify);
 export const doneCommand = () =>
@@ -330,7 +346,10 @@ export const acceptCommand = () =>
 export const prCommand = () =>
   command("pr", "Generate the reviewer handoff from current evidence", false, runProductReport);
 export const handoffCommand = () =>
-  command("handoff", "Show the current product handoff", false, runProductStatus);
+  command("handoff", "Alias for the current product status", false, runProductStatus).option(
+    "--full",
+    "Include the full brief and product state in --json output",
+  );
 export const migrateCommand = () =>
   command(
     "migrate",

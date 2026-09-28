@@ -1,9 +1,9 @@
 import { Command } from "commander";
-import { readObservations } from "../../workflow/evidence/observations-reader.js";
 import {
-  productWithoutImageBytes,
-  renderProductResult,
-} from "../../workflow/product-presentation.js";
+  productObservationSummary,
+  readObservations,
+} from "../../workflow/evidence/observations-reader.js";
+import { renderProductResult } from "../../workflow/product-presentation.js";
 import { isJson, options, workspaceWithFeature } from "../context.js";
 import { emit, emitError } from "../output.js";
 
@@ -36,7 +36,10 @@ export function observationsCommand(): Command {
       if (selected.value.workflow === "product") {
         process.exitCode = emit(
           "observations",
-          { ok: true, value: productWithoutImageBytes(selected.value.bundle) },
+          {
+            ok: true,
+            value: productObservationSummary(state, selected.value.bundle, opts.outcome),
+          },
           { json: isJson(opts), text: renderProductResult },
         );
         return;

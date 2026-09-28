@@ -128,6 +128,14 @@ export function productNextCommand(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   if ("command" in value && typeof value.command === "string") return value.command;
   if ("nextCommand" in value && typeof value.nextCommand === "string") return value.nextCommand;
+  if (
+    "next" in value &&
+    value.next &&
+    typeof value.next === "object" &&
+    "command" in value.next &&
+    typeof value.next.command === "string"
+  )
+    return value.next.command;
   return undefined;
 }
 
