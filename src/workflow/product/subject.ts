@@ -1,9 +1,11 @@
-import { lstat, readlink } from "node:fs/promises";
+import { lstat, readlink, stat } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { vispError } from "../../core/errors.js";
 import { productIdentityEnvironment } from "../../core/execution-environment.js";
 import { repositoryFiles, repositoryGitlinks } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
+import { canonicalProjectRoot, isInside } from "../../core/paths.js";
 import { matchesPattern } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
@@ -76,7 +78,19 @@ async function productFileHash(
   if (link?.isSymbolicLink()) {
     budget.entries += 1;
     if (budget.entries > INPUT_LIMITS.entries) return inputLimit(path);
-    return ok(hashValue({ link: await readlink(absolute), mode: link.mode & 0o777 }));
+    const destination = await readlink(absolute);
+    if (
+      !isInside(workspace.paths.root, canonicalProjectRoot(resolve(dirname(absolute), destination)))
+    )
+      return err(
+        vispError("IO_ERROR", `Refusing project read through an external symlink: ${path}`),
+      );
+    const target = await stat(absolute).catch(() => undefined);
+    if (!target?.isFile())
+      return err(
+        vispError("UNSUPPORTED", `Product evidence requires regular files; cannot inspect ${path}`),
+      );
+    return ok(hashValue({ link: destination, mode: link.mode & 0o777 }));
   }
   const metadata = await workspace.files.readMetadata(path);
   if (!metadata.ok) return metadata;
