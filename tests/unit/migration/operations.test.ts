@@ -124,3 +124,19 @@ it("does not apply migration or publish an export when original history cannot b
     code: "ENOENT",
   });
 });
+
+it("previews valid features alongside a named invalid legacy artifact", async () => {
+  const w = await fixture();
+  await w.withFeature("002-invalid");
+  await w.write(".visp/features/002-invalid/tasks.json", '{"kind":"tasks"}');
+  const preview = await previewMigration(w.root);
+  expect(preview.ok).toBe(true);
+  if (!preview.ok) throw new Error(preview.error.message);
+  expect(preview.value.features.map((feature) => feature.feature)).toContain("001-history");
+  expect(preview.value.failures).toHaveLength(1);
+  expect(preview.value.failures[0]?.message).toContain("002-invalid/tasks.json");
+  expect(preview.value.failures[0]?.recovery).toContain("--feature");
+  const applied = await applyMigration(w.root);
+  expect(applied.ok).toBe(false);
+  expect(!applied.ok && applied.error.message).toContain("002-invalid");
+});

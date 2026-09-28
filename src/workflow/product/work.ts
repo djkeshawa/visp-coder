@@ -1,6 +1,7 @@
 import { vispError } from "../../core/errors.js";
+import type { FileMutation } from "../../core/file-transaction.js";
 import { filePrecondition } from "../../core/file-transaction.js";
-import { headCommit } from "../../core/git.js";
+import { currentBranch, headCommit } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { requireImplementationFoundation } from "../gates/readiness.js";
@@ -28,8 +29,9 @@ import {
   type ProductAuthorization,
   readProductAuthorization,
   selectProductSlice,
+  staleTaskNote,
 } from "./scopes.js";
-import { runProductNext } from "./status.js";
+import { newSessionRequestNext, runProductNext } from "./status.js";
 import {
   authorizationPath,
   json,
@@ -82,6 +84,22 @@ export async function runProductWork(
   tests?: TestsStarter,
   testsWaitMs = 0,
 ): Promise<Result<ProductWorkContext>> {
+  if (!options.feature && !options.task) {
+    const routing = await withProductMutation(workspace, async () => {
+      const record = await readProductRecord(workspace, options);
+      if (!record.ok) return record;
+      const next = await newSessionRequestNext(workspace, record.value, options);
+      if (!next.ok) return next;
+      return next.value
+        ? err(
+            vispError("STAGE_BLOCKED", next.value.objective, {
+              recovery: next.value.evidence.join("\n"),
+            }),
+          )
+        : ok(undefined);
+    });
+    if (!routing.ok) return routing;
+  }
   if (options.check?.trim()) {
     const quick = await singleSliceBrief(workspace, options.feature, options.check.trim());
     if (!quick.ok) return quick;
@@ -232,13 +250,17 @@ async function runProductWorkLocked(
   const status = await statusMutation(workspace, record.value.brief.feature, slice.id, "work");
   if (!status.ok) return status;
   const next = workingState(current, slice, auth, timestamp, reopen, subject.value, findings);
+  const branch = await workBranchMutation(workspace, record.value);
+  if (!branch.ok) return branch;
   const saved = await saveProductState(workspace, record.value, next, [
+    ...branch.value,
     { kind: "write", path, content: json(auth), expectedBefore: filePrecondition(before.value) },
     status.value,
   ]);
   return saved.ok
     ? ok({
         ...context.value,
+        notes: [...context.value.notes, ...staleTaskNote(workspace, record.value)],
         criticUnderstanding: understanding.value,
       })
     : saved;
@@ -257,7 +279,7 @@ async function grantAuthorization(
 ): Promise<Result<ProductAuthorization>> {
   const prior = await readProductAuthorization(workspace, record);
   if (!prior.ok) return prior;
-  const session = await currentHostSession(workspace);
+  const session = await currentHostSession(workspace, true);
   if (!session.ok) return session;
   const protectedEnv = await protectedEnvSnapshot(workspace.paths.root);
   if (!protectedEnv.ok) return protectedEnv;
@@ -428,4 +450,26 @@ function reopeningBlocked(
   findings: string[],
 ): boolean {
   return reopen && (explicitTask === undefined || findings.length === 0);
+}
+
+async function workBranchMutation(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+): Promise<Result<FileMutation[]>> {
+  const branch = await currentBranch(workspace.paths.root);
+  if (!branch.ok) return branch;
+  const intent = await workspace.store.readIntent(record.brief.feature);
+  if (!intent.ok) return intent;
+  if (branch.value === "HEAD" || intent.value.branch === branch.value) return ok([]);
+  const path = workspace.paths.featureFile(record.brief.feature, "intent.json");
+  const before = await workspace.files.readText(path);
+  if (!before.ok) return before;
+  return ok([
+    {
+      kind: "write",
+      path,
+      content: json({ ...intent.value, branch: branch.value }),
+      expectedBefore: filePrecondition(before.value),
+    },
+  ]);
 }

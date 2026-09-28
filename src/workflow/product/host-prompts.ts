@@ -73,7 +73,14 @@ export async function hasUntakenPrompts(workspace: WorkspaceState): Promise<Resu
 /** The host session that sent the latest user prompt, when the host's hook reports one. */
 export async function currentHostSession(
   workspace: WorkspaceState,
+  forGrant = false,
 ): Promise<Result<string | undefined>> {
+  if (forGrant) {
+    const active = await activeHostSessions(workspace);
+    if (!active.ok) return active;
+    if (active.value.size > 1) return ok(undefined);
+  }
+
   const text = await workspace.files.readTextIfExists(
     join(workspace.paths.sessionDir, HOST_SESSION_FILE),
   );
@@ -149,4 +156,24 @@ async function findRollout(
 
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+async function activeHostSessions(workspace: WorkspaceState): Promise<Result<Set<string>>> {
+  const entries = await workspace.files.listDir(join(workspace.paths.sessionDir, "hosts"));
+  if (!entries.ok) return entries;
+  const active = new Set<string>();
+  for (const entry of entries.value.filter((name) => name.endsWith(".json"))) {
+    const read = await workspace.files.readTextIfExists(
+      join(workspace.paths.sessionDir, "hosts", entry),
+    );
+    if (!read.ok) return read;
+    try {
+      const item = JSON.parse(read.value ?? "{}");
+      if (typeof item.session === "string" && Date.now() - Date.parse(item.at) < 60 * 60 * 1000)
+        active.add(item.session);
+    } catch {
+      /* An interrupted heartbeat is not a caller identity. */
+    }
+  }
+  return ok(active);
 }

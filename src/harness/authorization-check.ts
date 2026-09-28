@@ -30,6 +30,8 @@ for (const [directory, version] of [[".visp/state/product-authorizations", 2], [
     try {
       const marker = read(join(directory, entry.name));
       if (!validIdentity(marker)) throw new Error("Invalid authorization identity");
+      try { lstatSync(join(".visp", "features", marker.feature)); }
+      catch (error) { if (error?.code === "ENOENT") continue; throw error; }
       if (version === 2) {
         if (marker.version !== 2) throw new Error("Invalid product authorization");
         const state = read(join(".visp", "features", marker.feature, "product-state.json"));

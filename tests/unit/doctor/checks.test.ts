@@ -1000,12 +1000,13 @@ describe("the repository index check", () => {
 });
 
 describe("the evidence trail check", () => {
-  /** The whole trail hidden is the state that made CI and review impossible. */
-  it("reports a .gitignore that hides the trail", async () => {
+  /** A project may deliberately keep its evidence local. */
+  it("respects a deliberate .gitignore that keeps the trail local", async () => {
     await writeFile(join(workspace.root, ".gitignore"), ".visp/\n", "utf8");
 
     const result = await check("evidence trail");
-    expect(result.status).not.toBe("ok");
+    expect(result.status).toBe("ok");
+    expect(result.detail).toContain("deliberately");
   });
 
   it("does not claim evidence is tracked when Git is unavailable", async () => {

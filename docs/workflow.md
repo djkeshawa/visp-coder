@@ -10,6 +10,10 @@ visp feature "<goal>" --source-brief "<original request, verbatim>"
 
 Under Claude Code (with the installed prompt hook) and Codex, VISP takes the request from the user's recorded prompt; a `--source-brief` is kept only when it quotes that prompt verbatim, for example one request out of a longer message, so a paraphrase cannot replace it. On other hosts pass the complete request. `--risk low|medium|high|critical` records project risk and `--branch` creates a feature branch. The feature is created under `.visp/features/<id>/` with a `brief.yaml` that holds the preserved request and an empty plan. `feature` pins the current critic configuration into the feature; later changes to defaults do not affect it.
 
+Feature ordinals are reserved atomically across local Git refs and linked worktrees. Existing branch tips are inspected before allocation; independent clones can still reserve the same ordinal before exchanging refs. After a checkout switch, absent active features and tasks are ignored; `next` names the current branch and suggests switching back when needed. Bare `work` cannot silently take over an earlier session’s pending new request. With several active host sessions and no caller identity, new grants are left unstamped.
+
+The request is committed in `brief.yaml`, `intent.json` and product state and appears in `visp pr` text for publication. VISP masks recognizable credentials, high-entropy tokens and local paths and reports when the initial request was changed. Review the preserved request before sharing it.
+
 ## The brief
 
 Read it with `visp brief --template` (editable form, no state change) or `visp brief` (current brief). Update it in one of two ways:
@@ -70,7 +74,7 @@ slices:
 
 `scope.allowed` is the set of paths the agent may change while the slice is authorized; `expected` names the files the slice should touch; `forbidden` narrows `allowed`. `workflow.blockedPaths` from `visp.yml` refuse explicit guard checks and Claude edit-tool writes regardless of slice scope. Slash-free blocked patterns match at any depth, case-insensitively. Git-listed changes are checked at commit and `done`, and ignored `.env*` files are checked against the authorization baseline at `done`; other ignored files written through a shell are outside those after-the-fact checks. Keep the first slice to one usable behavior, including its result and failure path, before expanding.
 
-Scope is enforced by `visp guard`, which the installed hooks call: the Claude Code edit hook before each write, the Git `pre-commit` hook before each commit, and, if installed with `visp install --hooks claude git ci` (or `--hooks git ci` outside Claude Code), a CI job that checks the pull request diff against the slice scopes in the committed brief of the feature that matches the branch (`visp guard --scope tasks`). `--hooks` replaces the default hook set, so include the local hooks you still need. Changing scope requires a brief update and a new `visp work`.
+Scope is enforced by `visp guard`, which the installed hooks call: the Claude Code edit hook before each write, the Git `pre-commit` hook before each commit, and, if installed with `visp install --hooks claude git ci` (or `--hooks git ci` outside Claude Code), a CI job that checks the pull request diff against the slice scopes in the union of committed briefs for features changed in the PR diff or matching the branch (`visp guard --scope tasks`). `--hooks` replaces the default hook set, so include the local hooks you still need. Changing scope requires a brief update and a new `visp work`.
 
 ## Checks
 
@@ -97,6 +101,8 @@ A check must exercise behavior to count as functional evidence. Syntax-only or s
 `workflow.validationCommands` from `visp.yml` run alongside every slice's checks as `CONFIG_1`, `CONFIG_2`, and so on. `workflow.acceptanceChecks` are pinned when a feature is created and run at acceptance.
 
 Supervised checks inherit the operator’s environment, including tokens and other credentials, except for shell bookkeeping (`_`, `SHLVL`, `PWD`, `OLDPWD`). Their output is recorded as evidence. Python bytecode is redirected to a private per-user cache outside the project unless `PYTHONPYCACHEPREFIX` is explicitly set. A command that could not start (for example, the executable is not installed) is recorded as an environment failure with the note that no product behavior was tested, not as a test failure.
+
+Declared env files remain part of the check identity, but candidate snapshots keep only hashes for ignored files, secret filenames and blocked paths. Such inputs cannot be restored from a candidate. Check output is committed as a redacted tail; raw command output is local in `.visp/session/check-output/`.
 
 ## Work, done, next, accept
 
@@ -152,7 +158,7 @@ After a failure, `work` includes the failing output and says whether it describe
 
 `visp pr` prints a Markdown document built from recorded state:
 
-- the verbatim request;
+- the preserved request, with recognized credentials and local paths masked;
 - an outcomes table with checks and statuses;
 - decisions, slice scope and uncommitted changes;
 - each check's command and latest executed result, including pinned acceptance checks;

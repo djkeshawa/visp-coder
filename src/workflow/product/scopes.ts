@@ -52,16 +52,21 @@ export function selectProductSlice(
       : undefined);
   if (requested !== undefined) {
     const slice = record.brief.slices.find((entry) => entry.id === requested);
-    if (!slice)
+    if (!slice && options.task !== undefined)
       return err(
-        vispError("TASK_NOT_FOUND", `${requested} is not a slice in ${record.brief.feature}`, {
-          recovery: `visp status --feature ${record.brief.feature}`,
-        }),
+        vispError(
+          "TASK_NOT_FOUND",
+          `${requested} is not a slice in ${record.brief.feature}. Valid slices: ${record.brief.slices.map((entry) => entry.id).join(", ") || "none"}`,
+          {
+            recovery: `visp work --feature ${record.brief.feature} --task <valid-id>`,
+          },
+        ),
       );
     if (
-      options.task !== undefined ||
-      !chooseNext ||
-      !closedSlice(record.state.slices[slice.id]?.status)
+      slice &&
+      (options.task !== undefined ||
+        !chooseNext ||
+        !closedSlice(record.state.slices[slice.id]?.status))
     )
       return ok(slice);
   }
@@ -325,4 +330,16 @@ function scopeList(forbidden: readonly string[], outside: readonly string[]): st
   const named = [...new Set([...forbidden, ...outside])];
   const shown = named.slice(0, 8).join(", ");
   return named.length > 8 ? `${shown} and ${named.length - 8} more` : shown;
+}
+
+export function staleTaskNote(workspace: WorkspaceState, record: ProductRecord): string[] {
+  const task =
+    workspace.status?.activeFeature === record.brief.feature
+      ? workspace.status.activeTask
+      : undefined;
+  return task && !record.brief.slices.some((slice) => slice.id === task)
+    ? [
+        `Ignored saved task ${task}, which is absent from this checkout's brief; selected the next available slice.`,
+      ]
+    : [];
 }

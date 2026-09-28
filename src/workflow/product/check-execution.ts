@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { withProductCheckContext } from "../../core/check-context.js";
 import { commandExecutableDigest } from "../../core/command-executable.js";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { type CommandOutput, resolveCommand, run } from "../../core/exec.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
+import { outputRedactor, privatePath } from "../../core/redaction.js";
 import { err, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
@@ -52,7 +54,22 @@ export async function executeProductCheck(
   if (isBrowserCheckCommand(check.command))
     return executeBrowserCheck(workspace, record, check.command, base, retryEnvironment);
   const started = Date.now();
+  const argv = resolveCommand(check.command);
+  const envFiles = argv.ok
+    ? argv.value.flatMap((arg, index, args) =>
+        arg.startsWith("--env-file=")
+          ? [arg.slice("--env-file=".length)]
+          : arg === "--env-file" && args[index + 1]
+            ? [args[index + 1] as string]
+            : [],
+      )
+    : [];
+  const redact = await outputRedactor(workspace.paths.root, [
+    ...envFiles,
+    ...Object.keys(verifierSnapshot).filter((path) => privatePath(path)),
+  ]);
   const output = await executeCommand(workspace, check, !!base.verifierDigest);
+  const raw = output.ok ? `${output.value.stdout}\n${output.value.stderr}` : output.error.message;
   const commandVerifier =
     base.verifierDigest && output.ok && output.value.executableDigest
       ? {
@@ -70,10 +87,30 @@ export async function executeProductCheck(
       status: commandStatus(output),
       exitCode: output.ok ? output.value.exitCode : -1,
       durationMs: output.ok ? output.value.durationMs : Date.now() - started,
-      output: commandEvidenceOutput(output, !!base.verifierDigest),
+      output: commandEvidenceOutput(
+        output.ok
+          ? {
+              ...output,
+              value: {
+                ...output.value,
+                stdout: redact(output.value.stdout),
+                stderr: redact(output.value.stderr),
+              },
+            }
+          : { ...output, error: { ...output.error, message: redact(output.error.message) } },
+        !!base.verifierDigest,
+      ),
     },
     state: record.state,
-    mutations: [],
+    mutations: [
+      {
+        kind: "write",
+        path: join(workspace.paths.sessionDir, "check-output", `${base.id}.log`),
+        content: raw,
+        mode: 0o600,
+        expectedBefore: { existed: false },
+      },
+    ],
   };
 }
 

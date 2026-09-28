@@ -18,7 +18,7 @@ visp-migrate --project . apply
 
 `preview` changes nothing and does not recover interrupted transactions. `--feature <id>` limits `preview` or `apply` to one feature.
 
-`export` writes `.visp/exports/<name>.json` with the exact bytes, permissions and SHA-256 hashes of `visp.yml`, `.gitignore` and `.visp/`, plus a manifest digest. It does not need a valid configuration or parseable records, refuses to overwrite an existing export, and refuses symlinks and special files rather than producing an incomplete copy. Limits: 10,000 entries, 64 directory levels, 32 MiB per file and 256 MiB in total. There is no automated restore; the export is for preservation and inspection.
+`export` writes `.visp/exports/<name>.json` with the exact bytes, permissions and SHA-256 hashes of `visp.yml`, `.gitignore` and the non-derived parts of `.visp/`, plus a manifest digest. Backups and exports exclude ignored session prompts, installation state, graph databases and their WAL files, caches, captures and candidates. It does not need a valid configuration or parseable records, refuses to overwrite an existing export, and refuses symlinks and special files rather than producing an incomplete copy. Limits: 10,000 entries, 64 directory levels, 32 MiB per file and 256 MiB in total. There is no automated restore; the export is for preservation and inspection.
 
 `apply` recovers interrupted VISP transactions, plans the upgrade, then writes a raw backup to `.visp/migrations/backups/<digest>.json` and the upgraded records in one transaction. If it is interrupted, run it again to recover and retry. Repeating it is harmless. It refuses while a critic review is pending.
 
@@ -32,6 +32,8 @@ What `apply` does:
 Historical completion is not relabeled as current verification. Features that were in progress need a fresh `visp work` and current evidence; features marked `historical-complete` stay historical, so start a new feature for fresh work. Do not edit the state version, remove the upgrade marker or copy old state over an upgraded project; that can roll back evidence and spending.
 
 `visp migrate [--feature <id>] [--dry-run]` remains in the main CLI for converting a legacy feature. It refuses history upgrades that need a backup and points to `visp-migrate`.
+
+Preview reports invalid artifacts per feature with their paths and recovery hints, while continuing to inspect unaffected features. Apply remains atomic and refuses invalid selected history; use `apply --feature <id>` to migrate unaffected features individually.
 
 ## Removed in 0.5
 

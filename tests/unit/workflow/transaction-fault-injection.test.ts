@@ -143,7 +143,7 @@ describe("workflow transaction fault injection", () => {
     expect(kinds?.get("visp.yml")).toBe("write");
   }, 120_000);
 
-  it("restores brief, product state, authorization and status after every slice closure mutation", async () => {
+  it("restores evidence, private logs, authorization and status after every slice closure mutation", async () => {
     let mutationCount = 1;
     for (let failAt = 1; failAt <= mutationCount; failAt++) {
       const { workspace, brief } = await productWorkspace();
@@ -165,21 +165,21 @@ describe("workflow transaction fault injection", () => {
         expect(result.ok).toBe(false);
         const paths = requireObservation(workspace.root, observed, "product-state");
         mutationCount = paths.length;
-        expect(paths).toEqual(
-          [
-            briefPath(state, brief.feature),
-            productStatePath(state, brief.feature),
-            authorizationPath(state, brief.feature),
-            ".visp/status.json",
-          ].map((path) => relativeMutationPath(workspace.root, path)),
-        );
+        expect(paths).toEqual([
+          relativeMutationPath(workspace.root, briefPath(state, brief.feature)),
+          relativeMutationPath(workspace.root, productStatePath(state, brief.feature)),
+          expect.stringMatching(/^\.visp\/session\/check-output\/[^/]+\.log$/),
+          relativeMutationPath(workspace.root, authorizationPath(state, brief.feature)),
+          ".visp/status.json",
+        ]);
+        expect(observed.mutations?.[2]).toMatchObject({ kind: "write", mode: 0o600 });
         await expectRollback(workspace.root, observed);
       } finally {
         vi.restoreAllMocks();
         await workspace.destroy();
       }
     }
-    expect(mutationCount).toBe(4);
+    expect(mutationCount).toBe(5);
   });
 });
 

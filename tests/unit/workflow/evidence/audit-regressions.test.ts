@@ -16,7 +16,7 @@ afterEach(async () => {
 
 describe("evidence audit regressions", () => {
   it.each([runProductVerify, runProductReview])(
-    "rejects explicit and dangling active IDs without writing evidence or telemetry",
+    "rejects explicit invalid IDs even when saved selection is stale without writing evidence or telemetry",
     async (run) => {
       const ready = await productWorkspace();
       workspace = ready.workspace;
@@ -37,7 +37,7 @@ describe("evidence audit regressions", () => {
       if (!state.status) throw new Error("Missing status fixture");
       await legacyStore(state).writeStatus({ ...state.status, activeTask: "T999" });
       state = await workspace.state();
-      const active = await run(state, { feature });
+      const active = await run(state, { feature, task: "T999" });
       expect(active).toMatchObject({ ok: false, error: { code: "TASK_NOT_FOUND" } });
       expect(await state.files.readTextIfExists(state.paths.telemetry)).toEqual(telemetryBefore);
       expect(await state.files.readText(evidencePath)).toEqual(evidenceBefore);
