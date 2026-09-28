@@ -74,6 +74,7 @@ interface ProductOptions extends GlobalOptions {
   dispatch?: boolean;
   prepare?: boolean;
   writeTests?: boolean;
+  retryTests?: boolean;
   check?: string;
   session?: string;
   group?: string[];
@@ -288,13 +289,19 @@ export function briefCommand(): Command {
 
 export const workCommand = () =>
   command("work", "Deliver context and authorize the next usable slice", true, (state, opts) =>
-    opts.writeTests && opts.feature
-      ? writeIndependentTests(state, opts.feature, codexTester())
-      : opts.inspect
-        ? runProductContext(state, opts)
-        : runProductWork(state, opts, configuredTestsStarter(state), testsWaitMs(state, "cli")),
+    opts.retryTests && !opts.feature
+      ? Promise.resolve(err(vispError("CONFIG_INVALID", "--retry-tests requires --feature")))
+      : (opts.writeTests || opts.retryTests) && opts.feature
+        ? writeIndependentTests(state, opts.feature, codexTester(), opts.retryTests === true)
+        : opts.inspect
+          ? runProductContext(state, opts)
+          : runProductWork(state, opts, configuredTestsStarter(state), testsWaitMs(state, "cli")),
   )
     .option("--inspect", "Read context without authorization, environment probing or graph refresh")
+    .option(
+      "--retry-tests",
+      "Retry an independent tester that failed for an environment reason (requires --feature)",
+    )
     .option(
       "--check <command>",
       "Test command for the slice; on a feature without slices, work the whole request as one slice",

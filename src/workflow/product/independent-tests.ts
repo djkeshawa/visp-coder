@@ -1,6 +1,15 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  appendFile,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +23,7 @@ import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
+import { acceptanceEnvironment } from "./acceptance-environment.js";
 import {
   createProductFeature,
   type ProductFeatureOptions,
@@ -24,6 +34,7 @@ import { reachesModel, runCodexStructured, type SessionActivity } from "./critic
 import { hostRequest } from "./host-prompts.js";
 import { rulesForRequest, withRules } from "./project-rules.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
+import { productSourceSnapshot } from "./subject.js";
 
 /**
  * Independent acceptance tests. Before the first slice is authorized, a tester that never
@@ -40,7 +51,7 @@ import { type ProductRecord, readProductRecord } from "./store.js";
 const RECORD = "acceptance-tests.json";
 const TESTER_TIMEOUT_MS = 720_000;
 const BASELINE_TIMEOUT_MS = 120_000;
-const STALE_RUNNING_MS = 10 * 60_000;
+const STALE_RUNNING_MS = 2 * TESTER_TIMEOUT_MS + BASELINE_TIMEOUT_MS;
 const MAX_FILE_BYTES = 64 * 1024;
 const MIN_ASSERTIONS = 3;
 
@@ -98,8 +109,14 @@ export const independentTestsRecordSchema = z
     tests: z.array(z.object({ name: z.string(), quote: z.string() })).optional(),
     notes: z.string().optional(),
     content: z.string().optional(),
+    sourceDigest: z.string().optional(),
     baseline: z
-      .object({ exitCode: z.number(), timedOut: z.boolean(), output: z.string() })
+      .object({
+        exitCode: z.number(),
+        timedOut: z.boolean(),
+        spawnFailed: z.boolean().optional(),
+        output: z.string(),
+      })
       .optional(),
   })
   .strict();
@@ -153,6 +170,8 @@ export function configuredTestsStarter(
   channel: "cli" | "mcp" = "cli",
 ): TestsStarter | undefined {
   if (workspace.config.critic?.launch !== "codex-exec") return undefined;
+  if (spawnSync("codex", ["--version"], { stdio: "ignore", timeout: 3000 }).status !== 0)
+    return undefined;
   // Codex's sandbox ends every process a shell command started, so a detached tester never
   // finished there; a Codex worker's CLI runs it inside `visp feature` instead. The MCP
   // server outlives each call, so it keeps the background process.
@@ -169,11 +188,14 @@ export function codexTester(
     const { lookup: dnsLookup } = await import("node:dns/promises");
     if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)))))
       throw new Error("The tester cannot reach its model from this process");
+    await sweepOldTesterDirectories();
     const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
     try {
       const root = request.explore
         ? await repositoryCopy(request.root, directory, request.blockedPaths ?? [])
-        : request.root;
+        : await mkdir(join(directory, "empty-project"), { recursive: true }).then(() =>
+            join(directory, "empty-project"),
+          );
       return await runCodexStructured({
         ...(options.executable ? { executable: options.executable } : {}),
         root,
@@ -192,6 +214,17 @@ export function codexTester(
   };
 }
 
+async function sweepOldTesterDirectories(): Promise<void> {
+  const entries = await readdir(tmpdir(), { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith("visp-tester-")) continue;
+    const path = join(tmpdir(), entry.name);
+    const details = await stat(path).catch(() => undefined);
+    if (details && Date.now() - details.mtimeMs > 24 * 60 * 60_000)
+      await rm(path, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 export function inlineTests(tester: IndependentTester): TestsStarter {
   return (workspace, feature) => writeIndependentTests(workspace, feature, tester);
 }
@@ -202,7 +235,7 @@ export function inlineTests(tester: IndependentTester): TestsStarter {
  */
 export function backgroundTests(cli: string): TestsStarter {
   return async (workspace, feature, waitMs) => {
-    const logPath = join(await mkdtemp(join(tmpdir(), "visp-tester-")), "tester.json");
+    const logPath = workspace.paths.featureFile(feature, "tester-process.log");
     const output = openSync(logPath, "w");
     const child = spawn(
       process.execPath,
@@ -380,17 +413,24 @@ export async function writeIndependentTests(
   workspace: WorkspaceState,
   feature: string,
   tester: IndependentTester,
+  retryFailed = false,
 ): Promise<Result<IndependentTestsRecord>> {
   const existing = await readTestsRecord(workspace, feature);
   if (!existing.ok) return existing;
-  if (existing.value && (existing.value.status !== "running" || !isStale(existing.value)))
-    return ok(existing.value);
+  if (existing.value && !mayRestartTester(existing.value, retryFailed)) return ok(existing.value);
+  if (retryFailed && existing.value?.status === "failed") {
+    const pending = await retryPendingPin(workspace, feature, existing.value);
+    if (pending) return pending;
+  }
   const loaded = await readProductRecord(workspace, { feature });
   if (!loaded.ok) return loaded;
   const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
   if (!policy.ok) return policy;
   const model = policy.value.config?.model;
   if (!model) return err(vispError("CONFIG_INVALID", "The tester needs a configured critic model"));
+  const source = await productSourceSnapshot(workspace, loaded.value.brief);
+  if (!source.ok) return source;
+  const sourceDigest = existing.value?.sourceDigest ?? hashValue(source.value);
   const startedAt = new Date().toISOString();
   const running: IndependentTestsRecord = {
     version: 1,
@@ -398,6 +438,7 @@ export async function writeIndependentTests(
     startedAt,
     model,
     pid: process.pid,
+    sourceDigest,
   };
   const marked = await saveTestsRecord(workspace, feature, running, existing.value);
   if (!marked.ok) return marked;
@@ -419,10 +460,16 @@ export async function writeIndependentTests(
     onActivity: (activity: SessionActivity) =>
       recordTesterActivity(workspace, feature, model, existingCodebase, activity),
   };
-  const fields = await testOutcome(workspace, feature, tester, request);
+  const fields = await testOutcome(workspace, feature, tester, request, sourceDigest);
   const record = { ...running, ...fields, finishedAt: new Date().toISOString() };
   const saved = await saveTestsRecord(workspace, feature, record, running);
   return saved.ok ? ok(independentTestsRecordSchema.parse(record)) : saved;
+}
+
+function mayRestartTester(record: IndependentTestsRecord, retryFailed: boolean): boolean {
+  return (
+    (retryFailed && record.status === "failed") || (record.status === "running" && isStale(record))
+  );
 }
 
 type TestFields = Partial<IndependentTestsRecord>;
@@ -432,15 +479,27 @@ async function testOutcome(
   feature: string,
   tester: IndependentTester,
   request: TesterRequest,
+  sourceDigest: string,
 ): Promise<TestFields> {
-  const first = await attemptTests(workspace, feature, tester, request);
+  const first = await attemptTests(workspace, feature, tester, request, sourceDigest);
   if (first.status !== "rejected" || !first.content) return first;
+  if (
+    first.baseline &&
+    (first.baseline.spawnFailed || [127, 9009].includes(first.baseline.exitCode))
+  )
+    return first;
   // Execution feedback: live suites on an existing codebase assumed routes and formats the
   // code does not have. One repair round with the failure output, then the same checks.
-  return attemptTests(workspace, feature, tester, {
-    ...request,
-    prompt: repairPrompt(request.prompt, first.content, first.reason ?? ""),
-  });
+  return attemptTests(
+    workspace,
+    feature,
+    tester,
+    {
+      ...request,
+      prompt: repairPrompt(request.prompt, first.content, first.reason ?? ""),
+    },
+    sourceDigest,
+  );
 }
 
 async function attemptTests(
@@ -448,6 +507,7 @@ async function attemptTests(
   feature: string,
   tester: IndependentTester,
   request: TesterRequest,
+  sourceDigest: string,
 ): Promise<TestFields> {
   let response: TesterResponse;
   try {
@@ -462,8 +522,44 @@ async function attemptTests(
   const content = response.file.content.slice(0, MAX_FILE_BYTES);
   const invalid = invalidFile(response.file);
   if (invalid) return { status: "rejected", reason: invalid, content, ...described };
-  const kept = await keepFailingTests(workspace, feature, response.file, response.existingBehavior);
-  return { ...kept, ...(kept.status === "rejected" ? { content } : {}), ...described };
+  if (onlyStructuralChecks(response))
+    return {
+      status: "declined",
+      reason: "The suite checks only file structure, not a functional outcome",
+      ...described,
+    };
+  const kept = await keepFailingTests(
+    workspace,
+    feature,
+    response.file,
+    response.existingBehavior,
+    sourceDigest,
+  );
+  return {
+    ...kept,
+    ...(["rejected", "failed"].includes(kept.status ?? "") ? { content } : {}),
+    ...described,
+  };
+}
+
+async function retryPendingPin(
+  workspace: WorkspaceState,
+  feature: string,
+  record: IndependentTestsRecord,
+): Promise<Result<IndependentTestsRecord> | undefined> {
+  if (!record.file || !record.command || !record.content || !record.baseline) return undefined;
+  const file = await workspace.files.readTextIfExists(join(workspace.paths.root, record.file));
+  if (!file.ok || file.value !== record.content) return undefined;
+  const pinned = await pinTests(workspace, feature, record.file, record.command, record.content);
+  if (!pinned.ok) return pinned;
+  const complete: IndependentTestsRecord = {
+    ...record,
+    status: "pinned",
+    reason: undefined,
+    finishedAt: new Date().toISOString(),
+  };
+  const saved = await saveTestsRecord(workspace, feature, complete, record);
+  return saved.ok ? ok(complete) : saved;
 }
 
 function repairPrompt(prompt: string, content: string, reason: string): string {
@@ -486,18 +582,30 @@ async function keepFailingTests(
   feature: string,
   file: { name: string; content: string },
   existingBehavior: boolean,
+  sourceDigest: string,
 ): Promise<TestFields> {
-  const path = `acceptance/${feature}/${file.name}`;
+  const unchanged = await sourceUnchanged(workspace, sourceDigest);
+  if (!unchanged.ok) return { status: "failed", reason: unchanged.error.message };
+  if (!unchanged.value)
+    return {
+      status: "declined",
+      reason:
+        "Product sources changed while the tester was writing; the before-implementation baseline is inconclusive",
+    };
+  const safeName = file.name.replace(/\.(?:test|spec)\.mjs$/, ".acceptance.mjs");
+  const path = `acceptance/${feature}/${safeName}`;
   const command = testCommand(path);
-  const written = await applyFileTransaction(workspace.paths.root, "write-acceptance-tests", [
-    {
-      kind: "write",
-      path: join(workspace.paths.root, path),
-      content: file.content,
-      expectedBefore: { existed: false },
-    },
-  ]);
-  if (!written.ok) return { status: "rejected", reason: written.error.message, file: path };
+  const written = await retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "write-acceptance-tests", [
+      {
+        kind: "write",
+        path: join(workspace.paths.root, path),
+        content: file.content,
+        expectedBefore: { existed: false },
+      },
+    ]),
+  );
+  if (!written.ok) return { status: "failed", reason: written.error.message, file: path };
   const baseline = await runBaseline(workspace.paths.root, command);
   const kept = { file: path, command, baseline };
   // On an existing codebase the current code is the oracle for documented behavior: tests
@@ -505,22 +613,68 @@ async function keepFailingTests(
   const existing = existingBehavior
     ? await runBaseline(workspace.paths.root, command, { VISP_TEST_SCOPE: "existing" })
     : undefined;
-  const rejection =
-    existing && (existing.exitCode !== 0 || existing.timedOut)
-      ? `Tests of existing behavior fail on the current repository, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`
-      : baseline.timedOut
-        ? "The tests did not finish on the unimplemented project"
-        : baseline.exitCode === 0
-          ? "The tests pass before any implementation, so they check nothing new"
-          : undefined;
+  const stillUnchanged = await sourceUnchanged(workspace, sourceDigest, path);
+  if (!stillUnchanged.ok) {
+    await removeFile(workspace, path, file.content);
+    return { status: "failed", reason: stillUnchanged.error.message };
+  }
+  if (!stillUnchanged.value) {
+    await removeFile(workspace, path, file.content);
+    return {
+      status: "declined",
+      reason:
+        "Product sources changed during the baseline; the before-implementation result is inconclusive",
+    };
+  }
+  const rejection = baselineRejection(baseline, existing);
   if (rejection) {
     await removeFile(workspace, path, file.content);
     return { status: "rejected", reason: rejection, content: file.content, ...kept };
   }
   const pinned = await pinTests(workspace, feature, path, command, file.content);
   if (pinned.ok) return { status: "pinned", ...kept };
-  await removeFile(workspace, path, file.content);
+  if (pinned.error.code !== "STATE_BUSY") await removeFile(workspace, path, file.content);
   return { status: "failed", reason: pinned.error.message, ...kept };
+}
+
+function baselineRejection(
+  baseline: Awaited<ReturnType<typeof runBaseline>>,
+  existing?: Awaited<ReturnType<typeof runBaseline>>,
+): string | undefined {
+  if (existing && (existing.exitCode !== 0 || existing.timedOut || existing.spawnFailed))
+    return `Tests of existing behavior fail on the current repository, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`;
+  if (baseline.spawnFailed || [127, 9009].includes(baseline.exitCode))
+    return "The test interpreter could not start; no product behavior was tested";
+  if (baseline.timedOut) return "The tests did not finish on the unimplemented project";
+  if (baseline.exitCode === 0)
+    return "The tests pass before any implementation, so they check nothing new";
+  return undefined;
+}
+
+async function sourceUnchanged(
+  workspace: WorkspaceState,
+  digest: string,
+  candidate?: string,
+): Promise<Result<boolean>> {
+  const current = await productSourceSnapshot(workspace);
+  if (!current.ok) return current;
+  const files = Object.fromEntries(
+    Object.entries(current.value).filter(([path]) => path !== candidate),
+  );
+  return ok(hashValue(files) === digest);
+}
+
+function onlyStructuralChecks(response: TesterResponse): boolean {
+  const described = `${response.notes} ${response.tests.map((test) => test.name).join(" ")}`;
+  return (
+    /(?:cannot|can't|unable to|no way to) test (?:the )?behavio(?:u)?r/i.test(described) ||
+    (response.tests.length > 0 &&
+      response.tests.every((test) =>
+        /\b(?:file exists|exists and parses|parses|syntax|file structure|source file)\b/i.test(
+          test.name,
+        ),
+      ))
+  );
 }
 
 /**
@@ -636,7 +790,8 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "- Test only behavior the request states. Quote the sentence each test relies on in `tests[].quote`. Do not invent requirements, messages or formats the request leaves open.",
     "- A wrong test is worse than a missing one: the implementer must satisfy it. Leave out any case where a careful reader could expect a different result (for example extra fields or an empty body when the request does not say).",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
-    "- Use only the standard library: Python 3 (name ending .py, run as `python3 <file>`) or Node.js ES modules (name ending .mjs, run as `node <file>`). Prefer the language the request or repository uses.",
+    "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
+    "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
     "- Start and stop anything the tests need, the way the request says, with timeouts on every wait. Use a free port where one is needed.",
     "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why.",
     "- The project is not implemented yet, so the file must fail now and pass once the request is met.",
@@ -648,7 +803,9 @@ function testerPrompt(request: string, feature: string, existing = false): strin
           "- Create every item, record or file your tests need through the documented interfaces; never depend on data, fixtures or documentation examples already in the repository.",
           "- Include tests of existing behavior that use the same helpers as the new tests: at least one for every existing route, command or interface your new tests call or assert on (for example, if a new test expects a status from an existing endpoint, also test that endpoint's documented existing case), and every assertion helper the new tests use (such as an error-body check) must also be used by at least one existing-behavior test. Set existingBehavior: true. When the environment variable VISP_TEST_SCOPE is `existing`, run only those tests; they must pass on the repository as it is now. Your file is judged by running it against the real repository.",
         ]
-      : ["- Set existingBehavior: false."]),
+      : [
+          "- Set existingBehavior: false. You are in an empty temporary directory. Do not inspect the implementation, run `visp`, or load project or personal skills.",
+        ]),
     `The file will be saved as acceptance/${feature}/<name> and run from the repository root. Do not modify the repository.`,
     "",
     "Request:",
@@ -668,7 +825,9 @@ function invalidFile(file: { name: string; content: string }): string | undefine
 }
 
 function testCommand(path: string): string[] {
-  return path.endsWith(".py") ? ["python3", path] : ["node", path];
+  return path.endsWith(".py")
+    ? [process.platform === "win32" ? "python" : "python3", path]
+    : ["node", path];
 }
 
 /**
@@ -677,45 +836,53 @@ function testCommand(path: string): string[] {
  */
 async function runBaseline(root: string, command: string[], extra: Record<string, string> = {}) {
   const [file, ...args] = command as [string, ...string[]];
-  const env = await resolvedProductExecutionEnvironment();
-  return new Promise<{ exitCode: number; timedOut: boolean; output: string }>((resolve) => {
-    let output = "";
-    let timedOut = false;
-    const child = spawn(file, args, {
-      cwd: root,
-      env: { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra },
-      // Its own process group on POSIX; on Windows detached would open a new console.
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const collect = (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-8000);
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
-    const endGroup = () => {
-      try {
-        // Windows has no process groups to signal; there the child itself is ended.
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // The group already exited.
-      }
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      endGroup();
-    }, BASELINE_TIMEOUT_MS);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ exitCode: -1, timedOut: false, output: error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      endGroup();
-      resolve({ exitCode: code ?? -1, timedOut, output: output.trim().slice(-2000) });
-    });
-  });
+  const productEnv = await resolvedProductExecutionEnvironment();
+  const env = acceptanceEnvironment(productEnv);
+  return new Promise<{ exitCode: number; timedOut: boolean; spawnFailed: boolean; output: string }>(
+    (resolve) => {
+      let output = "";
+      let timedOut = false;
+      const child = spawn(file, args, {
+        cwd: root,
+        env: { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra },
+        // Its own process group on POSIX; on Windows detached would open a new console.
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const collect = (chunk: Buffer) => {
+        output = (output + chunk.toString()).slice(-8000);
+      };
+      child.stdout.on("data", collect);
+      child.stderr.on("data", collect);
+      const endGroup = () => {
+        try {
+          // Windows has no process groups to signal; there the child itself is ended.
+          if (process.platform === "win32") child.kill("SIGKILL");
+          else if (child.pid) process.kill(-child.pid, "SIGKILL");
+        } catch {
+          // The group already exited.
+        }
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        endGroup();
+      }, BASELINE_TIMEOUT_MS);
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        resolve({ exitCode: -1, timedOut: false, spawnFailed: true, output: error.message });
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        endGroup();
+        resolve({
+          exitCode: code ?? -1,
+          timedOut,
+          spawnFailed: false,
+          output: output.trim().slice(-2000),
+        });
+      });
+    },
+  );
 }
 
 async function pinTests(
@@ -735,7 +902,8 @@ async function pinTests(
         vispError("STAGE_BLOCKED", "The feature was accepted before the tests were ready"),
       );
     const pinned = await pinOnto(workspace, current.value.brief, path, command, content);
-    if (pinned.ok || pinned.error.code !== "STATE_BUSY" || attempt >= 4) return pinned;
+    if (pinned.ok || pinned.error.code !== "STATE_BUSY" || attempt >= 8) return pinned;
+    await sleep(500);
   }
 }
 
@@ -764,13 +932,15 @@ function pinOnto(
 }
 
 async function removeFile(workspace: WorkspaceState, path: string, content: string) {
-  await applyFileTransaction(workspace.paths.root, "discard-acceptance-tests", [
-    {
-      kind: "remove",
-      path: join(workspace.paths.root, path),
-      expectedBefore: filePrecondition(content),
-    },
-  ]);
+  await retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "discard-acceptance-tests", [
+      {
+        kind: "remove",
+        path: join(workspace.paths.root, path),
+        expectedBefore: filePrecondition(content),
+      },
+    ]),
+  );
 }
 
 export async function readTestsRecord(
@@ -793,14 +963,37 @@ async function saveTestsRecord(
   record: IndependentTestsRecord,
   before: IndependentTestsRecord | undefined,
 ) {
-  return applyFileTransaction(workspace.paths.root, "record-acceptance-tests", [
-    {
-      kind: "write",
-      path: workspace.paths.featureFile(feature, RECORD),
-      content: `${JSON.stringify(record, null, 2)}\n`,
-      ...(before === undefined ? { expectedBefore: { existed: false } } : {}),
-    },
-  ]);
+  const path = workspace.paths.featureFile(feature, RECORD);
+  const current = await workspace.files.readTextIfExists(path);
+  if (!current.ok) return current;
+  if (!before && current.value !== undefined)
+    return err(vispError("STATE_BUSY", "Another tester already started for this feature"));
+  let parsed: unknown;
+  try {
+    parsed = current.value === undefined ? null : JSON.parse(current.value);
+  } catch {
+    return err(vispError("ARTIFACT_INVALID", `Unreadable ${RECORD}`));
+  }
+  if (before && hashValue(parsed) !== hashValue(before))
+    return err(vispError("STATE_BUSY", "The tester record changed while this tester was running"));
+  return retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "record-acceptance-tests", [
+      {
+        kind: "write",
+        path,
+        content: `${JSON.stringify(record, null, 2)}\n`,
+        expectedBefore: filePrecondition(current.value),
+      },
+    ]),
+  );
+}
+
+async function retryBusy<T>(operation: () => Promise<Result<T>>): Promise<Result<T>> {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await operation();
+    if (result.ok || result.error.code !== "STATE_BUSY" || attempt >= 8) return result;
+    await sleep(500);
+  }
 }
 
 async function waitForRecord(
@@ -864,8 +1057,10 @@ function sleep(ms: number) {
 }
 
 function isStale(record: IndependentTestsRecord): boolean {
-  if (record.pid !== undefined && !processAlive(record.pid)) return true;
-  return Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS;
+  return (
+    (record.pid !== undefined && !processAlive(record.pid)) ||
+    Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS
+  );
 }
 
 function processAlive(pid: number): boolean {

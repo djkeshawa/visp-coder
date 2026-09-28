@@ -7,6 +7,7 @@ import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
 import { err, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
+import { acceptanceEnvironment } from "./acceptance-environment.js";
 import { executeBrowserCheck } from "./browser-check-execution.js";
 import {
   describeProductCheck,
@@ -142,14 +143,21 @@ async function executeCommand(
       check.id,
       async (environment) => {
         const binary = argv.value[0] ?? "";
-        const before = await commandExecutableDigest(binary, workspace.paths.root, environment);
+        const checkEnvironment = check.id.startsWith("PINNED_")
+          ? acceptanceEnvironment(environment)
+          : environment;
+        const before = await commandExecutableDigest(
+          binary,
+          workspace.paths.root,
+          checkEnvironment,
+        );
         const executed = await run(binary, argv.value.slice(1), {
           cwd: workspace.paths.root,
-          env: environment,
+          env: checkEnvironment,
           replaceEnv: true,
         });
         if (!executed.ok) return executed;
-        const after = await commandExecutableDigest(binary, workspace.paths.root, environment);
+        const after = await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment);
         return {
           ok: true as const,
           value: {
@@ -184,9 +192,9 @@ function commandStatus(output: Result<CommandOutput>): ProductExecution["status"
  * that the actor ran successfully with escalation. That is not a product failure.
  */
 const SANDBOX_DENIAL =
-  /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind) EPERM\b/;
+  /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind|spawn|spawnSync|fork|exec|execSync)\b[^\n]{0,160}\bEPERM\b/;
 const SANDBOX_NOTE =
-  "VISP: the host sandbox denied network sockets to this check, so no product behavior was tested. Rerun the same visp command with the host's sandbox escalation (for Codex, request escalated permissions for that command); do not change the product to work around it.";
+  "VISP: the host sandbox denied a socket or subprocess needed by this check, so no product behavior was tested. Rerun the same visp command with the host's sandbox escalation (for Codex, request escalated permissions for that command); do not change the product to work around it.";
 
 function sandboxDenied(output: CommandOutput): boolean {
   return SANDBOX_DENIAL.test(`${output.stdout}\n${output.stderr}`);
