@@ -34,6 +34,22 @@ async function walk(config = graphConfig()) {
 }
 
 describe("walkRepository", () => {
+  it("indexes nested build source and excludes agent worktrees", async () => {
+    await repo.write("src/build/id.ts", "export const id = 1;\n");
+    await repo.write(".claude/worktrees/w/src/copy.ts", "export const copy = 1;\n");
+    const { files, skipped } = await walk();
+    expect(files.map((file) => file.path)).toContain("src/build/id.ts");
+    expect(files.map((file) => file.path)).not.toContain(".claude/worktrees/w/src/copy.ts");
+    expect(skipped).toContainEqual({ path: ".claude", reason: "excluded" });
+  });
+
+  it("does not count or hash non-source assets", async () => {
+    await repo.write("assets/logo.png", "image bytes");
+    const { files, skipped } = await walk();
+    expect(files.map((file) => file.path)).not.toContain("assets/logo.png");
+    expect(skipped).toContainEqual({ path: "assets/logo.png", reason: "excluded" });
+  });
+
   it("records supported files with a language, size and hash", async () => {
     const { files } = await walk();
     const a = files.find((file) => file.path === "src/a.ts");
@@ -114,8 +130,8 @@ describe("walkRepository", () => {
 
   it("never enters hard-ignored directories", async () => {
     const { files, skipped } = await walk();
-    const paths = [...files.map((file) => file.path), ...skipped.map((entry) => entry.path)];
-    expect(paths.some((path) => path.startsWith("node_modules"))).toBe(false);
+    expect(files.some((file) => file.path.startsWith("node_modules"))).toBe(false);
+    expect(skipped).toContainEqual({ path: "node_modules", reason: "excluded" });
   });
 
   it("skips symlinks and records them", async () => {
@@ -137,7 +153,7 @@ describe("walkRepository", () => {
   it("skips binary files", async () => {
     await writeFile(join(repo.root, "src/blob.bin"), Buffer.from([1, 2, 0, 3]));
     const { skipped } = await walk();
-    expect(skipped).toContainEqual({ path: "src/blob.bin", reason: "binary" });
+    expect(skipped).toContainEqual({ path: "src/blob.bin", reason: "excluded" });
   });
 
   it("applies configured exclude globs", async () => {

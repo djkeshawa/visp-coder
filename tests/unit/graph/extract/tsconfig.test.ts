@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadAliases, parseJsonc } from "../../../../src/graph/extract/tsconfig.js";
-import { type Fixture, makeRepo } from "../fixtures.js";
+import { extractFixture, type Fixture, makeRepo } from "../fixtures.js";
 
 let repo: Fixture;
 let outside = "";
@@ -15,6 +15,30 @@ afterEach(async () => {
 });
 
 describe("tsconfig alias confinement", () => {
+  it("resolves package extends within node_modules", async () => {
+    repo = await makeRepo({
+      "tsconfig.json": '{"extends":"@tsconfig/node20/tsconfig.json"}',
+      "node_modules/@tsconfig/node20/tsconfig.json":
+        '{"compilerOptions":{"paths":{"@pkg/*":["src/*"]}}}',
+    });
+    const aliases = await loadAliases(repo.root);
+    expect(aliases.problems).toEqual([]);
+    expect(aliases.aliases).toContainEqual({
+      pattern: "@pkg/*",
+      targets: ["node_modules/@tsconfig/node20/src/*"],
+    });
+  });
+
+  it("reports missing package extends as an unresolved import on tsconfig", async () => {
+    repo = await makeRepo({ "tsconfig.json": '{"extends":"@missing/config/tsconfig.json"}' });
+    const facts = await extractFixture(repo);
+    expect(facts.unknowns).toContainEqual({
+      kind: "unresolved_import",
+      path: "tsconfig.json",
+      detail: "@missing/config/tsconfig.json",
+    });
+  });
+
   it("follows nested parent inheritance that stays inside the project", async () => {
     repo = await makeRepo({
       "tsconfig.json": '{"extends":"./config/child.json"}',
