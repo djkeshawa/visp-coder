@@ -42,7 +42,7 @@ In practice the coding agent runs these commands itself; the installed instructi
 
 ## The loop
 
-1. **`visp feature "<request>"`** starts a feature and preserves the request verbatim. Under Claude Code and Codex, VISP takes it from the user's recorded prompt, so a paraphrase cannot replace it.
+1. **`visp feature "<request>"`** starts a feature and preserves the request with credential patterns and local paths masked. Under Claude Code and Codex, VISP takes it from the user's recorded prompt, so a paraphrase cannot replace it.
 2. **`visp work --check "<test command>"`** (the light path) works the whole request as one slice checked by that command. For several independently usable parts, write a brief instead: **`visp brief`** reads or updates `.visp/features/<id>/brief.yaml` (outcomes, behavior examples, decisions, checks and slices), and **`visp work`** authorizes one slice at a time. `work` delivers the relevant outcomes, source excerpts, graph context, findings and memory, allows edits only inside the slice's scope, and refuses a slice with a functional outcome that no declared check exercises.
 3. **Independent tests.** With `critic.launch: codex-exec`, an independent tester started by `visp feature` writes acceptance tests from the request alone while the worker proceeds (new projects by default). VISP pins them only if they fail before implementation, and the worker cannot quietly change them.
 4. **Implement** within the authorized files.
@@ -97,6 +97,8 @@ slices:
 
 Adapt the selectors, URL and files to the real application. HTTP(S) journeys need the app to be running already. See [the workflow guide](docs/workflow.md) for every brief field and [product review](docs/product-review.md) for browser journeys.
 
+The request and redacted check output are saved in the committed feature trail; `visp pr` includes the request in text intended for publication. Review that trail before committing. Raw command logs stay in ignored `.visp/session/check-output/`; redaction is best effort, and authored command definitions or screenshots can still contain private data.
+
 ## Core commands
 
 | Command | Purpose |
@@ -121,6 +123,7 @@ Adapt the selectors, URL and files to the real application. HTTP(S) journeys nee
 | `visp rules` / `visp rules remove <id>` | List or remove the rules the user stated for all later work |
 | `visp skill` | Propose, admit and retire project skills |
 | `visp guard` | Check changed files against the authorized scope (used by hooks and CI) |
+| `visp trail prune` | Remove local captures and candidates no longer referenced by retained history |
 | `visp doctor` | Check the setup; `--settings` explains effective configuration |
 
 CLI text output is compact. `--json` prints the full result envelope. MCP tools reply with compact text plus the complete result in `structuredContent`; pass `detail: true` for full text.

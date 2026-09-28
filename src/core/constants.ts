@@ -137,6 +137,8 @@ export type Language = (typeof LANGUAGES)[number];
  * source of truth about the change.
  */
 export const DERIVED_STATE_PATHS = [
+  `${STATE_DIR}/features/*/captures/`,
+  `${STATE_DIR}/features/*/candidates/`,
   `${STATE_DIR}/${DIR.cache}/`,
   `${STATE_DIR}/${DIR.graph}/`,
   `${STATE_DIR}/${DIR.session}/`,

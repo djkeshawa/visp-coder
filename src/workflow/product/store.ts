@@ -17,6 +17,7 @@ import {
   parseProductBrief,
   productStateSchema,
 } from "./model.js";
+import { compactTrail } from "./trail.js";
 
 export interface ProductSelection {
   readonly feature?: string;
@@ -185,7 +186,7 @@ export function recordMutations(
     {
       kind: "write",
       path: productStatePath(workspace, brief.feature),
-      content: json(state),
+      content: json(compactTrail(state)),
       expectedBefore: filePrecondition(record?.stateText),
     },
   ];
@@ -208,7 +209,7 @@ export async function saveProductState(
     {
       kind: "write",
       path: productStatePath(workspace, record.brief.feature),
-      content: json(next),
+      content: json(compactTrail(next)),
       expectedBefore: filePrecondition(record.stateText),
     },
     ...extra,
