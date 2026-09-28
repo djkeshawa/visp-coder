@@ -45,6 +45,8 @@ export interface QueryWork {
 }
 
 export interface QueryReceipt {
+  readonly snapshotId: string;
+  readonly createdAt: string;
   readonly work?: QueryWork;
   readonly operation: QueryOperation;
   readonly budget: QueryBudget;

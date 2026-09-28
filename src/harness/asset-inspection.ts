@@ -32,7 +32,7 @@ export interface ForeignHarnessAssets {
   readonly mcpRegistrations: readonly ForeignMcpRegistration[];
 }
 
-export type McpRegistrationHarness = "claude-code" | "codex" | "opencode";
+export type McpRegistrationHarness = "claude-code" | "codex" | "cursor" | "copilot" | "opencode";
 
 export interface ForeignMcpRegistration {
   readonly harness: McpRegistrationHarness;
@@ -168,17 +168,21 @@ function foreignMcpRegistrationCandidates(harness: Harness): ForeignMcpRegistrat
     harness: candidate,
     path: configFileForHarness(candidate),
   }));
-  if (harness === "codex" || harness === "opencode") {
+  if (
+    harness === "codex" ||
+    harness === "opencode" ||
+    harness === "cursor" ||
+    harness === "copilot"
+  ) {
     candidates.push({ harness: "claude-code", path: MCP_CONFIG_FILE });
   }
   return candidates;
 }
 
 function foreignMcpRegistrationHarnesses(harness: Harness): McpRegistrationHarness[] {
-  if (harness === "opencode") return ["codex"];
-  if (harness === "codex") return ["opencode"];
-  if (["claude-code", "cursor"].includes(harness)) return ["codex", "opencode"];
-  return ["codex", "opencode"];
+  return (["codex", "cursor", "copilot", "opencode"] as McpRegistrationHarness[]).filter(
+    (candidate) => candidate !== harness,
+  );
 }
 
 export function mcpRegistrationLabel(path: string): string {

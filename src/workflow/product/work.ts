@@ -1,5 +1,6 @@
 import { vispError } from "../../core/errors.js";
 import { filePrecondition } from "../../core/file-transaction.js";
+import { headCommit } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { requireImplementationFoundation } from "../gates/readiness.js";
@@ -21,6 +22,7 @@ import {
   type ProductState,
   sliceDigest,
 } from "./model.js";
+import { protectedEnvSnapshot } from "./protected-env.js";
 import { withProductMutation } from "./runtime.js";
 import {
   type ProductAuthorization,
@@ -292,22 +294,27 @@ async function grantAuthorization(
     authorizationPath(workspace, record.brief.feature),
   );
   if (!retained.ok) return retained;
-  let baseline = prior.value?.task === slice.id ? prior.value.baseline : snapshot;
+  let grant = prior.value?.task === slice.id ? prior.value : undefined;
   if (!prior.value && retained.value) {
     try {
       const stale = productAuthorizationSchema.safeParse(JSON.parse(retained.value));
       if (
         stale.success &&
+        stale.data.feature === record.brief.feature &&
         stale.data.task === slice.id &&
         stale.data.root === hashValue(workspace.paths.root)
       )
-        baseline = stale.data.baseline;
+        grant = stale.data;
     } catch {
       // A malformed old grant cannot supply a baseline.
     }
   }
   const session = await currentHostSession(workspace);
   if (!session.ok) return session;
+  const protectedEnv = await protectedEnvSnapshot(workspace.paths.root);
+  if (!protectedEnv.ok) return protectedEnv;
+  const head = await headCommit(workspace.paths.root);
+  if (!head.ok) return head;
   return ok({
     version: 2,
     feature: record.brief.feature,
@@ -315,7 +322,10 @@ async function grantAuthorization(
     createdAt,
     root: hashValue(workspace.paths.root),
     contractDigest: sliceDigest(record.brief, slice),
-    baseline,
+    baseline: grant?.baseline ?? snapshot,
+    blockedPaths: grant?.blockedPaths ?? workspace.config.workflow.blockedPaths,
+    envBaseline: grant?.envBaseline ?? protectedEnv.value,
+    headCommit: grant?.headCommit ?? head.value,
     ...(session.value ? { session: session.value } : {}),
   });
 }

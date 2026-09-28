@@ -20,7 +20,9 @@ it("serves real project bytes with a media type", async () => {
     type: "text/html",
   });
   expect(
-    Buffer.from((await readBrowserFile(root, url(join(root, "index.html")))).bytes).toString(),
+    Buffer.from(
+      (await readBrowserFile(root, url(join(root, "index.html")))).bytes ?? [],
+    ).toString(),
   ).toBe("<html>Safe bytes</html>");
   await writeFile(join(root, "other.bin"), "binary");
   expect((await readBrowserFile(root, url(join(root, "other.bin")))).type).toBe(
@@ -34,13 +36,18 @@ it("rejects traversal, encoded separators, remote file hosts and directory/symli
     "https://example.com",
     url(join(root, "..", "outside.html")),
     url(root),
-    url(join(root, "missing")),
     url(join(root, "linked.html")),
     url(join(root, "linked-dir", "index.html")),
     `${url(root)}/a%2Fb`,
     "file://remotehost/share/index.html",
   ])
     await expect(readBrowserFile(root, input)).rejects.toThrow();
+});
+it("returns a missing confined asset for an HTTP-style 404 response", async () => {
+  expect(await readBrowserFile(root, url(join(root, "missing.png")))).toMatchObject({
+    bytes: null,
+    type: "image/png",
+  });
 });
 it("rejects configured and default blocked paths and oversized inputs", async () => {
   await writeFile(join(root, ".env"), "not public");
@@ -107,6 +114,19 @@ it("fulfills confined requests with owned bytes and fails forbidden requests", a
   });
   policy.dispose();
   expect(f.dispose).toHaveBeenCalledOnce();
+});
+it("fulfills missing assets as 404 without a browser security gap", async () => {
+  const f = transportFixture();
+  const policy = await confineBrowserFiles(f.transport, f.send, root);
+  f.emit("Fetch.requestPaused", {
+    requestId: "missing",
+    request: { url: url(join(root, "missing.png")), method: "GET" },
+  });
+  await policy.check();
+  expect(f.send).toHaveBeenCalledWith(
+    "Fetch.fulfillRequest",
+    expect.objectContaining({ requestId: "missing", responseCode: 404 }),
+  );
 });
 it("stops new blank popups while ignoring Chrome-owned surfaces and the controlled page", async () => {
   const f = transportFixture();

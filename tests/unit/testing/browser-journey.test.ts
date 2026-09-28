@@ -9,6 +9,7 @@ import {
   browserJourneySchema,
   runBrowserJourney,
 } from "../../../src/testing/browser-journey.js";
+import { BrowserBehaviorFailure } from "../../../src/testing/browser-observations.js";
 import type { BrowserOperation } from "../../../src/testing/browser-session.js";
 import {
   BrowserRuntimeError,
@@ -141,6 +142,22 @@ it("keeps terminal mismatch and existing captures when its diagnostic screenshot
   expect(result.captures).toHaveLength(1);
   expect(result.operations).toHaveLength(1);
   expect(browser.close).toHaveBeenCalledOnce();
+});
+
+it("retains captures and action index for invalid selector behavior", async () => {
+  browser.sample.mockRejectedValueOnce(
+    new BrowserBehaviorFailure("Invalid CSS selector: button:contains(Start)"),
+  );
+  const result = await runBrowserJourney(options);
+  expect(result).toMatchObject({
+    status: "failed",
+    failure: {
+      kind: "behavior",
+      actionIndex: 0,
+      message: expect.stringContaining("Invalid CSS selector"),
+    },
+  });
+  expect(result.captures.length).toBeGreaterThan(0);
 });
 
 it("does not publish partial diagnostic evidence across a detected browser security failure", async () => {

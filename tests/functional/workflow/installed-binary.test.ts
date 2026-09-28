@@ -102,7 +102,7 @@ describe("installed for OpenCode", () => {
 
     expect(stdout).toContain("opencode.json");
     const config = JSON.parse(await readFile(join(root, "opencode.json"), "utf8"));
-    expect(config.mcp.visp.command).toEqual(["visp", "serve", "--mcp"]);
+    expect(config.mcp.visp.command).toEqual(["node", CLI, "serve", "--mcp"]);
   });
 
   it("does not claim an MCP profile change when registration is disabled", async () => {
@@ -197,13 +197,8 @@ describe("installed for OpenCode", () => {
 });
 
 /**
- * What the PreToolUse hook does when `visp` on PATH is not this visp.
- *
- * Three `visp*` packages can be installed at once, and a hook that shells out by
- * bare name reaches whichever one PATH finds. The hook used to key its decision
- * on the exit status alone, and an argument parser answers 1 for an unknown
- * option — so a foreign binary produced a confident, specific scope violation
- * for every write, sending someone to widen `allowedFiles` to fix an install.
+ * The generated hook uses its installed CLI even if PATH shadows `visp` with
+ * another program. The guard's no-authorization refusal must still reach it.
  */
 describe("the hook when PATH holds a different visp", () => {
   async function hookOutput(fake: string): Promise<{ decision: string; reason: string }> {
@@ -254,22 +249,19 @@ describe("the hook when PATH holds a different visp", () => {
     return { decision: parsed.permissionDecision, reason: parsed.permissionDecisionReason };
   }
 
-  /** Exit 1 from an argument parser is not a scope refusal, and must not read as one. */
-  it("names the install, not the scope, when the foreign binary rejects the arguments", async () => {
+  it("ignores a foreign binary that rejects guard arguments", async () => {
     const { decision, reason } = await hookOutput(
       "#!/bin/sh\necho \"error: unknown option '--path'\" >&2\nexit 1\n",
     );
 
     expect(decision).toBe("deny");
-    expect(reason).toContain("could not check");
-    expect(reason).not.toContain("outside the scope");
+    expect(reason).toContain("No task is authorized");
   });
 
-  /** The dangerous direction: a success status from something that checked nothing. */
-  it("refuses rather than allowing when the foreign binary exits zero", async () => {
+  it("ignores a foreign binary that exits zero without checking", async () => {
     const { decision, reason } = await hookOutput("#!/bin/sh\necho '{\"ok\":true}'\nexit 0\n");
 
     expect(decision).toBe("deny");
-    expect(reason).toContain("could not check");
+    expect(reason).toContain("No task is authorized");
   });
 });

@@ -21,6 +21,7 @@ import { environmentNext } from "./environment.js";
 import { currentJourneyFeedback } from "./evidence-references.js";
 import { productFailureSignature } from "./failures.js";
 import { findingAppliesToSlice, outstandingFeedback, productFeedbackPlan } from "./feedback.js";
+import { productInputWarnings } from "./input-warnings.js";
 import {
   checksFor,
   closedSlice,
@@ -47,6 +48,8 @@ export type { ProductOutcomeStatus } from "./assessment.js";
 export { type ProductReviewBundle, type ProductReviewOptions, runProductReview } from "./review.js";
 
 export interface ProductVerification {
+  readonly warnings?: readonly string[];
+  readonly committedChanges?: readonly string[];
   readonly checkpoint?: { candidate: string; provenance: string } | { gap: string };
   readonly delivery?: { status: string; summary: string };
   readonly nextCommand?: string;
@@ -164,6 +167,8 @@ async function execute(
       executions.some((entry) => entry.status === "environment-failed"),
     ),
     checkpoint: checkpointDelivery(checkpoint),
+    warnings: await productInputWarnings(workspace, record.brief),
+    committedChanges: prepared.value.committedChanges,
     ...progress,
     ...(trace?.ok ? { trace: trace.value } : {}),
     feature: record.brief.feature,
@@ -248,6 +253,7 @@ function deliveryResult(
 }
 
 interface PreparedExecution {
+  committedChanges: string[];
   record: ProductRecord;
   slice?: ProductSlice;
   source: string;
@@ -277,6 +283,7 @@ async function prepareExecution(
     return err(
       vispError("STAGE_BLOCKED", "Close the active slices before final product acceptance"),
     );
+  let committedChanges: string[] = [];
   if (slice && !closedSlice(record.state.slices[slice.id]?.status)) {
     const scope = await checkProductScope(workspace, record, slice);
     if (!scope.ok)
@@ -289,13 +296,21 @@ async function prepareExecution(
           browserRetryAttempted: false,
         },
       });
+    committedChanges = scope.value.committedChanges;
   }
   const snapshot = await productSourceSnapshot(workspace, record.brief);
   if (!snapshot.ok) return snapshot;
   const source = await productSourceDigest(workspace, record.brief, snapshot.value);
   if (!source.ok) return source;
   const commands = executionCommands(workspace, record, slice, accept, source.value);
-  return ok({ record, slice, source: source.value, snapshot: snapshot.value, commands });
+  return ok({
+    record,
+    slice,
+    source: source.value,
+    snapshot: snapshot.value,
+    commands,
+    committedChanges,
+  });
 }
 
 function closeoutAvailability(

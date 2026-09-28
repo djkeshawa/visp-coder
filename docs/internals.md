@@ -10,13 +10,15 @@ Three surfaces call `visp guard`, so a refusal means the same thing everywhere:
 | --- | --- | --- | --- |
 | Edit hook (Claude Code) | `.visp/hooks/claude-pretooluse.mjs`, wired into `.claude/settings.json` | This checkout's authorization | Denies the write and says the check could not run |
 | Git `pre-commit` | The repository's pre-commit hook | This checkout's authorization | Blocks the commit while a slice is authorized; otherwise allows it with a warning |
-| CI (`visp install --hooks ci`) | `.github/workflows/visp.yml` | The feature's committed brief (`--scope tasks`) | The job fails |
+| CI (`visp install --hooks claude git ci`, or `--hooks git ci` outside Claude Code) | `.github/workflows/visp.yml` | The feature's committed brief (`--scope tasks`) | The job fails |
 
-The hooks read the JSON envelope from `visp guard --json` rather than the exit code, so a crash or an unrelated `visp` on `PATH` is never mistaken for a verdict. `--if-authorized` lets ordinary commits through when no slice is authorized; `--include-done` keeps finished slices' changes committable. A denial that blames the installation should be fixed with `visp doctor`, not by widening scope. The local hook can be bypassed with `git commit --no-verify`; CI is the authoritative check.
+The hooks read the JSON envelope from `visp guard --json` rather than the exit code, so a crash or an unrelated `visp` on `PATH` is never mistaken for a verdict. `--hooks` replaces the default hook set; retain `git` and, for Claude Code, `claude` when adding `ci`. `--if-authorized` lets ordinary commits through when no slice is authorized; `--include-done` keeps finished slices' changes committable. A denial that blames the installation should be fixed with `visp doctor`, not by widening scope. The local hook can be bypassed with `git commit --no-verify`; CI is the authoritative check.
 
 The generated CI workflow pins the VISP version that generated it, so a new release cannot change the verdict on an unchanged repository. A `pull_request` checkout is detached, so the workflow passes `--branch` to find the feature.
 
 MCP registration exposes tools; it does not intercept writes. Codex edits through `apply_patch`, which its hooks do not intercept, so for Codex the `pre-commit` hook and `visp done` enforce scope; its installed hooks (`.visp/hooks/codex-hooks.mjs`, wired into `.codex/hooks.json`) record prompts, refuse shell commands that would delete VISP state, and send the worker back on Stop.
+
+MCP tool calls run in the VISP server process, outside a coding host's command sandbox and approval flow. This includes checks launched by `visp_verify` and `visp_done` and browser capture. Review check commands before authorizing a slice, especially a new executable or argument vector. The MCP `visp_capture` tool accepts journeys and replays; its browser binary is chosen by the operator's environment (`CHROME_BIN`) or the installed browser, not by a tool argument.
 
 ## Models VISP launches
 
@@ -38,7 +40,9 @@ This coordinates cooperating local processes. It does not stop an editor, a shel
 
 ## Evidence identity
 
-Checks run without shell bookkeeping variables (`_`, `SHLVL`, `PWD`, `OLDPWD`). The evidence fingerprint also leaves out host session identifiers (`CODEX_THREAD_ID`, `CODEX_SESSION_ID`), so a new reviewer session does not make unchanged evidence stale. Other variables such as `PATH` and `NODE_OPTIONS` are part of the fingerprint. Python bytecode is redirected with `PYTHONPYCACHEPREFIX` so checks do not write into the product.
+Checks inherit the operator’s environment except shell bookkeeping (`_`, `SHLVL`, `PWD`, `OLDPWD`), and their output is recorded. Evidence freshness includes only `PATH`, `NODE_*`, `PYTHON*`, `LANG`, `LC_*`, `TZ`, `CI`, and variables named by a check’s `environmentVariables`. Terminal settings, host session identifiers and sandbox routing variables do not make unchanged product evidence stale. The full inherited environment is hashed separately as `comparisonEnvironment` for comparing executions; variable values are not stored in plaintext. Python bytecode defaults to a private per-user cache whose ownership and permissions are checked; an explicit `PYTHONPYCACHEPREFIX` still wins.
+
+Source snapshots read the declared slice scopes, check inputs and control files directly. Other tracked paths retain Git object identities, with working-tree edits hashed separately; unrelated repository size does not consume the declared-input byte budget. Symlinks are identified by their link target text, including directory, dangling and external links, without reading their targets. Candidates preserve only the selected slice’s declared inputs and controls, with recoverable link-aware restoration.
 
 An execution is bound to the product source, the slice contract, the verifier inputs, the environment and the VISP runtime. For declared command verifiers on POSIX, the resolved executable's path and content are also recorded. Browser executables that resolve to the same file share an identity.
 

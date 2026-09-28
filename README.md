@@ -24,7 +24,7 @@ visp install --harness codex --dry-run   # preview what will be written
 visp install --harness codex
 ```
 
-`init` writes `visp.yml` and `.visp/`. `install` writes the host's instruction files and `VISP.commands.md`, registers the MCP server, and installs hooks: a Git `pre-commit` scope check for every host; for Claude Code, edit, shell, prompt and Stop hooks in `.claude/settings.json`; for Codex, prompt, shell and Stop hooks in `.codex/hooks.json`, which Codex runs after you trust them once with `/hooks`. Commit the setup before starting feature work. `visp doctor` checks the installation.
+`init` writes `visp.yml` and `.visp/`. `install` writes the host's instruction files and `VISP.commands.md`, registers the MCP server for Claude Code, Codex, Cursor, Copilot and OpenCode, and installs a Git `pre-commit` scope check. Generic hosts need their MCP server entry configured manually. Claude Code also gets edit, shell, prompt and Stop hooks in `.claude/settings.json`; Codex gets prompt, shell and Stop hooks in `.codex/hooks.json`. Open Codex and trust project hooks with `/hooks` before relying on them, including before headless `codex exec` runs. Cursor, Copilot, OpenCode and generic hosts have no VISP host hooks, so use `visp done` and the Git hook as their local checks. The MCP and hook entries use the installed CLI path, and generated scripts under `.visp/hooks/` are local to each checkout. Commit the setup before starting feature work. `visp doctor` checks the installation. When switching VISP builds, use `visp install --replace-runtime` and restart MCP and host processes using the old build; `--force` only replaces edited files.
 
 ## Quick start
 
@@ -38,14 +38,14 @@ visp accept                                   # check the assembled product
 visp pr                                       # reviewer document for the pull request
 ```
 
-In practice the coding agent runs these commands itself; the installed instructions and hooks tell it how and send it back when it stops early.
+In practice the coding agent runs these commands itself. Claude Code and trusted Codex hooks can send it back when it stops early; other hosts rely on instructions and explicit `visp next` calls.
 When supplying the original request explicitly, use `--source-brief -` with a quoted heredoc as shown in [the workflow guide](docs/workflow.md#starting-a-feature), so shell characters in the request stay literal.
 
 ## The loop
 
 1. **`visp feature "<request>"`** starts a feature and preserves the request verbatim. Under Claude Code and Codex, VISP takes it from the user's recorded prompt, so a paraphrase cannot replace it.
 2. **`visp work --check "<test command>"`** (the light path) works the whole request as one slice checked by that command. For several independently usable parts, write a brief instead: **`visp brief`** reads or updates `.visp/features/<id>/brief.yaml` (outcomes, behavior examples, decisions, checks and slices), and **`visp work`** authorizes one slice at a time. `work` delivers the relevant outcomes, source excerpts, graph context, findings and memory, allows edits only inside the slice's scope, and refuses a slice with a functional outcome that no declared check exercises.
-3. **Independent tests.** With `critic.launch: codex-exec`, an independent tester started by `visp feature` writes acceptance tests from the request alone while the worker proceeds (new projects by default). VISP pins them only if they fail before implementation, and the worker cannot quietly change them.
+3. **Independent tests.** With `critic.launch: codex-exec` and `critic.harness: codex`, an independent tester started by `visp feature` writes acceptance tests from the request alone while the worker proceeds (new projects by default). VISP pins them only if they fail before implementation, and the worker cannot quietly change them.
 4. **Implement** within the authorized files.
 5. **`visp done`** runs the slice's checks (plus any `workflow.validationCommands`, and the pinned tests on the last slice). If every check passes and `codex-exec` is configured, VISP runs the independent reviewer and returns its findings as the next repair step.
 6. **`visp next`** reports the next action; fix the findings and run `visp done` again. Required findings reopen the slice.
@@ -126,9 +126,11 @@ Adapt the selectors, URL and files to the real application. HTTP(S) journeys nee
 
 CLI text output is compact. `--json` prints the full result envelope. MCP tools reply with compact text plus the complete result in `structuredContent`; pass `detail: true` for full text.
 
+Library callers should obtain a `LoadedWorkspaceState` with `loadWorkspace()` before calling the exported product and observation services. The older `WorkspaceState` shape without `files` remains supported by `resolveFeature()` only.
+
 ## Independent review
 
-The critic is a separate model session that receives the original request, current source, check results and screenshots, but not the actor's verdicts or history. It returns an assessment of each outcome and up to three findings. With `critic.launch: codex-exec` (written by `visp init --harness codex`), VISP launches a read-only `codex exec` reviewer and tester itself; this needs the Codex CLI signed in, whichever host does the coding. With `launch: host` (the default), the coding host delegates the review to its own subagent using the packet VISP prepares. See [the critic guide](docs/critic.md).
+The critic is a separate model session that receives the original request, current source, check results and screenshots, but not the actor's verdicts or history. It returns an assessment of each outcome and up to three findings. With `critic.launch: codex-exec` (written by `visp init --harness codex`), VISP launches a read-only `codex exec` reviewer itself; the independent tester also runs when `critic.harness: codex`. This needs the Codex CLI signed in, whichever host does the coding. With `launch: host` (the default), the coding host delegates the review to its own subagent using the packet VISP prepares. See [the critic guide](docs/critic.md).
 
 ## Results
 

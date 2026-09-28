@@ -20,6 +20,7 @@ export const identifiedRuntimeSchema = z
 export function requireRuntimeAgreement(
   observed: unknown,
   expected: RuntimeIdentity = runtimeIdentity(),
+  peerRole = "guard",
 ) {
   const current = identifiedRuntimeSchema.safeParse(expected);
   const peer = identifiedRuntimeSchema.safeParse(observed);
@@ -35,7 +36,7 @@ export function requireRuntimeAgreement(
       "RUNTIME_MISMATCH",
       !current.success || !peer.success
         ? "Runtime agreement is unavailable: both processes must report an identified VISP build"
-        : `VISP runtime mismatch: caller ${current.data.version} build ${current.data.buildId}, guard ${peer.data.version} build ${peer.data.buildId}`,
+        : `VISP runtime mismatch: this process ${current.data.version} build ${current.data.buildId} (${current.data.executable}), ${peerRole} ${peer.data.version} build ${peer.data.buildId} (${peer.data.executable})`,
       {
         recovery:
           "Inspect CLI doctor and MCP visp_doctor runtime fields and the guard executable on PATH. Use the same built VISP version/build, then restart stale MCP and host processes; rerun doctor before continuing. A matching package version alone is insufficient.",

@@ -53,9 +53,12 @@ export function makeReceipt(
   operation: QueryOperation,
   budget: QueryBudget,
   result: BudgetedResult,
+  snapshot: { readonly id: string; readonly createdAt: string },
   work?: QueryWork,
 ): QueryReceipt {
   return {
+    snapshotId: snapshot.id,
+    createdAt: snapshot.createdAt,
     operation,
     budget,
     truncated: result.truncated || work?.truncated === true,

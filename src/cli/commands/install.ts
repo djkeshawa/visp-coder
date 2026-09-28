@@ -16,11 +16,9 @@ import {
   installHarness,
   previewHarnessInstall,
 } from "../../harness/install.js";
+import { MCP_AWARE_HARNESSES } from "../../harness/mcp-registration.js";
 import { isJson, mutatingWorkspace, options, workspace } from "../context.js";
 import { emit, emitError } from "../output.js";
-
-/** Harnesses with a project-level MCP configuration visp can merge safely. */
-const MCP_AWARE: readonly Harness[] = ["claude-code", "codex", "cursor", "opencode"];
 
 export function installCommand(): Command {
   return new Command("install")
@@ -39,6 +37,7 @@ export function installCommand(): Command {
       "Remove only fingerprint-matched VISP assets from other harnesses",
     )
     .option("--force", "Overwrite files that have been edited since install")
+    .option("--replace-runtime", "Replace assets pinned to another VISP build; restart its hosts")
     .action(handleInstallCommand);
 }
 
@@ -47,6 +46,7 @@ interface InstallCliOptions {
   readonly profile?: string;
   readonly hooks?: string[] | boolean;
   readonly force?: boolean;
+  readonly replaceRuntime?: boolean;
   readonly mcp?: boolean;
   readonly prunePreviousHarness?: boolean;
   readonly dryRun?: boolean;
@@ -71,13 +71,14 @@ async function handleInstallCommand(_flags: unknown, command: Command): Promise<
     harness,
     profile,
     hooks: selectedHooks(choices.value.hooks, harness),
-    mcp: opts.mcp !== false && MCP_AWARE.includes(harness),
+    mcp: opts.mcp !== false && MCP_AWARE_HARNESSES.includes(harness),
     configUpdates: {
       ...(choices.value.harness ? { harness: choices.value.harness } : {}),
       ...(choices.value.profile ? { profile: choices.value.profile } : {}),
     },
     ...(opts.prunePreviousHarness ? { prunePreviousHarness: true } : {}),
     ...(opts.force ? { force: true } : {}),
+    ...(opts.replaceRuntime ? { replaceRuntime: true } : {}),
   };
   if (opts.dryRun) {
     process.exitCode = emit(

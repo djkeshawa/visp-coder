@@ -35,7 +35,7 @@ export async function verifyInstalledHarness(
   if (!activation.ok) return activation;
   const hooks = await verifyRequestedHooks(fs, paths, options.hooks ?? []);
   if (!hooks.ok) return hooks;
-  const mcp = await verifyRequestedMcp(fs, options);
+  const mcp = await verifyRequestedMcp(fs, options, plan);
   if (!mcp.ok) return mcp;
   const state = await verifyInstallState(paths, fs, options, profile);
   if (!state.ok) return state;
@@ -99,11 +99,14 @@ async function verifyRequestedHooks(
   return ok(undefined);
 }
 
-async function verifyRequestedMcp(
+export async function verifyRequestedMcp(
   fs: ProjectFileSystem,
   options: InstallOptions,
+  plan?: InstallPlan,
 ): Promise<Result<void>> {
   if (!options.mcp) return ok(undefined);
+  if (options.harness === "codex" && (plan?.mcp === "malformed" || plan?.mcp === "customized"))
+    return ok(undefined);
   const path = configFileForHarness(options.harness);
   const current = await fs.readTextIfExists(path);
   if (!current.ok) return current;
@@ -220,11 +223,13 @@ async function verifyRequestedHook(
   if (hook === "git") {
     const resolved = await preCommitHookPath(paths.root);
     if (!resolved.ok) return resolved;
+    const local = await fs.readTextIfExists(`${resolved.value.absolute}.local`);
+    if (!local.ok) return local;
     return verifyGeneratedAsset(
       fs,
       {
         path: resolved.value.absolute,
-        content: renderPreCommitHook(),
+        content: renderPreCommitHook(local.value !== undefined),
         executable: true,
       },
       resolved.value.display,

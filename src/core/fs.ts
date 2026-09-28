@@ -6,9 +6,11 @@ import {
   mkdir,
   readdir,
   readFile,
+  readlink,
   realpath,
   rename as renamePath,
   rmdir,
+  symlink,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -296,8 +298,15 @@ export class ProjectFileSystem {
     return this.writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`, mode);
   }
 
-  async writeBytesAtomic(path: string, content: Uint8Array, mode = 0o644): Promise<Result<void>> {
-    const target = await this.validate(path);
+  async writeBytesAtomic(
+    path: string,
+    content: Uint8Array,
+    mode = 0o644,
+    replaceLink = false,
+  ): Promise<Result<void>> {
+    const validate = (path: string) =>
+      replaceLink ? this.validateEntryTarget(path) : this.validate(path);
+    const target = await validate(path);
     if (!target.ok) return target;
     const directory = dirname(target.value);
     const created = await this.ensureDir(directory);
@@ -305,10 +314,10 @@ export class ProjectFileSystem {
 
     const temporary = join(directory, `.${randomSuffix()}.tmp`);
     try {
-      const ready = await this.validateMutationTarget(target.value);
+      const ready = await validate(target.value);
       if (!ready.ok) return ready;
       await writeFile(temporary, content, { flag: "wx", mode });
-      const stillSafe = await this.validateMutationTarget(target.value);
+      const stillSafe = await validate(target.value);
       if (!stillSafe.ok) return stillSafe;
       const safeTemporary = await this.validate(temporary);
       if (!safeTemporary.ok) return safeTemporary;
@@ -321,8 +330,10 @@ export class ProjectFileSystem {
     }
   }
 
-  async removeFile(path: string): Promise<Result<void>> {
-    const target = await this.validateMutationTarget(path);
+  async removeFile(path: string, removeLink = false): Promise<Result<void>> {
+    const target = await (removeLink
+      ? this.validateEntryTarget(path)
+      : this.validateMutationTarget(path));
     if (!target.ok) return target;
     try {
       await unlink(target.value);
@@ -330,6 +341,45 @@ export class ProjectFileSystem {
     } catch (cause) {
       if (isNodeError(cause) && cause.code === "ENOENT") return ok(undefined);
       return err(fromUnknown(cause, "IO_ERROR"));
+    }
+  }
+
+  /** Inspect the link itself, including dangling and external targets; never traverse it. */
+  async readSymbolicLink(path: string): Promise<Result<Uint8Array | undefined>> {
+    const target = await this.validateEntryTarget(path);
+    if (!target.ok) return target;
+    try {
+      return ok(
+        (await lstat(target.value)).isSymbolicLink()
+          ? await readlink(target.value, { encoding: "buffer" })
+          : undefined,
+      );
+    } catch (cause) {
+      return isNodeError(cause) && cause.code === "ENOENT"
+        ? ok(undefined)
+        : err(fromUnknown(cause, "IO_ERROR"));
+    }
+  }
+
+  /** Atomic entry replacement, with the same strict parent confinement as ordinary writes. */
+  async writeSymlinkAtomic(path: string, content: Uint8Array): Promise<Result<void>> {
+    const target = await this.validateEntryTarget(path);
+    if (!target.ok) return target;
+    if (this.isManagedTarget(target.value))
+      return err(vispError("IO_ERROR", "Managed state cannot contain symlinks"));
+    const created = await this.ensureDir(dirname(target.value));
+    if (!created.ok) return created;
+    const temporary = join(dirname(target.value), `.${randomSuffix()}.tmp`);
+    try {
+      await symlink(Buffer.from(content), temporary);
+      const ready = await this.validateEntryTarget(path);
+      if (!ready.ok) return ready;
+      await renamePath(temporary, ready.value);
+      return ok(undefined);
+    } catch (cause) {
+      return err(fromUnknown(cause, "IO_ERROR"));
+    } finally {
+      await unlink(temporary).catch(() => undefined);
     }
   }
 
@@ -458,6 +508,36 @@ export class ProjectFileSystem {
 
   private async validateMutationTarget(path: string): Promise<Result<string>> {
     return this.validate(path);
+  }
+
+  private async validateEntryTarget(path: string): Promise<Result<string>> {
+    const target = this.confinedTarget(path);
+    if (!target.ok) return target;
+    if (target.value === this.root || this.isManagedTarget(target.value))
+      return this.validate(path);
+    const parent = await this.validate(dirname(target.value));
+    return parent.ok ? target : parent;
+  }
+
+  /** Resolve an authored file link before planning an atomic replacement. */
+  async authoredWriteTarget(path: string): Promise<Result<string>> {
+    const target = this.confinedTarget(path);
+    if (!target.ok) return target;
+    try {
+      const canonical = await realpath(target.value);
+      if (!isInside(this.root, canonical) || this.isManagedTarget(canonical)) {
+        return err(
+          vispError(
+            "IO_ERROR",
+            `${path} links outside the project; replace the link with a local file or use an in-project target`,
+          ),
+        );
+      }
+      return this.validate(canonical);
+    } catch (cause) {
+      if (isNodeError(cause) && cause.code === "ENOENT") return this.validate(target.value);
+      return err(fromUnknown(cause, "IO_ERROR"));
+    }
   }
 
   /**

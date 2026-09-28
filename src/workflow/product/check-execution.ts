@@ -7,6 +7,7 @@ import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
 import { err, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
+import { acceptanceEnvironment } from "./acceptance-environment.js";
 import { executeBrowserCheck } from "./browser-check-execution.js";
 import {
   describeProductCheck,
@@ -15,7 +16,7 @@ import {
 } from "./check-command.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
 import type { ProductRecord } from "./store.js";
-import { productContractDigest, productSourceDigest } from "./subject.js";
+import { productComparisonEnvironmentDigest, productContractDigest } from "./subject.js";
 import { productVerifierDigest } from "./verifier-identity.js";
 
 export interface ExecutedProductCheck {
@@ -34,7 +35,7 @@ export async function executeProductCheck(
   verifierSnapshot: Record<string, string> = {},
   reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
-  const environment = await productSourceDigest(workspace, record.brief, {});
+  const environment = await productComparisonEnvironmentDigest(workspace, record.brief);
   const base = {
     id: randomUUID(),
     comparisonEnvironment: environment.ok ? environment.value : undefined,
@@ -59,7 +60,7 @@ export async function executeProductCheck(
       reuseCapture,
     );
   const started = Date.now();
-  const output = await executeCommand(workspace, check);
+  const output = await executeCommand(workspace, check, !!base.verifierDigest);
   const commandVerifier =
     base.verifierDigest && output.ok && output.value.executableDigest
       ? {
@@ -114,7 +115,7 @@ function unavailableVerifier(
         status: "environment-failed",
         exitCode: -1,
         durationMs: 0,
-        output: `Check ${check.id} was not executed: verifier inputs are missing, unavailable, or omit an explicit Node assertion entry (${check.verifierFiles.join(", ")}). Use repository-relative Node script paths, declare the assertion entry and its helpers in verifierFiles, or restore missing files before rerunning. No product behavior was tested.`,
+        output: `Check ${check.id} was not executed: verifier inputs are missing, unavailable, or omit an explicit Node assertion entry (${check.verifierFiles.join(", ")}). If VISP could not identify the entry after a Node option, use --flag=value. Use repository-relative Node script paths, declare the assertion entry and its helpers in verifierFiles, or restore missing files before rerunning. No product behavior was tested.`,
       },
       state,
       mutations: [],
@@ -137,6 +138,7 @@ export type ExecutionIdentity = Pick<
 async function executeCommand(
   workspace: WorkspaceState,
   check: ProductCheck,
+  identifyExecutable: boolean,
 ): Promise<Result<CommandOutput & { executableDigest?: string }>> {
   const valid = validateProductCheckCommand(check);
   if (!valid.ok) return valid;
@@ -150,14 +152,21 @@ async function executeCommand(
       check.id,
       async (environment) => {
         const binary = argv.value[0] ?? "";
-        const before = await commandExecutableDigest(binary, workspace.paths.root, environment);
+        const checkEnvironment = check.id.startsWith("PINNED_")
+          ? acceptanceEnvironment(environment)
+          : environment;
+        const before = identifyExecutable
+          ? await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment)
+          : undefined;
         const executed = await run(binary, argv.value.slice(1), {
           cwd: workspace.paths.root,
-          env: environment,
+          env: checkEnvironment,
           replaceEnv: true,
         });
         if (!executed.ok) return executed;
-        const after = await commandExecutableDigest(binary, workspace.paths.root, environment);
+        const after = before
+          ? await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment)
+          : undefined;
         return {
           ok: true as const,
           value: {
@@ -171,7 +180,7 @@ async function executeCommand(
       return err(
         vispError(
           "COMMAND_FAILED",
-          `${result.error.message}. Check ${check.id} could not start executable ${JSON.stringify(argv.value[0])}. Correct the command or recover the installed executable in this environment. A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples. No product behavior was tested.`,
+          `${result.error.message}. Check ${check.id} could not start executable ${JSON.stringify(argv.value[0])}.${process.platform === "win32" ? " Check PATH and the tool's .cmd/.bat shim." : " Correct the command or recover the installed executable in this environment."} A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples. No product behavior was tested.`,
           { details: result.error.details },
         ),
       );
@@ -192,9 +201,9 @@ function commandStatus(output: Result<CommandOutput>): ProductExecution["status"
  * that the actor ran successfully with escalation. That is not a product failure.
  */
 const SANDBOX_DENIAL =
-  /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind) EPERM\b/;
+  /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind|spawn|spawnSync|fork|exec|execSync)\b[^\n]{0,160}\bEPERM\b/;
 const SANDBOX_NOTE =
-  "VISP: the host sandbox denied network sockets to this check, so no product behavior was tested. Rerun the same visp command with the host's sandbox escalation (for Codex, request escalated permissions for that command); do not change the product to work around it.";
+  "VISP: the host sandbox denied a socket or subprocess needed by this check, so no product behavior was tested. Rerun the same visp command with the host's sandbox escalation (for Codex, request escalated permissions for that command); do not change the product to work around it.";
 
 function sandboxDenied(output: CommandOutput): boolean {
   return SANDBOX_DENIAL.test(`${output.stdout}\n${output.stderr}`);

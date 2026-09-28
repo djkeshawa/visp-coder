@@ -328,7 +328,20 @@ export function interactionPage(
         returnByValue: true,
         awaitPromise: true,
       });
-      if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+      if (result.exceptionDetails) {
+        const details = result.exceptionDetails as {
+          text?: string;
+          exception?: { description?: string };
+        };
+        const description =
+          details.exception?.description ?? details.text ?? "Browser evaluation failed";
+        if (
+          /SyntaxError|DOMException/.test(description) &&
+          /querySelector|\.matches|\.closest|valid selector/i.test(description)
+        )
+          throw new BrowserBehaviorFailure(`Invalid CSS selector: ${description.slice(0, 512)}`);
+        throw new Error(JSON.stringify(result.exceptionDetails));
+      }
       const value = (result.result as { value: R }).value;
       record("measure", "Read browser state", value);
       return value;

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { planAgentActivation, planAgentDeactivation } from "../../../src/harness/activation.js";
@@ -10,6 +10,19 @@ const fresh = planAgentActivation("codex", undefined, false);
 const expectedActivationBlock = fresh.ok ? (fresh.value.content ?? "").replace(/\n$/, "") : "";
 
 let workspace: TestWorkspace;
+
+it("installs Claude activation through a link to an in-project AGENTS.md", async () => {
+  await workspace.write("AGENTS.md", "Shared instructions\n");
+  await symlink("AGENTS.md", join(workspace.root, "CLAUDE.md"));
+  const result = await installHarness((await workspace.state()).paths, {
+    harness: "claude-code",
+    hooks: [],
+  });
+  expect(result.ok).toBe(true);
+  expect(await readFile(join(workspace.root, "AGENTS.md"), "utf8")).toContain(
+    "visp:instructions:start",
+  );
+});
 
 beforeEach(async () => {
   workspace = await TestWorkspace.create();

@@ -8,6 +8,7 @@ import {
 import { runtimeIdentity } from "../core/version.js";
 import { HOST_SESSION_FILE } from "../workflow/product/host-prompts.js";
 import { AUTHORIZATION_CHECK } from "./authorization-check.js";
+import { hookCommand } from "./claude-settings.js";
 
 /**
  * Enforcement surfaces. Each one shells out to `visp guard` rather than
@@ -17,7 +18,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 13;
+export const HOOK_TEMPLATE_VERSION = 14;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -25,16 +26,17 @@ export const HOOK_TEMPLATE_VERSION = 13;
  * can still be prevented rather than merely reported.
  */
 export function renderPreToolUseHook(): string {
+  const cli = JSON.stringify(runtimeIdentity().executable);
   return `#!/usr/bin/env node
 // ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 // Refuses edits outside the active task's declared scope.
 // Decisions come from \`${PRODUCT_NAME} guard\`, so this file holds no rules of its own.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const ALLOW = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } };
+const cli = ${cli};
 
 function deny(reason) {
   return {
@@ -58,7 +60,15 @@ const input = readInput();
 
 // Claude Code names the project in its environment; Codex passes the session cwd instead.
 function projectRoot() {
-  return process.env.CLAUDE_PROJECT_DIR ?? input?.cwd ?? process.cwd();
+  const start = resolve(process.env.CLAUDE_PROJECT_DIR ?? input?.cwd ?? process.cwd());
+  let directory = start;
+  while (true) {
+    if (existsSync(join(directory, ".visp", "project.json"))) return directory;
+    if (existsSync(join(directory, ".git"))) return start;
+    const parent = dirname(directory);
+    if (parent === directory) return start;
+    directory = parent;
+  }
 }
 
 // The user's own words are the contract the tester and reviewer judge against; workers
@@ -95,7 +105,7 @@ if (input?.hook_event_name === "Stop") {
     if (!status.activeFeature || !recent) process.exit(0);
     const envelope = JSON.parse(
       // Unselected, so a later session's untaken request is sent to a feature of its own.
-      execFileSync("${PRODUCT_NAME}", ["next", "--json"], {
+      execFileSync(process.execPath, [cli, "next", "--json"], {
         cwd: root,
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 170000,
@@ -145,17 +155,11 @@ function recordSession() {
 if (input?.tool_name === "Bash") {
   recordSession();
   const command = String(input?.tool_input?.command ?? "");
-  const touchesState = /(^|[\\s'"=/])(\\.visp|acceptance)(\\/|[\\s'"]|$)/.test(command);
-  const destructive =
-    /\\bgit\\s+clean\\b/.test(command) ||
-    /\\bgit\\s+stash\\b.*(\\s-u\\b|--include-untracked|\\s-a\\b|--all)/.test(command) ||
-    (touchesState && /\\b(rm|mv|git\\s+(checkout|restore|rm|reset))\\b/.test(command));
+  const destructive = destructiveShellReason(command);
   if (destructive) {
     process.stdout.write(
       JSON.stringify(
-        deny(
-          "This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead.",
-        ),
+        deny(destructive),
       ),
     );
     process.exit(0);
@@ -217,6 +221,24 @@ function shellCommands(command) {
   }
   end();
   return commands.filter((words) => words.length > 0);
+}
+
+function destructiveShellReason(command) {
+  const protectedOperand = (word) => /^(?:\\.\\/)?(?:\\.visp|acceptance)(?:\\/|$)/.test(word);
+  for (const words of shellCommands(command)) {
+    const executable = words[0];
+    const operands = words.slice(1).filter((word) => !word.startsWith("-"));
+    if (executable === "git" && words[1] === "clean")
+      return "git clean may delete untracked VISP state or acceptance tests; inspect and remove individual files instead.";
+    if (executable === "git" && words[1] === "stash" && words.slice(2).some((word) => /^(?:-[A-Za-z]*[ua]|--include-untracked|--all)$/.test(word)))
+      return "git stash of untracked files may hide VISP state or acceptance tests; commit the work instead.";
+    const gitDestructive = executable === "git" && ["checkout", "restore", "rm", "reset"].includes(words[1]);
+    const fileDestructive = ["rm", "mv"].includes(executable);
+    const findDelete = executable === "find" && words.includes("-delete");
+    if ((gitDestructive || fileDestructive || findDelete) && operands.some(protectedOperand))
+      return "This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead.";
+  }
+  return undefined;
 }
 
 function workingTreeChanges() {
@@ -282,17 +304,47 @@ function discardedChanges(command) {
 const target = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
 
 if (!target) {
-  process.stdout.write(JSON.stringify(ALLOW));
   process.exit(0);
 }
 
 const root = projectRoot();
-const path = isAbsolute(target) ? relative(root, target) : target;
+function realPath(path, depth = 0) {
+  if (depth > 40) throw new Error("Too many symlinks in " + path);
+  try {
+    return realpathSync.native(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    try {
+      if (lstatSync(path).isSymbolicLink())
+        return realPath(resolve(dirname(path), readlinkSync(path)), depth + 1);
+    } catch (cause) {
+      if (cause?.code !== "ENOENT") throw cause;
+    }
+    const parent = dirname(path);
+    if (parent === path) return path;
+    return resolve(realPath(parent, depth + 1), path.slice(parent.length + 1));
+  }
+}
+
+function outside(path) {
+  return path === ".." || path.startsWith(".." + sep) || isAbsolute(path);
+}
+
+const absoluteTarget = isAbsolute(target) ? target : resolve(input?.cwd ?? root, target);
+const logical = relative(root, absoluteTarget);
+const physical = relative(realPath(root), realPath(absoluteTarget));
+if (isAbsolute(target) && outside(logical) && outside(physical)) process.exit(0);
+if (!outside(logical) && outside(physical)) {
+  process.stdout.write(JSON.stringify(deny(String(target) + " resolves outside the project root")));
+  process.exit(0);
+}
+const path = isAbsolute(target) ? (outside(logical) ? physical : logical) : target;
+const paths = physical !== path && !outside(physical) ? [path, physical] : [path];
 
 // VISP state changes only through visp commands, which validate and record it. A worker
 // that hand-edited the brief left it unreadable and abandoned the workflow. Drafts are
 // the one place the workflow asks agents to write.
-const statePath = path.replaceAll(String.fromCharCode(92), "/");
+const statePath = path.replaceAll(String.fromCharCode(92), "/").toLowerCase();
 if (
   (statePath === "${STATE_DIR}" || statePath.startsWith("${STATE_DIR}/")) &&
   !statePath.startsWith("${STATE_DIR}/drafts/") &&
@@ -352,7 +404,7 @@ let stdout;
 try {
   const asking =
     typeof input?.session_id === "string" && input.session_id ? ["--session", input.session_id] : [];
-  stdout = execFileSync("${PRODUCT_NAME}", ["guard", "--path", path, "--json", ...asking], {
+  stdout = execFileSync(process.execPath, [cli, "guard", "--path", ...paths, "--json", ...asking], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -365,8 +417,17 @@ try {
 const envelope = guardEnvelope(stdout);
 
 if (envelope === undefined) {
+  let authorization = "unknown";
+  try {
+    authorization = execFileSync(process.execPath, ["-e", ${JSON.stringify(AUTHORIZATION_CHECK)}], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim();
+  } catch {}
+  // No task is active, so there is nothing to enforce: leave Claude's own permission decision in place.
+  if (authorization === "inactive") process.exit(0);
   const cause = status === 0 || status === ${EXIT.refused}
-    ? \`no guard result on stdout — is \\\`${PRODUCT_NAME}\\\` on PATH the right one?\`
+    ? \`no guard result on stdout — is the installed VISP CLI intact?\`
     : \`exit \${status}\`;
   process.stdout.write(
     JSON.stringify(
@@ -379,7 +440,6 @@ if (envelope === undefined) {
 }
 
 if (status === 0 && envelope.ok) {
-  process.stdout.write(JSON.stringify(ALLOW));
   process.exit(0);
 }
 
@@ -409,7 +469,7 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
         PreToolUse: [
           {
             matcher: "Edit|Write|NotebookEdit",
-            hooks: [{ type: "command", command: `node "$CLAUDE_PROJECT_DIR/${hookPath}"` }],
+            hooks: [{ type: "command", command: hookCommand(hookPath) }],
           },
         ],
       },
@@ -420,11 +480,12 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
 }
 
 /** Pre-commit hook: the last checkpoint before out-of-scope work is recorded. */
-export function renderPreCommitHook(): string {
-  const installedNode = shellLiteral(process.execPath);
+export function renderPreCommitHook(chained = false): string {
+  const installedCli = shellLiteral(runtimeIdentity().executable);
   return `#!/bin/sh
 # ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 # Refuses a commit whose staged files fall outside the active task's scope.
+${chained ? '\n# Preserve the project hook that preceded VISP.\nif [ -x "$0.local" ]; then "$0.local" "$@" || exit $?; fi\n' : ""}
 
 authorization_dir=".visp/state/implement-allowed"
 product_authorization_dir=".visp/state/product-authorizations"
@@ -434,9 +495,6 @@ has_authorization=0
 # an interrupted older closure. A malformed marker or graph stays conservative:
 # without enough state to prove it stale, the hook treats it as active.
 node_runtime=$(command -v node 2>/dev/null)
-if [ -z "$node_runtime" ] && [ -x ${installedNode} ]; then
-  node_runtime=${installedNode}
-fi
 if [ -n "$node_runtime" ]; then
   authorization_state=$("$node_runtime" - "$authorization_dir" <<'VISP_AUTHORIZATION_CHECK' 2>/dev/null
 ${AUTHORIZATION_CHECK}
@@ -470,8 +528,8 @@ unchecked() {
   return 0
 }
 
-if ! command -v ${PRODUCT_NAME} >/dev/null 2>&1; then
-  unchecked "${PRODUCT_NAME} is not on PATH"
+if [ -z "$node_runtime" ]; then
+  unchecked "node is not on PATH"
   exit $?
 fi
 
@@ -479,13 +537,12 @@ fi
 # ordinary commits are left alone.
 # --include-done: work from a task visp already closed is still in the tree and
 # must remain committable, or finishing a task would strand it.
-output=$(${PRODUCT_NAME} guard --staged --if-authorized --include-done --json 2>/dev/null)
+output=$("$node_runtime" ${installedCli} guard --staged --if-authorized --include-done --json 2>/dev/null)
 
-# The exit code alone cannot be trusted. Another program named \`${PRODUCT_NAME}\` on
-# PATH — an older release, say — exits 1 for its own reasons, and 1 is also the
-# refusal code. Only a parseable guard envelope proves this check actually ran,
+# The exit code alone cannot be trusted. A stale or corrupted CLI might also
+# exit 1, the refusal code. Only a parseable guard envelope proves this check ran,
 # so that is what the decision reads.
-verdict=$(printf '%s' "$output" | node -e '
+verdict=$(printf '%s' "$output" | "$node_runtime" -e '
 let raw = "";
 process.stdin.on("data", (chunk) => { raw += chunk; });
 process.stdin.on("end", () => {
@@ -559,6 +616,8 @@ export function renderCiWorkflow(version: string): string {
 on:
   pull_request:
 
+permissions: contents: read
+
 jobs:
   scope-and-evidence:
     runs-on: ubuntu-latest
@@ -573,13 +632,18 @@ jobs:
       - name: Check the diff against what the feature declared it would touch
         # actions/checkout detaches HEAD for a pull_request, so git cannot name
         # the branch and visp is told it explicitly.
-        run: ${PRODUCT_NAME} guard --base \${{ github.event.pull_request.base.sha }} --scope tasks --branch \${{ github.head_ref }}
+        env:
+          HEAD_REF: \${{ github.head_ref }}
+        run: ${PRODUCT_NAME} guard --base \${{ github.event.pull_request.base.sha }} --scope tasks --branch "$HEAD_REF"
 `;
 }
 
 /** Codex runs hooks through a shell from the session directory; resolve the project root. */
 export const CODEX_HOOK_SCRIPT = ".visp/hooks/codex-hooks.mjs";
-const CODEX_HOOK_COMMAND = `node "$(git rev-parse --show-toplevel)/${CODEX_HOOK_SCRIPT}"`;
+const CODEX_HOOK_COMMAND =
+  process.platform === "win32"
+    ? `for /f %i in ('git rev-parse --show-toplevel') do @node "%i\\${CODEX_HOOK_SCRIPT.replaceAll("/", "\\")}" || exit /b 2`
+    : `node "$(git rev-parse --show-toplevel)/${CODEX_HOOK_SCRIPT}" || exit 2`;
 
 /**
  * Codex reads `.codex/hooks.json` in Claude Code's format. The same script records user

@@ -4,7 +4,8 @@ import type { CommandResult } from "../artifacts/evidence.js";
 
 /** Runner-reported counts are evidence of results, not an attestation of authenticity. */
 export function runnerTestSummary(output: string): CommandResult["testSummary"] {
-  const tap = nodeTestSummary(output);
+  const plain = stripVTControlCharacters(output);
+  const tap = nodeTestSummary(plain) ?? nodeSpecSummary(plain);
   if (tap) return tap;
   const data = jsonReport(output);
   const format = data && reportFormat(data);
@@ -18,6 +19,12 @@ export function runnerTestSummary(output: string): CommandResult["testSummary"] 
     ...(report.flaky ? { flaky: report.flaky } : {}),
     ...(report.errors ? { errors: report.errors } : {}),
   };
+}
+
+function nodeSpecSummary(output: string): CommandResult["testSummary"] {
+  const start = output.search(/^ℹ tests \d+\r?$/m);
+  if (start < 0) return undefined;
+  return nodeTestSummary(`TAP version 13\n${output.slice(start).replace(/^ℹ /gm, "# ")}`);
 }
 
 function jsonReport(output: string): Record<string, unknown> | undefined {
@@ -53,3 +60,5 @@ export function nodeTestSummary(output: string): CommandResult["testSummary"] {
   if (total !== passed + failed + cancelled + skipped + todo) return undefined;
   return { passed, failed: failed + cancelled, skipped: skipped + todo };
 }
+
+import { stripVTControlCharacters } from "node:util";

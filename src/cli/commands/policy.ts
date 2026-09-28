@@ -4,7 +4,7 @@ import { ok } from "../../core/result.js";
 import { now } from "../../workflow/artifacts/common.js";
 import { mutatePolicy } from "../../workflow/policy/mutations.js";
 import { resolveRule } from "../../workflow/policy/resolve.js";
-import { RULES, type RuleId } from "../../workflow/policy/rules.js";
+import { EVALUATED_RULE_IDS, RULES, type RuleId } from "../../workflow/policy/rules.js";
 import { isJson, options, projectRoot, workspace } from "../context.js";
 import { emit, emitError } from "../output.js";
 
@@ -27,6 +27,7 @@ interface RuleView {
   readonly active: boolean;
   readonly why: string;
   readonly overridable: boolean;
+  readonly evaluated: boolean;
 }
 
 function showCommand(): Command {
@@ -53,11 +54,16 @@ function showCommand(): Command {
           stage: rule.stage,
           active: resolved.active,
           overridable: rule.overridable,
-          why: resolved.active
-            ? "on"
-            : resolved.reason === "overridden"
-              ? `overridden: ${resolved.override.reason}`
-              : `off in ${state.value.policy.strictness} mode`,
+          evaluated: EVALUATED_RULE_IDS.includes(rule.id),
+          why: !EVALUATED_RULE_IDS.includes(rule.id)
+            ? "catalogued; not evaluated by this workflow"
+            : resolved.active
+              ? "on"
+              : resolved.reason === "overridden"
+                ? `overridden: ${resolved.override.reason}`
+                : state.value.policy.rules[rule.id] === false
+                  ? "off explicitly"
+                  : `off in ${state.value.policy.strictness} mode`,
         };
       });
 
@@ -74,8 +80,10 @@ function renderRules(data: { strictness: string; rules: readonly RuleView[] }): 
   for (const rule of data.rules) {
     const mark = rule.active ? "on " : "off";
     const locked = rule.overridable ? "" : "  (cannot be overridden)";
-    lines.push(`  ${mark}  ${rule.id.padEnd(28)} ${rule.title}${locked}`);
-    if (!rule.active) lines.push(`       ${rule.why}`);
+    lines.push(
+      `  ${mark}  ${rule.id.padEnd(28)} ${rule.title}${locked}${rule.evaluated ? "" : "  (not evaluated)"}`,
+    );
+    if (!rule.active || !rule.evaluated) lines.push(`       ${rule.why}`);
   }
 
   lines.push("", `Why each rule exists: ${PRODUCT_NAME} policy show --json`);

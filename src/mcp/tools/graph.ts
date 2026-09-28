@@ -13,8 +13,9 @@ import {
   queryGraph,
   refreshRepository,
 } from "../../graph/index.js";
-import { queryArgs, resolveQueryTarget } from "../../graph/query/arguments.js";
-import { recordActivity } from "../../orchestrate/session.js";
+import { resolveQueryInput } from "../../graph/query/arguments.js";
+import { queryFreshnessNote } from "../../graph/query/index.js";
+import { recordActivity, recordActivityLater } from "../../orchestrate/session.js";
 import { loadWorkspace, loadWorkspaceForMutation } from "../../workflow/state.js";
 import { TOOL } from "../constants.js";
 import { failure, reply } from "../reply.js";
@@ -36,6 +37,7 @@ const queryInput = {
     .string()
     .optional()
     .describe("A symbol name, an entity id, or a file path, depending on the operation"),
+  to: z.string().optional().describe("Destination entity or path for tracePath"),
   depth: z.number().int().positive().optional().describe("How far to traverse"),
   results: z.number().int().positive().optional().describe("How many rows to return"),
   nodes: z.number().int().positive().optional().describe("Maximum nodes visited during traversal"),
@@ -63,6 +65,7 @@ async function runQuery(
   args: {
     operation: QueryOperation;
     target?: string;
+    to?: string;
     depth?: number;
     results?: number;
     nodes?: number;
@@ -86,25 +89,23 @@ async function runQuery(
   if (!store.ok) return store;
 
   try {
-    const resolved = resolveQueryTarget(store.value, args.operation, args.target);
+    const resolved = resolveQueryInput(store.value, args.operation, args.target, args.to);
     if (!resolved.ok) return resolved;
-    const answer = queryGraph(
-      store.value,
-      args.operation,
-      queryArgs(args.operation, resolved.value),
-      {
-        ...(args.depth !== undefined ? { depth: args.depth } : {}),
-        ...(args.results !== undefined ? { results: args.results } : {}),
-        ...(args.nodes !== undefined ? { nodes: args.nodes } : {}),
-        ...(args.edges !== undefined ? { edges: args.edges } : {}),
-      },
-    );
+    const answer = queryGraph(store.value, args.operation, resolved.value.args, {
+      ...(args.depth !== undefined ? { depth: args.depth } : {}),
+      ...(args.results !== undefined ? { results: args.results } : {}),
+      ...(args.nodes !== undefined ? { nodes: args.nodes } : {}),
+      ...(args.edges !== undefined ? { edges: args.edges } : {}),
+    });
     if (answer.ok) {
-      await recordActivity(state.value, {
+      const freshness = await queryFreshnessNote(store.value, state.value.paths.root);
+      if (freshness) answer.value.notes.push(freshness);
+      recordActivityLater(state.value, {
         command: "query",
         outcome: "ok",
         detail: [args.operation, args.target].filter(Boolean).join(" "),
       });
+      answer.value.notes.unshift(...resolved.value.notes);
     }
     return answer;
   } finally {

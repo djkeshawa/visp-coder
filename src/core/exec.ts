@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { LIMITS } from "./constants.js";
 import { fromUnknown } from "./errors.js";
 import { err, ok, type Result } from "./result.js";
+import { prepareCommand } from "./windows-command.js";
 
 export interface CommandOutput {
   readonly command: string;
@@ -31,22 +32,25 @@ export function run(
 ): Promise<Result<CommandOutput>> {
   const started = Date.now();
   const timeout = options.timeoutMs ?? LIMITS.commandTimeoutMs;
+  const env = options.replaceEnv
+    ? (options.env ?? {})
+    : options.env
+      ? { ...process.env, ...options.env }
+      : process.env;
+  const prepared = prepareCommand(file, args, env);
 
   return new Promise((resolvePromise) => {
     try {
       execFile(
-        file,
-        [...args],
+        prepared.file,
+        prepared.args,
         {
           cwd: options.cwd,
           timeout,
           encoding: "utf8",
           maxBuffer: 8 * 1024 * 1024,
-          env: options.replaceEnv
-            ? (options.env ?? {})
-            : options.env
-              ? { ...process.env, ...options.env }
-              : process.env,
+          env,
+          windowsVerbatimArguments: prepared.windowsVerbatimArguments,
         },
         (error, stdout, stderr) => {
           resolvePromise(
@@ -132,7 +136,7 @@ function splitCommandWords(input: string): Result<string[], ShellSyntaxError> {
       if (started) argv.push(word);
       word = "";
       started = false;
-    } else if (/[|&;<>$`\\(){}[\]!*?~]/.test(character)) {
+    } else if (/[|&;<>$`(){}[\]!*?~]/.test(character)) {
       return {
         ok: false,
         error: {

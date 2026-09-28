@@ -1,6 +1,6 @@
-import { resolve } from "node:path";
 import type { Command } from "commander";
 import { parseFeatureId, parseTaskId } from "../core/input.js";
+import { discoverProjectRoot } from "../core/project-root.js";
 import type { Result } from "../core/result.js";
 import {
   loadWorkspace,
@@ -21,7 +21,7 @@ export function options<T>(command: Command): GlobalOptions & T {
 }
 
 export function projectRoot(options: GlobalOptions): string {
-  return resolve(options.project ?? process.cwd());
+  return discoverProjectRoot(options.project ?? process.cwd());
 }
 
 export function isJson(options: GlobalOptions): boolean {

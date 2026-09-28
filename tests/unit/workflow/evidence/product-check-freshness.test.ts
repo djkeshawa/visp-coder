@@ -57,6 +57,7 @@ describe("product check input freshness", () => {
   });
   it("ignores shell bookkeeping but invalidates changed behavioral environment and executes that identity", async () => {
     const { workspace, brief } = await fixture();
+    for (const check of brief.checks) check.environmentVariables = ["VISP_TEST_SETTING"];
     vi.stubEnv("VISP_TEST_SETTING", "expected");
     vi.stubEnv("SHLVL", "2");
     vi.stubEnv("CODEX_THREAD_ID", "actor-thread");

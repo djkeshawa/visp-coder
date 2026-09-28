@@ -1,3 +1,7 @@
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { browserExecutableIdentity } from "../core/browser-executable.js";
 import {
   CONFIG_FILE,
   DERIVED_STATE_PATHS,
@@ -5,7 +9,7 @@ import {
   PRODUCT_NAME,
   STATE_DIR,
 } from "../core/constants.js";
-import { describeCommand, resolveCommand } from "../core/exec.js";
+import { describeCommand, resolveCommand, run } from "../core/exec.js";
 import { inspectFileTransactions } from "../core/file-transaction.js";
 import { isRepository } from "../core/git.js";
 import { ok, type Result } from "../core/result.js";
@@ -22,6 +26,7 @@ import {
   checkEnforcement,
   checkHarnessActivation,
   checkHarnessAssets,
+  checkMcpRegistration,
   checkPreviousHarnessAssets,
 } from "./installation.js";
 import { checkInstalledRuntime, checkPathRuntime } from "./runtime.js";
@@ -67,10 +72,14 @@ export async function runChecks(
     await checkPathRuntime(state),
     await checkGit(state),
     await checkHarnessAssets(state),
+    await checkMcpRegistration(state),
+    await checkCodexTrust(state),
+    await checkCodexCli(state),
     await checkHarnessActivation(state),
     await checkPreviousHarnessAssets(state),
     await checkEnforcement(state, runtime),
     await checkValidationCommands(state),
+    await checkBrowser(state),
     await checkIndex(state),
     await checkEvidenceTracked(state),
     await checkSkillLibrary(state),
@@ -78,7 +87,110 @@ export async function runChecks(
     await checkFeature(state),
   ];
 
-  return { verdict: verdictFor(checks), checks };
+  const runtimeMismatch = checks.find(
+    (check) => check.name === "installed runtime" && check.status === "fail",
+  );
+  const reported = runtimeMismatch
+    ? checks.map((check) =>
+        ["harness assets", "harness activation", "enforcement"].includes(check.name)
+          ? {
+              ...check,
+              status: "unknown" as const,
+              detail: `This CLI build differs from the installed runtime; ${check.name} cannot be judged against its templates`,
+              recovery: undefined,
+            }
+          : check,
+      )
+    : checks;
+  return { verdict: verdictFor(reported), checks: reported };
+}
+
+async function checkBrowser(state: WorkspaceState): Promise<Check> {
+  if (!state.status?.activeFeature)
+    return { name: "browser", status: "ok", detail: "No active browser journey declared" };
+  const record = await readProductRecord(state);
+  if (
+    !record.ok ||
+    !record.value.brief.checks.some(
+      (check) =>
+        typeof check.command === "object" &&
+        !Array.isArray(check.command) &&
+        check.command.kind === "browser-journey",
+    )
+  )
+    return { name: "browser", status: "ok", detail: "No active browser journey declared" };
+  const binary = await browserExecutableIdentity();
+  return "missing" in binary
+    ? {
+        name: "browser",
+        status: "warn",
+        detail: `${binary.binary} is unavailable for browser journeys`,
+        recovery: "Set CHROME_BIN to an installed Chrome or Chromium executable",
+      }
+    : { name: "browser", status: "ok", detail: `Browser executable found: ${binary.path}` };
+}
+
+async function checkCodexTrust(state: WorkspaceState): Promise<Check> {
+  if (state.config.harness !== "codex")
+    return {
+      name: "codex hooks trust",
+      status: "ok",
+      detail: "Codex is not the selected coding host",
+    };
+  const configPath = join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "config.toml");
+  let config = "";
+  try {
+    config = await readFile(configPath, "utf8");
+  } catch {
+    return {
+      name: "codex hooks trust",
+      status: "unknown",
+      detail: "Codex hook trust could not be read",
+      recovery: "Open Codex and run /hooks to trust .codex/hooks.json",
+    };
+  }
+  const prefix = `${state.paths.root}/.codex/hooks.json:`;
+  const events = ["user_prompt_submit", "pre_tool_use", "stop"];
+  const missing = events.filter((event) => !config.includes(`${prefix}${event}:`));
+  const projectSection = config
+    .split(`[projects.${JSON.stringify(state.paths.root)}]`)[1]
+    ?.split(/^\[/mu)[0];
+  if (!/^\s*trust_level\s*=\s*"trusted"/mu.test(projectSection ?? ""))
+    missing.push("project trust");
+  return missing.length === 0
+    ? {
+        name: "codex hooks trust",
+        status: "ok",
+        detail: "Project trust and prompt, shell and Stop hook trust entries exist",
+      }
+    : {
+        name: "codex hooks trust",
+        status: "unknown",
+        detail: `Codex hook trust is unverified for ${missing.join(", ")}`,
+        recovery: "Open Codex and run /hooks to trust .codex/hooks.json before headless runs",
+      };
+}
+
+async function checkCodexCli(state: WorkspaceState): Promise<Check> {
+  if (state.config.critic?.launch !== "codex-exec")
+    return { name: "codex critic CLI", status: "ok", detail: "Codex exec is not selected" };
+  const version = await run("codex", ["--version"], { cwd: state.paths.root, timeoutMs: 5000 });
+  if (!version.ok || version.value.exitCode !== 0)
+    return {
+      name: "codex critic CLI",
+      status: "warn",
+      detail: "Codex CLI is unavailable",
+      recovery: "Install the Codex CLI or choose another critic.launch",
+    };
+  const login = await run("codex", ["login", "status"], { cwd: state.paths.root, timeoutMs: 5000 });
+  return login.ok && login.value.exitCode === 0
+    ? { name: "codex critic CLI", status: "ok", detail: "Codex CLI is available and signed in" }
+    : {
+        name: "codex critic CLI",
+        status: "unknown",
+        detail: "Codex sign-in could not be verified",
+        recovery: "Run codex login status and sign in if needed",
+      };
 }
 
 async function checkStateOwnership(state: WorkspaceState): Promise<Check> {

@@ -153,10 +153,7 @@ class ImportState {
   }
 
   private visitPython(node: SyntaxNode): boolean {
-    if (node.type === "import_statement") {
-      for (const child of named(node)) this.pythonModule(node, moduleText(child));
-      return false;
-    }
+    if (node.type === "import_statement") return this.pythonImportStatement(node);
     if (node.type === "import_from_statement") {
       const moduleNode = field(node, "module_name");
       const resolution = this.pythonModule(node, moduleNode?.text);
@@ -164,6 +161,19 @@ class ImportState {
       return false;
     }
     return true;
+  }
+
+  private pythonImportStatement(node: SyntaxNode): false {
+    for (const child of named(node)) {
+      const specifier = moduleText(child);
+      const resolution = this.pythonModule(node, specifier);
+      const target = resolution ? bindingTarget(resolution) : undefined;
+      const alias = child.type === "aliased_import" ? field(child, "alias")?.text : undefined;
+      const binding = alias ?? specifier?.split(".")[0];
+      if (target && binding) this.bindings.set(binding, target);
+      if (target && specifier && !alias) this.bindings.set(specifier, target);
+    }
+    return false;
   }
 
   private pythonModule(node: SyntaxNode, specifier: string | undefined): Resolution | undefined {

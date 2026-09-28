@@ -2,7 +2,8 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openBrowserSession } from "../../../src/testing/browser-session.js";
+import { BrowserBehaviorFailure } from "../../../src/testing/browser-observations.js";
+import { interactionPage, openBrowserSession } from "../../../src/testing/browser-session.js";
 import { pngHeader } from "../support/workspace.js";
 
 const transport = vi.hoisted(() => ({
@@ -32,6 +33,28 @@ afterEach(async () => {
 });
 
 describe("browser session ownership", () => {
+  it("maps invalid CSS selectors to a behavior failure", async () => {
+    const send = Object.assign(
+      vi.fn(async () => ({
+        exceptionDetails: {
+          text: "Uncaught",
+          exception: {
+            className: "DOMException",
+            description:
+              "SyntaxError: Failed to execute 'querySelectorAll' on 'Document': 'button:contains(Start)' is not a valid selector.",
+          },
+        },
+      })),
+      { sessionId: "session", targetId: "target" },
+    );
+    const page = interactionPage(send, () => {});
+    await expect(
+      page.evaluate(
+        (selector) => document.querySelectorAll(selector).length,
+        "button:contains(Start)",
+      ),
+    ).rejects.toThrow(BrowserBehaviorFailure);
+  });
   it("records viewport changes and preserves earlier capture dimensions", async () => {
     const initial = { width: 390, height: 844 };
     const session = await openBrowserSession({

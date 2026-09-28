@@ -31,14 +31,18 @@ export async function verifyGuardHandshake(
   runner: GuardHandshakeRunner = run,
   expected: RuntimeIdentity = runtimeIdentity(),
 ): Promise<Result<void>> {
-  const found = await runner(PRODUCT_NAME, ["guard", "--handshake", "--json"], {
-    cwd: root,
-    timeoutMs: 5_000,
-  });
+  const found = await runner(
+    process.execPath,
+    [expected.executable, "guard", "--handshake", "--json"],
+    {
+      cwd: root,
+      timeoutMs: 5_000,
+    },
+  );
   if (!found.ok)
     return err(
       handshakeError(
-        `${PRODUCT_NAME} is not on PATH or is not runnable: ${found.error.message.slice(0, 4_096)}`,
+        `Installed VISP CLI ${expected.executable} is not runnable with Node: ${found.error.message.slice(0, 4_096)}`,
         "spawn",
       ),
     );

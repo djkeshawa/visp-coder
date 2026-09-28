@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ok } from "../../../src/core/result.js";
+import { withStateLock } from "../../../src/core/state-lock.js";
 import { createServer } from "../../../src/mcp/server.js";
 import { readSession } from "../../../src/orchestrate/session.js";
 import { runInit } from "../../../src/workflow/stages/init.js";
@@ -92,6 +94,21 @@ describe("graph tools over MCP", () => {
     const result = await call("visp_query", { operation: "callers", target: "makeToken" });
     expect(result.isError).toBeFalsy();
     expect(result.content[0]?.text).toContain("src/login.ts");
+    expect(result.content[0]?.text).toContain(
+      "Resolved makeToken to src/token.ts#function:makeToken",
+    );
+  });
+
+  it("accepts both endpoints for tracePath", async () => {
+    const result = await call("visp_query", {
+      operation: "tracePath",
+      target: "src/login.ts",
+      to: "makeToken",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(
+      (result.structuredContent?.data as { rows: unknown[] } | undefined)?.rows.length,
+    ).toBeGreaterThan(0);
   });
 
   it("returns an actionable error for a whole file where one symbol is needed", async () => {
@@ -119,6 +136,12 @@ describe("graph tools over MCP", () => {
       },
     });
     expect(result.content[0]?.text).toContain("increase nodes or edges");
+  });
+
+  it("accepts a file path for neighbors", async () => {
+    const result = await call("visp_query", { operation: "neighbors", target: "src/token.ts" });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toContain("src/login.ts");
   });
 
   it("re-indexes without re-parsing when nothing changed", async () => {
@@ -161,14 +184,50 @@ describe("graph tools over MCP", () => {
     const state = await loadWorkspace(root);
     expect(state.ok).toBe(true);
     if (!state.ok) return;
+    await expect
+      .poll(
+        async () => {
+          const current = await readSession(state.value);
+          return current.ok
+            ? current.value.activity.filter((entry) => entry.command === "query").length
+            : 0;
+        },
+        { timeout: 3000 },
+      )
+      .toBe(6);
     const session = await readSession(state.value);
     expect(session.ok).toBe(true);
     if (!session.ok) return;
     const commands = session.value.activity.map((entry) => entry.command);
     expect(commands.filter((command) => command === "index")).toHaveLength(1);
     expect(commands.filter((command) => command === "index --refresh")).toHaveLength(3);
-    expect(commands.filter((command) => command === "query")).toHaveLength(4);
+    expect(commands.filter((command) => command === "query")).toHaveLength(6);
     expect(session.value.activity.every((entry) => entry.outcome === "ok")).toBe(true);
+  });
+
+  it("answers a read-only query while the state writer lock is held", async () => {
+    let acquired!: () => void;
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      acquired = resolve;
+    });
+    const held = withStateLock(root, async () => {
+      acquired();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return ok(undefined);
+    });
+    await ready;
+    try {
+      const started = performance.now();
+      const result = await call("visp_query", { operation: "search", target: "makeToken" });
+      expect(result.isError).toBeFalsy();
+      expect(performance.now() - started).toBeLessThan(1000);
+    } finally {
+      release();
+      await held;
+    }
   });
 });
 

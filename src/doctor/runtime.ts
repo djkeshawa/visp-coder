@@ -9,7 +9,7 @@ import type { Check } from "./checks.js";
 export async function checkInstalledRuntime(state: WorkspaceState): Promise<Check> {
   const name = "installed runtime";
   const recovery =
-    "Choose the intended VISP build, run visp install to refresh project assets, and restart stale MCP/host processes.";
+    "Run the executable recorded in the installed runtime check, or explicitly replace the installation with visp install --replace-runtime and restart MCP/host processes using the old build.";
   const installed = await readInstallState(state.paths, state.files);
   if (!installed.ok) return { name, status: "fail", detail: installed.error.message, recovery };
   const runtime = installed.value?.runtime;
@@ -21,8 +21,14 @@ export async function checkInstalledRuntime(state: WorkspaceState): Promise<Chec
         "No identified installation runtime; product mutations require refreshed installation assets",
       recovery,
     };
-  const agreed = requireRuntimeAgreement(runtime);
-  if (!agreed.ok) return { name, status: "fail", detail: agreed.error.message, recovery };
+  const agreed = requireRuntimeAgreement(runtime, runtimeIdentity(), "installed assets");
+  if (!agreed.ok)
+    return {
+      name,
+      status: "fail",
+      detail: agreed.error.message,
+      recovery: `Run node ${JSON.stringify(runtime.executable)} for this installation, or use its MCP tools. To switch builds, run visp install --replace-runtime and restart stale MCP/host processes.`,
+    };
   return {
     name,
     status: "ok",
@@ -30,29 +36,45 @@ export async function checkInstalledRuntime(state: WorkspaceState): Promise<Chec
   };
 }
 
-/** An MCP server and the `visp` found by shell tools may be different builds. */
+/** Diagnose whether shell tools resolve the runtime installed for this project. */
 export async function checkPathRuntime(state: WorkspaceState): Promise<Check> {
-  const name = "PATH runtime";
-  const checked = await run("visp", ["doctor", "--runtime-identity", "--json"], {
+  const installed = await readInstallState(state.paths, state.files);
+  if (!installed.ok || !installed.value?.runtime)
+    return { name: "PATH visp", status: "unknown", detail: "No installed runtime to compare" };
+  const found = await run("visp", ["guard", "--handshake", "--json"], {
     cwd: state.paths.root,
-    timeoutMs: 5000,
+    timeoutMs: 5_000,
   });
-  if (!checked.ok || checked.value.exitCode !== 0)
-    return { name, status: "warn", detail: "Could not identify the visp executable on PATH" };
-  try {
-    const parsed = JSON.parse(checked.value.stdout) as {
-      data?: { runtime?: { buildId?: string } };
-    };
-    const found = parsed.data?.runtime?.buildId;
-    if (found === runtimeIdentity().buildId)
-      return { name, status: "ok", detail: `PATH uses build ${found}` };
+  if (!found.ok || found.value.exitCode !== 0)
     return {
-      name,
-      status: "fail",
-      detail: `PATH visp build ${found ?? "unknown"} differs from this runtime ${runtimeIdentity().buildId}`,
-      recovery: "Use the same VISP build for MCP and CLI, then restart the MCP server",
+      name: "PATH visp",
+      status: "warn",
+      detail: "The shell's visp command could not be identified",
+      recovery: `Run node ${JSON.stringify(installed.value.runtime.executable)} for this installation, or use its MCP tools`,
+    };
+  try {
+    const runtime = JSON.parse(found.value.stdout)?.data?.runtime;
+    if (
+      runtime?.buildId === installed.value.runtime.buildId &&
+      runtime?.version === installed.value.runtime.version &&
+      runtime?.executable === installed.value.runtime.executable
+    )
+      return {
+        name: "PATH visp",
+        status: "ok",
+        detail: "The shell resolves the installed VISP build",
+      };
+    return {
+      name: "PATH visp",
+      status: "warn",
+      detail: `The shell resolves ${runtime?.executable ?? "an unidentified VISP"}, while installed assets use ${installed.value.runtime.executable}`,
+      recovery: `Run node ${JSON.stringify(installed.value.runtime.executable)} or use the installed MCP tools; this CLI is ${runtimeIdentity().executable}`,
     };
   } catch {
-    return { name, status: "warn", detail: "PATH visp returned an unrecognized runtime identity" };
+    return {
+      name: "PATH visp",
+      status: "warn",
+      detail: "The shell's visp returned no valid runtime identity",
+    };
   }
 }

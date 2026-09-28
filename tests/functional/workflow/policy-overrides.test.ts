@@ -63,7 +63,7 @@ describe("policy and overrides", () => {
     const result = project.run(
       "override",
       "create",
-      "evidence.test-signal",
+      "scope.max-changed-files",
       "--reason",
       "This task only moves files and cannot carry a test",
     );
@@ -74,8 +74,27 @@ describe("policy and overrides", () => {
   });
 
   it("requires a reason worth reading", () => {
-    const result = project.run("override", "create", "evidence.test-signal", "--reason", "because");
+    const result = project.run(
+      "override",
+      "create",
+      "scope.max-changed-files",
+      "--reason",
+      "because",
+    );
     expect(result.exitCode).not.toBe(0);
+  });
+
+  it("refuses an override for a catalogued rule with no evaluator", () => {
+    const result = project.run(
+      "override",
+      "create",
+      "stage.order",
+      "--reason",
+      "A recorded waiver would be misleading",
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("not evaluated");
+    expect(project.run("policy", "show").stdout).toContain("(not evaluated)");
   });
 
   it("refuses to override a rule that protects the boundary", () => {
@@ -91,16 +110,15 @@ describe("policy and overrides", () => {
   });
 
   it("resolves an override while live and restores the rule on revoke", () => {
-    project.run("policy", "set-strictness", "strict");
     const active = () =>
       project
         .json<{ rules: { id: string; active: boolean }[] }>("policy", "show")
-        .envelope.data?.rules.find((rule) => rule.id === "evidence.test-signal")?.active;
+        .envelope.data?.rules.find((rule) => rule.id === "scope.max-changed-files")?.active;
     expect(active()).toBe(true);
     project.run(
       "override",
       "create",
-      "evidence.test-signal",
+      "scope.max-changed-files",
       "--reason",
       "Moving files only; the behaviour is unchanged and covered elsewhere",
     );
@@ -113,7 +131,7 @@ describe("policy and overrides", () => {
     project.run(
       "override",
       "create",
-      "evidence.test-signal",
+      "scope.max-changed-files",
       "--reason",
       "A reason long enough to be evaluated later",
     );

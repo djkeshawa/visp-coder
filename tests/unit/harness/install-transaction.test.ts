@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { vispError } from "../../../src/core/errors.js";
 import { exists, ProjectFileSystem } from "../../../src/core/fs.js";
 import { err } from "../../../src/core/result.js";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import { hookCommand } from "../../../src/harness/claude-settings.js";
 import { defaultHooks, installHarness, readAssetManifest } from "../../../src/harness/install.js";
 import { buildInstallPlan } from "../../../src/harness/install-plan.js";
@@ -355,7 +356,7 @@ describe("transactional harness installation", () => {
     },
   );
 
-  it("writes no assets or config choice when a requested MCP surface is unsafe", async () => {
+  it("installs Codex assets while leaving an unsafe MCP surface for manual repair", async () => {
     const state = await workspace.state();
     const originalConfig = await readFile(state.paths.config, "utf8");
     await mkdir(join(workspace.root, ".codex"), { recursive: true });
@@ -368,14 +369,38 @@ describe("transactional harness installation", () => {
       configUpdates: { harness: "codex" },
     });
 
-    expect(result.ok).toBe(false);
-    expect(await exists(join(workspace.root, "AGENTS.visp.md"))).toBe(false);
-    expect(await exists(join(workspace.root, "AGENTS.md"))).toBe(false);
-    expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(false);
-    expect(await readFile(state.paths.config, "utf8")).toBe(originalConfig);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.manualSteps.join(" ")).toContain("--no-mcp");
+    expect(await exists(join(workspace.root, "AGENTS.visp.md"))).toBe(true);
+    expect(await exists(join(workspace.root, "AGENTS.md"))).toBe(true);
+    expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(true);
+    expect(await readFile(state.paths.config, "utf8")).not.toBe(originalConfig);
     expect(await readFile(join(workspace.root, CODEX_CONFIG_FILE), "utf8")).toBe(
       "mcp_servers = [\n",
     );
+  });
+
+  it("registers Cursor in its project config and removes the old root VISP entry", async () => {
+    const state = await workspace.state();
+    await writeFile(
+      join(workspace.root, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          visp: { command: "visp", args: ["serve", "--mcp"] },
+          github: { command: "github" },
+        },
+      }),
+    );
+    const result = await installHarness(state.paths, { harness: "cursor", hooks: [], mcp: true });
+    expect(result.ok).toBe(true);
+    const cursor = JSON.parse(await readFile(join(workspace.root, ".cursor/mcp.json"), "utf8"));
+    const old = JSON.parse(await readFile(join(workspace.root, ".mcp.json"), "utf8"));
+    expect(cursor.mcpServers.visp).toEqual({
+      command: "node",
+      args: [runtimeIdentity().executable, "serve", "--mcp"],
+    });
+    expect(old.mcpServers.visp).toBeUndefined();
+    expect(old.mcpServers.github).toEqual({ command: "github" });
   });
 
   it("writes no planned assets when a requested Git hook conflicts", async () => {
