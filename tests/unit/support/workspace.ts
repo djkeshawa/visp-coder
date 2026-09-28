@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { afterAll } from "vitest";
 import { parse, stringify } from "yaml";
 import { ok } from "../../../src/core/result.js";
 import { defaultHooks, installHarness } from "../../../src/harness/install.js";
@@ -244,8 +244,11 @@ export class TestWorkspace {
 
 const templates = new Map<string, Promise<{ workspace: TestWorkspace; value: unknown }>>();
 const templateDirs = new Set<string>();
-process.once("exit", () => {
-  for (const dir of templateDirs) rmSync(dir, { recursive: true, force: true });
+// Templates live for one test file, and this module is loaded once per file.
+afterAll(async () => {
+  templates.clear();
+  for (const dir of templateDirs) await rm(dir, { recursive: true, force: true });
+  templateDirs.clear();
 });
 
 /** A `visp` on PATH that runs this build, so installed hooks never reach an unrelated global VISP version. */

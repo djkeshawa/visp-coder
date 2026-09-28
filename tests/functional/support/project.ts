@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { afterAll } from "vitest";
 
 /**
  * A throwaway git project with visp's built CLI pointed at it. Functional tests
@@ -19,8 +19,11 @@ export interface RunResult {
 
 const templates = new Map<string, Promise<{ project: TestProject; value: unknown }>>();
 const templateRoots = new Set<string>();
-process.once("exit", () => {
-  for (const root of templateRoots) rmSync(root, { recursive: true, force: true });
+// Templates live for one test file, and this module is loaded once per file.
+afterAll(async () => {
+  templates.clear();
+  for (const root of templateRoots) await rm(root, { recursive: true, force: true });
+  templateRoots.clear();
 });
 
 export class TestProject {
