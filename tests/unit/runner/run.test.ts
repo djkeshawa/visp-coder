@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sha256 } from "../../../src/core/hash.js";
+import { EventJournal } from "../../../src/runner/artifacts.js";
 import { inspectStudyBudget } from "../../../src/runner/budgets.js";
 import type { RunnerSpec } from "../../../src/runner/contracts.js";
 import {
@@ -20,6 +21,7 @@ import {
   hashEvaluatorPolicy,
   inspectEvaluation,
 } from "../../../src/runner/evaluator.js";
+import { runHostTurn } from "../../../src/runner/host-turn.js";
 import { inspectRun, runExperiment, summarizeRun } from "../../../src/runner/run.js";
 
 let root: string;
@@ -187,6 +189,30 @@ describe.skipIf(process.platform === "win32")("optional runner with real fixture
     await expect(inspectStudyBudget(join(root, "runs"), spec.assignment.study)).rejects.toThrow(
       /Missing study budget ledger/i,
     );
+  });
+
+  it("rechecks pinned harness files before every host turn", async () => {
+    const events = join(root, "events");
+    await mkdir(events);
+    await expect(
+      runHostTurn(
+        {
+          ...spec,
+          harness: {
+            mode: "visp",
+            files: [{ path: "app.txt", sha256: "0".repeat(64) }],
+            requiredTools: ["visp.next"],
+            requiredHooks: [],
+          },
+        },
+        {
+          worktree: repo,
+          journal: new EventJournal(events, spec.id, "manifest"),
+          prompt: "no execution",
+          hostExecutableRealpath: executable,
+        },
+      ),
+    ).rejects.toThrow(/drift/i);
   });
 
   it("records malformed streams and cancellation as unsuccessful attempts", async () => {

@@ -5,6 +5,7 @@ import type { EventJournal } from "./artifacts.js";
 import type { NormalizedUsage, RunnerSpec, RunnerStatus } from "./contracts.js";
 import type { FeedbackLoopSummary } from "./loop-contracts.js";
 import { executeStream, executionEnvironment, type StreamResult } from "./process.js";
+import { verifyHarness } from "./run-support.js";
 import { type HostObservations, HostStreamState } from "./stream-state.js";
 
 export interface HostTurnResult {
@@ -31,6 +32,7 @@ export async function runHostTurn(
     hostExecutableRealpath: string;
   },
 ): Promise<HostTurnResult> {
+  await verifyHarness(spec, options.worktree);
   if (sha256(await readFile(options.hostExecutableRealpath)) !== spec.host.executableSha256)
     throw new Error("Host executable hash differs from the pinned build");
   const state = new HostStreamState(spec, options.journal, options.sessionId);
