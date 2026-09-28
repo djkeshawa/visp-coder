@@ -178,7 +178,7 @@ describe("runner-owned browser product checks", () => {
           closed: false,
           executions: [
             {
-              status: "failed",
+              status: "timed-out",
               assertions: "runner-observed",
               captureRunId: expect.any(String),
             },
@@ -254,7 +254,7 @@ describe("runner-owned browser product checks", () => {
     expect(await runProductWork(await workspace.state())).toMatchObject({ ok: true });
     expect(await runProductDone(await workspace.state())).toMatchObject({
       ok: true,
-      value: { closed: false, executions: [{ status: "failed" }] },
+      value: { closed: false, executions: [{ status: "timed-out" }] },
     });
     expect(browser.open).toHaveBeenCalledTimes(2);
   });
@@ -284,6 +284,30 @@ describe("runner-owned browser product checks", () => {
     expect(browser.close).toHaveBeenCalledOnce();
   });
 
+  it("reports navigation failure with the app URL and restart recovery", async () => {
+    const workspace = await fixture();
+    browser.open.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_REFUSED"));
+    const result = await runProductVerify(await workspace.state());
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        executions: [
+          {
+            status: "environment-failed",
+            output: expect.stringContaining(
+              "app-unreachable: Start or restart the app at http://localhost/",
+            ),
+          },
+        ],
+        recovery: expect.stringContaining("Start or restart the app"),
+        next: {
+          command: expect.not.stringContaining("--retry-environment"),
+          objective: expect.stringContaining("Start or restart"),
+        },
+      },
+    });
+  });
+
   it("keeps browser startup failures separate from behavior failures", async () => {
     const workspace = await fixture();
     browser.open.mockRejectedValueOnce(new BrowserUnavailableError("No installed browser"));
@@ -291,7 +315,9 @@ describe("runner-owned browser product checks", () => {
       ok: true,
       value: {
         passed: false,
-        executions: [{ status: "environment-failed", output: "No installed browser" }],
+        executions: [
+          { status: "environment-failed", output: expect.stringContaining("No installed browser") },
+        ],
       },
     });
     const record = await store.readProductRecord(await workspace.state());
@@ -318,7 +344,7 @@ describe("runner-owned browser product checks", () => {
     expect(await inspectStateLock(workspace.root)).toEqual(ok({ state: "unlocked" }));
   });
 
-  it("holds the existing mutation lock throughout the browser run", async () => {
+  it("allows another writer while the browser journey runs", async () => {
     const workspace = await fixture();
     let entered = () => {},
       release = () => {};
@@ -339,7 +365,7 @@ describe("runner-owned browser product checks", () => {
     try {
       expect(
         await withStateLock(workspace.root, async () => ok("other writer"), { timeoutMs: 0 }),
-      ).toMatchObject({ ok: false, error: { code: "STATE_BUSY" } });
+      ).toMatchObject({ ok: true });
       const record = await store.readProductRecord(await workspace.state());
       expect(record.ok && record.value.state.captureRuns).toEqual([]);
     } finally {

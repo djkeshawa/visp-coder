@@ -14,6 +14,7 @@ import {
   validateProductCheckCommand,
 } from "./check-command.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
+import { SANDBOX_NOTE, sandboxDenial } from "./sandbox-denial.js";
 import type { ProductRecord } from "./store.js";
 import { productContractDigest, productSourceDigest } from "./subject.js";
 import { productVerifierDigest } from "./verifier-identity.js";
@@ -32,6 +33,7 @@ export async function executeProductCheck(
   subjectDigest: string,
   retryEnvironment = false,
   verifierSnapshot: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<ExecutedProductCheck> {
   const environment = await productSourceDigest(workspace, record.brief, {});
   const base = {
@@ -48,10 +50,32 @@ export async function executeProductCheck(
   };
   const unavailable = unavailableVerifier(check, base, record.state);
   if (unavailable) return unavailable;
-  if (isBrowserCheckCommand(check.command))
-    return executeBrowserCheck(workspace, record, check.command, base, retryEnvironment);
+  if (isBrowserCheckCommand(check.command)) {
+    const timeout = check.timeoutMs ? AbortSignal.timeout(check.timeoutMs) : undefined;
+    const browserSignal = timeout
+      ? AbortSignal.any([timeout, ...(signal ? [signal] : [])])
+      : signal;
+    const result = await executeBrowserCheck(
+      workspace,
+      record,
+      check.command,
+      base,
+      retryEnvironment,
+      browserSignal,
+    );
+    return timeout?.aborted && !signal?.aborted
+      ? {
+          ...result,
+          execution: {
+            ...result.execution,
+            status: "timed-out",
+            output: `${result.execution.output}\nVISP: check timed out; inspect the journey and its timeoutMs budget.`,
+          },
+        }
+      : result;
+  }
   const started = Date.now();
-  const output = await executeCommand(workspace, check);
+  const output = await executeCommand(workspace, check, signal);
   const commandVerifier =
     base.verifierDigest && output.ok && output.value.executableDigest
       ? {
@@ -66,10 +90,10 @@ export async function executeProductCheck(
       ...(commandVerifier ? { commandVerifier } : {}),
       verifierDigest: commandVerifier ? hashValue(commandVerifier) : undefined,
       assertions: "agent-reported",
-      status: commandStatus(output),
+      status: commandStatus(output, workspace.paths.root),
       exitCode: output.ok ? output.value.exitCode : -1,
       durationMs: output.ok ? output.value.durationMs : Date.now() - started,
-      output: commandEvidenceOutput(output, !!base.verifierDigest),
+      output: commandEvidenceOutput(output, !!base.verifierDigest, workspace.paths.root),
     },
     state: record.state,
     mutations: [],
@@ -79,15 +103,23 @@ export async function executeProductCheck(
 function commandEvidenceOutput(
   output: Result<CommandOutput & { executableDigest?: string }>,
   verifierDeclared: boolean,
+  root: string,
 ) {
-  if (!output.ok) return output.error.message.slice(-8000);
+  if (!output.ok)
+    return [output.error.message, sandboxDenial(output.error.message, root) ? SANDBOX_NOTE : ""]
+      .filter(Boolean)
+      .join("\n")
+      .slice(-8000);
   const text = `${output.value.stdout}\n${output.value.stderr}`.trim();
   const limitation =
     verifierDeclared && !output.value.executableDigest
       ? "VISP: executable identity was unavailable or changed during execution. This result cannot support a witnessed repair or disproof. Use a stable, readable executable on a qualified platform and rerun the relevant checks; do not treat this as a product failure."
       : "";
-  const sandbox = output.value.exitCode !== 0 && sandboxDenied(output.value) ? SANDBOX_NOTE : "";
-  return [text.slice(-(8000 - sandbox.length - 1)), limitation, sandbox]
+  const sandbox = output.value.exitCode !== 0 && sandboxDenial(text, root) ? SANDBOX_NOTE : "";
+  const timeout = output.value.timedOut
+    ? "VISP: check timed out; increase this check's timeoutMs or fix a stalled check before retrying. No passing product result was established."
+    : "";
+  return [text.slice(-(8000 - sandbox.length - timeout.length - 2)), limitation, timeout, sandbox]
     .filter(Boolean)
     .join("\n")
     .slice(-8000);
@@ -129,6 +161,7 @@ export type ExecutionIdentity = Pick<
 async function executeCommand(
   workspace: WorkspaceState,
   check: ProductCheck,
+  signal?: AbortSignal,
 ): Promise<Result<CommandOutput & { executableDigest?: string }>> {
   const valid = validateProductCheckCommand(check);
   if (!valid.ok) return valid;
@@ -147,6 +180,8 @@ async function executeCommand(
           cwd: workspace.paths.root,
           env: environment,
           replaceEnv: true,
+          timeoutMs: check.timeoutMs,
+          signal,
         });
         if (!executed.ok) return executed;
         const after = await commandExecutableDigest(binary, workspace.paths.root, environment);
@@ -173,21 +208,11 @@ async function executeCommand(
   }
 }
 
-function commandStatus(output: Result<CommandOutput>): ProductExecution["status"] {
+function commandStatus(output: Result<CommandOutput>, root: string): ProductExecution["status"] {
   if (!output.ok) return "environment-failed";
-  if (output.value.exitCode === 0 && !output.value.timedOut) return "passed";
-  return sandboxDenied(output.value) ? "environment-failed" : "failed";
-}
-
-/**
- * Host sandboxes (for example Codex workspace-write) deny sockets to supervised checks
- * that the actor ran successfully with escalation. That is not a product failure.
- */
-const SANDBOX_DENIAL =
-  /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind) EPERM\b/;
-const SANDBOX_NOTE =
-  "VISP: the host sandbox denied network sockets to this check, so no product behavior was tested. Rerun the same visp command with the host's sandbox escalation (for Codex, request escalated permissions for that command); do not change the product to work around it.";
-
-function sandboxDenied(output: CommandOutput): boolean {
-  return SANDBOX_DENIAL.test(`${output.stdout}\n${output.stderr}`);
+  if (output.value.timedOut) return "timed-out";
+  if (output.value.exitCode === 0) return "passed";
+  return sandboxDenial(`${output.value.stdout}\n${output.value.stderr}`, root) === "denied"
+    ? "environment-failed"
+    : "failed";
 }

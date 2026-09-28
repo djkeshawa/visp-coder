@@ -1,6 +1,11 @@
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { browserJourneySchema } from "../../testing/browser-journey.js";
+import {
+  cancelledExecution,
+  mergeCaptureState,
+  requireExecutionContract,
+} from "../product/check-lifecycle.js";
 import { criticRouteCommand } from "../product/critic-guidance.js";
 import { supportedHostCaptureRecovery } from "../product/environment-model.js";
 import { inspectProductImages } from "../product/images.js";
@@ -9,6 +14,7 @@ import { withProductMutation } from "../product/runtime.js";
 import { selectProductSlice } from "../product/scopes.js";
 import { type ProductNext, runProductNext } from "../product/status.js";
 import { type ProductSelection, readProductRecord, saveProductState } from "../product/store.js";
+import { productSourceDigest } from "../product/subject.js";
 import type { WorkspaceState } from "../state.js";
 import { replayCommand, replayJourney } from "./capture-replay.js";
 import {
@@ -36,8 +42,11 @@ export async function runProductCapture(
     return err(vispError("CONFIG_INVALID", "Supply exactly one journey or replay run ID"));
   let capturedFeature: string | undefined;
   let capturedTask: string | undefined;
-  const published = await withProductMutation(workspace, async () => {
-    const record = await readProductRecord(workspace, options);
+  const published = await (async () => {
+    if (options.signal?.aborted) return cancelledExecution();
+    const record = await withProductMutation(workspace, () =>
+      readProductRecord(workspace, options),
+    );
     if (!record.ok) return record;
     capturedFeature = record.value.brief.feature;
     const selected =
@@ -59,15 +68,36 @@ export async function runProductCapture(
     return withProductCapture(
       workspace,
       record.value,
-      { journey: journey.data, task, binary: options.binary },
+      { journey: journey.data, task, binary: options.binary, signal: options.signal },
       async (prepared) => {
-        const saved = await saveProductState(
-          workspace,
-          record.value,
-          prepared.state,
-          prepared.mutations,
-        );
-        if (!saved.ok) return saved;
+        const saved = await withProductMutation(workspace, async () => {
+          if (options.signal?.aborted) return cancelledExecution();
+          const current = await readProductRecord(workspace, {
+            feature: record.value.brief.feature,
+          });
+          if (!current.ok) return current;
+          const contract = requireExecutionContract(record.value, current.value);
+          if (!contract.ok) return contract;
+          const subject = await productSourceDigest(workspace, current.value.brief);
+          if (!subject.ok) return subject;
+          if (subject.value !== prepared.subjectDigest)
+            return err(
+              vispError(
+                "EVIDENCE_FAILED",
+                "Product changed before capture publication; capture the current version again",
+              ),
+            );
+          return saveProductState(
+            workspace,
+            current.value,
+            mergeCaptureState(current.value.state, record.value.state, prepared.state),
+            prepared.mutations,
+          );
+        });
+        if (!saved.ok)
+          return saved.error.code === "INTERNAL"
+            ? err({ ...saved.error, code: "EVIDENCE_FAILED" })
+            : saved;
         const inspected = await inspectProductImages(
           workspace,
           prepared.subjectDigest,
@@ -92,7 +122,7 @@ export async function runProductCapture(
         });
       },
     );
-  });
+  })();
   const recovered = replayCaptureRecovery(published, options, capturedFeature, capturedTask);
   if (!recovered.ok) return recovered;
 

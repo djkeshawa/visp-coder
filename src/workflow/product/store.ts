@@ -19,6 +19,11 @@ import {
 } from "./model.js";
 
 export interface ProductSelection {
+  readonly signal?: AbortSignal;
+  readonly deadline?: number;
+  readonly onProgress?: (event: { check: string; status: string }) => void | Promise<void>;
+  /** Internal acceptance continuation after a review of the same checked subject. */
+  readonly reusePassed?: boolean;
   readonly feature?: string;
   readonly task?: string;
   /** Mutating work/check operations only; does not change host permissions. */

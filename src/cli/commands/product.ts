@@ -60,6 +60,9 @@ interface ProductOptions extends GlobalOptions {
   feature?: string;
   task?: string;
   retryEnvironment?: boolean;
+  signal?: AbortSignal;
+  deadline?: number;
+  onProgress?: (event: { check: string; status: string }) => void;
   from?: string;
   patch?: string;
   inspect?: boolean;
@@ -115,6 +118,18 @@ function cliText(name: string, opts: ProductOptions, value: unknown): string {
 }
 
 async function execute(name: string, opts: ProductOptions, mutate: boolean, run: Operation) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  process.once("SIGINT", cancel);
+  process.once("SIGTERM", cancel);
+  opts = {
+    ...opts,
+    signal: controller.signal,
+    deadline: Date.now() - process.uptime() * 1000 + 100_000,
+    onProgress: (event) => {
+      process.stderr.write(`VISP ${event.check}: ${event.status}\n`);
+    },
+  };
   try {
     const mode = productCommandMode(name, opts);
     if (!mode.ok) {
@@ -157,6 +172,9 @@ async function execute(name: string, opts: ProductOptions, mutate: boolean, run:
     process.exitCode = emitError(name, fromUnknown(cause, "ARTIFACT_INVALID"), {
       json: isJson(opts),
     });
+  } finally {
+    process.removeListener("SIGINT", cancel);
+    process.removeListener("SIGTERM", cancel);
   }
 }
 

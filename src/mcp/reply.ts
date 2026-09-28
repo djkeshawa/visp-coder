@@ -50,6 +50,12 @@ export function reply<T>(
  * refusal (a gate saying no) is not — that is a successful answer of "no".
  */
 export function failure(tool: string, error: VispError): CallToolResult {
+  if (error.code === "STATE_BUSY")
+    error = {
+      ...error,
+      recovery:
+        "Another VISP operation owns this worktree. Wait for that MCP call to finish or cancel it, then retry. Inspect visp_doctor for owner details if the lock remains; do not delete a live owner's lock.",
+    };
   return {
     isError: true,
     content: [

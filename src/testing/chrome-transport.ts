@@ -5,7 +5,17 @@ import { join } from "node:path";
 import { productExecutionEnvironment } from "../core/execution-environment.js";
 import { bounded } from "./deadline.js";
 
-export class BrowserUnavailableError extends Error {}
+export const BROWSER_STARTUP_TIMEOUT_MS = 10_000;
+export class BrowserUnavailableError extends Error {
+  constructor(
+    message: string,
+    options?: ErrorOptions & { kind?: "missing-browser" | "permissions" | "startup" },
+  ) {
+    super(message, options);
+    this.kind = options?.kind;
+  }
+  readonly kind?: "missing-browser" | "permissions" | "startup";
+}
 /** An established browser failed to execute an operation; partial history remains diagnostic. */
 export class BrowserRuntimeError extends Error {
   constructor(
@@ -73,10 +83,13 @@ export async function launchChrome(
     }
   }
   try {
-    const endpoint = await debuggingEndpoint(child, options.startupTimeoutMs ?? 10_000);
+    const endpoint = await debuggingEndpoint(
+      child,
+      options.startupTimeoutMs ?? BROWSER_STARTUP_TIMEOUT_MS,
+    );
     connection = await connect(
       endpoint,
-      options.startupTimeoutMs ?? 10_000,
+      options.startupTimeoutMs ?? BROWSER_STARTUP_TIMEOUT_MS,
       options.operationTimeoutMs ?? 5_000,
     );
     return { send: connection.send, onEvent: connection.onEvent, close };
@@ -95,12 +108,23 @@ function startupError(
   diagnosticTruncated: boolean,
 ): BrowserUnavailableError {
   const missing = cause instanceof Error && "code" in cause && cause.code === "ENOENT";
-  const recovery = missing
-    ? "Select an installed Chrome/Chromium executable with --binary or CHROME_BIN."
-    : "Inspect the startup diagnostic and host process permissions. If the host restricts execution, use its supported permission recovery; keep browser sandboxing enabled.";
+  const diagnostic = `${cause instanceof Error ? cause.message : String(cause)}\n${stderr}`;
+  const kind = missing
+    ? "missing-browser"
+    : /\b(?:EPERM|EACCES)\b|Operation not permitted|Permission denied|No usable sandbox/i.test(
+          diagnostic,
+        )
+      ? "permissions"
+      : "startup";
+  const recovery =
+    kind === "missing-browser"
+      ? "Select an installed Chrome/Chromium executable with --binary or CHROME_BIN."
+      : kind === "permissions"
+        ? "Use the host's supported permission recovery; keep browser sandboxing enabled."
+        : "Inspect the startup diagnostic, browser installation and required shared libraries before retrying.";
   return new BrowserUnavailableError(
     `Browser unavailable (${binary}): ${cause instanceof Error ? cause.message : String(cause)}. ${recovery}${stderr.trim() ? `\nBrowser stderr${diagnosticTruncated ? " (truncated)" : ""}:\n${stderr.trim()}` : ""}`,
-    { cause },
+    { cause, kind },
   );
 }
 

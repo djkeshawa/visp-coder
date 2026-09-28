@@ -62,7 +62,7 @@ describe("environment recovery in the product loop", () => {
     await p.workspace.write("src/value.mjs", "export const value=2;");
     const launch = vi.spyOn(capture, "prepareProductCapture").mockResolvedValue(
       err(
-        vispError("UNSUPPORTED", "Browser unavailable: permission denied", {
+        vispError("UNSUPPORTED", "spawn chrome ENOENT", {
           details: { gap: "browser-unavailable" },
         }),
       ),
@@ -163,7 +163,7 @@ describe("environment recovery in the product loop", () => {
     expect(launch).not.toHaveBeenCalled();
   });
 
-  it("authorizes scoped work despite startup failure, caches the gap and explicitly retries", async () => {
+  it("authorizes scoped work despite startup failure and retries transient probe failures", async () => {
     const launch = vi
       .spyOn(probe, "probeBrowserCapability")
       .mockRejectedValue(new Error("Browser unavailable: setsockopt Operation not permitted"));
@@ -198,12 +198,12 @@ describe("environment recovery in the product loop", () => {
         "utf8",
       ),
     ).toBe(before);
-    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledTimes(2);
     launch.mockResolvedValue();
     expect(
       await runProductWork(await p.workspace.state(), { retryEnvironment: true }),
     ).toMatchObject({ ok: true, value: { mayEdit: true } });
-    expect(launch).toHaveBeenCalledTimes(2);
+    expect(launch).toHaveBeenCalledTimes(3);
     const after = await readProductRecord(await p.workspace.state());
     if (!after.ok) throw new Error(after.error.message);
     expect(after.value.state.executions).toEqual([]);

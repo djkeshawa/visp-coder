@@ -120,8 +120,9 @@ async function unavailableEnvironmentNext(
   )
     return undefined;
   const rerun =
-    record.state.executions.some((entry) => entry.status === "environment-failed") ||
-    record.brief.slices.every((entry) => closedSlice(record.state.slices[entry.id]?.status));
+    record.state.executions.some(
+      (entry) => entry.status === "environment-failed" || entry.status === "timed-out",
+    ) || record.brief.slices.every((entry) => closedSlice(record.state.slices[entry.id]?.status));
   const next = environmentNext(
     record.brief.feature,
     slice?.id,
@@ -146,7 +147,9 @@ async function nextClosedProduct(
   subject: string,
 ): Promise<Result<ProductNext>> {
   const failures = currentProductFailures(record, subject);
-  const environmentFailures = failures.filter((entry) => entry.status === "environment-failed");
+  const environmentFailures = failures.filter(
+    (entry) => entry.status === "environment-failed" || entry.status === "timed-out",
+  );
   if (environmentFailures.length)
     return ok(
       environmentNext(
@@ -269,7 +272,9 @@ async function nextOpenSlice(
   const failures = [
     ...new Map(executions.map((execution) => [execution.check, execution])).values(),
   ].filter((execution) => execution.status !== "passed");
-  const environmentFailures = failures.filter((entry) => entry.status === "environment-failed");
+  const environmentFailures = failures.filter(
+    (entry) => entry.status === "environment-failed" || entry.status === "timed-out",
+  );
   if (environmentFailures.length)
     return ok({
       ...environmentNext(
@@ -279,8 +284,16 @@ async function nextOpenSlice(
         "verify",
       ),
       mayEdit: true,
-      objective:
-        "Continue the authorized slice while recovering the failed check's execution environment or correcting its command; required checks remain unresolved",
+      objective: environmentFailures.some((entry) =>
+        /app-unreachable:|check-authoring:|VISP: check timed out/.test(entry.output),
+      )
+        ? environmentNext(
+            record.brief.feature,
+            slice.id,
+            environmentFailures.map((entry) => entry.output),
+            "verify",
+          ).objective
+        : "Continue the authorized slice while recovering the failed check's execution environment or correcting its command; required checks remain unresolved",
     });
   if (failures.length)
     return ok({

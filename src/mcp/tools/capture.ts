@@ -3,6 +3,7 @@ import { z } from "zod";
 import { browserJourneySchema } from "../../testing/browser-journey.js";
 import { runProductCapture } from "../../workflow/evidence/product-capture.js";
 import { mutatingWorkspaceFor } from "../context.js";
+import { mcpOperationOptions } from "../operation-progress.js";
 import { failure } from "../reply.js";
 import { productReply, productSelectionInput } from "./workflow.js";
 
@@ -23,10 +24,16 @@ export function registerCaptureTools(server: McpServer, root: string): void {
         })
         .strict(),
     },
-    async (args) => {
+    async (args, extra) => {
+      const operation = mcpOperationOptions(extra);
+      await operation.onProgress?.({ check: "browser journey", status: "running" });
       const state = await mutatingWorkspaceFor(root);
       return state.ok
-        ? productReply("visp_capture", await runProductCapture(state.value, args), args.detail)
+        ? productReply(
+            "visp_capture",
+            await runProductCapture(state.value, { ...args, ...operation }),
+            args.detail,
+          )
         : failure("visp_capture", state.error);
     },
   );

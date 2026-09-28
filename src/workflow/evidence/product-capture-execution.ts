@@ -17,6 +17,7 @@ import {
 } from "../../testing/browser-journey.js";
 import { BrowserUnavailableError } from "../../testing/chrome-transport.js";
 import { captureBehaviorChange } from "../product/behavior-changes.js";
+import { browserFailureRecovery } from "../product/browser-recovery.js";
 import {
   browserExecutionEnvironmentIdentity,
   supportedHostCaptureRecovery,
@@ -53,6 +54,7 @@ interface CaptureExecutionOptions {
   readonly journey: unknown;
   readonly task?: string;
   readonly binary?: string;
+  readonly signal?: AbortSignal;
 }
 
 export const prepareProductCapture = (
@@ -92,6 +94,7 @@ export async function withProductCapture<T>(
       directory,
       subjectDigest: before.value,
       binary: options.binary,
+      signal: options.signal,
       projectRoot: workspace.paths.root,
       blockedPaths: workspace.config.workflow.blockedPaths,
     });
@@ -245,14 +248,24 @@ function captureFailure(cause: unknown, record: ProductRecord, options: CaptureE
     });
     return err(
       vispError("UNSUPPORTED", cause.message, {
-        recovery: recovery.message,
+        recovery:
+          cause.kind === "startup"
+            ? "Inspect the browser startup diagnostic and restore its installation or required shared libraries before retrying."
+            : recovery.message,
         details: {
           gap: "browser-unavailable",
+          browserFailureKind: cause.kind,
           reviewStatus: "unavailable",
           supportedHostOption: recovery.option,
         },
       }),
     );
   }
-  return err(fromUnknown(cause, "EVIDENCE_FAILED"));
+  const error = fromUnknown(cause, "EVIDENCE_FAILED");
+  const journey = browserJourneySchema.safeParse(options.journey);
+  const recovery = browserFailureRecovery(
+    error.message,
+    journey.success ? journey.data.url : "the configured URL",
+  );
+  return err({ ...error, ...(recovery ? { recovery } : {}) });
 }
