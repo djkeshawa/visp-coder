@@ -1,5 +1,5 @@
 import { STATE_DIR } from "../core/constants.js";
-import { firstMatch, matchesAny } from "../core/patterns.js";
+import { firstMatch, matchesAny, normalizePath } from "../core/patterns.js";
 import type { ImplementMarker } from "../workflow/artifacts/evidence.js";
 
 /**
@@ -172,7 +172,7 @@ export function missingExpectedFiles(
   changed: readonly string[],
   marker: ImplementMarker,
 ): string[] {
-  const normalized = changed.map(normalizeForMatching);
+  const normalized = changed.map(normalizePath);
   return marker.expectedFiles.filter(
     (pattern) => !normalized.some((path) => matchesAny(path, [pattern])),
   );
@@ -200,8 +200,4 @@ function normalizeScopePath(input: string): NormalizedScopePath {
   const path = segments.join("/");
   if (path.length === 0 || /^[A-Za-z]:/.test(path)) return { ok: false };
   return { ok: true, path };
-}
-
-function normalizeForMatching(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
 }

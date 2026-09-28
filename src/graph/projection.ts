@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "../core/hash.js";
 import { EXTERNAL_PREFIX, isExternalRef } from "./constants.js";
 import { pathOfEntityId } from "./ids.js";
 import { isTestPath } from "./paths.js";
@@ -113,7 +114,7 @@ export function collapseToFileGraph(projection: GraphProjection): FileGraph {
     dependencyEdges: sortEdges(edges.dependency.values()),
     testEdges: sortEdges(edges.test.values()),
     externalDeps: [...edges.external.values()].sort(
-      (a, b) => compare(a.from, b.from) || compare(a.module, b.module),
+      (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.module, b.module),
     ),
     unparsedFiles: projection.files.paths
       .filter((_, index) => projection.files.parsed[index] !== true)
@@ -208,7 +209,7 @@ export function reverseImportClosure(
   }
 
   const closure = new Set(seeds);
-  let frontier = [...closure].sort(compare);
+  let frontier = [...closure].sort(compareCodeUnits);
   while (frontier.length > 0) {
     const next: string[] = [];
     for (const path of frontier) {
@@ -218,10 +219,10 @@ export function reverseImportClosure(
         next.push(importer);
       }
     }
-    frontier = next.sort(compare);
+    frontier = next.sort(compareCodeUnits);
   }
 
-  return [...closure].sort(compare);
+  return [...closure].sort(compareCodeUnits);
 }
 
 /** Refresh only direct importers, following re-export chains that carry changed names. */
@@ -243,7 +244,7 @@ export function refreshDependencySet(
     }
   }
   addForwardBarrels(selected, outgoing, reexports);
-  return [...selected].sort(compare);
+  return [...selected].sort(compareCodeUnits);
 }
 
 /** Call resolution needs maps from unchanged barrels a parsed file imports. */
@@ -343,7 +344,7 @@ export function structuralNeighbourhood(
 
   const ordered = [...distances.entries()]
     .map(([path, distance]) => ({ path, hops: distance }))
-    .sort((a, b) => a.hops - b.hops || compare(a.path, b.path));
+    .sort((a, b) => a.hops - b.hops || compareCodeUnits(a.path, b.path));
 
   return {
     files: ordered.slice(0, Math.max(0, maxFiles)),
@@ -528,7 +529,7 @@ function describeEntities(
     });
   }
 
-  return described.sort((a, b) => a.startLine - b.startLine || compare(a.label, b.label));
+  return described.sort((a, b) => a.startLine - b.startLine || compareCodeUnits(a.label, b.label));
 }
 
 function buildAdjacency(edges: readonly FileEdge[]): Map<string, Set<string>> {
@@ -547,9 +548,7 @@ function link(adjacency: Map<string, Set<string>>, from: string, to: string): vo
 }
 
 function sortEdges(edges: Iterable<FileEdge>): FileEdge[] {
-  return [...edges].sort((a, b) => compare(a.from, b.from) || compare(a.to, b.to));
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+  return [...edges].sort(
+    (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.to, b.to),
+  );
 }

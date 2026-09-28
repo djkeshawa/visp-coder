@@ -7,11 +7,7 @@ import { getQueryIndex } from "./index.js";
 import type { QueryArgs, QueryOperation } from "./types.js";
 
 /** Shared positional target interpretation for CLI and MCP graph queries. */
-export function queryArgs(
-  operation: QueryOperation,
-  target: string | undefined,
-  to?: string,
-): QueryArgs {
+function queryArgs(operation: QueryOperation, target: string | undefined, to?: string): QueryArgs {
   if (target === undefined) return {};
   switch (operation) {
     case "search":

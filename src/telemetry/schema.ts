@@ -58,7 +58,7 @@ export type CheckEvent = z.infer<typeof checkEventSchema>;
 export type CheckStage = CheckEvent["stage"];
 export type CheckSource = CheckEvent["source"];
 
-export const usageSegmentSchema = z
+const usageSegmentSchema = z
   .object({
     at: isoTimestampSchema,
     model: z.string().optional(),

@@ -9,7 +9,7 @@ export function fileEntityId(path: string): string {
   return `${path}#file`;
 }
 
-export function entityId(path: string, kind: EntityKind, name: string): string {
+function entityId(path: string, kind: EntityKind, name: string): string {
   return `${path}#${kind}:${name}`;
 }
 

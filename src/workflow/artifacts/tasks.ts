@@ -18,21 +18,19 @@ import {
 /** Historical read-only probe perspectives; retained so recorded task graphs still parse. */
 const probeRoleSchema = z.enum(["impact", "risk", "test", "visual"]);
 
-export const validationCheckSchema = z
+const validationCheckSchema = z
   .object({
     layer: validationLayerSchema,
     command: commandSpecSchema,
   })
   .strict();
 
-export type ValidationCheck = z.infer<typeof validationCheckSchema>;
-
 /**
  * Engineering shapes that determine evidence needs. These are deliberately
  * domain-neutral: a task declares the boundary it changes instead of Visp
  * guessing from words in its title or acceptance criteria.
  */
-export const engineeringConcernSchema = z.enum([
+const engineeringConcernSchema = z.enum([
   "custom-logic",
   "cross-boundary",
   "user-interaction",

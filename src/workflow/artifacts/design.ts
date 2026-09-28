@@ -36,5 +36,3 @@ export const designBriefSchema = z
       .default([]),
   })
   .strict();
-
-export type DesignBrief = z.infer<typeof designBriefSchema>;

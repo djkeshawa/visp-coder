@@ -2,7 +2,7 @@ import { sha256 } from "../../core/hash.js";
 import { ok, type Result } from "../../core/result.js";
 import type { ObservationAttachment, ObservationView } from "../artifacts/observations.js";
 import type { WorkspaceState } from "../state.js";
-import { imageDimensions } from "./observations/media.js";
+import { imageDimensions, imageMimeType } from "./observations/media.js";
 import { readObservationViews } from "./observations.js";
 
 export interface ObservationImage {
@@ -81,16 +81,4 @@ async function loadImage(
 
 function imageTooLarge(size: number | undefined, remaining: number): boolean {
   return size === undefined || size > Math.min(remaining, 4 * 1024 * 1024);
-}
-
-function imageMimeType(bytes: Buffer): string | undefined {
-  if (bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") return "image/png";
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
-  if (/^GIF8[79]a$/.test(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
-  if (
-    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
-    bytes.subarray(8, 12).toString("ascii") === "WEBP"
-  )
-    return "image/webp";
-  return undefined;
 }

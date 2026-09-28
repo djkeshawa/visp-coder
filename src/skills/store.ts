@@ -47,7 +47,7 @@ export interface SkillDocument {
   readonly body: string;
 }
 
-export function skillsDir(state: WorkspaceState): string {
+function skillsDir(state: WorkspaceState): string {
   return join(state.paths.state, "skills");
 }
 

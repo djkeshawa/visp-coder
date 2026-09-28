@@ -3,6 +3,7 @@ import type { GraphConfig } from "../../config/schema.js";
 import { HARD_IGNORED_DIRS, LIMITS } from "../../core/constants.js";
 import { fromUnknown } from "../../core/errors.js";
 import { type ProjectDirectoryEntry, ProjectFileSystem } from "../../core/fs.js";
+import { compareCodeUnits } from "../../core/hash.js";
 import { matchesAny } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { GENERATED_AGENT_PREFIXES, isGraphInputPath } from "../paths.js";
@@ -55,9 +56,9 @@ class Walk {
 
   result(): WalkResult {
     return {
-      files: [...this.files].sort((a, b) => compare(a.path, b.path)),
+      files: [...this.files].sort((a, b) => compareCodeUnits(a.path, b.path)),
       skipped: [...this.skipped].sort(
-        (a, b) => compare(a.path, b.path) || compare(a.reason, b.reason),
+        (a, b) => compareCodeUnits(a.path, b.path) || compareCodeUnits(a.reason, b.reason),
       ),
     };
   }
@@ -187,8 +188,4 @@ class Walk {
     const content = await this.projectFiles.readText(path);
     return content.ok ? inherited.extend(repoDir, content.value) : inherited;
   }
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }

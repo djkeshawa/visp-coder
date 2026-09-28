@@ -13,7 +13,7 @@ import { err, ok, type Result } from "./result.js";
 /** Command-facing vocabulary that must be narrowed before it reaches workflow code. */
 export const HOOK_KINDS = ["claude", "git", "ci"] as const;
 export type HookKindInput = (typeof HOOK_KINDS)[number];
-export const WORKFLOW_MODES = ["full", "compact"] as const;
+const WORKFLOW_MODES = ["full", "compact"] as const;
 export type WorkflowMode = (typeof WORKFLOW_MODES)[number];
 
 export const featureIdSchema = z

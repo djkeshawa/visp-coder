@@ -59,7 +59,7 @@ export function reviewInputTemplate(bundle: ProductReviewBundle) {
 }
 
 /** Prepared sessions own subject and selection identity; reviewers author only these judgments. */
-export function reviewJudgmentsTemplate(bundle: ProductReviewBundle) {
+function reviewJudgmentsTemplate(bundle: ProductReviewBundle) {
   return {
     experimentResolutions: [],
     feedback: {

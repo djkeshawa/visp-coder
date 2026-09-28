@@ -5,8 +5,8 @@ import { err, ok, type Result } from "../core/result.js";
 import { commandMap } from "./command-guide.js";
 import { TOOL_ACCESS_GUIDANCE } from "./instructions.js";
 
-export const AGENT_ACTIVATION_FILE = "AGENTS.md";
-export const ACTIVATION_START = "<!-- visp:instructions:start -->";
+const AGENT_ACTIVATION_FILE = "AGENTS.md";
+const ACTIVATION_START = "<!-- visp:instructions:start -->";
 export const ACTIVATION_END = "<!-- visp:instructions:end -->";
 
 const LEGACY_ACTIVATION_BODY = `${ACTIVATION_START}

@@ -16,7 +16,7 @@ export interface FileEntry {
   readonly language: FileLanguage;
 }
 
-export const SKIP_REASONS = [
+const SKIP_REASONS = [
   "too_large",
   "binary",
   "gitignored",
@@ -38,7 +38,7 @@ export interface WalkResult {
   readonly skipped: SkippedFile[];
 }
 
-export const ENTITY_KINDS = [
+const ENTITY_KINDS = [
   "file",
   "function",
   "class",
@@ -60,7 +60,7 @@ export interface Entity {
   readonly endLine: number;
 }
 
-export const RELATION_KINDS = [
+const RELATION_KINDS = [
   "imports",
   "exports",
   "defines",
@@ -80,7 +80,7 @@ export interface Relation {
   readonly line: number;
 }
 
-export const UNKNOWN_KINDS = [
+const UNKNOWN_KINDS = [
   "parser_error",
   "parse_timeout",
   "dynamic_import",

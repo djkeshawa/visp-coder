@@ -59,7 +59,7 @@ export const skillPreregistrationSchema = z
   .strict();
 export type SkillPreregistration = z.infer<typeof skillPreregistrationSchema>;
 
-export const skillEvaluationInputSchema = z
+const skillEvaluationInputSchema = z
   .object({
     schemaVersion: z.literal(1),
     skillVersion: sha256Schema,

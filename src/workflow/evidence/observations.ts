@@ -150,7 +150,7 @@ export async function attachmentStaleReasons(
   );
 }
 
-export async function attachmentIssue(
+async function attachmentIssue(
   state: WorkspaceState,
   attachment: ObservationAttachment,
 ): Promise<"missing" | "changed" | undefined> {

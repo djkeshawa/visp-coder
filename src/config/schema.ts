@@ -121,11 +121,7 @@ export const configSchema = z
   .strict();
 
 export type VispConfig = z.output<typeof configSchema>;
-export type VispConfigInput = z.input<typeof configSchema>;
-
-export type WorkflowConfig = VispConfig["workflow"];
 export type GraphConfig = VispConfig["graph"];
-export type ContextConfig = VispConfig["context"];
 
 /** The config that applies when no `visp.yml` exists. */
 export function defaultConfig(): VispConfig {

@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { type Harness, PRODUCT_NAME } from "../core/constants.js";
 import { ok, type Result } from "../core/result.js";
+import { optionalObject } from "../core/validation-values.js";
 import { runtimeIdentity } from "../core/version.js";
 import {
   CODEX_CONFIG_FILE,
@@ -18,8 +19,8 @@ import {
 
 export const MCP_CONFIG_FILE = ".mcp.json";
 export const OPENCODE_CONFIG_FILE = "opencode.json";
-export const CURSOR_CONFIG_FILE = ".cursor/mcp.json";
-export const COPILOT_CONFIG_FILE = ".vscode/mcp.json";
+const CURSOR_CONFIG_FILE = ".cursor/mcp.json";
+const COPILOT_CONFIG_FILE = ".vscode/mcp.json";
 export const MCP_SERVER_NAME = PRODUCT_NAME;
 export const MCP_AWARE_HARNESSES: readonly Harness[] = [
   "claude-code",
@@ -110,7 +111,7 @@ export function planMcpRegistration(
   }
 
   const containerPresent = Object.hasOwn(config, shape.container);
-  const existingServers = objectRecord(config[shape.container]);
+  const existingServers = optionalObject(config[shape.container]);
   if (containerPresent && !existingServers) return ok({ status: "malformed" });
 
   const servers = { ...(existingServers ?? {}) };
@@ -140,7 +141,7 @@ export function planMcpUnregistration(
   if (parsed === "malformed") return { status: "malformed" };
 
   const containerPresent = Object.hasOwn(parsed, shape.container);
-  const existingServers = objectRecord(parsed[shape.container]);
+  const existingServers = optionalObject(parsed[shape.container]);
   if (containerPresent && !existingServers) return { status: "malformed" };
   const existing = existingServers?.[MCP_SERVER_NAME];
   if (existing === undefined) return { status: "absent" };
@@ -175,7 +176,7 @@ export function inspectMcpRegistrationResidue(
   }
 
   const containerPresent = Object.hasOwn(parsed, shape.container);
-  const existingServers = objectRecord(parsed[shape.container]);
+  const existingServers = optionalObject(parsed[shape.container]);
   if (containerPresent && !existingServers) {
     return {
       exact: false,
@@ -199,7 +200,7 @@ export function inspectMcpRegistrationResidue(
 
 function parseConfig(text: string): McpConfig | undefined {
   try {
-    return objectRecord(JSON.parse(stripJsonCommentsAndTrailingCommas(text)));
+    return optionalObject(JSON.parse(stripJsonCommentsAndTrailingCommas(text)));
   } catch {
     // Rewriting a file we cannot parse would discard whatever it holds.
     return undefined;
@@ -253,12 +254,6 @@ function parseConfigText(current: string | undefined): McpConfig | "malformed" {
 
 function mentionsVispServer(current: string | undefined): boolean {
   return current !== undefined && /["']visp["']\s*:/u.test(current);
-}
-
-function objectRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 }
 
 function formatConfig(config: McpConfig): string {

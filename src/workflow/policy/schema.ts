@@ -66,5 +66,3 @@ export const overrideStoreSchema = z
     overrides: z.array(overrideSchema).default([]),
   })
   .strict();
-
-export type OverrideStore = z.infer<typeof overrideStoreSchema>;

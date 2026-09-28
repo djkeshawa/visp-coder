@@ -306,7 +306,7 @@ function claudeUsage(
   ];
 }
 
-export function validateUsage(value: NormalizedUsage): NormalizedUsage {
+function validateUsage(value: NormalizedUsage): NormalizedUsage {
   for (const key of [
     "inputTokens",
     "cachedInputTokens",

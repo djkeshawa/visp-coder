@@ -19,7 +19,7 @@ import { evidenceReceiptSchema } from "./evidence-contract.js";
  * ever treated as a pass: a check that did not happen proves nothing, however
  * many of its neighbours did.
  */
-export const codeEvidenceSchema = z.enum(["executed", "partial", "refused", "delegated"]);
+const codeEvidenceSchema = z.enum(["executed", "partial", "refused", "delegated"]);
 export type CodeEvidence = z.infer<typeof codeEvidenceSchema>;
 
 export const commandResultSchema = z
@@ -85,7 +85,7 @@ export const findingSchema = z
 export type Finding = z.infer<typeof findingSchema>;
 
 /** Exact code and contract state to which a verification or review applies. */
-export const evidenceSubjectSchema = z
+const evidenceSubjectSchema = z
   .object({
     digest: sha256Schema,
     basis: z.enum(["working-tree", "staged", "ref"]),
@@ -149,7 +149,7 @@ export const flipCheckSchema = z
  * How one command's failures moved between attempts. A lens over the full
  * output, never a replacement for it — `commands[].output` stays complete.
  */
-export const commandDeltaSchema = z
+const commandDeltaSchema = z
   .object({
     command: z.string(),
     /** Normalised failure lines that were not in the previous attempt. */
@@ -191,7 +191,7 @@ export type Verification = z.infer<typeof verificationSchema>;
  * be run: nothing was learned about it either way, and folding that into
  * `passed` would put a claim in the record that nothing supports.
  */
-export const criterionOutcomeSchema = z.enum(["passed", "failed", "unchecked"]);
+const criterionOutcomeSchema = z.enum(["passed", "failed", "unchecked"]);
 
 export const criterionCheckSchema = z
   .object({
@@ -212,8 +212,6 @@ export const criterionCheckSchema = z
     evidenceReceipts: z.array(evidenceReceiptSchema).max(256).optional(),
   })
   .strict();
-
-export type CriterionCheck = z.infer<typeof criterionCheckSchema>;
 
 export const reviewSchema = z
   .object({
@@ -245,149 +243,6 @@ export const reviewSchema = z
   .strict();
 
 export type Review = z.infer<typeof reviewSchema>;
-
-export const featureEvidenceIssueSchema = z
-  .object({
-    task: taskIdSchema.optional(),
-    stage: z.enum(["task", "verification", "review", "acceptance"]),
-    code: z.string().min(1),
-  })
-  .strict();
-
-const attemptFailureFingerprintSummarySchema = z
-  .object({
-    fingerprint: sha256Schema,
-    count: z.number().int().positive(),
-    firstCreatedAt: isoTimestampSchema,
-    lastCreatedAt: isoTimestampSchema,
-  })
-  .strict()
-  .superRefine((summary, context) => {
-    if (summary.firstCreatedAt > summary.lastCreatedAt) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "firstCreatedAt must not be later than lastCreatedAt",
-        path: ["firstCreatedAt"],
-      });
-    }
-  });
-
-/** Complete history after combining retained receipts with compacted metadata. */
-export const attemptHistorySummarySchema = z
-  .object({
-    task: taskIdSchema.optional(),
-    stage: z.enum(["verification", "review"]),
-    total: z.number().int().positive(),
-    kept: z.number().int().nonnegative(),
-    candidates: z.number().int().nonnegative(),
-    compacted: z.number().int().nonnegative(),
-    firstCreatedAt: isoTimestampSchema,
-    lastCreatedAt: isoTimestampSchema,
-    failureFingerprints: z.array(attemptFailureFingerprintSummarySchema).default([]),
-  })
-  .strict()
-  .superRefine((history, context) => {
-    if (history.firstCreatedAt > history.lastCreatedAt) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "firstCreatedAt must not be later than lastCreatedAt",
-        path: ["firstCreatedAt"],
-      });
-    }
-    if (history.total !== history.kept + history.compacted) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "total must equal kept plus compacted attempts",
-        path: ["total"],
-      });
-    }
-    if (history.candidates > history.compacted) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "candidates cannot exceed compacted attempts",
-        path: ["candidates"],
-      });
-    }
-    const seen = new Set<string>();
-    let fingerprinted = 0;
-    for (const [index, fingerprint] of history.failureFingerprints.entries()) {
-      fingerprinted += fingerprint.count;
-      if (seen.has(fingerprint.fingerprint)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "failure fingerprints must be unique within an attempt group",
-          path: ["failureFingerprints", index, "fingerprint"],
-        });
-      }
-      seen.add(fingerprint.fingerprint);
-    }
-    if (fingerprinted > history.total) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "failure fingerprint counts cannot exceed total attempts",
-        path: ["failureFingerprints"],
-      });
-    }
-  });
-
-/** One canonical, machine-derived verdict shared by status and PR output. */
-export const featureEvidenceSummarySchema = z
-  .object({
-    productAcceptance: z
-      .object({
-        status: z.enum(["pending", "passed", "failed", "stale"]),
-        findings: z.array(findingSchema),
-      })
-      .strict()
-      .optional(),
-    /** Optional for legacy artifacts; workflow readiness alone is not acceptance. */
-    completion: z
-      .object({
-        workflow: z.enum(["ready", "blocked"]),
-        evidence: z.enum(["no-known-limitations", "limited", "unavailable"]),
-        acceptance: z.enum(["checks-satisfied", "unresolved", "unassessed"]),
-      })
-      .strict()
-      .optional(),
-    ready: z.boolean(),
-    totalTasks: z.number().int().nonnegative(),
-    tasksDone: z.number().int().nonnegative(),
-    verificationPassed: z.number().int().nonnegative(),
-    reviewPassed: z.number().int().nonnegative(),
-    /** Legacy field: passed tasks with no recorded evidence limitations, not semantic proof. */
-    fullyEvidenced: z.number().int().nonnegative(),
-    assessment: z
-      .object({
-        commandsExecuted: z.number().int().nonnegative(),
-        criteriaPassed: z.number().int().nonnegative(),
-        criteriaFailed: z.number().int().nonnegative(),
-        criteriaUnchecked: z.number().int().nonnegative(),
-        tasksWithLimitations: z.number().int().nonnegative(),
-      })
-      .strict()
-      .optional(),
-    blockers: z.array(featureEvidenceIssueSchema).default([]),
-    limitations: z.array(featureEvidenceIssueSchema).default([]),
-    latestClosedTask: taskIdSchema.optional(),
-    /** Optional so summaries embedded in older PR artifacts remain readable. */
-    attemptHistory: z.array(attemptHistorySummarySchema).optional(),
-  })
-  .strict();
-
-export const pullRequestSchema = z
-  .object({
-    ...artifactEnvelope("pr"),
-    feature: featureIdSchema,
-    title: z.string().min(1),
-    body: z.string(),
-    changedFiles: z.array(z.string()).default([]),
-    checklist: z.array(z.string()).default([]),
-    /** Optional so PR artifacts written by older Visp versions still parse. */
-    summary: featureEvidenceSummarySchema.optional(),
-  })
-  .strict();
-
-export type PullRequest = z.infer<typeof pullRequestSchema>;
 
 /**
  * Authorization to edit a specific task's files. Written by `gate implement`,

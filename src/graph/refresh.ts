@@ -86,7 +86,7 @@ export async function refreshRepository(
   return runIndex(root, config, storePath, "incremental");
 }
 
-export async function runIndex(
+async function runIndex(
   root: string,
   config: GraphConfig,
   storePath: string,

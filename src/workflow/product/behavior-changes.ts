@@ -70,7 +70,7 @@ export function compareObservations(before: Observation | undefined, after: Obse
   };
 }
 
-export function describeObservation(run: Observation) {
+function describeObservation(run: Observation) {
   return {
     runId: run.id,
     subjectDigest: run.subjectDigest,

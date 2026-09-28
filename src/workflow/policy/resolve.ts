@@ -51,13 +51,13 @@ export function resolveRule(
 }
 
 /** The policy's on/off decision for a rule, before overrides. */
-export function isEnabled(rule: Rule, policy: Policy): boolean {
+function isEnabled(rule: Rule, policy: Policy): boolean {
   const explicit = policy.rules[rule.id];
   if (explicit !== undefined) return explicit;
   return defaultRuleState(policy.strictness)[rule.id];
 }
 
-export function findApplicableOverride(
+function findApplicableOverride(
   ruleId: RuleId,
   overrides: readonly Override[],
   context: RuleContext = {},

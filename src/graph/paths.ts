@@ -46,12 +46,6 @@ export function dirname(path: string): string {
   return slash === -1 ? "" : path.slice(0, slash);
 }
 
-export function stem(path: string): string {
-  const base = basename(path);
-  const extension = extensionOf(base);
-  return extension ? base.slice(0, base.length - extension.length) : base;
-}
-
 /** Joins and normalizes `.`/`..` segments without touching the filesystem. */
 export function joinPosix(base: string, ...segments: string[]): string {
   const parts: string[] = [];

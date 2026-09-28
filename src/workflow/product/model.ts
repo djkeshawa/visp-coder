@@ -21,7 +21,7 @@ import { userFeedbackRecordSchema } from "./user-feedback-model.js";
 
 const id = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
 const provenance = z.enum(["user-stated", "independent", "agent-proposed", "legacy"]);
-export const productOutcomeSchema = z
+const productOutcomeSchema = z
   .object({
     id,
     kind: z.enum(["functional", "quality", "experience"]),
