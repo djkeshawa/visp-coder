@@ -79,7 +79,7 @@ describe("product work authorization boundaries", () => {
     expect(await bytes()).toEqual(authorized);
   });
 
-  it("rejects unknown explicit and active slices without touching authorization", async () => {
+  it("rejects unknown explicit selections without touching authorization", async () => {
     const before = await bytes();
     const state = await workspace.state();
     for (const operation of [runProductContext, runProductWork]) {
@@ -87,18 +87,31 @@ describe("product work authorization boundaries", () => {
         ok: false,
         error: { code: "TASK_NOT_FOUND" },
       });
-      expect(
-        await operation({
-          ...state,
-          status: state.status ? { ...state.status, activeTask: "T999" } : undefined,
-        }),
-      ).toMatchObject({ ok: false, error: { code: "TASK_NOT_FOUND" } });
       expect(await operation(state, { feature: "999-missing" })).toMatchObject({
         ok: false,
         error: { code: "ARTIFACT_MISSING" },
       });
     }
     expect(await bytes()).toEqual(before);
+  });
+
+  it("recovers a stale saved slice without granting edits until work is requested", async () => {
+    const before = await bytes();
+    const state = await workspace.state();
+    const stale = {
+      ...state,
+      status: state.status ? { ...state.status, activeTask: "T999" } : undefined,
+    };
+    expect(value(await runProductContext(stale))).toMatchObject({
+      task: "T001",
+      mayEdit: false,
+    });
+    expect(await bytes()).toEqual(before);
+    const work = value(await runProductWork(stale));
+    expect(work).toMatchObject({ task: "T001", mayEdit: true });
+    expect(work.notes.join()).toContain("T999");
+    const after = await bytes();
+    expect(after.auth && JSON.parse(after.auth)).toMatchObject({ task: "T001" });
   });
 
   it("leaves a feature without a next slice incomplete instead of granting broad scope", async () => {
