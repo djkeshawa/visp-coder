@@ -38,6 +38,11 @@ path = os.environ["PATH"]
 if arm.get("shim"):
     path = f"{arm['shim']}:{path}"
 env = {"HOME": str(home), "CODEX_HOME": str(codex_home), "PATH": path, "LANG": "C.UTF-8"}
+# BMAD renders its skills with `uv run`, which otherwise downloads CPython into every clean
+# home; the worker read that as breaking the no-download rule and stopped. Use the host's.
+uv_python = pathlib.Path.home() / ".local" / "share" / "uv" / "python"
+if uv_python.is_dir():
+    env.update({"UV_PYTHON_INSTALL_DIR": str(uv_python), "UV_PYTHON_DOWNLOADS": "never"})
 argv = [
     *isolate(),
     # Equivalent to the user trusting the project's hooks once with /hooks.
