@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.0.0
+        specifier: ^1.23.0
         version: 1.30.0(zod@3.25.76)
       '@vscode/tree-sitter-wasm':
         specifier: ^0.3.1

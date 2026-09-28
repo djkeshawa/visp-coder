@@ -59,7 +59,10 @@ export function search(index: SnapshotIndex, args: QueryArgs): QueryDraft {
 
   return {
     rows: matches.map((entity) => entityRow(entity)).sort(byKey),
-    unknowns: relevantUnknowns(index, paths, term),
+    unknowns:
+      term === "" && path !== undefined
+        ? index.unknownsFor([path])
+        : relevantUnknowns(index, paths, term),
     notes: matches.length === 0 ? [describeMiss(args)] : [],
   };
 }

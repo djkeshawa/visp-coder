@@ -40,6 +40,22 @@ describe("describe", () => {
 });
 
 describe("search", () => {
+  it("limits path-only unknowns to that file", () => {
+    snapshot.unknowns.push({ kind: "unresolved_call", path: "elsewhere.ts", detail: "anything" });
+    snapshot.unknowns.push({ kind: "unresolved_call", path: "src/math.ts", detail: "local" });
+    const answer = ask("search", { path: "src/math.ts" });
+    expect(answer.unknowns).toContainEqual({
+      kind: "unresolved_call",
+      path: "src/math.ts",
+      detail: "local",
+    });
+    expect(answer.unknowns).not.toContainEqual({
+      kind: "unresolved_call",
+      path: "elsewhere.ts",
+      detail: "anything",
+    });
+    expect(answer.unknowns.every((unknown) => unknown.path === "src/math.ts")).toBe(true);
+  });
   it("matches entity names by substring", () => {
     const answer = ask("search", { name: "calc" });
     expect(answer.rows.map((row) => row.name)).toContain("Calculator");
@@ -69,6 +85,19 @@ describe("entity", () => {
 });
 
 describe("traversal operations", () => {
+  it("shows unresolved calls in other files that name the seed", () => {
+    snapshot.unknowns.push({
+      kind: "unresolved_call",
+      path: "src/elsewhere.ts",
+      detail: "module.add",
+    });
+    const answer = ask("callers", { entity: "src/math.ts#function:add" });
+    expect(answer.unknowns).toContainEqual({
+      kind: "unresolved_call",
+      path: "src/elsewhere.ts",
+      detail: "module.add",
+    });
+  });
   it("finds callers and callees of a function", () => {
     const callers = ask("callers", { entity: "src/math.ts#function:add" });
     const callees = ask("callees", { entity: "src/app.ts#function:run" });

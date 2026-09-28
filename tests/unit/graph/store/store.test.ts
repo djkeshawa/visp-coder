@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openStore } from "../../../../src/graph/store/index.js";
 import type { GraphStore } from "../../../../src/graph/store/store.js";
@@ -55,6 +57,25 @@ function snapshot(overrides: Partial<SnapshotInput> = {}): SnapshotInput {
 }
 
 describe("snapshot round trip", () => {
+  it("returns a retryable graph error when another process holds the writer lock", () => {
+    const { DatabaseSync: Database } = createRequire(import.meta.url)("node:sqlite") as {
+      DatabaseSync: typeof DatabaseSync;
+    };
+    const holder = new Database(repo.storePath);
+    holder.exec("BEGIN IMMEDIATE");
+    try {
+      const result = store.publishSnapshot(snapshot());
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe("GRAPH_BUSY");
+        expect(result.error.recovery).toContain("Retry");
+      }
+    } finally {
+      holder.exec("ROLLBACK");
+      holder.close();
+    }
+  }, 10_000);
+
   it("returns everything that was published", async () => {
     const published = store.publishSnapshot(snapshot());
     if (!published.ok) throw new Error(published.error.message);
@@ -76,6 +97,8 @@ describe("snapshot round trip", () => {
     const head = store.readHead();
     expect(head.ok && head.value).toBeUndefined();
     expect(store.requireHead().ok).toBe(false);
+    const missing = store.requireHead();
+    expect(!missing.ok && missing.error.recovery).toBe("visp index");
   });
 
   it("exposes per-file hashes for incremental reuse", () => {

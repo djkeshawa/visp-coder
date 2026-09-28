@@ -28,7 +28,7 @@ export function doctorCommand(): Command {
     )
     .option(
       "--check-command <command>",
-      "Run an explicit smoke command through the verification subprocess (executes project code)",
+      "Run a smoke command with the current environment (executes project code; not product verification)",
     )
     .option(
       "--check-layer <layer>",
@@ -75,7 +75,7 @@ export function doctorCommand(): Command {
             )
           : checked;
       const remaining = report.checks.filter((check) => check.recovery);
-      const featureReadiness = await readFeatureReadiness(state.value);
+      const featureReadiness = await readDoctorFeatureReadiness(state.value, report.checks);
       const settings = await requestedSettings(state.value, opts.settings);
 
       process.exitCode = emit(
@@ -147,11 +147,17 @@ function renderFeatureReadiness(
     active ? "Before continuing feature work:" : "Before starting a feature:",
     ...blockers.map(
       ({ requirement, error }) =>
-        `  ${requirement}: ${error.message}${error.recovery ? ` Recovery: ${error.recovery}` : ""}`,
+        `  ${requirement}: ${error.message}${error.recovery ? `. Recovery: ${error.recovery}` : ""}`,
     ),
     ...(active
       ? []
-      : ["Finish installation before reviewing and committing the project baseline."]),
+      : [
+          blockers.some(
+            ({ requirement }) => requirement === "harness" || requirement === "enforcement",
+          )
+            ? "Finish installation before reviewing and committing the project baseline."
+            : "Commit the project baseline, then start a feature.",
+        ]),
   ];
 }
 
@@ -164,6 +170,24 @@ async function readFeatureReadiness(state: WorkspaceState) {
         !state.status?.activeFeature,
       )
     : [{ requirement: "inspection", error: foundation.error }];
+}
+
+async function readDoctorFeatureReadiness(state: WorkspaceState, checks: readonly Check[]) {
+  const mismatch = checks.find(
+    (check) => check.name === "installed runtime" && check.status === "fail",
+  );
+  if (!mismatch) return readFeatureReadiness(state);
+  return [
+    {
+      requirement: "harness" as const,
+      error: {
+        code: "RUNTIME_MISMATCH" as const,
+        message:
+          "Installed assets differ from this CLI build; readiness cannot be assessed from this process",
+        recovery: mismatch.recovery,
+      },
+    },
+  ];
 }
 
 function renderCheck(check: Check): string {

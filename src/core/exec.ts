@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { LIMITS } from "./constants.js";
 import { fromUnknown } from "./errors.js";
 import { err, ok, type Result } from "./result.js";
+import { prepareCommand } from "./windows-command.js";
 
 export interface CommandOutput {
   readonly command: string;
@@ -35,11 +36,14 @@ export function run(
     try {
       options.signal?.throwIfAborted();
       if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new Error("Invalid command timeout");
-      child = spawn(file, [...args], {
+      const env = options.replaceEnv ? (options.env ?? {}) : { ...process.env, ...options.env };
+      const prepared = prepareCommand(file, args, env);
+      child = spawn(prepared.file, prepared.args, {
         cwd: options.cwd,
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
-        env: options.replaceEnv ? (options.env ?? {}) : { ...process.env, ...options.env },
+        env,
+        windowsVerbatimArguments: prepared.windowsVerbatimArguments,
       });
     } catch (cause) {
       resolve(err(fromUnknown(cause, "COMMAND_FAILED")));
@@ -164,7 +168,7 @@ class BoundedOutput {
  * metacharacters is rejected rather than passed to a shell.
  */
 export function parseCommand(input: string): Result<string[], ShellSyntaxError> {
-  const metacharacter = /[|&;<>$`\\(){}[\]!*?~\n]/.exec(input);
+  const metacharacter = /[|&;<>$`(){}[\]!*?~\n]/.exec(input);
   if (metacharacter) {
     return {
       ok: false,

@@ -69,8 +69,8 @@ export function planAgentActivation(
     start >= endMarker
   ) {
     return err(
-      vispError("ARTIFACT_INVALID", `${AGENT_ACTIVATION_FILE} has malformed VISP markers`, {
-        recovery: `Repair or remove the ${ACTIVATION_START} / ${ACTIVATION_END} block, then rerun visp install`,
+      vispError("ARTIFACT_INVALID", `${agentActivationFile(harness)} has malformed VISP markers`, {
+        recovery: `Repair or remove the ${ACTIVATION_START} / ${ACTIVATION_END} block in ${agentActivationFile(harness)}, then rerun visp install`,
       }),
     );
   }
@@ -81,9 +81,13 @@ export function planAgentActivation(
 
   if (!force && !ownedActivationBlock(installed)) {
     return err(
-      vispError("ARTIFACT_INVALID", "The VISP block in AGENTS.md was edited and was left alone", {
-        recovery: "Rerun visp install --force to replace only the managed VISP block",
-      }),
+      vispError(
+        "ARTIFACT_INVALID",
+        `The VISP block in ${agentActivationFile(harness)} was edited and was left alone`,
+        {
+          recovery: `Rerun visp install --force to replace only the managed VISP block in ${agentActivationFile(harness)}`,
+        },
+      ),
     );
   }
 

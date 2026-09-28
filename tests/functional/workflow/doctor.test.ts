@@ -56,11 +56,13 @@ describe("doctor", () => {
     expect(result.stdout).toContain("repository index");
   });
 
-  it("runs an explicit smoke command through the verification subprocess", async () => {
+  it("runs an explicit smoke command and explains its verification limitation", async () => {
     await project.write("smoke.mjs", "process.exit(0);\n");
     const passed = project.run("doctor", "--check-command", "node smoke.mjs");
     expect(passed.exitCode).toBe(0);
     expect(passed.stdout).toContain("validation smoke");
+    expect(passed.stdout).toContain("current shell environment");
+    expect(passed.stdout).toContain("product verification adds");
     await project.write("smoke.mjs", "process.exit(3);\n");
     const failed = project.run("doctor", "--check-command", "node smoke.mjs");
     expect(failed.exitCode).not.toBe(0);
@@ -79,13 +81,15 @@ describe("doctor", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Repaired:");
-    expect(result.stdout).toContain("healthy");
+    expect(result.stdout).toContain("degraded");
+    expect(result.stdout).toContain("Point your coding agent at AGENTS.visp.md");
   });
 
   it("is idempotent, so running it twice changes nothing", () => {
     project.run("doctor", "--fix");
     const second = project.run("doctor", "--fix");
-    expect(second.stdout).toContain("healthy");
+    expect(second.stdout).toContain("Already in place");
+    expect(second.stdout).toContain("degraded");
   });
 
   /**

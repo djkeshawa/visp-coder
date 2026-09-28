@@ -14,13 +14,56 @@ export type Resolution =
 export interface ResolutionContext {
   readonly files: ReadonlySet<string>;
   readonly aliases: AliasTable;
+  readonly pythonRoots?: readonly string[];
+  readonly pythonPackages?: ReadonlySet<string>;
 }
 
 export function createResolutionContext(
   files: Iterable<string>,
   aliases: AliasTable,
 ): ResolutionContext {
-  return { files: new Set(files), aliases };
+  const paths = new Set(files);
+  const { pythonRoots, pythonPackages } = discoverPythonRoots(paths);
+  discoverNamespacePackages(paths, pythonRoots, pythonPackages);
+  return { files: paths, aliases, pythonRoots: [...pythonRoots], pythonPackages };
+}
+
+function discoverPythonRoots(paths: ReadonlySet<string>) {
+  const pythonRoots = new Set(["", "src"]);
+  const pythonPackages = new Set<string>();
+  for (const path of paths) {
+    if (path.endsWith("/pyproject.toml") || path.endsWith("/setup.cfg")) {
+      pythonRoots.add(dirname(path));
+    }
+    const srcAt = path.lastIndexOf("/src/");
+    if (srcAt !== -1 && (path.endsWith(".py") || path.endsWith(".pyi"))) {
+      pythonRoots.add(path.slice(0, srcAt + 4));
+    }
+    if (!path.endsWith("/__init__.py")) continue;
+    const parts = path.split("/");
+    const packageName = parts.at(-2);
+    if (!packageName) continue;
+    pythonPackages.add(packageName);
+    pythonRoots.add(parts.slice(0, -2).join("/"));
+  }
+  return { pythonRoots, pythonPackages };
+}
+
+function discoverNamespacePackages(
+  paths: ReadonlySet<string>,
+  pythonRoots: ReadonlySet<string>,
+  pythonPackages: Set<string>,
+): void {
+  for (const path of paths) {
+    if (!path.endsWith(".py") && !path.endsWith(".pyi")) continue;
+    for (const root of pythonRoots) {
+      const prefix = root === "" ? "" : `${root}/`;
+      if (!path.startsWith(prefix)) continue;
+      const remaining = path.slice(prefix.length);
+      const separator = remaining.indexOf("/");
+      if (separator > 0) pythonPackages.add(remaining.slice(0, separator));
+    }
+  }
 }
 
 export function resolveScriptImport(
@@ -116,8 +159,14 @@ export function resolvePythonImport(
     return hit ? { kind: "file", path: hit } : { kind: "unresolved", detail: specifier };
   }
 
-  const hit = probePython(context, moduleName.split(".").join("/"));
-  return hit ? { kind: "file", path: hit } : { kind: "external", ref: externalRef(specifier) };
+  const modulePath = moduleName.split(".").join("/");
+  for (const root of context.pythonRoots ?? ["", "src"]) {
+    const hit = probePython(context, joinPosix(root, modulePath));
+    if (hit) return { kind: "file", path: hit };
+  }
+  return context.pythonPackages?.has(moduleName.split(".")[0] ?? "")
+    ? { kind: "unresolved", detail: specifier }
+    : { kind: "external", ref: externalRef(specifier) };
 }
 
 function probePython(context: ResolutionContext, base: string): string | undefined {

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFile, symlink } from "node:fs/promises";
+import { readFile, rm, symlink } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -67,6 +67,28 @@ describe("bounded product input", () => {
     await expect(readCommandInput(state, "-", Readable.from(["value: [\n"]))).rejects.toThrow();
     await expect(readCommandInput(state, "../outside.yaml")).rejects.toThrow();
   });
+
+  it.skipIf(process.platform === "win32")(
+    "reads an absolute input through a symlinked project root",
+    async () => {
+      const { workspace } = await productWorkspace();
+      workspaces.push(workspace);
+      const link = `${workspace.root}-link`;
+      await symlink(workspace.root, link, "dir");
+      const previousTemp = process.env.TMPDIR;
+      try {
+        process.env.TMPDIR = join(workspace.root, "input-temp");
+        await workspace.write(".visp/input.yaml", "answer: 42\n");
+        expect(
+          await readCommandInput(await workspace.state(), join(link, ".visp/input.yaml")),
+        ).toEqual({ answer: 42 });
+      } finally {
+        if (previousTemp === undefined) delete process.env.TMPDIR;
+        else process.env.TMPDIR = previousTemp;
+        await rm(link);
+      }
+    },
+  );
 
   it("bounds file size before reading and retains the limit if a file grows", async () => {
     const { workspace } = await productWorkspace();

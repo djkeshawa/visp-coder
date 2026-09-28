@@ -39,8 +39,9 @@ jobs:
           tests/unit/graph/walker/walk.test.ts
           tests/unit/harness/activation.test.ts
           tests/unit/harness/install-transaction.test.ts
+          tests/integration/windows-native-spawn.test.ts
           tests/unit/workflow/transaction-fault-injection.test.ts
-          --maxWorkers=1 --minWorkers=1
+          --maxWorkers=2 --minWorkers=1
 
   check:
     runs-on: ubuntu-latest

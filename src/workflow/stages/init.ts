@@ -19,6 +19,7 @@ import {
 import { ProjectFileSystem } from "../../core/fs.js";
 import { isRepository, repositoryRequiredError } from "../../core/git.js";
 import { ProjectPaths } from "../../core/paths.js";
+import { initializedProjectRoot } from "../../core/project-root.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { now } from "../artifacts/common.js";
 import { emptyStatus } from "../artifacts/project.js";
@@ -70,6 +71,14 @@ export async function runInit(
     );
   }
   const paths = new ProjectPaths(options.root);
+  const ancestor = initializedProjectRoot(paths.root);
+  if (ancestor && ancestor !== paths.root) {
+    return err(
+      vispError("ALREADY_INITIALIZED", `VISP is already initialized at ${ancestor}`, {
+        recovery: `Run visp from ${ancestor} or pass --project ${ancestor}`,
+      }),
+    );
+  }
   const files = new ProjectFileSystem(paths.root);
   const ready = await ensureInitReady(paths, files, options.force === true, options.harness);
   if (!ready.ok) return ready;

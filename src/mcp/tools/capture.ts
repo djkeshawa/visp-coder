@@ -19,7 +19,6 @@ export function registerCaptureTools(server: McpServer, root: string): void {
           ...productSelectionInput,
           journey: browserJourneySchema.optional(),
           replay: z.string().min(1).optional(),
-          binary: z.string().optional(),
           detail: z.boolean().optional(),
         })
         .strict(),

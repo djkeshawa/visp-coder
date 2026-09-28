@@ -7,7 +7,7 @@ import {
   type FileMutation,
   filePrecondition,
 } from "../../core/file-transaction.js";
-import { hashValue, sha256 } from "../../core/hash.js";
+import { hashValue } from "../../core/hash.js";
 import { isPortableAbsolute } from "../../core/paths.js";
 import { matchesAny } from "../../core/patterns.js";
 import { err, ok } from "../../core/result.js";
@@ -15,6 +15,8 @@ import type { WorkspaceState } from "../state.js";
 import { type CriticSelection, recordGuards } from "./critic-store.js";
 import type { ProductSlice } from "./model.js";
 import { checkProductScope } from "./scopes.js";
+import { readSourceEntry, sourceEntryHash, sourceEntryMutation } from "./source-entry.js";
+import { candidateSourcePaths } from "./source-inputs.js";
 import { json } from "./store.js";
 import { productSourceDigest, productSourceSnapshot } from "./subject.js";
 
@@ -33,6 +35,7 @@ const fileSchema = z
     path: pathSchema,
     content: z.string().nullable(),
     mode: z.number().int().optional(),
+    symlink: z.literal(true).optional(),
     hash: z.string(),
   })
   .strict();
@@ -65,12 +68,23 @@ export async function prepareCandidate(
 ) {
   const snapshot = await productSourceSnapshot(workspace, selected.record.brief);
   if (!snapshot.ok) return snapshot;
-  if (Object.keys(snapshot.value).length > 2000)
-    return err(vispError("UNSUPPORTED", "Candidate exceeds 2000 source files"));
+  const paths = candidateSourcePaths(
+    workspace,
+    selected.record.brief,
+    snapshot.value,
+    selected.slice,
+  );
+  if (paths.length > 2000)
+    return err(
+      vispError("UNSUPPORTED", "Candidate exceeds 2000 declared source files", {
+        recovery: "Narrow this slice's scope and check inputs before preserving a candidate.",
+      }),
+    );
   const files: ProductCandidate["files"] = [];
   const guards: FileMutation[] = [];
   let bytes = 0;
-  for (const [path, expected] of Object.entries(snapshot.value)) {
+  for (const path of paths) {
+    const expected = snapshot.value[path] ?? "";
     const captured = await captureFile(workspace, path, expected, bytes);
     if (!captured.ok) return captured;
     bytes += captured.value.bytes;
@@ -168,7 +182,12 @@ export async function restoreCandidate(
   if (!subject.ok) return subject;
   if (subject.value !== expectedSubject)
     return err(vispError("EVIDENCE_FAILED", "Source changed since the restore request"));
-  const planned = await planRestore(workspace, selected.slice, current.value, candidate.value);
+  const selectedCurrent = Object.fromEntries(
+    candidateSourcePaths(workspace, selected.record.brief, current.value, selected.slice).map(
+      (path) => [path, current.value[path] ?? ""],
+    ),
+  );
+  const planned = await planRestore(workspace, selected.slice, selectedCurrent, candidate.value);
   if (!planned.ok) return planned;
   const result = await applyFileTransaction(workspace.paths.root, "restore-product-candidate", [
     ...recordGuards(workspace, selected.record),
@@ -190,37 +209,24 @@ async function captureFile(
   expected: string,
   bytes: number,
 ) {
-  const metadata = await workspace.files.readMetadata(path);
-  if (!metadata.ok) return metadata;
-  if ((metadata.value?.size ?? 0) + bytes > MAX_BYTES)
-    return err(vispError("UNSUPPORTED", "Candidate exceeds 32 MiB"));
-  const read = await workspace.files.readBytesIfExists(path);
+  const read = await readSourceEntry(workspace.files, path, MAX_BYTES - bytes);
   if (!read.ok) return read;
-  if ((read.value?.length ?? 0) + bytes > MAX_BYTES)
-    return err(vispError("UNSUPPORTED", "Candidate exceeds 32 MiB"));
-  const hash = hashValue({
-    hash: read.value === undefined ? null : sha256(read.value),
-    mode: metadata.value?.mode,
-  });
+  const entry = read.value;
+  const hash = sourceEntryHash(entry.bytes, entry.mode, entry.symlink);
   if (hash !== expected)
     return err(vispError("EVIDENCE_FAILED", "Source changed during candidate capture"));
   const file = {
     path,
-    content: read.value === undefined ? null : Buffer.from(read.value).toString("base64"),
-    mode: metadata.value?.mode,
+    content: entry.bytes === undefined ? null : Buffer.from(entry.bytes).toString("base64"),
+    mode: entry.mode,
+    ...(entry.symlink ? { symlink: true as const } : {}),
     hash,
   };
-  const guard: FileMutation =
-    read.value === undefined
-      ? { kind: "remove", path, expectedBefore: filePrecondition(undefined) }
-      : {
-          kind: "write",
-          path,
-          content: read.value,
-          mode: metadata.value?.mode,
-          expectedBefore: filePrecondition(read.value, metadata.value?.mode),
-        };
-  return ok({ file, guard, bytes: read.value?.length ?? 0 });
+  return ok({
+    file,
+    guard: sourceEntryMutation(path, entry, entry),
+    bytes: entry.bytes?.length ?? 0,
+  });
 }
 
 function validateFiles(candidate: ProductCandidate) {
@@ -230,7 +236,9 @@ function validateFiles(candidate: ProductCandidate) {
     const bytes = file.content === null ? undefined : Buffer.from(file.content, "base64");
     if (bytes && bytes.toString("base64") !== file.content) throw new Error("encoding");
     if (
-      hashValue({ hash: bytes === undefined ? null : sha256(bytes), mode: file.mode }) !== file.hash
+      sourceEntryHash(bytes, file.mode, file.symlink) !== file.hash ||
+      (file.symlink &&
+        (bytes === undefined || bytes.length === 0 || bytes.includes(0) || file.mode !== 0o777))
     )
       throw new Error("hash");
   }
@@ -255,35 +263,22 @@ async function planRestore(
       return err(
         vispError("SCOPE_VIOLATION", `Restoration would change out-of-scope file: ${path}`),
       );
-    const before = await workspace.files.readBytesIfExists(path);
+    const before = await readSourceEntry(workspace.files, path, MAX_BYTES);
     if (!before.ok) return before;
-    const meta = await workspace.files.readMetadata(path);
-    if (!meta.ok) return meta;
-    if (!matchesSnapshot(current[path], before.value, meta.value?.mode))
+    const entry = before.value;
+    if (
+      current[path] === undefined
+        ? entry.bytes !== undefined
+        : sourceEntryHash(entry.bytes, entry.mode, entry.symlink) !== current[path]
+    )
       return err(vispError("EVIDENCE_FAILED", "Concurrent source edit during restore"));
     mutations.push(
-      file?.content == null
-        ? { kind: "remove", path, expectedBefore: filePrecondition(before.value, meta.value?.mode) }
-        : {
-            kind: "write",
-            path,
-            content: Buffer.from(file.content, "base64"),
-            mode: file.mode,
-            expectedBefore: filePrecondition(before.value, meta.value?.mode),
-          },
+      sourceEntryMutation(path, entry, {
+        bytes: file?.content == null ? undefined : Buffer.from(file.content, "base64"),
+        mode: file?.mode,
+        symlink: file?.symlink,
+      }),
     );
   }
   return ok(mutations);
-}
-
-function sourceHash(bytes: Uint8Array | undefined, mode: number | undefined) {
-  return hashValue({ hash: bytes === undefined ? null : sha256(bytes), mode });
-}
-
-function matchesSnapshot(
-  expected: string | undefined,
-  bytes: Uint8Array | undefined,
-  mode: number | undefined,
-) {
-  return expected === undefined ? bytes === undefined : sourceHash(bytes, mode) === expected;
 }

@@ -12,6 +12,7 @@ export interface RunManifest {
   readonly schemaVersion: 1;
   readonly spec: RunnerSpec;
   readonly worktree: string;
+  readonly hostExecutableRealpath: string;
   readonly startedAt: string;
   readonly runtime: {
     readonly visp: string;
@@ -27,7 +28,10 @@ export interface RunManifest {
   readonly budgetReservation: StudyBudgetReservation;
 }
 
-export async function prepareRoot(spec: RunnerSpec, requested: string): Promise<string> {
+export async function prepareRoot(
+  spec: RunnerSpec,
+  requested: string,
+): Promise<{ root: string; hostExecutableRealpath: string }> {
   const adapter = adapterFor(spec.host.kind);
   if (spec.budget.monetaryEnforcement === "strict")
     throw new Error(
@@ -49,12 +53,13 @@ export async function prepareRoot(spec: RunnerSpec, requested: string): Promise<
   await mkdir(requested, { recursive: true, mode: 0o700 });
   const root = await realpath(requested);
   assertOutside(repository, root);
-  const executable = await readFile(spec.host.executable);
+  const hostExecutableRealpath = await realpath(spec.host.executable);
+  const executable = await readFile(hostExecutableRealpath);
   if (sha256(executable) !== spec.host.executableSha256)
     throw new Error("Host executable hash differs from the pinned build");
   const version = (
     await execute(
-      spec.host.executable,
+      hostExecutableRealpath,
       ["--version"],
       repository,
       10_000,
@@ -70,7 +75,7 @@ export async function prepareRoot(spec: RunnerSpec, requested: string): Promise<
   ).trim();
   if (revision !== spec.revision)
     throw new Error("Repository revision must name an exact existing commit");
-  return root;
+  return { root, hostExecutableRealpath };
 }
 
 export async function verifyHarness(spec: RunnerSpec, worktree: string): Promise<void> {
@@ -89,11 +94,13 @@ export function manifestFor(
   resumedFrom: string | null,
   initialSnapshotHash: string,
   budgetReservation: StudyBudgetReservation,
+  hostExecutableRealpath: string,
 ): RunManifest {
   return {
     schemaVersion: 1,
     spec,
     worktree,
+    hostExecutableRealpath,
     startedAt: new Date().toISOString(),
     runtime: {
       visp: VERSION,

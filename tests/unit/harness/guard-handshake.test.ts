@@ -49,10 +49,14 @@ describe("guard handshake", () => {
     const result = await verifyGuardHandshake("/project", runner);
 
     expect(result.ok).toBe(true);
-    expect(runner).toHaveBeenCalledWith("visp", ["guard", "--handshake", "--json"], {
-      cwd: "/project",
-      timeoutMs: 5_000,
-    });
+    expect(runner).toHaveBeenCalledWith(
+      process.execPath,
+      [runtimeIdentity().executable, "guard", "--handshake", "--json"],
+      {
+        cwd: "/project",
+        timeoutMs: 5_000,
+      },
+    );
   });
 
   const expectedRuntime = {

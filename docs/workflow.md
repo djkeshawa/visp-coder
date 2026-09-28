@@ -68,9 +68,9 @@ slices:
     taskClass: bugfix   # optional: feature, bugfix, refactor, test, docs, chore, config
 ```
 
-`scope.allowed` is the set of paths the agent may change while the slice is authorized; `expected` names the files the slice should touch; `forbidden` narrows `allowed`. `workflow.blockedPaths` from `visp.yml` are never writable, whatever a slice says. Keep the first slice to one usable behavior, including its result and failure path, before expanding.
+`scope.allowed` is the set of paths the agent may change while the slice is authorized; `expected` names the files the slice should touch; `forbidden` narrows `allowed`. `workflow.blockedPaths` from `visp.yml` refuse explicit guard checks and Claude edit-tool writes regardless of slice scope. Slash-free blocked patterns match at any depth, case-insensitively. Git-listed changes are checked at commit and `done`, and ignored `.env*` files are checked against the authorization baseline at `done`; other ignored files written through a shell are outside those after-the-fact checks. Keep the first slice to one usable behavior, including its result and failure path, before expanding.
 
-Scope is enforced by `visp guard`, which the installed hooks call: the Claude Code edit hook before each write, the Git `pre-commit` hook before each commit, and, if installed with `visp install --hooks ci`, a CI job that checks the pull request diff against the slice scopes in the committed brief of the feature that matches the branch (`visp guard --scope tasks`). Changing scope requires a brief update and a new `visp work`.
+Scope is enforced by `visp guard`, which the installed hooks call: the Claude Code edit hook before each write, the Git `pre-commit` hook before each commit, and, if installed with `visp install --hooks claude git ci` (or `--hooks git ci` outside Claude Code), a CI job that checks the pull request diff against the slice scopes in the committed brief of the feature that matches the branch (`visp guard --scope tasks`). `--hooks` replaces the default hook set, so include the local hooks you still need. Changing scope requires a brief update and a new `visp work`.
 
 ## Checks
 
@@ -90,7 +90,8 @@ checks:
 - **Commands** run as an argument vector, never through a shell. A string is split into arguments; shell syntax such as `&&`, pipes or `VAR=value` prefixes is refused. Use two checks or a script the project owns.
 - **Browser journeys** use `command: {kind: browser-journey, journey: {...}}`. VISP drives an installed Chrome/Chromium with an isolated profile and records operations, measurements and screenshots. See [product review](product-review.md).
 - **`files`** lists the product and test files the check depends on; changes to them make earlier results stale.
-- **`verifierFiles`** lists the assertion program and its helpers, fixtures and configuration. VISP hashes them separately from the product so a repair can be compared against the same verifier. An explicit Node script, preload or `--env-file` argument must be listed, or the check stops before running with an environment failure. Use repository-relative paths.
+- **`environmentVariables`** optionally lists application environment variable names (for example `[APP_MODE, API_ENDPOINT]`) whose values must affect evidence freshness. Runtime variables (`PATH`, `NODE_*`, `PYTHON*`, `LANG`, `LC_*`, `TZ`, `CI`) are always included; terminal and host session variables are excluded by default.
+- **`verifierFiles`** lists the assertion program and its helpers, fixtures and configuration. VISP hashes them separately from the product so a repair can be compared against the same verifier. An explicit Node script, preload, global setup, `--env-file` or `--test-rerun-failures` input must be listed, or the check stops before running with an environment failure. Use repository-relative paths.
 
 A check must exercise behavior to count as functional evidence. Syntax-only or static commands (for example `node --check`) still run but do not establish behavior. A check may not run a VISP workflow command (`visp done`, `visp capture` and similar) against its own workspace.
 
@@ -98,13 +99,17 @@ A check must exercise behavior to count as functional evidence. Syntax-only or s
 
 Checks accept an optional `timeoutMs` (1–3,600,000 ms); command checks otherwise use 10 minutes and browser journeys retain their 60-second journey deadline. Timeouts are recorded as `timed-out`, with advice to inspect the check and its wait budget. On POSIX, VISP terminates the whole owned process group when a check exits, times out or is cancelled. Verbose output is bounded while retaining its beginning and end.
 
-Supervised checks run with a filtered environment and Python bytecode redirected away from the project, so a check does not change the product it checks. A command that could not start (for example, the executable is not installed) is recorded as an environment failure with the note that no product behavior was tested, not as a test failure.
+Supervised checks inherit the operator’s environment, including tokens and other credentials, except for shell bookkeeping (`_`, `SHLVL`, `PWD`, `OLDPWD`). Their output is recorded as evidence. Python bytecode is redirected to a private per-user cache outside the project unless `PYTHONPYCACHEPREFIX` is explicitly set. A command that could not start (for example, the executable is not installed) is recorded as an environment failure with the note that no product behavior was tested, not as a test failure.
 
 ## Work, done, next, accept
 
+Untracked, non-ignored files still affect evidence freshness so new source is checked. `work`, `next` and verification name the first untracked file outside all slice scopes and check inputs; ignore generated logs and reports, or declare intended product files before checking.
+
+Authorizations record the Git commit at `work`. Incoming committed changes whose working content still matches `HEAD` are reported separately and do not count against the slice scope or changed-file limit; local edits on top of them still do.
+
 **`visp work [--task <id>]`** selects the next ready slice (or the named one), checks that it has an outcome, a bounded scope and runnable checks, and authorizes edits in its scope. It returns the objective, scope, relevant outcomes and findings, source excerpts, graph neighbors, memory notes and admitted skills, trimmed to `context.tokenBudget`. `--inspect` reads the same context without authorizing, probing the environment or refreshing the graph. For slices with browser checks, `work` first confirms an isolated browser can start and capture; `--retry-environment` retries after the host environment is fixed.
 
-**Independent acceptance tests.** With `critic.launch: codex-exec`, `visp feature` starts an independent tester on a new project that writes tests from the original request. VISP keeps them only if they fail before implementation and pins them whenever the tester finishes; `work` does not wait and reports them as `independentTests`. See [the critic guide](critic.md#independent-acceptance-tests).
+**Independent acceptance tests.** With `critic.launch: codex-exec` and `critic.harness: codex`, `visp feature` starts an independent tester on a new project that writes tests from the original request. VISP keeps them only if they fail before implementation and pins them whenever the tester finishes; `work` does not wait and reports them as `independentTests`. See [the critic guide](critic.md#independent-acceptance-tests).
 
 **Light path.** `visp work --check "<test command>"` on a feature without slices creates one slice covering the whole request (scope `**`, the command as its check) and authorizes it; on a slice without checks it declares that check. Use a full brief only for several independently usable parts.
 
@@ -123,7 +128,7 @@ Without a check, `done` has nothing to execute and the reviewer has no evidence.
 
 **`visp next`** is read-only and returns one action with its command. When a background review is running it waits within a 100-second CLI or 50-second MCP call budget; if the review is still running it returns `action: wait` with `visp next --feature <id>` to run again. `visp status` shows outcomes, slice progress, evidence and open findings.
 
-**Host hooks.** For Claude Code, `visp install` wires hooks into `.claude/settings.json` that refuse out-of-scope edits, record user prompts for `visp feature`, refuse agent edits under `.visp/` (except drafts) and shell commands that would delete VISP state or pinned tests, and on Stop send the worker back to an unfinished, recently active feature (at most three times, once for a handoff). For Codex, it writes the same prompt, shell and Stop hooks to `.codex/hooks.json`; Codex runs project hooks only after you trust them once with `/hooks`. Codex edits through `apply_patch`, so edit scope there is enforced by the Git hook and `visp done`.
+**Host hooks.** For Claude Code, `visp install` wires hooks into `.claude/settings.json` that refuse out-of-scope edits made with Edit, Write and NotebookEdit, record user prompts for `visp feature`, refuse agent edits under `.visp/` (except drafts) and shell commands that would delete VISP state or pinned tests, and on Stop send the worker back to an unfinished, recently active feature (at most three times, once for a handoff). The shell hook does not intercept general shell writes. For Codex, it writes the same prompt, shell and Stop hooks to `.codex/hooks.json`; Codex runs project hooks only after you trust them once with `/hooks`, including for later headless runs. Untrusted headless runs have no Stop reminder. Codex edits through `apply_patch`, so edit scope there is checked at commit and by `visp done`.
 
 **`visp accept`** reruns the checks against the assembled product, including pinned acceptance checks (which `done` also runs on the last open slice), and requires a current assessment of every mandatory outcome and expectation. Passing commands alone do not satisfy it.
 

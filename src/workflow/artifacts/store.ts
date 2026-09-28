@@ -129,28 +129,6 @@ export class ArtifactStore {
       : entries;
   }
 
-  private async readEvidenceAttempts<S extends z.ZodTypeAny>(
-    feature: string,
-    task: string | undefined,
-    name: string,
-    schema: S,
-  ): Promise<Result<z.output<S>[]>> {
-    const directory = this.paths.evidenceAttemptsDir(feature, task, name);
-    const entries = await this.files.listDir(directory);
-    if (!entries.ok) return entries;
-
-    const records: z.output<S>[] = [];
-    for (const entry of entries.value.filter((path) => path.endsWith(".json"))) {
-      const record = await this.files.readJson(
-        this.paths.evidenceAttemptFile(feature, task, name, entry.slice(0, -".json".length)),
-        parser(schema, `${name} attempt`),
-      );
-      if (!record.ok) return record;
-      records.push(record.value);
-    }
-    return ok(records);
-  }
-
   readContextPack(feature: string, taskId: string): Promise<Result<ContextPack | undefined>> {
     return this.files.readJsonIfExists(
       this.paths.contextFile(feature, taskId),

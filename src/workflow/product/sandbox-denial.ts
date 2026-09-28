@@ -1,8 +1,8 @@
 import { isAbsolute, relative, sep } from "node:path";
 
 const socketDenial =
-  /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind) EPERM\b/;
-const spawnDenial = /\bspawn(?:Sync)?\b[^\n]*(?:EPERM|EACCES)\b/;
+  /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind)\b[^\n]{0,160}\bEPERM\b/;
+const spawnDenial = /\b(?:spawn|spawnSync|fork|exec|execSync)\b[^\n]*(?:EPERM|EACCES)\b/;
 const permissionDenial = /\b(?:EPERM|EACCES|EROFS)\b|Operation not permitted|Permission denied/i;
 
 export function sandboxDenial(text: string, root: string): "denied" | "possible" | undefined {

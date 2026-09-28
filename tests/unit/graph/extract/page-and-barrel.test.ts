@@ -53,6 +53,27 @@ afterAll(async () => {
 });
 
 describe("the page entry chain", () => {
+  it("resolves Vite root-absolute script paths and reports missing local scripts", async () => {
+    const pageRepo = await makeRepo({
+      "public/index.html":
+        '<script type="module" src="/src/main.ts"></script>\n<script src="/missing.js"></script>',
+      "src/main.ts": "export const main = true;\n",
+    });
+    try {
+      const page = await indexFixture(pageRepo);
+      expect(page.entrypoints).toContainEqual(
+        expect.objectContaining({ kind: "page_entrypoint", name: "src/main.ts" }),
+      );
+      expect(page.unknowns).toContainEqual({
+        kind: "unresolved_import",
+        path: "public/index.html",
+        detail: "/missing.js",
+      });
+    } finally {
+      await pageRepo.cleanup();
+    }
+  });
+
   it("gives the application hub an inbound edge from the page", () => {
     const graph = collapseToFileGraph(projection);
     expect(graph.dependencyEdges).toContainEqual({ from: "index.html", to: "src/main.js" });

@@ -10,9 +10,10 @@ import {
   queryGraph,
   refreshRepository,
 } from "../../graph/index.js";
-import { queryArgs, resolveQueryTarget } from "../../graph/query/arguments.js";
-import { recordActivity } from "../../orchestrate/session.js";
-import { isJson, mutatingWorkspace, options } from "../context.js";
+import { resolveQueryInput } from "../../graph/query/arguments.js";
+import { queryFreshnessNote } from "../../graph/query/index.js";
+import { recordActivity, recordActivityLater } from "../../orchestrate/session.js";
+import { isJson, mutatingWorkspace, options, workspace } from "../context.js";
 import { emit, emitError } from "../output.js";
 
 export function indexCommand(): Command {
@@ -72,7 +73,7 @@ function renderIndexReport(report: IndexReport): string {
   if (report.counts.entities === 0) {
     lines.push(
       "",
-      "No entities were extracted. Check that graph.languages in visp.yml covers this project.",
+      "No entities were extracted. Graph queries are empty for unsupported languages such as Go and Rust; graph.languages supports TypeScript, JavaScript and Python.",
     );
   }
 
@@ -91,12 +92,19 @@ export function queryCommand(): Command {
     .description("Ask a bounded structural question about the repository")
     .argument("<operation>", `One of: ${QUERY_OPERATIONS.join(", ")}`)
     .argument("[target]", "Entity id, file path, or search text, depending on the operation")
+    .argument("[to]", "Destination entity or path for tracePath")
     .option("--depth <n>", "How far to traverse", Number.parseInt)
     .option("--results <n>", "How many rows to return", Number.parseInt)
     .option("--nodes <n>", "Maximum nodes visited during traversal", Number.parseInt)
     .option("--edges <n>", "Maximum edges examined during traversal", Number.parseInt)
     .action(
-      async (operation: string, target: string | undefined, _flags: unknown, command: Command) => {
+      async (
+        operation: string,
+        target: string | undefined,
+        to: string | undefined,
+        _flags: unknown,
+        command: Command,
+      ) => {
         const opts = options<{ depth?: number; results?: number; nodes?: number; edges?: number }>(
           command,
         );
@@ -114,7 +122,7 @@ export function queryCommand(): Command {
           return;
         }
 
-        const state = await mutatingWorkspace(opts);
+        const state = await workspace(opts);
         if (!state.ok) {
           process.exitCode = emitError("query", state.error, { json: isJson(opts) });
           return;
@@ -127,28 +135,25 @@ export function queryCommand(): Command {
         }
 
         try {
-          const resolved = resolveQueryTarget(store.value, operation as QueryOperation, target);
+          const resolved = resolveQueryInput(store.value, operation as QueryOperation, target, to);
           if (!resolved.ok) {
             process.exitCode = emitError("query", resolved.error, { json: isJson(opts) });
             return;
           }
-
-          const result = queryGraph(
-            store.value,
-            operation as QueryOperation,
-            queryArgs(operation as QueryOperation, resolved.value),
-            {
-              depth: opts.depth,
-              results: opts.results,
-              nodes: opts.nodes,
-              edges: opts.edges,
-            },
-          );
+          const result = queryGraph(store.value, operation as QueryOperation, resolved.value.args, {
+            depth: opts.depth,
+            results: opts.results,
+            nodes: opts.nodes,
+            edges: opts.edges,
+          });
 
           // Whether agents ever ask the index anything was unanswerable for
           // every finished run: only `done` reached the trail.
           if (result.ok) {
-            await recordActivity(state.value, {
+            result.value.notes.unshift(...resolved.value.notes);
+            const freshness = await queryFreshnessNote(store.value, state.value.paths.root);
+            if (freshness) result.value.notes.push(freshness);
+            recordActivityLater(state.value, {
               command: "query",
               outcome: "ok",
               detail: [operation, target].filter(Boolean).join(" "),
@@ -157,15 +162,7 @@ export function queryCommand(): Command {
 
           process.exitCode = emit("query", result, {
             json: isJson(opts),
-            text: (answer) =>
-              [
-                resolved.value !== target && resolved.value !== undefined
-                  ? `Reading ${resolved.value}\n`
-                  : "",
-                renderAnswer(answer),
-              ]
-                .filter(Boolean)
-                .join(""),
+            text: renderAnswer,
           });
         } finally {
           store.value.close();

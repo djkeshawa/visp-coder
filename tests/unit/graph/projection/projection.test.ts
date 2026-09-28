@@ -64,7 +64,7 @@ describe("collapseToFileGraph", () => {
 
   it("names files no parser covered", () => {
     const graph = collapseToFileGraph(projection);
-    expect(graph.unparsedFiles).toContain("notes.md");
+    expect(graph.unparsedFiles).not.toContain("notes.md");
     expect(graph.unparsedFiles).not.toContain("src/app.ts");
   });
 });

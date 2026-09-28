@@ -67,6 +67,7 @@ export const productCheckSchema = z
     verifierFiles: z.array(pathPatternSchema).optional(),
     timeoutMs: z.number().int().positive().max(3_600_000).optional(),
     environment: z.enum(["node", "browser", "other"]).default("other"),
+    environmentVariables: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
   })
   .strict();
 

@@ -5,12 +5,24 @@ import {
   LANGUAGE_BY_EXTENSION,
   PACKAGE_JSON,
   TEST_PATH_PATTERNS,
+  UNPARSED_SOURCE_EXTENSIONS,
 } from "./constants.js";
 import type { FileLanguage } from "./types.js";
 
 /** POSIX path arithmetic over repository-relative paths. The graph never uses OS separators. */
 
-const GENERATED_AGENT_PREFIXES = [".visp/", ".agents/", ".claude/", ".codex/", ".cursor/"];
+export const GENERATED_AGENT_PREFIXES = [".visp/", ".agents/", ".claude/", ".codex/", ".cursor/"];
+
+export function isGraphInputPath(path: string): boolean {
+  const extension = extensionOf(path);
+  return (
+    grammarForPath(path) !== undefined ||
+    isHtmlPath(path) ||
+    isPackageManifest(path) ||
+    ["pyproject.toml", "setup.cfg"].includes(basename(path)) ||
+    UNPARSED_SOURCE_EXTENSIONS.has(extension)
+  );
+}
 
 export function isHtmlPath(path: string): boolean {
   const extension = extensionOf(path);

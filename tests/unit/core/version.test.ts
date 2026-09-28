@@ -1,5 +1,11 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { pinnedRange } from "../../../src/core/version.js";
+import { pinnedRange, runtimeIdentity } from "../../../src/core/version.js";
+
+it("pins generated launchers to this package's CLI, not the embedding process", () => {
+  expect(runtimeIdentity().executable).toBe(realpathSync(resolve("dist/cli.js")));
+});
 
 describe("generated CI version pinning", () => {
   it("pins stable releases to their compatible major and minor line", () => {

@@ -76,6 +76,31 @@ describe("product command check execution boundary", () => {
       },
     });
   });
+  it("classifies a sandbox-denied subprocess as an environment failure", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [
+            process.execPath,
+            "-e",
+            "console.error('Error: spawnSync /usr/bin/node EPERM'); process.exit(1)",
+          ],
+        })),
+      },
+      reason: "Exercise a sandbox-denied helper",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    expect(result.ok && result.value.executions[0]).toMatchObject({
+      status: "environment-failed",
+      output: expect.stringContaining("supported sandbox escalation"),
+    });
+  });
   it.each([
     ["visp", "capture", "--from", "journey.json"],
     ["pnpm", "exec", "visp", "done"],
