@@ -31,6 +31,7 @@ async function project(critic?: Record<string, unknown>) {
     const config = parse(await readFile(join(workspace.root, "visp.yml"), "utf8"));
     config.critic = { ...config.critic, ...critic };
     await workspace.write("visp.yml", stringify(config));
+    await workspace.installFoundation();
   }
   await workspace.write(".gitignore", ".visp/session/\n");
   workspace.commit("configure");

@@ -58,6 +58,7 @@ async function project(
   };
   if (critic) config.critic = { ...config.critic, ...critic };
   await workspace.write("visp.yml", stringify(config));
+  await workspace.installFoundation();
   await workspace.write(".gitignore", ".memory-calls\n.fake-visp-memory\n.visp/session/\n");
   workspace.commit("configure memory");
   return { log };

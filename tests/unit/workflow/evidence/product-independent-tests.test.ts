@@ -48,6 +48,7 @@ async function testerWorkspace() {
   const config = parse(await readFile(join(workspace.root, "visp.yml"), "utf8"));
   config.critic = { ...config.critic, harness: "codex", launch: "codex-exec", mode: "auto" };
   await workspace.write("visp.yml", stringify(config));
+  await workspace.installFoundation();
   workspace.commit("VISP launches the reviewer and tester");
   return fixture;
 }
@@ -670,6 +671,7 @@ it("runs the tester on an existing codebase in a writable copy only when opted i
   const config = parse(await readFile(join(fixture.workspace.root, "visp.yml"), "utf8"));
   config.critic = { ...config.critic, existingCodeTests: true };
   await fixture.workspace.write("visp.yml", stringify(config));
+  await fixture.workspace.installFoundation();
   fixture.workspace.commit("existing code, opted in");
   const requests: { explore?: boolean; prompt: string }[] = [];
   const work = await runProductWork(
@@ -695,6 +697,7 @@ it("keeps secret and blocked files out of the tester's copy and lists its comman
   config.critic = { ...config.critic, existingCodeTests: true };
   config.workflow = { ...config.workflow, blockedPaths: ["private/**"] };
   await fixture.workspace.write("visp.yml", stringify(config));
+  await fixture.workspace.installFoundation();
   fixture.workspace.commit("existing code, opted in");
   // Untracked but not ignored: git ls-files -co lists them.
   await fixture.workspace.write(".env", "TOKEN=secret\n");

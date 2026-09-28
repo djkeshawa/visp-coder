@@ -305,6 +305,7 @@ it.each(CRITIC_HARNESSES)(
       expect(
         await criticStatus(await workspace.state(), { feature: first.value.brief.feature }),
       ).toMatchObject({ ok: true, value: { enabled: true } });
+      await workspace.installFoundation();
       workspace.commit("turn off new feature defaults");
       const second = await createProductFeature(await workspace.state(), {
         goal: "Another outcome",
