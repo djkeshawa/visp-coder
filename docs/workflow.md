@@ -90,7 +90,7 @@ checks:
 - **Browser journeys** use `command: {kind: browser-journey, journey: {...}}`. VISP drives an installed Chrome/Chromium with an isolated profile and records operations, measurements and screenshots. See [product review](product-review.md).
 - **`files`** lists the product and test files the check depends on; changes to them make earlier results stale.
 - **`environmentVariables`** optionally lists application environment variable names (for example `[APP_MODE, API_ENDPOINT]`) whose values must affect evidence freshness. Runtime variables (`PATH`, `NODE_*`, `PYTHON*`, `LANG`, `LC_*`, `TZ`, `CI`) are always included; terminal and host session variables are excluded by default.
-- **`verifierFiles`** lists the assertion program and its helpers, fixtures and configuration. VISP hashes them separately from the product so a repair can be compared against the same verifier. An explicit Node script, preload or `--env-file` argument must be listed, or the check stops before running with an environment failure. Use repository-relative paths.
+- **`verifierFiles`** lists the assertion program and its helpers, fixtures and configuration. VISP hashes them separately from the product so a repair can be compared against the same verifier. An explicit Node script, preload, global setup, `--env-file` or `--test-rerun-failures` input must be listed, or the check stops before running with an environment failure. Use repository-relative paths.
 
 A check must exercise behavior to count as functional evidence. Syntax-only or static commands (for example `node --check`) still run but do not establish behavior. A check may not run a VISP workflow command (`visp done`, `visp capture` and similar) against its own workspace.
 

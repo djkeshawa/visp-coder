@@ -120,6 +120,9 @@ it.each([
   ["--test-concurrency", "2"],
   ["--test-shard", "1/2"],
   ["--test-isolation", "process"],
+  ["--experimental-test-isolation", "process"],
+  ["--test-random-seed", "42"],
+  ["--experimental-test-tag-filter", "unit"],
   ["--test-coverage-lines", "80"],
   ["--test-coverage-branches", "80"],
   ["--test-coverage-functions", "80"],
@@ -132,4 +135,43 @@ it.each([
       snapshot,
     ),
   ).toMatch(/^[a-f0-9]{64}$/);
+});
+
+it.each([false, true])(
+  "binds Node global setup as well as the assertion entry (inline: %s)",
+  (inline) => {
+    const command: [string, ...string[]] = [
+      "node",
+      "--test",
+      ...(inline
+        ? ["--test-global-setup=test/helper.mjs"]
+        : ["--test-global-setup", "test/helper.mjs"]),
+      "test/check.mjs",
+    ];
+    expect(productVerifierDigest({ ...check, command }, snapshot)).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      productVerifierDigest({ ...check, command, verifierFiles: ["test/check.mjs"] }, snapshot),
+    ).toBeUndefined();
+    expect(
+      productVerifierDigest({ ...check, command, verifierFiles: ["test/helper.mjs"] }, snapshot),
+    ).toBeUndefined();
+  },
+);
+
+it("binds Node's rerun selection file when identifying the test entry", () => {
+  const command: [string, ...string[]] = [
+    "node",
+    "--test",
+    "--test-rerun-failures",
+    "test/selection.json",
+    "test/check.mjs",
+  ];
+  const inputs = { ...snapshot, "test/selection.json": "selection" };
+  expect(
+    productVerifierDigest(
+      { ...check, command, verifierFiles: ["test/*.mjs", "test/selection.json"] },
+      inputs,
+    ),
+  ).toMatch(/^[a-f0-9]{64}$/);
+  expect(productVerifierDigest({ ...check, command }, inputs)).toBeUndefined();
 });

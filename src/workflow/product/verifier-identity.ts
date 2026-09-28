@@ -11,6 +11,7 @@ const NODE_PRELOAD_FLAGS = new Set([
   "--import",
   "--loader",
   "--experimental-loader",
+  "--test-global-setup",
 ]);
 const NODE_VALUE_FLAGS = new Set([
   "--conditions",
@@ -23,6 +24,9 @@ const NODE_VALUE_FLAGS = new Set([
   "--test-concurrency",
   "--test-shard",
   "--test-isolation",
+  "--experimental-test-isolation",
+  "--test-random-seed",
+  "--experimental-test-tag-filter",
   "--test-coverage-lines",
   "--test-coverage-branches",
   "--test-coverage-functions",
@@ -92,11 +96,17 @@ function nodeInput(
   if (/^(?:-e|-p|--eval|--print)(?:=|$)/.test(argument)) return { kind: "eval", next: index };
   if (NODE_PRELOAD_FLAGS.has(argument))
     return { kind: "preload", next: index + 1, path: args[index + 1] };
-  const inlinePreload = argument.match(/^--(?:require|import|loader|experimental-loader)=(.+)$/);
+  const inlinePreload = argument.match(
+    /^--(?:require|import|loader|experimental-loader|test-global-setup)=(.+)$/,
+  );
   if (inlinePreload) return { kind: "preload", next: index, path: inlinePreload[1] };
-  if (argument === "--env-file" || argument === "--env-file-if-exists")
+  if (
+    argument === "--env-file" ||
+    argument === "--env-file-if-exists" ||
+    argument === "--test-rerun-failures"
+  )
     return { kind: "input", next: index + 1, path: args[index + 1] };
-  const inlineInput = argument.match(/^--env-file(?:-if-exists)?=(.+)$/);
+  const inlineInput = argument.match(/^--(?:env-file(?:-if-exists)?|test-rerun-failures)=(.+)$/);
   if (inlineInput) return { kind: "input", next: index, path: inlineInput[1] };
   if (NODE_VALUE_FLAGS.has(argument)) return { kind: "skip", next: index + 1 };
   if (argument.startsWith("-")) return { kind: "skip", next: index };
