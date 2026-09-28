@@ -481,13 +481,17 @@ async function classifyRecoveryEntry(
   transaction: string,
   entry: JournalEntry,
 ): Promise<Result<"restored" | "applied">> {
-  const alreadyRestored = await matchesSnapshot(fs, entry.path, entry.before, true);
+  const alreadyRestored = await matchesSnapshot(fs, entry.path, entry.before);
   if (!alreadyRestored.ok) return alreadyRestored;
   if (alreadyRestored.value) return ok("restored");
 
   const stillApplied = await matchesAfter(fs, entry, true);
   if (!stillApplied.ok) return stillApplied;
   if (stillApplied.value) return ok("applied");
+
+  const restoredContent = await matchesSnapshot(fs, entry.path, entry.before, true);
+  if (!restoredContent.ok) return restoredContent;
+  if (restoredContent.value) return ok("applied");
   return err(
     vispError("IO_ERROR", `Transaction recovery found a divergent file: ${entry.path}`, {
       recovery:

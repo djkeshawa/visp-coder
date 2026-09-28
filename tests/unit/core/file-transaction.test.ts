@@ -35,6 +35,25 @@ async function root(): Promise<string> {
 }
 
 describe("file transactions", () => {
+  it("rolls back a mode-only mutation even when both snapshots contain identical bytes", async () => {
+    const project = await root();
+    await writeFile(join(project, "mode-only"), "same");
+    await chmod(join(project, "mode-only"), 0o600);
+    await applyFileTransaction(
+      project,
+      "mode-only-rollback",
+      [{ kind: "write", path: "mode-only", content: "same", mode: 0o755 }],
+      {
+        leavePreparedOnError: true,
+        afterMutation() {
+          throw new Error("interrupted");
+        },
+      },
+    );
+    expect((await recoverFileTransactions(project)).ok).toBe(true);
+    expect((await stat(join(project, "mode-only"))).mode & 0o777).toBe(0o600);
+  });
+
   it("ignores a journal removed between listing and reading", async () => {
     const project = await root();
     const listing = vi
