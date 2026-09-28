@@ -7,7 +7,7 @@ import {
   saveCriticMode,
 } from "../../config/critic-defaults.js";
 import { vispError } from "../../core/errors.js";
-import { ok } from "../../core/result.js";
+import { err, ok } from "../../core/result.js";
 import { isJson, options } from "../context.js";
 import { emit, emitError } from "../output.js";
 
@@ -112,12 +112,17 @@ async function defaultsOperation(opts: DefaultsOptions) {
 async function saveGlobalDefaults(opts: DefaultsOptions) {
   if (opts.mode !== undefined) {
     if (opts.model !== undefined || opts.reasoning !== undefined || opts.maxCalls !== undefined)
-      throw new Error("Use --harness for model or budget defaults");
+      return err(vispError("UNSUPPORTED", "Use --harness for model or budget defaults"));
     return saveCriticMode(opts.mode);
   }
   if (opts.model !== undefined || opts.reasoning !== undefined || opts.maxCalls !== undefined)
-    throw new Error("Use --harness <host> to change model or budget defaults");
+    return err(vispError("UNSUPPORTED", "Use --harness <host> to change model or budget defaults"));
   if (!opts.on && !opts.off)
-    throw new Error("Use --on or --off to change defaults globally, or select --harness <host>");
+    return err(
+      vispError(
+        "UNSUPPORTED",
+        "Use --on or --off to change defaults globally, or select --harness <host>",
+      ),
+    );
   return saveCriticEnabled(opts.on === true);
 }
