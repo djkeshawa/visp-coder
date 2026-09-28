@@ -90,12 +90,13 @@ it("falls back to phrase matching when the model fails", async () => {
   expect(await recorded()).toEqual(["Going forward, every endpoint logs the request id."]);
 });
 
-it("does not own the state lock while the rule extractor calls its model", async () => {
+it("runs the rule extractor unlocked after checking the clean baseline", async () => {
   await project({ enabled: true, harness: "codex", launch: "codex-exec" });
   let ownership: unknown;
   extractor.mockImplementation(async () => {
     if (!workspace) throw new Error("no workspace");
     ownership = await inspectStateLock(workspace.root);
+    await workspace.write(".model-log", "model call\n");
     return [];
   });
   await feature("List items", "Always use tabs from now on.");

@@ -87,8 +87,9 @@ describe("Chrome startup diagnostics", () => {
       );
       return child;
     });
-    await expect(launchChrome({ binary: "/installed/chromium" })).rejects.toThrow(
-      /EPERM.*permissions/s,
-    );
+    await expect(launchChrome({ binary: "/installed/chromium" })).rejects.toMatchObject({
+      kind: "permissions",
+      message: expect.stringMatching(/EPERM.*permission/s),
+    });
   });
 });

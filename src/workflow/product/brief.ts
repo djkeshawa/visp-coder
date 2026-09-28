@@ -18,9 +18,10 @@ import {
   recordEarlierRequests,
 } from "../../memory/memory-service.js";
 import { recordRequestHistory } from "../../memory/request-history.js";
+import type { AcceptanceBaseline } from "../artifacts/acceptance.js";
 import type { Intent } from "../artifacts/feature.js";
 import { captureAcceptanceBaseline } from "../evidence/acceptance.js";
-import { requireFeatureFoundation } from "../gates/readiness.js";
+import { requireFeatureFoundation, requireImplementationFoundation } from "../gates/readiness.js";
 import type { WorkspaceState } from "../state.js";
 import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
@@ -79,14 +80,15 @@ export async function createProductFeature(
 ): Promise<Result<ProductFeatureOutcome>> {
   if (!options.goal.trim())
     return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
-  const foundation = await withProductMutation(workspace, () =>
-    requireFeatureFoundation(workspace, "visp feature <goal>"),
-  );
-  if (!foundation.ok) return foundation;
+  const baseline = await withProductMutation(workspace, async () => {
+    const foundation = await requireFeatureFoundation(workspace, "visp feature <goal>");
+    return foundation.ok ? captureAcceptanceBaseline(workspace) : foundation;
+  });
+  if (!baseline.ok) return baseline;
   const request = await featureRequest(workspace, options);
   if (!request.ok) return request;
   return withProductMutation(workspace, () =>
-    createProductFeatureLocked(workspace, options, request.value),
+    createProductFeatureLocked(workspace, options, request.value, baseline.value),
   );
 }
 
@@ -94,15 +96,15 @@ async function createProductFeatureLocked(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
   request: Extract<Awaited<ReturnType<typeof featureRequest>>, { ok: true }>["value"],
+  baseline: AcceptanceBaseline,
 ): Promise<Result<ProductFeatureOutcome>> {
   if (!options.goal.trim())
     return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
-  const foundation = await requireFeatureFoundation(workspace, "visp feature <goal>");
+  // Cleanliness was checked before model/service calls, which may write their own logs.
+  const foundation = await requireImplementationFoundation(workspace, "visp feature <goal>");
   if (!foundation.ok) return foundation;
   const listed = await workspace.store.listFeatures();
   if (!listed.ok) return listed;
-  const baseline = await captureAcceptanceBaseline(workspace);
-  if (!baseline.ok) return baseline;
   const feature = nextFeatureId(listed.value, options.goal);
   const timestamp = new Date().toISOString();
   const { host, memory } = request;
@@ -113,7 +115,7 @@ async function createProductFeatureLocked(
     feature,
     goal: options.goal,
     originalRequest: request.originalRequest,
-    acceptanceBaseline: baseline.value,
+    acceptanceBaseline: baseline,
   });
   if (!parsed.ok) return parsed;
   const brief = parsed.value;
