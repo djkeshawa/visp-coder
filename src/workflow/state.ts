@@ -9,6 +9,7 @@ import { currentBranch, headCommit, isRepository, workingTreeChanges } from "../
 import { parseFeatureId } from "../core/input.js";
 import { isExecutableMode } from "../core/mode.js";
 import { ProjectPaths } from "../core/paths.js";
+import { discoverProjectRoot } from "../core/project-root.js";
 import { err, ok, type Result } from "../core/result.js";
 import {
   agentActivationFile,
@@ -44,7 +45,7 @@ export interface WorkspaceState {
 }
 
 export async function loadWorkspace(root: string): Promise<Result<WorkspaceState>> {
-  const paths = new ProjectPaths(root);
+  const paths = new ProjectPaths(discoverProjectRoot(root));
   const files = new RecoveringProjectFileSystem(paths.root);
 
   // A lock may create .visp/state before init; the tracked project record marks setup.
@@ -95,7 +96,7 @@ export async function loadWorkspace(root: string): Promise<Result<WorkspaceState
 
 /** Recover first, then load; mutators must never plan from a partly applied transaction. */
 export async function loadWorkspaceForMutation(root: string): Promise<Result<WorkspaceState>> {
-  const recovered = await recoverFileTransactions(root);
+  const recovered = await recoverFileTransactions(discoverProjectRoot(root));
   if (!recovered.ok) return recovered;
   return loadWorkspace(root);
 }
@@ -211,8 +212,9 @@ export async function buildFoundationContext(
       headCommit(state.paths.root),
       changedFilesOf(state),
     ]);
+  if (!harnessInstalled.ok) return harnessInstalled;
   return ok({
-    harnessInstalled,
+    harnessInstalled: harnessInstalled.value,
     enforcementInstalled,
     repositoryAvailable,
     hasBaseline: baseline.ok,
@@ -220,11 +222,11 @@ export async function buildFoundationContext(
   });
 }
 
-async function hasHarnessAssets(state: WorkspaceState): Promise<boolean> {
+async function hasHarnessAssets(state: WorkspaceState): Promise<Result<boolean>> {
   const critic = await resolveCriticDefault(state.config.harness, state.config.critic);
-  if (!critic.ok) return false;
+  if (!critic.ok) return critic;
   const assets = planFor(state.config.harness, state.config.profile, critic.value).assets;
-  if (assets.length === 0) return false;
+  if (assets.length === 0) return ok(false);
 
   const current = await Promise.all(
     assets.map(async (asset) => {
@@ -236,23 +238,25 @@ async function hasHarnessAssets(state: WorkspaceState): Promise<boolean> {
       return metadata.ok && isExecutableMode(metadata.value?.mode);
     }),
   );
-  if (!current.every(Boolean)) return false;
+  if (!current.every(Boolean)) return ok(false);
 
-  if (!requiresAgentActivation(state.config.harness)) return true;
+  if (!requiresAgentActivation(state.config.harness)) return ok(true);
   const activation = await state.files.readTextIfExists(agentActivationFile(state.config.harness));
-  if (!activation.ok) return false;
+  if (!activation.ok) return activation;
   const planned = planAgentActivation(state.config.harness, activation.value, false);
-  return planned.ok && planned.value.status === "current";
+  return ok(planned.ok && planned.value.status === "current");
 }
 
 async function hasEnforcementSurface(state: WorkspaceState): Promise<boolean> {
   const hookPath = await preCommitHookPath(state.paths.root);
   if (hookPath.ok) {
     const preCommit = await state.files.readTextIfExists(hookPath.value.absolute);
+    const local = await state.files.readTextIfExists(`${hookPath.value.absolute}.local`);
     const metadata = await state.files.metadata(hookPath.value.absolute);
     if (
       preCommit.ok &&
-      preCommit.value === renderPreCommitHook() &&
+      local.ok &&
+      preCommit.value === renderPreCommitHook(local.value !== undefined) &&
       metadata.ok &&
       isExecutableMode(metadata.value?.mode)
     ) {

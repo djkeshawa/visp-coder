@@ -116,18 +116,47 @@ function walkFrom(
     })
     .filter((row): row is NonNullable<typeof row> => row !== undefined)
     .sort(byKey);
+  const unknowns = traversalUnknowns(
+    index,
+    seed,
+    rows.map((row) => row.path),
+  );
+  const elsewhere = unknowns.filter(
+    (unknown) =>
+      unknown.kind === "unresolved_call" &&
+      unknown.path !== seed.path &&
+      unknown.detail.endsWith(seed.name),
+  ).length;
   return {
     rows,
-    unknowns: index
-      .unknownsFor(new Set([seed.path, ...rows.map((row) => row.path)]))
-      .sort(compareUnknowns),
+    unknowns,
     work: work.receipt(),
-    notes: work.receipt().truncated
-      ? work.notes()
-      : rows.length === 0
-        ? [`${label}: nothing within depth ${budget.depth}`]
-        : [],
+    notes: [
+      ...(elsewhere > 0 && (label === "callers" || label === "impact")
+        ? [`${elsewhere} unresolved calls named ${seed.name} elsewhere`]
+        : []),
+      ...(work.receipt().truncated
+        ? work.notes()
+        : rows.length === 0
+          ? [`${label}: nothing within depth ${budget.depth}`]
+          : []),
+    ],
   };
+}
+
+function traversalUnknowns(index: SnapshotIndex, seed: Entity, paths: string[]) {
+  const local = index.unknownsFor(new Set([seed.path, ...paths]));
+  const elsewhere = index.snapshot.unknowns.filter(
+    (unknown) =>
+      unknown.path !== seed.path &&
+      !paths.includes(unknown.path) &&
+      ((unknown.kind === "unresolved_call" && unknown.detail.endsWith(seed.name)) ||
+        (unknown.kind === "dynamic_import" && unknown.detail.includes(seed.name)) ||
+        unknown.kind === "parser_error" ||
+        unknown.kind === "parse_timeout" ||
+        unknown.kind === "file_skipped"),
+  );
+  return [...local, ...elsewhere].sort(compareUnknowns);
 }
 
 /** Lazy expansion counts edges before filtering and never allocates a full neighbor list. */

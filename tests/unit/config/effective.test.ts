@@ -90,3 +90,20 @@ it("explains that the retained flip setting no longer has an effect", async () =
     }),
   );
 });
+
+it("identifies active memory settings and telemetry's limited effect", async () => {
+  project = await TestWorkspace.create();
+  await project.write(
+    "visp.yml",
+    "memory:\n  service:\n    command: visp-memory\n    select: keyword\n",
+  );
+  const report = await explainSettings(await project.state());
+  if (!report.ok) throw new Error(report.error.message);
+  for (const path of ["memory.recall", "memory.service.command", "memory.service.select"])
+    expect(report.value.settings.find((setting) => setting.path === path)?.effect).toBe(
+      "conditional",
+    );
+  expect(
+    report.value.settings.find((setting) => setting.path === "telemetry.enabled")?.note,
+  ).toContain("usage import");
+});

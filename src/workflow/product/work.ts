@@ -1,7 +1,7 @@
 import { vispError } from "../../core/errors.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { filePrecondition } from "../../core/file-transaction.js";
-import { currentBranch } from "../../core/git.js";
+import { currentBranch, headCommit } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { requireImplementationFoundation } from "../gates/readiness.js";
@@ -23,6 +23,7 @@ import {
   type ProductState,
   sliceDigest,
 } from "./model.js";
+import { protectedEnvSnapshot } from "./protected-env.js";
 import { withProductMutation } from "./runtime.js";
 import {
   type ProductAuthorization,
@@ -280,6 +281,10 @@ async function grantAuthorization(
   if (!prior.ok) return prior;
   const session = await currentHostSession(workspace, true);
   if (!session.ok) return session;
+  const protectedEnv = await protectedEnvSnapshot(workspace.paths.root);
+  if (!protectedEnv.ok) return protectedEnv;
+  const head = await headCommit(workspace.paths.root);
+  if (!head.ok) return head;
   return ok({
     version: 2,
     feature: record.brief.feature,
@@ -288,6 +293,15 @@ async function grantAuthorization(
     root: hashValue(workspace.paths.root),
     contractDigest: sliceDigest(record.brief, slice),
     baseline: prior.value?.task === slice.id ? prior.value.baseline : snapshot,
+    blockedPaths:
+      prior.value?.task === slice.id && prior.value.blockedPaths
+        ? prior.value.blockedPaths
+        : workspace.config.workflow.blockedPaths,
+    envBaseline:
+      prior.value?.task === slice.id && prior.value.envBaseline
+        ? prior.value.envBaseline
+        : protectedEnv.value,
+    headCommit: prior.value?.task === slice.id ? prior.value.headCommit : head.value,
     ...(session.value ? { session: session.value } : {}),
   });
 }

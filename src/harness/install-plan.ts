@@ -5,6 +5,7 @@ import { parseConfig } from "../config/load.js";
 import type { VispConfig } from "../config/schema.js";
 import { type Harness, PROFILES, type Profile } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
+import { run } from "../core/exec.js";
 import { type FileMutation, filePrecondition } from "../core/file-transaction.js";
 import type { ProjectFileSystem } from "../core/fs.js";
 import { isExecutableMode } from "../core/mode.js";
@@ -72,8 +73,8 @@ export async function buildInstallPlan(
   profile: Profile,
   fs: ProjectFileSystem,
 ): Promise<Result<InstallPlan>> {
-  const identified = requireRuntimeAgreement(runtimeIdentity());
-  if (!identified.ok) return identified;
+  const installed = await checkInstallRuntime(paths, fs, options);
+  if (!installed.ok) return installed;
   const manifest = await readAssetManifest(paths, fs);
   if (!manifest.ok) return manifest;
   const configuration = await readInstallConfig(fs, paths);
@@ -95,6 +96,20 @@ export async function buildInstallPlan(
     expectedManifest: `${JSON.stringify(manifest.value, null, 2)}\n`,
     expectedConfig: undefined,
   };
+  if (options.harness === "generic")
+    planned.manualSteps.push(
+      'If your host supports MCP, add a VISP server manually: {"visp":{"command":"visp","args":["serve","--mcp"]}}',
+    );
+  const previousInstall = await readInstallState(paths, fs);
+  if (!previousInstall.ok) return previousInstall;
+  const droppedHooks =
+    previousInstall.value?.hooks.filter(
+      (hook) => (hook === "git" || hook === "claude") && !(options.hooks ?? []).includes(hook),
+    ) ?? [];
+  if (droppedHooks.length)
+    planned.manualSteps.push(
+      `This installation drops previously recorded local hooks: ${droppedHooks.join(", ")}. Include them with --hooks to keep local enforcement.`,
+    );
 
   const assets = await planAssets(fs, harnessPlan.assets, options, manifest.value, planned);
   if (!assets.ok) return assets;
@@ -124,6 +139,29 @@ export async function buildInstallPlan(
   planned.expectedConfig = config.value.expected;
   if (config.value.mutation !== undefined) planned.mutations.push(config.value.mutation);
   return ok(planned);
+}
+
+async function checkInstallRuntime(
+  paths: ProjectPaths,
+  fs: ProjectFileSystem,
+  options: InstallOptions,
+): Promise<Result<void>> {
+  const identified = requireRuntimeAgreement(runtimeIdentity());
+  if (!identified.ok) return identified;
+  const installed = await readInstallState(paths, fs);
+  if (!installed.ok) return installed;
+  if (!installed.value?.runtime || options.replaceRuntime) return ok(undefined);
+  const agreement = requireRuntimeAgreement(
+    installed.value.runtime,
+    runtimeIdentity(),
+    "installed assets",
+  );
+  return agreement.ok
+    ? agreement
+    : err({
+        ...agreement.error,
+        recovery: `Installed assets use node ${JSON.stringify(installed.value.runtime.executable)}; run that build or use visp install --replace-runtime and restart MCP and host processes that use the old build. --force only replaces edited files.`,
+      });
 }
 
 async function readInstallConfig(fs: ProjectFileSystem, paths: ProjectPaths) {
@@ -284,6 +322,8 @@ async function planPreviousMcpRegistration(
   registration: ForeignMcpRegistration,
   planned: InstallPlan,
 ): Promise<Result<void>> {
+  if (planned.mutations.some((mutation) => mutation.path === registration.path))
+    return ok(undefined);
   const current = await fs.readTextIfExists(registration.path);
   if (!current.ok) return current;
   const removal = planMcpUnregistration(current.value, registration.harness);
@@ -454,9 +494,11 @@ async function planActivation(
   if (!activation.ok) return activation;
   plan.activation = activation.value.status;
   if (activation.value.content !== undefined) {
+    const target = await fs.authoredWriteTarget(activationFile);
+    if (!target.ok) return target;
     plan.mutations.push({
       kind: "write",
-      path: activationFile,
+      path: target.value,
       content: activation.value.content,
       expectedBefore: filePrecondition(current.value),
     });
@@ -596,7 +638,6 @@ async function planGitHook(
   if (!current.ok) return current;
   const metadata = await fs.metadata(resolved.value.absolute);
   if (!metadata.ok) return metadata;
-  const expected = renderPreCommitHook();
   const foreign = current.value !== undefined && !current.value.includes(HOOK_MARKER);
   if (foreign && !force) {
     return err(
@@ -604,11 +645,42 @@ async function planGitHook(
         "STAGE_BLOCKED",
         `A foreign pre-commit hook already exists at ${resolved.value.display}`,
         {
-          recovery: "Integrate VISP manually, omit the git hook, or rerun visp install --force",
+          recovery:
+            "Integrate VISP manually, omit the git hook, or rerun visp install --force to preserve the existing hook as pre-commit.local",
         },
       ),
     );
   }
+
+  const localPath = `${resolved.value.absolute}.local`;
+  const local = await fs.readTextIfExists(localPath);
+  if (!local.ok) return local;
+  if (foreign) {
+    const tracked = await run(
+      "git",
+      ["ls-files", "--error-unmatch", "--", resolved.value.display],
+      { cwd: paths.root },
+    );
+    if (!tracked.ok) return tracked;
+    if (tracked.value.exitCode === 0 || local.value !== undefined) {
+      return err(
+        vispError("STAGE_BLOCKED", `Cannot chain the foreign hook at ${resolved.value.display}`, {
+          recovery:
+            tracked.value.exitCode === 0
+              ? "This hook is tracked by Git; integrate VISP manually without replacing it"
+              : "pre-commit.local already exists; integrate VISP manually",
+        }),
+      );
+    }
+    plan.mutations.push({
+      kind: "write",
+      path: localPath,
+      content: current.value ?? "",
+      mode: metadata.value?.mode,
+      expectedBefore: filePrecondition(local.value),
+    });
+  }
+  const expected = renderPreCommitHook(foreign || local.value !== undefined);
 
   const currentAndExecutable = current.value === expected && isExecutableMode(metadata.value?.mode);
   plan.assets.push({
@@ -637,21 +709,31 @@ async function planMcp(
   const path = configFileForHarness(options.harness);
   const current = await fs.readTextIfExists(path);
   if (!current.ok) return current;
-  const registration = planMcpRegistration(current.value, options.force === true, options.harness);
+  const registration = planMcpRegistration(
+    current.value,
+    options.force === true || options.replaceRuntime === true,
+    options.harness,
+  );
   if (!registration.ok) return registration;
   plan.mcp = registration.value.status;
   plan.mcpConfigFile = path;
   if (registration.value.status === "malformed" || registration.value.status === "customized") {
+    if (options.harness === "codex") {
+      plan.manualSteps.push(
+        `${path} could not be merged; add [mcp_servers.visp] manually or rerun visp install --no-mcp. Other installation assets will still be installed.`,
+      );
+      return ok(undefined);
+    }
     return err(
       vispError(
         "ARTIFACT_INVALID",
-        options.harness === "codex"
-          ? `${path} already exists and cannot be safely merged automatically; it was left unchanged`
-          : `${path} contains a VISP registration that was left unchanged`,
+        registration.value.status === "malformed"
+          ? `${path} is not a safely mergeable MCP configuration; it was left unchanged`
+          : `${path} contains a customized VISP registration that was left unchanged`,
         {
           recovery:
-            options.harness === "codex"
-              ? `Review ${path} and add [mcp_servers.visp] manually, or rerun visp install --no-mcp; existing Codex TOML is never rewritten`
+            registration.value.status === "malformed"
+              ? `Repair ${path} or rerun visp install --no-mcp; --force never replaces unparseable configuration`
               : `Review ${path}, then rerun visp install --force to replace only the VISP registration`,
         },
       ),
@@ -664,6 +746,20 @@ async function planMcp(
       content: registration.value.content,
       expectedBefore: filePrecondition(current.value),
     });
+  }
+  if (options.harness === "cursor") {
+    const old = await fs.readTextIfExists(".mcp.json");
+    if (!old.ok) return old;
+    const removal = planMcpUnregistration(old.value, "claude-code");
+    if (removal.status === "removed" && removal.content !== undefined) {
+      plan.mutations.push({
+        kind: "write",
+        path: ".mcp.json",
+        content: removal.content,
+        expectedBefore: filePrecondition(old.value),
+      });
+      plan.assets.push({ path: ".mcp.json (old VISP registration)", status: "removed" });
+    }
   }
   return ok(undefined);
 }

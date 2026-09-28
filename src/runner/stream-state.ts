@@ -80,7 +80,7 @@ export class HostStreamState {
     if (!this.usage.length) this.diagnostics.push("Host did not report attributable token usage");
     this.diagnostics.push(...harnessRequirementGaps(this.spec.harness, this.observations));
     for (const row of this.usage) {
-      if (row.model !== this.spec.host.model)
+      if (this.spec.host.kind !== "claude" && row.model !== this.spec.host.model)
         this.diagnostics.push(`Usage includes an unpinned model: ${row.model}`);
     }
     if (this.estimatedUsd === null) this.diagnostics.push("Complete priced usage is unavailable");
@@ -121,6 +121,7 @@ export class HostStreamState {
       event.observedTools !== undefined ||
       event.observedHooks !== undefined ||
       event.reportedModel !== undefined ||
+      event.mcpServers !== undefined ||
       event.toolCalls !== undefined ||
       event.commandCalls !== undefined
     )

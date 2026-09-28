@@ -70,4 +70,13 @@ describe("doctor repairs", () => {
     expect(repairs).toEqual([expect.objectContaining({ name: "harness assets", done: false })]);
     expect(repairs[0]?.detail).toContain("guard executable is unavailable");
   });
+
+  it("does not rewrite harness assets when the installed build differs", async () => {
+    const repairs = await applyFixes(await workspace.state(), [
+      { name: "installed runtime", status: "fail", detail: "different build" },
+      failing("harness assets"),
+      failing("enforcement"),
+    ]);
+    expect(repairs).toEqual([]);
+  });
 });

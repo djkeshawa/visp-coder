@@ -46,14 +46,20 @@ describe("concurrent policy mutations", () => {
   });
 
   it("allocates distinct override ids and retains a concurrent revocation", async () => {
-    await run("override", "create", "evidence.test-signal", "--reason", "First bounded exception");
+    await run(
+      "override",
+      "create",
+      "scope.max-changed-files",
+      "--reason",
+      "First bounded exception",
+    );
     vi.spyOn(context, "mutatingWorkspace").mockResolvedValue(ok(await workspace.state()));
     await Promise.all([
       ...Array.from({ length: 6 }, (_, index) =>
         run(
           "override",
           "create",
-          "evidence.test-signal",
+          "scope.max-changed-files",
           "--reason",
           `Exception for task ${index}`,
         ),

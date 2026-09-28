@@ -4,6 +4,7 @@ import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses, type ProductOutcomeStatus } from "./assessment.js";
 import { criticNext } from "./critic-guidance.js";
 import { hasUntakenPrompts } from "./host-prompts.js";
+import { productInputWarnings } from "./input-warnings.js";
 import type { ProductBrief, ProductState } from "./model.js";
 import { productReviewDocument } from "./review-document.js";
 import { earlierSessionGrant, staleTaskNote } from "./scopes.js";
@@ -75,9 +76,10 @@ export async function runProductNext(
     currentProductIdentity(workspace, loaded.value.brief),
   );
   if (!next.ok) return next;
+  const warnings = await productInputWarnings(workspace, loaded.value.brief);
   const result = await criticNext(workspace, {
     ...next.value,
-    evidence: [...next.value.evidence, ...staleTaskNote(workspace, loaded.value)],
+    evidence: [...next.value.evidence, ...warnings, ...staleTaskNote(workspace, loaded.value)],
   });
   if (!result.ok || (!loaded.value.state.criticManual && !loaded.value.state.userFeedback?.length))
     return result;

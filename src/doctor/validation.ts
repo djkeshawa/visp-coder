@@ -5,7 +5,7 @@ import { inspectValidationQuality } from "../workflow/evidence/test-quality.js";
 import { describeExecution } from "../workflow/evidence/verify-support.js";
 import type { Check, DoctorReport } from "./checks.js";
 
-/** Explicit opt-in: a smoke check runs project code using the exact verification runner. */
+/** Explicit opt-in smoke test; product verification supplies its own environment and context. */
 export async function withValidationSmoke(
   report: DoctorReport,
   command: string,
@@ -31,7 +31,7 @@ export async function withValidationSmoke(
     detail:
       findings.length > 0
         ? findings.map((finding) => finding.message).join("; ")
-        : `${command} completed through the verification subprocess; this smoke check does not certify feature acceptance`,
+        : `${command} completed as a smoke check with the current shell environment; product verification adds its own environment and check context. This does not certify feature acceptance`,
     ...(findings.length > 0
       ? {
           recovery:

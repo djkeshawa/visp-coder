@@ -1,5 +1,11 @@
+import { utimes } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { queryGraph, querySnapshot } from "../../../../src/graph/query/index.js";
+import {
+  queryFreshnessNote,
+  queryGraph,
+  querySnapshot,
+} from "../../../../src/graph/query/index.js";
 import type { QueryEnvelope } from "../../../../src/graph/query/types.js";
 import { openStore } from "../../../../src/graph/store/index.js";
 import type { GraphStore } from "../../../../src/graph/store/store.js";
@@ -47,6 +53,34 @@ afterEach(async () => {
 });
 
 describe("graph query index reuse", () => {
+  it("includes snapshot identity and flags edits newer than the snapshot", async () => {
+    await repo.write("a.ts", "export const a = 1;\n");
+    const createdAt = new Date(Date.now() + 1000).toISOString();
+    expect(store.publishSnapshot({ ...snapshot(), createdAt }).ok).toBe(true);
+    const answer = ask();
+    expect(answer.receipt).toMatchObject({ snapshotId: "stable-head", createdAt });
+    expect(await queryFreshnessNote(store)).toBeUndefined();
+    const editedAt = new Date(Date.parse(createdAt) + 1000);
+    await utimes(join(repo.root, "a.ts"), editedAt, editedAt);
+    expect(await queryFreshnessNote(store)).toContain("visp index --refresh");
+  });
+
+  it("reuses a snapshot across short-lived read connections", () => {
+    const first = ask();
+    const opened = openStore(repo.storePath);
+    if (!opened.ok) throw new Error(opened.error.message);
+    try {
+      const read = vi.spyOn(opened.value, "requireHead");
+      expect(queryGraph(opened.value, "search", { path: "a.ts" })).toMatchObject({
+        ok: true,
+        value: first,
+      });
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      opened.value.close();
+    }
+  });
+
   it("loads snapshot rows once for unchanged repeated queries", () => {
     const read = vi.spyOn(store, "requireHead");
     const first = ask();

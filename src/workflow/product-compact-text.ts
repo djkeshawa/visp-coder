@@ -246,6 +246,12 @@ export function compactVerificationText(
     delivery: data.delivery,
     recovery: data.recovery,
     recommendation: data.recommendation,
+    warnings:
+      Array.isArray(data.warnings) && data.warnings.length ? boundedRows(data.warnings) : undefined,
+    committedChanges:
+      Array.isArray(data.committedChanges) && data.committedChanges.length
+        ? boundedRows(data.committedChanges)
+        : undefined,
     checks: rows(data.executions).map(executionSummary),
     unresolved,
     gaps: closureGaps(data.gaps, unresolved),

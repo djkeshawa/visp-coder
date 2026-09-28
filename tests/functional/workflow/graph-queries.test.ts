@@ -64,7 +64,7 @@ describe("querying an indexed repository", () => {
   it("resolves a symbol name to an entity for callers", () => {
     const result = project.run("query", "callers", "makeToken");
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Reading src/token.ts#");
+    expect(result.stdout).toContain("Resolved makeToken to src/token.ts#");
     expect(result.stdout).toContain("src/login.ts");
   });
 

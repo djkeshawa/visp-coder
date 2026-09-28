@@ -36,7 +36,7 @@ export async function runExperiment(
   options: RunnerOptions,
 ): Promise<RunnerResult> {
   const spec = runnerSpecSchema.parse(input);
-  const root = await prepareRoot(spec, options.outputRoot);
+  const { root, hostExecutableRealpath } = await prepareRoot(spec, options.outputRoot);
   const directory = join(root, spec.id);
   const previous = options.resumeFrom ? await inspectRun(options.resumeFrom) : undefined;
   const worktree = previous?.manifest.worktree ?? join(directory, "worktree");
@@ -48,7 +48,6 @@ export async function runExperiment(
   });
   try {
     await lock.writeFile(JSON.stringify({ pid: process.pid, runId: spec.id }));
-    const budgetReservation = await reserveStudyBudget(root, studyBudgetRequest(spec));
     if (!previous)
       await git(spec.repository, ["worktree", "add", "--detach", worktree, spec.revision]);
     if (previous) {
@@ -58,6 +57,7 @@ export async function runExperiment(
     }
     await verifyHarness(spec, worktree);
     const initial = await captureSnapshot(worktree, directory, spec.revision);
+    const budgetReservation = await reserveStudyBudget(root, studyBudgetRequest(spec));
     immutableJson(join(directory, "initial-snapshot.json"), initial);
     const manifest = manifestFor(
       spec,
@@ -65,6 +65,7 @@ export async function runExperiment(
       options.resumeFrom ?? null,
       hashValue(initial),
       budgetReservation,
+      hostExecutableRealpath,
     );
     const manifestHash = hashValue(manifest);
     immutableJson(join(directory, "manifest.json"), { manifest, hash: manifestHash });
@@ -119,7 +120,14 @@ async function performRun(
 ): Promise<RunnerResult> {
   const { spec, worktree } = manifest;
   const journal = new EventJournal(join(directory, "events"), spec.id, manifestHash);
-  const options = { worktree, directory, journal, sessionId: resumedSession, signal };
+  const options = {
+    worktree,
+    directory,
+    journal,
+    sessionId: resumedSession,
+    signal,
+    hostExecutableRealpath: manifest.hostExecutableRealpath,
+  };
   const turn = spec.feedbackLoop
     ? await executeFeedbackLoop(spec, options)
     : await runHostTurn(spec, { ...options, prompt: spec.prompt });
@@ -197,6 +205,7 @@ export async function inspectRun(directory: string) {
   if (
     manifest.schemaVersion !== 1 ||
     typeof manifest.worktree !== "string" ||
+    typeof manifest.hostExecutableRealpath !== "string" ||
     manifestEnvelope.hash !== hashValue(manifest)
   )
     throw new Error("Manifest integrity verification failed");
@@ -244,4 +253,19 @@ export async function inspectRun(directory: string) {
     throw new Error("Snapshot integrity verification failed");
   await verifySnapshot(directory, snapshot);
   return { manifest, result, snapshot };
+}
+
+export function summarizeRun(run: Awaited<ReturnType<typeof inspectRun>>) {
+  const { manifest, result, snapshot } = run;
+  return {
+    runId: result.runId,
+    status: result.status,
+    host: manifest.spec.host.kind,
+    model: manifest.spec.host.model,
+    startedAt: result.startedAt,
+    endedAt: result.endedAt,
+    estimatedUsd: result.estimatedUsd,
+    diagnostics: result.diagnostics,
+    snapshotFileCount: snapshot.files.length,
+  };
 }

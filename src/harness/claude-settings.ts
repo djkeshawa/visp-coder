@@ -37,7 +37,9 @@ interface ClaudeSettings {
 
 /** The command Claude Code runs. Relative to the project, so it survives a move. */
 export function hookCommand(hookPath: string): string {
-  return `node "$CLAUDE_PROJECT_DIR/${hookPath}"`;
+  if (process.platform === "win32")
+    return `node "%CLAUDE_PROJECT_DIR%\\${hookPath.replaceAll("/", "\\")}" || exit /b 2`;
+  return `node "$CLAUDE_PROJECT_DIR/${hookPath}" || exit 2`;
 }
 
 /**
@@ -99,6 +101,11 @@ function hasPromptHook(settings: ClaudeSettings, hookPath: string): boolean {
       Array.isArray(hooks[event]) &&
       (hooks[event] as HookEntry[]).some((entry) => isDeepStrictEqual(entry, expected)),
   );
+}
+
+export function hasClaudeSessionHooks(current: string | undefined, hookPath: string): boolean {
+  const settings = parseSettings(current);
+  return settings !== "malformed" && hasPromptHook(settings, hookPath);
 }
 
 function entryFor(hookPath: string): HookEntry {

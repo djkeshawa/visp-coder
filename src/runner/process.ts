@@ -3,7 +3,23 @@ import { devNull } from "node:os";
 
 export function executionEnvironment(host = false): NodeJS.ProcessEnv {
   const names = ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"];
-  if (host) names.push("HOME", "USERPROFILE", "CODEX_HOME", "CLAUDE_CONFIG_DIR");
+  if (host)
+    names.push(
+      "HOME",
+      "USERPROFILE",
+      "CODEX_HOME",
+      "CLAUDE_CONFIG_DIR",
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "ALL_PROXY",
+      "NO_PROXY",
+      "http_proxy",
+      "https_proxy",
+      "all_proxy",
+      "no_proxy",
+      "NODE_EXTRA_CA_CERTS",
+      "SSL_CERT_FILE",
+    );
   const env: NodeJS.ProcessEnv = {};
   for (const name of names) if (process.env[name] !== undefined) env[name] = process.env[name];
   return env;
@@ -75,6 +91,8 @@ export interface StreamOptions {
   readonly input: string;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly rawOutput?: boolean;
   readonly onLine: (line: string) => "budget-exceeded" | undefined;
 }
 
@@ -83,7 +101,7 @@ export function executeStream(options: StreamOptions): Promise<StreamResult> {
   return new Promise((resolve) => {
     const child = spawn(options.file, [...options.args], {
       cwd: options.cwd,
-      env: executionEnvironment(true),
+      env: options.env ?? executionEnvironment(true),
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
@@ -123,6 +141,16 @@ export function executeStream(options: StreamOptions): Promise<StreamResult> {
     child.stdout.on("data", (chunk: string) => {
       size += Buffer.byteLength(chunk);
       if (size > 16 * 1024 * 1024) return stop("output-limit");
+      if (options.rawOutput) {
+        try {
+          const requested = options.onLine(chunk);
+          if (requested) stop(requested);
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : String(cause);
+          stop("protocol-error");
+        }
+        return;
+      }
       pending += chunk;
       let newline = pending.indexOf("\n");
       while (newline >= 0) {
@@ -150,7 +178,7 @@ export function executeStream(options: StreamOptions): Promise<StreamResult> {
     const timer = setTimeout(() => stop("timed-out"), options.timeoutMs);
     if (options.signal?.aborted) abort();
     child.on("close", (exitCode) => {
-      consume(pending);
+      if (!options.rawOutput) consume(pending);
       kill("SIGKILL");
       clearTimeout(timer);
       if (force) clearTimeout(force);

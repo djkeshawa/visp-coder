@@ -37,15 +37,10 @@ const codex: HostAdapter = {
       "--model",
       spec.host.model,
     ];
-    // Resume inherits sandbox/configuration from the explicitly named session.
-    if (!sessionId)
-      args.push(
-        "--sandbox",
-        spec.permissions.mode,
-        "--ignore-user-config",
-        "--config",
-        'approval_policy="never"',
-      );
+    args.push("--ignore-user-config");
+    if (sessionId) args.push("--config", `sandbox_mode=${JSON.stringify(spec.permissions.mode)}`);
+    else args.push("--sandbox", spec.permissions.mode);
+    args.push("--config", 'approval_policy="never"');
     if (spec.host.effort)
       args.push("--config", `model_reasoning_effort=${JSON.stringify(spec.host.effort)}`);
     return [...args, "-"];
@@ -53,7 +48,7 @@ const codex: HostAdapter = {
   parse(row, model) {
     if (row.type === "thread.started")
       return { type: "started", sessionId: requiredText(row.thread_id, "thread_id") };
-    if (row.type === "turn.failed" || row.type === "error") return { type: "failed" };
+    if (row.type === "turn.failed") return { type: "failed" };
     if (row.type === "turn.completed") {
       const u = object(row.usage, "usage");
       return {
@@ -101,7 +96,10 @@ const claude: HostAdapter = {
       "dontAsk",
       "--setting-sources",
       "project",
+      "--strict-mcp-config",
     ];
+    if (spec.harness.files.some((file) => file.path === ".mcp.json"))
+      args.push("--mcp-config", ".mcp.json");
     if (spec.permissions.mode === "read-only") args.push("--tools", "Read,Glob,Grep");
     if (spec.permissions.allowedTools)
       args.push("--allowedTools", spec.permissions.allowedTools.join(","));
@@ -115,6 +113,9 @@ const claude: HostAdapter = {
         type: "started",
         sessionId: requiredText(row.session_id, "session_id"),
         reportedModel: typeof row.model === "string" ? row.model : undefined,
+        mcpServers: Array.isArray(row.mcp_servers)
+          ? row.mcp_servers.filter((server): server is string => typeof server === "string")
+          : undefined,
       };
     }
     if (row.type === "system" && row.subtype === "hook_response" && row.exit_code === 0) {

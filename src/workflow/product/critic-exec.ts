@@ -4,6 +4,7 @@ import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "n
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { redactStrings } from "../../core/redaction.js";
+import { prepareCommand } from "../../core/windows-command.js";
 import type { ProductCriticHost } from "./critic.js";
 import type { CriticPacket } from "./critic-packet.js";
 
@@ -30,7 +31,9 @@ export function codexExecCriticHost(options: {
         return { unavailable: "critic.launch: codex-exec requires critic.harness: codex" };
       const version = await run(executable, ["--version"], { signal: config.signal });
       if (version.exitCode !== 0)
-        return { unavailable: `Codex CLI is not runnable: ${version.error ?? version.stderr}` };
+        return {
+          unavailable: `Codex CLI is not runnable${process.platform === "win32" ? " (check the npm codex.cmd shim and PATH)" : ""}: ${version.error ?? version.stderr}`,
+        };
       if (!(await reachesModel(lookup)))
         return {
           unavailable:
@@ -146,7 +149,7 @@ export async function runCodexStructured(options: {
     .catch(() => undefined);
   if (result.exitCode !== 0)
     throw new Error(
-      `codex exec exited ${result.exitCode ?? "without a status"}: ${(result.error ?? result.stderr).slice(-1200)}`,
+      `codex exec exited ${result.exitCode ?? "without a status"}: ${(result.error ?? result.stderr).slice(-1200)}${process.platform === "win32" && result.error ? " Check the npm codex.cmd shim and PATH." : ""}`,
     );
   return JSON.parse(await readFile(responsePath, "utf8"));
 }
@@ -272,10 +275,12 @@ function run(
     let stderr = "";
     const stdout: Buffer[] = [];
     let stdoutBytes = 0;
-    const child = spawn(executable, args, {
+    const prepared = prepareCommand(executable, args, options.env ?? process.env);
+    const child = spawn(prepared.file, prepared.args, {
       stdio: ["pipe", "pipe", "pipe"],
       signal: options.signal,
       killSignal: "SIGTERM",
+      windowsVerbatimArguments: prepared.windowsVerbatimArguments,
       ...(options.env ? { env: options.env } : {}),
     });
     child.stderr.on("data", (chunk: Buffer) => {

@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { relative, resolve } from "node:path";
 import { ProjectFileSystem } from "../../core/fs.js";
 import { sha256 } from "../../core/hash.js";
@@ -87,7 +88,16 @@ async function collect(
 }
 
 function relativeConfigPath(root: string, base: string, path: string): string | undefined {
-  if (isPortableAbsolute(path) || !path.startsWith(".")) return undefined;
+  if (isPortableAbsolute(path)) return undefined;
+  if (!path.startsWith(".")) {
+    try {
+      const require = createRequire(resolve(root, base, "tsconfig.json"));
+      const absolute = require.resolve(path);
+      return isInside(root, absolute) ? toPosix(relative(root, absolute)) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
   // Resolve before confinement: rejecting every '..' rejects safe nested inheritance,
   // while joinPosix would silently discard an attempted escape above the root.
   const absolute = resolve(root, base, path.replace(/\\/g, "/"));

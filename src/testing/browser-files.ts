@@ -19,6 +19,7 @@ export async function readBrowserFile(root: string, url: string, blocked: readon
   const projectPath = relative(files.root, path).replaceAll("\\", "/");
   if (!projectPath || matchesAny(projectPath, [...DEFAULT_BLOCKED_PATHS, ...blocked]))
     throw new BrowserSecurityError("Local browser file is outside allowed project content");
+  if (!metadata.value) return { bytes: null, type: contentType(path) };
   if (metadata.value?.type !== "file" || metadata.value.size > 32 * 1024 * 1024)
     throw new BrowserSecurityError("Local browser input must be a regular file of at most 32 MiB");
   const bytes = await files.readBytesIfExists(path);
@@ -67,16 +68,16 @@ export async function confineBrowserFiles(
       const request = params.request as { url: string; method: string };
       if (request.method !== "GET") throw new Error("Local browser files support GET only");
       const loaded = await readBrowserFile(root, request.url, blocked);
-      bytesRead += loaded.bytes.length;
+      bytesRead += loaded.bytes?.length ?? 0;
       if (bytesRead > 128 * 1024 * 1024) throw new Error("Local browser input budget exceeded");
       await send("Fetch.fulfillRequest", {
         requestId,
-        responseCode: 200,
+        responseCode: loaded.bytes === null ? 404 : 200,
         responseHeaders: [
           { name: "Content-Type", value: loaded.type },
           { name: "Content-Security-Policy", value: "worker-src 'none'" },
         ],
-        body: Buffer.from(loaded.bytes).toString("base64"),
+        body: loaded.bytes === null ? "" : Buffer.from(loaded.bytes).toString("base64"),
       });
     } catch (cause) {
       fail(errorMessage(cause));

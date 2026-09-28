@@ -1,5 +1,6 @@
-import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Replaced at build time by tsup with the version in package.json. Reading it
@@ -19,12 +20,20 @@ export interface RuntimeIdentity {
   readonly executable: string;
 }
 
-export function runtimeIdentity(entry: string | undefined = process.argv[1]): RuntimeIdentity {
+export function runtimeIdentity(entry: string | undefined = vispCliEntry()): RuntimeIdentity {
   return {
     version: VERSION,
     buildId: BUILD_ID,
     executable: executablePath(entry),
   };
+}
+
+function vispCliEntry(): string | undefined {
+  const directory = dirname(fileURLToPath(import.meta.url));
+  const bundled = join(directory, "cli.js");
+  if (existsSync(bundled)) return bundled;
+  const sourceBuild = resolve(directory, "../../dist/cli.js");
+  return existsSync(sourceBuild) ? sourceBuild : process.argv[1];
 }
 
 function executablePath(entry: string | undefined): string {

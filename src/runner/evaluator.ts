@@ -158,7 +158,7 @@ export async function evaluateRun(
   await writePolicy(join(directory, "oracle"), policy.files);
   await mkdir(join(directory, "results"), { mode: 0o700 });
   const name = `visp-eval-${randomUUID()}`;
-  const reportLines: string[] = [];
+  const reportChunks: string[] = [];
   const execution = await executeStream({
     file: spec.engine.executable,
     args: buildContainerArguments(spec, directory, name, manifestHash),
@@ -166,15 +166,16 @@ export async function evaluateRun(
     input: "",
     timeoutMs: spec.timeoutMs,
     signal,
-    onLine: (line) => {
-      reportLines.push(line);
+    rawOutput: true,
+    onLine: (chunk) => {
+      reportChunks.push(chunk);
       return undefined;
     },
   });
   await removeOwnedContainer(spec, name, manifestHash, directory);
   const reportPath = safeChild(join(directory, "results"), spec.reportFile);
   await mkdir(dirname(reportPath), { recursive: true, mode: 0o700 });
-  await writeFile(reportPath, reportLines.join("\n"), { flag: "wx", mode: 0o600 });
+  await writeFile(reportPath, reportChunks.join(""), { flag: "wx", mode: 0o600 });
   let assessment: ReturnType<typeof evaluateReport> | null = null;
   let reportHash: string | null = null;
   let diagnostic: string | null = execution.error ?? null;

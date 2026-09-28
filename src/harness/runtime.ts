@@ -3,6 +3,7 @@ import type { ProjectFileSystem } from "../core/fs.js";
 import type { ProjectPaths } from "../core/paths.js";
 import { err } from "../core/result.js";
 import { requireRuntimeAgreement } from "../core/runtime-agreement.js";
+import { runtimeIdentity } from "../core/version.js";
 import { readInstallState } from "./install-state.js";
 
 /** Historical records remain readable; only an identified installation authorizes mutation. */
@@ -17,13 +18,19 @@ export async function requireInstalledRuntime(paths: ProjectPaths, files: Projec
         { recovery: "visp install" },
       ),
     );
-  const agreed = requireRuntimeAgreement(installed.value.runtime);
+  const agreed = requireRuntimeAgreement(
+    installed.value.runtime,
+    runtimeIdentity(),
+    "installed assets",
+  );
+  const installedCommand = installed.value.runtime?.executable
+    ? `Run node ${JSON.stringify(installed.value.runtime.executable)} or use the installed MCP tools.`
+    : "Inspect the installed runtime with visp doctor.";
   return agreed.ok
     ? agreed
     : err({
         ...agreed.error,
         message: `Installed harness runtime cannot authorize this operation: ${agreed.error.message}`,
-        recovery:
-          "Inspect CLI doctor and MCP visp_doctor identities. Choose the intended build, refresh this project's assets with visp install, and restart stale MCP/host processes. Historical evidence remains unchanged.",
+        recovery: `${installedCommand} To switch builds, run visp install --replace-runtime and restart stale MCP/host processes. Historical evidence remains unchanged.`,
       });
 }

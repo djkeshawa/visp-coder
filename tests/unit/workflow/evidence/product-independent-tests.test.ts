@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
+import { ok } from "../../../../src/core/result.js";
+import { withStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import {
   runProductAcceptReviewed,
@@ -11,10 +13,13 @@ import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import {
   backgroundTests,
   codexTester,
+  configuredTestsStarter,
   createProductFeatureWithTests,
   type IndependentTester,
+  independentTestsBeforeWork,
   inlineTests,
   readTestsRecord,
+  startIndependentTests,
   writeIndependentTests,
 } from "../../../../src/workflow/product/independent-tests.js";
 import { runProductReport } from "../../../../src/workflow/product/index.js";
@@ -24,9 +29,14 @@ import { productWorkspace } from "../../support/product-workspace.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
 let workspace: TestWorkspace | undefined;
+const codexThread = process.env.CODEX_THREAD_ID;
+beforeEach(() => {
+  delete process.env.CODEX_THREAD_ID;
+});
 afterEach(async () => {
   await workspace?.destroy();
   workspace = undefined;
+  if (codexThread !== undefined) process.env.CODEX_THREAD_ID = codexThread;
 });
 
 // The fixture's module returns 1; the request promises 2.
@@ -55,6 +65,20 @@ function tester(file: { name: string; content: string } | null, calls: string[] 
   return run;
 }
 
+it("reports a skipped tester when codex-exec uses a non-Codex critic", async () => {
+  const fixture = await productWorkspace({ critic: true });
+  workspace = fixture.workspace;
+  const config = parse(await readFile(join(workspace.root, "visp.yml"), "utf8"));
+  config.critic = { ...config.critic, harness: "cursor", launch: "codex-exec", mode: "auto" };
+  await workspace.write("visp.yml", stringify(config));
+  const state = await workspace.state();
+  expect(configuredTestsStarter(state)).toBeUndefined();
+  expect(await independentTestsBeforeWork(state, undefined, undefined, 0)).toMatchObject({
+    ok: true,
+    value: { status: "skipped", reason: expect.stringContaining("critic.harness: codex") },
+  });
+});
+
 it("pins tests written from the original request when they fail before implementation", async () => {
   const fixture = await testerWorkspace();
   const prompts: string[] = [];
@@ -66,7 +90,7 @@ it("pins tests written from the original request when they fail before implement
   );
   expect(work.ok, JSON.stringify(work)).toBe(true);
   if (!work.ok) return;
-  const file = `acceptance/${fixture.brief.feature}/value.test.mjs`;
+  const file = `acceptance/${fixture.brief.feature}/value.acceptance.mjs`;
   expect(work.value.independentTests).toMatchObject({
     status: "pinned",
     file,
@@ -120,6 +144,105 @@ it("rejects a test file without enough assertions", async () => {
   });
 });
 
+it("does not pin a suite when its interpreter exits with command-not-found", async () => {
+  const fixture = await testerWorkspace();
+  const content = `import assert from "node:assert/strict";
+assert.ok(true); assert.ok(true); assert.ok(true);
+process.exit(127);
+`;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "missing-runtime.mjs", content }),
+  );
+  expect(result.ok && result.value.status).toBe("rejected");
+  expect(result.ok && result.value.reason).toContain("could not start");
+});
+
+it("does not expose operator secrets to candidate tests", async () => {
+  const fixture = await testerWorkspace();
+  const previous = process.env.VISP_TEST_OPERATOR_SECRET;
+  process.env.VISP_TEST_OPERATOR_SECRET = "secret";
+  try {
+    const content = `import assert from "node:assert/strict";
+import { value } from "../../src/value.mjs";
+assert.equal(process.env.VISP_TEST_OPERATOR_SECRET, undefined);
+assert.equal(typeof value, "number");
+assert.equal(value, 2);
+`;
+    const result = await writeIndependentTests(
+      await fixture.workspace.state(),
+      fixture.brief.feature,
+      tester({ name: "secret-check.mjs", content }),
+    );
+    expect(result.ok && result.value.status).toBe("pinned");
+    expect((await runProductWork(await fixture.workspace.state(), { task: "T001" })).ok).toBe(true);
+    await fixture.workspace.write("src/value.mjs", "export const value = 2;\n");
+    const done = await runProductDone(await fixture.workspace.state(), { task: "T001" });
+    expect(done.ok && done.value.executions.find((run) => run.check === "PINNED_1")?.status).toBe(
+      "passed",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.VISP_TEST_OPERATOR_SECRET;
+    else process.env.VISP_TEST_OPERATOR_SECRET = previous;
+  }
+});
+
+it("declines a baseline when the worker changes source during testing", async () => {
+  const fixture = await testerWorkspace();
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async () => {
+      await fixture.workspace.write("src/value.mjs", "export const value = 2;\n");
+      return {
+        file: { name: "value.mjs", content: FAILS_FIRST },
+        existingBehavior: false,
+        tests: [{ name: "value", quote: "Return two" }],
+        notes: "",
+      };
+    },
+  );
+  expect(result.ok && result.value.status).toBe("declined");
+  expect(result.ok && result.value.reason).toContain("changed while the tester");
+});
+
+it("captures source before launching a detached tester", async () => {
+  const fixture = await testerWorkspace();
+  const state = await fixture.workspace.state();
+  let calls = 0;
+  await startIndependentTests(state, fixture.brief.feature, async (workspace, feature) => {
+    await fixture.workspace.write("src/value.mjs", "export const value = 2;\n");
+    return writeIndependentTests(workspace, feature, async () => {
+      calls += 1;
+      return { file: null, tests: [], notes: "" };
+    });
+  });
+  const record = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+  expect(record.ok && record.value?.status).toBe("declined");
+  expect(record.ok && record.value?.reason).toContain("before the tester started");
+  expect(calls).toBe(0);
+});
+
+it("declines a suite that admits it checks only file structure", async () => {
+  const fixture = await testerWorkspace();
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async () => ({
+      file: {
+        name: "structure.mjs",
+        content:
+          "import assert from 'node:assert/strict'; assert.ok(true); assert.ok(true); assert.ok(true); process.exit(1);",
+      },
+      existingBehavior: false,
+      tests: [{ name: "file exists and parses", quote: "Create a game" }],
+      notes: "I cannot test the behavior from this interface",
+    }),
+  );
+  expect(result.ok && result.value.status).toBe("declined");
+});
+
 it("asks the tester once per feature, even when it fails", async () => {
   const fixture = await testerWorkspace();
   let calls = 0;
@@ -145,6 +268,69 @@ it("asks the tester once per feature, even when it fails", async () => {
   expect(calls).toBe(1);
   const record = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
   expect(record.ok && record.value?.status).toBe("failed");
+});
+
+it("retries a failed tester only when explicitly requested", async () => {
+  const fixture = await testerWorkspace();
+  const state = await fixture.workspace.state();
+  const failed = await writeIndependentTests(state, fixture.brief.feature, async () => {
+    throw new Error("model unavailable");
+  });
+  expect(failed.ok && failed.value.status).toBe("failed");
+  const retry = await writeIndependentTests(state, fixture.brief.feature, tester(null), true);
+  expect(retry.ok && retry.value.status).toBe("declined");
+});
+
+it("does not spawn a background tester when Codex is missing", async () => {
+  const fixture = await testerWorkspace();
+  const previous = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    expect(configuredTestsStarter(await fixture.workspace.state(), "mcp")).toBeUndefined();
+  } finally {
+    if (previous === undefined) delete process.env.PATH;
+    else process.env.PATH = previous;
+  }
+});
+
+it("waits through a long done lock instead of discarding candidate tests", async () => {
+  const fixture = await testerWorkspace();
+  let locked!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const held = withStateLock(fixture.workspace.root, async () => {
+    locked();
+    await new Promise((resolve) => setTimeout(resolve, 5500));
+    return ok(undefined);
+  });
+  await ready;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: FAILS_FIRST }),
+  );
+  await held;
+  expect(result.ok && result.value.status).toBe("pinned");
+});
+
+it("reports a live tester as running beyond ten minutes", async () => {
+  const fixture = await testerWorkspace();
+  await fixture.workspace.write(
+    `.visp/features/${fixture.brief.feature}/acceptance-tests.json`,
+    JSON.stringify({
+      version: 1,
+      status: "running",
+      startedAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+      pid: process.pid,
+    }),
+  );
+  const work = await runProductWork(
+    await fixture.workspace.state(),
+    { task: "T001" },
+    inlineTests(tester(null)),
+  );
+  expect(work.ok && work.value.independentTests?.status).toBe("running");
 });
 
 it("does not launch a tester unless VISP launches the reviewer", async () => {
@@ -266,7 +452,7 @@ it("starts the tester with the feature and keeps the worker's first brief an ini
       checks: [
         {
           id: "C001",
-          command: [process.execPath, `acceptance/${id}/value.test.mjs`],
+          command: [process.execPath, `acceptance/${id}/value.acceptance.mjs`],
           outcomes: ["O001"],
         },
       ],
@@ -555,6 +741,38 @@ writeFileSync(args[args.indexOf("--output-last-message") + 1], JSON.stringify({
   expect(report.value.markdown).toMatch(
     /## Tester commands with network access[\s\S]*curl -s http:\/\/localhost:8080\/items/,
   );
+});
+
+it("runs a new-project tester in an empty directory and sweeps abandoned auth copies", async () => {
+  const fixture = await testerWorkspace();
+  const { chmod, mkdir, mkdtemp, utimes, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const stale = await mkdtemp(join(tmpdir(), "visp-tester-"));
+  await mkdir(join(stale, "codex-home"));
+  await writeFile(join(stale, "codex-home", "auth.json"), "secret");
+  const old = new Date(Date.now() - 25 * 60 * 60_000);
+  await utimes(stale, old, old);
+  const fake = join(fixture.workspace.root, "..", `fake-codex-empty-${Date.now()}.mjs`);
+  await writeFile(
+    fake,
+    `#!${process.execPath}
+import { readdirSync, writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const root = args[args.indexOf("--cd") + 1];
+writeFileSync(args[args.indexOf("--output-last-message") + 1], JSON.stringify({
+  file: null, existingBehavior: false, tests: [], notes: JSON.stringify(readdirSync(root)),
+}));
+`,
+  );
+  await chmod(fake, 0o755);
+  const response = (await codexTester({ executable: fake, lookup: async () => undefined })({
+    root: fixture.workspace.root,
+    model: "fake",
+    prompt: "Test behavior",
+    schema: {},
+  })) as { notes: string };
+  expect(JSON.parse(response.notes)).toEqual([]);
+  await expect(readFile(join(stale, "codex-home", "auth.json"))).rejects.toThrow();
 });
 
 // A suite that starts a server left it running after the baseline run.

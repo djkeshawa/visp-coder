@@ -25,7 +25,11 @@ import {
 import type { inspectProductImages } from "../product/images.js";
 import type { productObservationPlan } from "../product/observation-plan.js";
 import type { ProductRecord } from "../product/store.js";
-import { productContractDigest, productSourceDigest } from "../product/subject.js";
+import {
+  productComparisonEnvironmentDigest,
+  productContractDigest,
+  productSourceDigest,
+} from "../product/subject.js";
 import type { WorkspaceState } from "../state.js";
 import { productJourneyKey } from "./product-journey.js";
 import type { ProductReviewCapture } from "./product-review.js";
@@ -79,7 +83,7 @@ export async function withProductCapture<T>(
     );
   const before = await productSourceDigest(workspace, record.brief);
   if (!before.ok) return before;
-  const environment = await productSourceDigest(workspace, record.brief, {});
+  const environment = await productComparisonEnvironmentDigest(workspace, record.brief);
   const comparisonEnvironment = environment.ok
     ? hashValue({
         environment: environment.value,

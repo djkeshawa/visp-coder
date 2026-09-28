@@ -42,6 +42,7 @@ skills:
 
 memory:
   enabled: true
+  recall: true
 
 telemetry:
   enabled: true
@@ -58,7 +59,7 @@ telemetry:
 | `workflow.strictness` | Default rule strictness until a policy is recorded; afterwards use `visp policy set-strictness <mode>`. `locked` is `strict` with overrides refused. |
 | `workflow.reviewMode` | `observation-preview` is an opt-in review mode; see [product review](product-review.md). |
 | `workflow.maxChangedFiles` | Changed-file ceiling for an authorized slice. A recorded policy limit takes precedence. |
-| `workflow.blockedPaths` | Paths an agent may never write, regardless of slice scope. They are also left out of the source VISP delivers and of the tester's execution-mode copy. |
+| `workflow.blockedPaths` | Paths rejected by explicit `visp guard` checks and Claude's edit hook regardless of slice scope. A slash-free pattern matches at any directory depth, without regard to case. Git-listed changes are checked again at commit and `done`; ignored `.env` and `.env.*` files are hashed at authorization and checked at `done`. Ignored build output is not checked after a shell write. Blocked files are left out of the source VISP delivers and of the tester's execution-mode copy. |
 | `workflow.validationCommands` | Commands run with every slice's checks as `CONFIG_1`, `CONFIG_2`, … One entry is one command, run without a shell; write `pnpm test` and `pnpm lint` as two entries, or give an argument list such as `["pnpm", "test", "--", "--reporter=dot"]`. |
 | `workflow.acceptanceChecks` | `{command, files}` checks pinned into each new feature and run at `visp accept`. |
 | `workflow.flipCheck` | Kept for labeling historical telemetry; current verification does not run flip checks. |
@@ -66,8 +67,10 @@ telemetry:
 | `context.tokenBudget` | Approximate budget for the complete context `work` delivers. |
 | `context.maxSnippets` | Maximum source excerpts in delivered context. |
 | `skills.*` | Skill selection: `minSupport` closed slices a derived proposal must cite; `maxPerPack` admitted skills per context (0 selects none). |
-| `memory.enabled` | Deliver matching project notes in `work` context. |
-| `telemetry.enabled` | Local attempt and usage records. They never leave the machine. |
+| `memory.enabled` | Enable project notes and earlier-request recall. |
+| `memory.recall` | With a VISP-launched reviewer and no `memory.service`, use its model to select decisions from earlier requests and append them to a new feature's original request and `work` replies. Defaults to `true`; set `false` to skip this recall. |
+| `memory.service.command`, `memory.service.select` | Optional Visp Memory CLI and selection mode (`model` or `keyword`) for long-term request decisions. |
+| `telemetry.enabled` | Local usage import; activity recording is independent. Records stay on the machine. |
 
 `visp doctor --settings` (MCP `visp_doctor` with `settings: true`) shows each effective value, whether it came from the file or a default, and which controls are inactive.
 
@@ -93,17 +96,20 @@ Policy and overrides are stored in `.visp/policy.json` and `.visp/overrides.json
 ```sh
 visp query describe                    # what is in this repository
 visp query search makeToken            # where is it defined
-visp query callers src/auth/token.ts   # what would break
+visp query callers 'src/auth/token.ts#function:makeToken'   # what calls this symbol
 visp query testsFor src/auth/token.ts  # what covers it
 visp query impact src/auth/token.ts    # what depends on it, transitively
+visp query tracePath src/app.ts src/auth/token.ts  # shortest structural path
 visp query unknowns                    # what the index could not resolve
 ```
 
-Other operations are `entity`, `neighbors`, `callees` and `tracePath`. `--depth`, `--results`, `--nodes` and `--edges` bound a query (defaults 3, 50, 2,000 and 8,000; maxima 8, 200, 20,000 and 80,000). A truncated answer keeps its unknowns, so a partial result never looks complete. MCP exposes `visp_index` and `visp_query`.
+Other operations are `entity`, `neighbors` and `callees`. `tracePath` takes a source and destination; MCP passes the destination as `to`. `--depth`, `--results`, `--nodes` and `--edges` bound a query (defaults 3, 50, 2,000 and 8,000; maxima 8, 200, 20,000 and 80,000). A truncated answer keeps its unknowns, so a partial result never looks complete. Query receipts include the snapshot ID and creation time, and replies flag source changes newer than that snapshot. MCP exposes `visp_index` and `visp_query`.
 
 ## Memory and skills
 
 `visp learn "<note>"` records a project note under `.visp/memory/`; `visp recall [query]` lists notes. `work` delivers up to four matching notes (6,000 bytes) labeled with their source; notes are untrusted context, not instructions.
+
+With the default `memory.recall: true` and a VISP-launched reviewer, each new feature can receive relevant decisions from earlier feature requests. The selected decisions are appended to the feature's original request, so the tester and reviewer see them as part of that request. Set `memory.recall: false` to disable this step when no `memory.service` is configured.
 
 Project rules are different: they are requirements the user stated for all later work, such as "these conventions apply to this change and all later work" followed by a list, or "from now on, never log request bodies". `visp feature` finds them in the user's recorded prompts (never in a worker's text; with `critic.launch: codex-exec` the reviewer's model reads them and each must quote the prompt, otherwise phrase matching does), records them in `.visp/rules.json`, and the tester, the reviewer and every `work` reply read the current rules (a later message that replaces or withdraws a rule wins; a removed rule stops applying at once). `visp rules` lists them and `visp rules remove <id>` removes one that was not meant.
 
@@ -147,7 +153,7 @@ See [internals](internals.md#skills) for revision, evaluation and rollback recor
 | `memory/` | yes | Project notes |
 | `skills/` | yes | Skill documents, revisions and lifecycle history |
 | `exports/`, `migrations/backups/` | yes | History exports and upgrade backups from `visp-migrate` |
-| `hooks/` | yes | Generated hook scripts |
+| `hooks/` | no | Generated, build-specific hook scripts; reinstall locally after cloning |
 | `state/` | no | Local slice authorizations (`state/product-authorizations/`), install records, transaction journals and the writer lock |
 | `graph/` | no | The repository index database |
 | `session/` | no | Per-session data, including recent user prompts recorded by the host's prompt hook |
@@ -156,6 +162,8 @@ See [internals](internals.md#skills) for revision, evaluation and rollback recor
 | `telemetry.json`, `telemetry.json.events/` | no | Local usage records |
 
 Authorizations are per checkout: authorizing a slice on one machine grants nothing elsewhere, which is why CI judges a pull request against the committed brief instead. Let VISP commands write everything under `.visp/`; do not edit generated records by hand.
+
+If a project tracked `.visp/hooks/` before this ignore rule was added, remove those generated files from the Git index once with `git rm --cached -r .visp/hooks/`, then commit the updated `.gitignore`. Each developer's `visp install` recreates the hooks locally.
 
 Pinned acceptance tests live outside `.visp/`, under `acceptance/<feature>/`, and are committed with the feature.
 

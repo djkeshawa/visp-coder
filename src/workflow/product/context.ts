@@ -18,6 +18,7 @@ import type { ProductWorkContext } from "./context-types.js";
 import { correctionChecks, failedCheckOwners } from "./corrections.js";
 import { currentJourneyFailures, currentJourneyFeedback } from "./evidence-references.js";
 import { productFeedbackPlan } from "./feedback.js";
+import { productInputWarnings } from "./input-warnings.js";
 import { checksFor, type ProductSlice } from "./model.js";
 import { type ProjectRule, readProjectRules } from "./project-rules.js";
 import { reviewExcerpt } from "./review-excerpts.js";
@@ -74,6 +75,7 @@ export async function buildProductContext(
   const neighborhood = await productNeighborhood(workspace, paths, refresh, question);
   if (!neighborhood.ok) return neighborhood;
   const { graph, notes } = neighborhood.value;
+  notes.unshift(...(await productInputWarnings(workspace, brief)));
   notes.push(...checkOutputNotes(checks));
   const memory = await recallRelevant(workspace, {
     terms: [

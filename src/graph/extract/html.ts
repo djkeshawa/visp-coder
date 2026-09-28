@@ -1,7 +1,7 @@
 import { EXTERNAL_PREFIX } from "../constants.js";
 import { fileEntityId } from "../ids.js";
 import { basename } from "../paths.js";
-import type { Entity, Entrypoint, Relation } from "../types.js";
+import type { Entity, Entrypoint, Relation, UnknownRecord } from "../types.js";
 import { htmlScripts } from "./html-scripts.js";
 import { type ResolutionContext, resolveScriptImport } from "./resolve.js";
 
@@ -11,6 +11,7 @@ export interface HtmlExtraction {
   readonly entities: Entity[];
   readonly relations: Relation[];
   readonly entrypoints: Entrypoint[];
+  readonly unknowns: UnknownRecord[];
 }
 
 export function extractHtml(
@@ -20,6 +21,7 @@ export function extractHtml(
 ): HtmlExtraction {
   const relations: Relation[] = [];
   const entrypoints: Entrypoint[] = [];
+  const unknowns: UnknownRecord[] = [];
   const pageEntity = fileEntityId(path);
 
   const scripts = htmlScripts(source);
@@ -29,7 +31,10 @@ export function extractHtml(
 
     const line = lineAt(source, script.start - script.tag.length);
     const resolved = resolvePageScript(context, path, src);
-    if (!resolved) continue;
+    if (!resolved) {
+      unknowns.push({ kind: "unresolved_import", path, detail: src });
+      continue;
+    }
 
     relations.push({
       source: pageEntity,
@@ -77,6 +82,7 @@ export function extractHtml(
         : [],
     relations,
     entrypoints,
+    unknowns,
   };
 }
 
@@ -93,9 +99,17 @@ function resolvePageScript(
   path: string,
   src: string,
 ): string | undefined {
-  const candidates = src.startsWith(".") || src.startsWith("/") ? [src] : [`./${src}`, src];
+  const candidates = src.startsWith("/")
+    ? [`./${src.slice(1)}`]
+    : src.startsWith(".")
+      ? [src]
+      : [`./${src}`, src];
   for (const candidate of candidates) {
     const resolved = resolveScriptImport(context, path, candidate);
+    if (resolved.kind === "file") return resolved.path;
+  }
+  if (src.startsWith("/")) {
+    const resolved = resolveScriptImport(context, "index.html", `./${src.slice(1)}`);
     if (resolved.kind === "file") return resolved.path;
   }
   return undefined;

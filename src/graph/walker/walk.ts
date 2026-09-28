@@ -5,6 +5,7 @@ import { fromUnknown } from "../../core/errors.js";
 import { type ProjectDirectoryEntry, ProjectFileSystem } from "../../core/fs.js";
 import { matchesAny } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { GENERATED_AGENT_PREFIXES, isGraphInputPath } from "../paths.js";
 import type { FileEntry, SkippedFile, SkipReason, WalkResult } from "../types.js";
 import { IgnoreStack } from "./ignore.js";
 import { inspectFile } from "./scan.js";
@@ -98,8 +99,17 @@ class Walk {
     depth: number,
     stack: IgnoreStack,
   ): Promise<void> {
-    // Hard-ignored directories are a property of the tool, not of this repository.
-    if (HARD_IGNORED.has(entry.name)) return;
+    if (GENERATED_AGENT_PREFIXES.some((prefix) => `${repoPath}/`.startsWith(prefix)))
+      return this.skip(repoPath, "excluded");
+    if (
+      entry.name === ".git" ||
+      entry.name === "node_modules" ||
+      entry.name === ".visp" ||
+      (depth === 0 && HARD_IGNORED.has(entry.name))
+    )
+      return this.skip(repoPath, "excluded");
+    const nestedGit = await this.projectFiles.metadata(`${repoPath}/.git`);
+    if (nestedGit.ok && nestedGit.value?.type === "file") return this.skip(repoPath, "excluded");
 
     const reason = this.excluded(repoPath, true, stack);
     if (reason) return this.skip(repoPath, reason);
@@ -108,6 +118,7 @@ class Walk {
   }
 
   private async visitFile(repoPath: string): Promise<void> {
+    if (!isGraphInputPath(repoPath)) return this.skip(repoPath, "excluded");
     if (this.files.length >= this.limits.maxFiles) {
       this.capped = true;
       return this.skip(repoPath, "max_files");

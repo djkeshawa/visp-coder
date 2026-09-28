@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { parse } from "yaml";
 import { parseProjectFilePath } from "../core/input.js";
+import { canonicalProjectRoot } from "../core/paths.js";
 import type { WorkspaceState } from "../workflow/state.js";
 
 const MAX_INPUT_BYTES = 1024 * 1024;
@@ -22,13 +23,15 @@ export async function readCommandInput(
 
 async function readInputFile(state: WorkspaceState, path: string): Promise<Buffer> {
   // Workers keep drafts in the temporary directory; reading their own input there is safe.
-  const temporary = resolve(path);
-  if (isAbsolute(path) && temporary.startsWith(`${resolve(tmpdir())}${sep}`)) {
+  const temporary = canonicalProjectRoot(path);
+  if (isAbsolute(path) && temporary.startsWith(`${canonicalProjectRoot(tmpdir())}${sep}`)) {
     const bytes = await readFile(temporary);
     if (bytes.length > MAX_INPUT_BYTES) throw new Error("Command input exceeds 1 MiB");
     return bytes;
   }
-  const checked = parseProjectFilePath(isAbsolute(path) ? relative(state.paths.root, path) : path);
+  const checked = parseProjectFilePath(
+    isAbsolute(path) ? relative(state.paths.root, temporary) : path,
+  );
   // Workers kept drafts in /tmp; stdin reaches the same input without a project file.
   if (!checked.ok)
     throw new Error(`${checked.error.message}. For a file elsewhere, pipe it: --from - < ${path}`);

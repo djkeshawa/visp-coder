@@ -1,7 +1,13 @@
 import type { Language } from "../../core/constants.js";
 import { ok, type Result } from "../../core/result.js";
 import { GRAMMAR_BY_EXTENSION, UNPARSED_SOURCE_EXTENSIONS } from "../constants.js";
-import { extensionOf, grammarForPath, isHtmlPath, isPackageManifest } from "../paths.js";
+import {
+  extensionOf,
+  grammarForPath,
+  isGraphInputPath,
+  isHtmlPath,
+  isPackageManifest,
+} from "../paths.js";
 import type {
   Entity,
   Entrypoint,
@@ -88,14 +94,21 @@ class ExtractionRun {
   async prepare(): Promise<void> {
     const aliases = this.request.aliases ?? (await loadAliases(this.request.root));
     for (const problem of aliases.problems) {
-      this.unknowns.record("parser_error", problem, "tsconfig could not be read");
+      const extendsAt = problem.indexOf(" extends ");
+      if (extendsAt !== -1)
+        this.unknowns.record(
+          "unresolved_import",
+          problem.slice(0, extendsAt),
+          problem.slice(extendsAt + 9),
+        );
+      else this.unknowns.record("parser_error", problem, "tsconfig could not be read");
     }
     this.context = createResolutionContext(
       this.request.files.map((file) => file.path),
       aliases,
     );
     for (const skip of this.request.skipped) {
-      this.unknowns.record("file_skipped", skip.path, skip.reason);
+      if (isGraphInputPath(skip.path)) this.unknowns.record("file_skipped", skip.path, skip.reason);
     }
   }
 
@@ -133,6 +146,7 @@ class ExtractionRun {
     this.entities.push(...page.entities);
     this.relations.push(...page.relations);
     this.entrypoints.push(...page.entrypoints);
+    this.unknowns.addAll(page.unknowns);
     if (page.relations.length > 0) this.parsedPaths.add(file.path);
     if (this.enabled.has("javascript")) {
       const inline = inlineJavaScript(source);
