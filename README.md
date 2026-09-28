@@ -39,6 +39,7 @@ visp pr                                       # reviewer document for the pull r
 ```
 
 In practice the coding agent runs these commands itself. Claude Code and trusted Codex hooks can send it back when it stops early; other hosts rely on instructions and explicit `visp next` calls.
+When supplying the original request explicitly, use `--source-brief -` with a quoted heredoc as shown in [the workflow guide](docs/workflow.md#starting-a-feature), so shell characters in the request stay literal.
 
 ## The loop
 

@@ -76,9 +76,9 @@ describe("VISP 0.1.0 project compatibility", () => {
     for (const [path, entry] of Object.entries(originalFeature))
       expect(afterMigration[path]).toEqual(entry);
     expect(project.json<{ action: string }>("next").envelope.data?.action).toBe("complete");
-    expect(project.json<{ state: { status: string } }>("status").envelope.data?.state.status).toBe(
-      "historical-complete",
-    );
+    expect(
+      project.json<{ state: { status: string } }>("status", "--full").envelope.data?.state.status,
+    ).toBe("historical-complete");
     const loaded = await loadWorkspace(project.root);
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;

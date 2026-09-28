@@ -58,7 +58,7 @@ export async function checkHarnessAssets(state: WorkspaceState): Promise<Check> 
       recovery: `${PRODUCT_NAME} install`,
     };
   }
-  const plan = planFor(state.config.harness, profile, critic.value);
+  const plan = planFor(state.config.harness, profile, critic.value ?? null);
   const manifest = await readAssetManifest(state.paths);
   const recorded = manifest.ok ? manifest.value : {};
 

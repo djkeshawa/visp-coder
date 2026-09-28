@@ -225,7 +225,7 @@ export async function buildFoundationContext(
 async function hasHarnessAssets(state: WorkspaceState): Promise<Result<boolean>> {
   const critic = await resolveCriticDefault(state.config.harness, state.config.critic);
   if (!critic.ok) return critic;
-  const assets = planFor(state.config.harness, state.config.profile, critic.value).assets;
+  const assets = planFor(state.config.harness, state.config.profile, critic.value ?? null).assets;
   if (assets.length === 0) return ok(false);
 
   const current = await Promise.all(

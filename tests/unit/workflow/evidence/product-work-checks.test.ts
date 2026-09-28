@@ -72,7 +72,7 @@ it("adds the given check to a slice that has none", async () => {
     check: `${process.execPath} --test test/value.test.mjs`,
   });
   expect(work.ok, JSON.stringify(work)).toBe(true);
-  expect(work.ok && work.value.checks.map((check) => check.id)).toEqual(["T001-C1"]);
+  expect(work.ok && work.value.checks.map((check) => check.id)).toEqual(["T001-C001"]);
 });
 
 it("leaves slices that already have checks unchanged", async () => {

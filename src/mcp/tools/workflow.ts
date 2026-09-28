@@ -34,6 +34,7 @@ import {
   renderProductResult,
 } from "../../workflow/product-presentation.js";
 import type { WorkspaceState } from "../../workflow/state.js";
+import { mcpAction, mcpActionText } from "../action.js";
 import { TOOL } from "../constants.js";
 import { mutatingWorkspaceFor, workspaceFor } from "../context.js";
 import { failure, reply } from "../reply.js";
@@ -92,20 +93,54 @@ function withBriefGuidance(response: CallToolResult, template?: boolean): CallTo
   };
 }
 
-/** Models read the text; structuredContent always carries the complete result. */
-export function productReply(name: string, result: Result<unknown>, detail = false) {
+/** StructuredContent carries the complete result once; text keeps only actionable context. */
+export function productReply(
+  name: string,
+  result: Result<unknown>,
+  detail = false,
+): CallToolResult {
   const response = reply(name, result, {
-    text: (value) =>
-      (detail ? undefined : compactProductReply(name, value, "mcp")) ?? renderProductResult(value),
-    nextCommand: productNextCommand,
+    text: (value) => {
+      const compact = compactProductReply(name, value, "mcp") ?? renderProductResult(value);
+      const command = productNextCommand(value);
+      const rendered = command ? mcpActionText(command) : undefined;
+      if (!command || !rendered) return compact;
+      const escaped = compact.replaceAll(
+        JSON.stringify(command).slice(1, -1),
+        JSON.stringify(rendered).slice(1, -1),
+      );
+      return escaped.replaceAll(
+        `Next: ${JSON.stringify(rendered).slice(1, -1)}`,
+        `Next: ${rendered}`,
+      );
+    },
+    nextCommand: (value) => mcpActionText(productNextCommand(value) ?? ""),
     data: (value) => {
       const data = productWithoutImageBytes(value);
+      if (name === TOOL.capture && data && typeof data === "object" && !Array.isArray(data)) {
+        const { images: _images, ...receipt } = data as Record<string, unknown>;
+        return {
+          ...receipt,
+          imageIds: Array.isArray(receipt.captures)
+            ? receipt.captures.flatMap((capture) =>
+                capture && typeof capture === "object" && "id" in capture ? [capture.id] : [],
+              )
+            : [],
+        };
+      }
       return !detail && name === TOOL.status ? compactProductStatus(data) : data;
     },
   });
+  const command = result.ok ? productNextCommand(result.value) : undefined;
+  const nextAction = command ? mcpAction(command) : undefined;
+  const textContent = response.content as { type: "text"; text: string }[];
   return result.ok
-    ? { ...response, content: [...response.content, ...productImages(result.value)] }
-    : response;
+    ? {
+        ...response,
+        content: [...textContent, ...productImages(result.value)],
+        structuredContent: { ...response.structuredContent, ...(nextAction ? { nextAction } : {}) },
+      }
+    : { ...response, content: textContent };
 }
 
 export function registerWorkflowTools(server: McpServer, root: string): void {
@@ -202,7 +237,7 @@ export function registerWorkflowTools(server: McpServer, root: string): void {
     {
       title: "Work on a usable slice",
       description:
-        "Deliver context and authorize the selected scope. inspect:true reads existing context without authorization or graph refresh; use inspect:true,detail:true if a text-only wrapper needs full details. Read structuredContent.data when available.",
+        "Deliver context and authorize the selected scope. inspect:true reads existing context without authorization or graph refresh. The full result is in structuredContent.data.",
       inputSchema: z
         .object({
           ...productSelectionInput,

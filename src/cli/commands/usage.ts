@@ -39,7 +39,14 @@ export function usageCommand(): Command {
         }
         const file = parseProjectFilePath(opts.file);
         if (!file.ok) {
-          process.exitCode = emitError("usage import", file.error, { json: isJson(opts) });
+          process.exitCode = emitError(
+            "usage import",
+            {
+              ...file.error,
+              recovery: "Copy the rollout into the project, then pass its project-relative path",
+            },
+            { json: isJson(opts) },
+          );
           return;
         }
         const state = await mutatingWorkspace(opts);

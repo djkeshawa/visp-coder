@@ -6,9 +6,10 @@ import {
   saveCriticEnabled,
   saveCriticMode,
 } from "../../config/critic-defaults.js";
-import { ok } from "../../core/result.js";
+import { vispError } from "../../core/errors.js";
+import { err, ok } from "../../core/result.js";
 import { isJson, options } from "../context.js";
-import { emit } from "../output.js";
+import { emit, emitError } from "../output.js";
 
 export function criticDefaultsCommand() {
   return new Command("defaults")
@@ -34,9 +35,22 @@ export function criticDefaultsCommand() {
         off?: boolean;
         on?: boolean;
       }>(command);
-      if (opts.mode !== undefined && (opts.on || opts.off))
-        throw new Error("Choose mode or on/off");
-      if (opts.on && opts.off) throw new Error("Choose either --on or --off");
+      if (opts.mode !== undefined && (opts.on || opts.off)) {
+        process.exitCode = emitError(
+          "critic-defaults",
+          vispError("UNSUPPORTED", "Choose mode or on/off"),
+          { json: isJson(opts) },
+        );
+        return;
+      }
+      if (opts.on && opts.off) {
+        process.exitCode = emitError(
+          "critic-defaults",
+          vispError("UNSUPPORTED", "Choose either --on or --off"),
+          { json: isJson(opts) },
+        );
+        return;
+      }
       if (
         !opts.save &&
         (opts.mode !== undefined ||
@@ -45,8 +59,14 @@ export function criticDefaultsCommand() {
           opts.maxCalls !== undefined ||
           opts.off ||
           opts.on)
-      )
-        throw new Error("Use --save to change defaults; inspection is read-only");
+      ) {
+        process.exitCode = emitError(
+          "critic-defaults",
+          vispError("UNSUPPORTED", "Use --save to change defaults; inspection is read-only"),
+          { json: isJson(opts) },
+        );
+        return;
+      }
       const result = await defaultsOperation(opts);
       const enriched = result.ok
         ? ok({
@@ -92,12 +112,17 @@ async function defaultsOperation(opts: DefaultsOptions) {
 async function saveGlobalDefaults(opts: DefaultsOptions) {
   if (opts.mode !== undefined) {
     if (opts.model !== undefined || opts.reasoning !== undefined || opts.maxCalls !== undefined)
-      throw new Error("Use --harness for model or budget defaults");
+      return err(vispError("UNSUPPORTED", "Use --harness for model or budget defaults"));
     return saveCriticMode(opts.mode);
   }
   if (opts.model !== undefined || opts.reasoning !== undefined || opts.maxCalls !== undefined)
-    throw new Error("Use --harness <host> to change model or budget defaults");
+    return err(vispError("UNSUPPORTED", "Use --harness <host> to change model or budget defaults"));
   if (!opts.on && !opts.off)
-    throw new Error("Use --on or --off to change defaults globally, or select --harness <host>");
+    return err(
+      vispError(
+        "UNSUPPORTED",
+        "Use --on or --off to change defaults globally, or select --harness <host>",
+      ),
+    );
   return saveCriticEnabled(opts.on === true);
 }

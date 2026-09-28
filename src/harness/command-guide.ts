@@ -22,13 +22,6 @@ Prefer --patch - --reason "<decision>" for changed fields (arrays merge by ID); 
 /** One discoverability catalogue for generated host instructions and their examples. */
 export const VISP_COMMANDS = [
   {
-    command: "reproduce",
-    when: "A finding needs a later failing reproduction",
-    example:
-      'visp reproduce --finding <finding-id> --execution <execution-id> --reason "<relationship to report>"',
-    next: "Run a declared behavioral check first and attach its failed execution before editing. Repair, rerun the same check and an adjacent behavior, then obtain separate assessment. Attachment is not resolution.",
-  },
-  {
     command: "next",
     when: "Start or resume",
     example: "visp next",
@@ -37,8 +30,8 @@ export const VISP_COMMANDS = [
   {
     command: "feature",
     when: "New request",
-    example: 'visp feature "<goal>" --source-brief "<original request>"',
-    next: "Read brief --template; preserve the request.",
+    example: 'visp feature "<goal>" --source-brief -',
+    next: "Pass the request with a quoted heredoc, then run work --check for one slice; use brief --template for several usable slices.",
   },
   {
     command: "brief",
@@ -49,7 +42,7 @@ export const VISP_COMMANDS = [
   {
     command: "work",
     when: "Implement a slice",
-    example: "visp work --task <id>",
+    example: 'visp work --check "<test command>"',
     next: "Read relevant outcomes/code, then edit only the authorized scope. --inspect reads without authorizing.",
   },
   {
@@ -96,11 +89,13 @@ export const VISP_COMMANDS = [
   },
 ] as const;
 
-export function commandMap(includeNext = true) {
+export function commandMap(includeNext = true, includeCritic = includeNext) {
   return [
     includeNext ? "| When | Command | Next |" : "| When | Command |",
     includeNext ? "|---|---|---|" : "|---|---|",
-    ...VISP_COMMANDS.map((entry) =>
+    ...VISP_COMMANDS.filter(
+      (entry) => includeCritic || !["critic", "critic feedback", "review"].includes(entry.command),
+    ).map((entry) =>
       includeNext
         ? `| ${entry.when} | \`${entry.example}\` | ${entry.next} |`
         : `| ${entry.when} | \`${entry.example}\` |`,
@@ -108,14 +103,23 @@ export function commandMap(includeNext = true) {
   ].join("\n");
 }
 
-export function commandGuide() {
-  return `# VISP command guide
+export function commandGuide(criticEnabled = true) {
+  const guide = `# VISP command guide
 
 The executable is \`visp\`; the package is \`visp-coder\`. Commands accept \`--help\`.
 
 \`visp next\` only reports the next action; it does not record final acceptance. Run \`visp accept\` when that action directs it.
 
-${commandMap()}
+${commandMap(true, criticEnabled)}
+
+For a literal request containing backticks, dollar signs or quotes, use a quoted heredoc:
+
+\`\`\`sh
+visp feature "<goal>" --source-brief - <<'REQUEST'
+<verbatim request>
+REQUEST
+visp work --check "<test command>"
+\`\`\`
 
 ## Understand, build, observe
 
@@ -188,4 +192,5 @@ An outside-session reference requires preparing a session with the relevant --gr
 
 Opt in to \`workflow.reviewMode: observation-preview\` in visp.yml to inspect original goals and representative states without worker judgments. Report visible contradictions, locations, consequences, corrections and next checks; zero to three findings, not forced criticism. This preview is unvalidated by live model comparisons. Optional style advice never blocks acceptance.
 `;
+  return criticEnabled ? guide : (guide.split("## Reviewer execution")[0] ?? guide);
 }

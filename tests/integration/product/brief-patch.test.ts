@@ -92,20 +92,16 @@ it("persists an explicit task class and changes only the selected slice contract
   const selected = result.value.slices[0];
   if (!selected) throw new Error("Missing updated slice");
   expect(selected).toEqual({ ...original, taskClass: "bugfix" });
+  expect(result.value.authorizationRevoked).toBe(true);
   const context = await runProductContext(await workspace.state());
   expect(context).toMatchObject({ ok: true, value: { mayEdit: false, taskClass: "bugfix" } });
   expect(sliceDigest(result.value, selected)).not.toBe(sliceDigest(brief, original));
-  expect(await readProductBrief(await workspace.state())).toEqual({
-    ok: true,
-    value: result.value,
-  });
+  const saved = await readProductBrief(await workspace.state());
+  expect(saved).toMatchObject({ ok: true, value: { slices: [selected] } });
   const invalid = await updateProductBrief(await workspace.state(), {
     patch: { slices: [{ id: original.id, taskClass: "guessed" }] },
     reason: "Invalid classification",
   });
   expect(invalid.ok).toBe(false);
-  expect(await readProductBrief(await workspace.state())).toEqual({
-    ok: true,
-    value: result.value,
-  });
+  expect(await readProductBrief(await workspace.state())).toEqual(saved);
 });

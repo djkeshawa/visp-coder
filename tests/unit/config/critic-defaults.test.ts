@@ -192,15 +192,21 @@ it("supports CLI global and host switches without resetting model or limits", as
     ok: true,
     value: { enabled: false, manual: true },
   });
-  const before = await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8");
-  await expect(run("--mode", "manual")).rejects.toThrow("Use --save");
-  await expect(run("--save", "--mode", "manual", "--on")).rejects.toThrow("Choose mode");
-  await expect(run("--save", "--on", "--off")).rejects.toThrow("either --on or --off");
-  await expect(run("--on")).rejects.toThrow("Use --save");
-  await expect(run("--save", "--model", "chosen")).rejects.toThrow("Use --harness");
-  await expect(run("--save")).rejects.toThrow("Use --on or --off");
-  expect(await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8")).toBe(before);
   expect(output.mock.calls.at(-1)?.[0]).toContain("existing feature");
+  const before = await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8");
+  for (const [args, message] of [
+    [["--mode", "manual"], "Use --save"],
+    [["--save", "--mode", "manual", "--on"], "Choose mode"],
+    [["--save", "--on", "--off"], "either --on or --off"],
+    [["--on"], "Use --save"],
+    [["--save", "--model", "chosen"], "Use --harness"],
+    [["--save"], "Use --on or --off"],
+  ] as const) {
+    await run(...args);
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).error.message).toContain(message);
+  }
+  expect(await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8")).toBe(before);
 });
 
 it("reads without creating state, saves one host transactionally and applies project overrides", async () => {

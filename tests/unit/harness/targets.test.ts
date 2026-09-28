@@ -113,6 +113,13 @@ describe("planFor", () => {
 });
 
 describe("the minimal profile", () => {
+  it("omits critic and review instructions when the critic is disabled", () => {
+    const plan = planFor("codex", "minimal", null);
+    expect(plan.assets.map((asset) => asset.path)).not.toContain(".codex/agents/visp-critic.toml");
+    const guide = plan.assets.find((asset) => asset.path === "VISP.commands.md")?.content ?? "";
+    expect(guide).not.toContain("## Reviewer execution");
+    expect(guide).not.toContain("| `visp critic");
+  });
   it("installs only one short guide for a generic harness", () => {
     for (const harness of HARNESSES.filter((name) => name === "generic")) {
       const paths = planFor(harness, "minimal").assets.map((asset) => asset.path);

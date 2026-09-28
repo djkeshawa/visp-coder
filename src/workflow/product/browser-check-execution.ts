@@ -2,8 +2,10 @@ import { redactText } from "../../core/redaction.js";
 import type { Result } from "../../core/result.js";
 import {
   type PreparedProductCapture,
+  type ProductCaptureResult,
   prepareProductCapture,
 } from "../evidence/product-capture-execution.js";
+import { productJourneyKey } from "../evidence/product-journey.js";
 import type { WorkspaceState } from "../state.js";
 import type { ExecutedProductCheck, ExecutionIdentity } from "./check-execution.js";
 import { browserEnvironmentIdentity, failedBrowserCapability } from "./environment.js";
@@ -17,8 +19,32 @@ export async function executeBrowserCheck(
   command: Extract<ProductCheck["command"], { kind: "browser-journey" }>,
   base: ExecutionIdentity,
   retryEnvironment: boolean,
+  reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
   const environmentDigest = await browserEnvironmentIdentity(workspace.paths.root);
+  const prior = reuseCapture
+    ? reusableRun(
+        record.state.captureRuns,
+        base.subjectDigest,
+        productJourneyKey(command.journey, base.task),
+      )
+    : undefined;
+  if (prior)
+    return {
+      execution: {
+        ...base,
+        environmentDigest,
+        provenance: "supervisor-reused",
+        assertions: "runner-observed",
+        status: "passed",
+        captureRunId: prior.id,
+        exitCode: 0,
+        durationMs: 0,
+        output: `Reused completed capture ${prior.id} for the same subject and journey`,
+      },
+      state: record.state,
+      mutations: [],
+    };
   const cached = record.state.browserCapability;
   if (
     !retryEnvironment &&
@@ -76,6 +102,26 @@ export async function executeBrowserCheck(
   };
 }
 
+function reusableRun(
+  runs: readonly unknown[],
+  subject: string,
+  journeyKey: string,
+): { id: string } | undefined {
+  return runs
+    .flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object") return [];
+      const run = candidate as Record<string, unknown>;
+      return typeof run.id === "string" &&
+        run.provenance === "runner-executed" &&
+        run.status === "completed" &&
+        run.subjectDigest === subject &&
+        run.journeyKey === journeyKey
+        ? [{ id: run.id }]
+        : [];
+    })
+    .at(-1);
+}
+
 function browserExecution(
   base: ExecutionIdentity,
   state: ProductState,
@@ -111,9 +157,26 @@ function browserExecution(
       captureRunId: result.runId,
       exitCode: { passed: 0, failed: 1, "environment-failed": -1 }[status],
       durationMs,
-      output: JSON.stringify(result).slice(-8000),
+      output: browserCheckSummary(result),
     },
     state: captured.value.state,
     mutations: captured.value.mutations,
   };
+}
+
+export function browserCheckSummary(result: ProductCaptureResult): string {
+  return JSON.stringify({
+    status: result.status,
+    ...(result.failure
+      ? {
+          failure: {
+            kind: result.failure.kind,
+            message: result.failure.message.slice(0, 2000),
+            actionIndex: result.failure.actionIndex,
+          },
+        }
+      : {}),
+    runId: result.runId,
+    captures: result.captures.map((capture) => capture.id),
+  });
 }

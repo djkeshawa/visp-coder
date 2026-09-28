@@ -397,6 +397,7 @@ async function executeChecks(
       source,
       retryEnvironment,
       verifierSnapshot,
+      close,
     );
     executions.push(checked.execution);
     state = checked.state;

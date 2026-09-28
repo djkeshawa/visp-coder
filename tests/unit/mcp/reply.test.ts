@@ -46,7 +46,7 @@ describe("reply", () => {
 
     expect(result.isError).toBe(true);
     expect(text(result)).toContain("No feature is active");
-    expect(text(result)).toContain('Try: visp feature "<goal>"');
+    expect(text(result)).toContain("Try: visp_feature");
     expect(result.structuredContent).toEqual({
       tool: "visp_spec",
       ok: false,
@@ -55,6 +55,7 @@ describe("reply", () => {
         message: "No feature is active",
         recovery: 'visp feature "<goal>"',
       },
+      nextAction: { tool: "visp_feature", arguments: { goal: "<goal>" } },
     });
   });
 

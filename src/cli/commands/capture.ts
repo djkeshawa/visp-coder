@@ -3,7 +3,9 @@ import { fromUnknown } from "../../core/errors.js";
 import type { Result } from "../../core/result.js";
 import { runProductCapture } from "../../workflow/evidence/product-capture.js";
 import { runProductControl } from "../../workflow/evidence/product-control.js";
+import { compactProductReply } from "../../workflow/product-compact-text.js";
 import {
+  productNextCommand,
   productResultFailed,
   productWithoutImageBytes,
   renderProductResult,
@@ -51,7 +53,8 @@ function runtimeCommand(
           result.ok ? { ok: true, value: productWithoutImageBytes(result.value) } : result,
           {
             json: isJson(flags),
-            text: renderProductResult,
+            text: (value) => compactProductReply(name, value, "cli") ?? renderProductResult(value),
+            nextCommand: productNextCommand,
           },
         );
         if (result.ok && productResultFailed(result.value)) process.exitCode = 1;

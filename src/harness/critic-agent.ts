@@ -11,7 +11,7 @@ Read only the packet and listed evidence. Do not edit, execute commands, researc
 
 export function criticAgentAssets(
   harness: Harness,
-  configuration = balancedCritic(harness),
+  configuration: CriticConfig | null | undefined = balancedCritic(harness),
 ): Asset[] {
   if (!configuration || (configuration.harness && configuration.harness !== harness)) return [];
   const config: CriticConfig = configuration;

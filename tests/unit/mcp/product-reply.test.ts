@@ -33,6 +33,10 @@ it.each(["completed", "failed", "timed-out", "cancelled"])(
     const compact = productReply("visp_capture", ok(data));
     const detailed = productReply("visp_capture", ok(data), true);
     expect(compact.structuredContent).toEqual(detailed.structuredContent);
+    expect(compact.structuredContent?.data).toMatchObject({
+      imageIds: ["CAP-0", "CAP-1", "CAP-2", "CAP-3", "CAP-4", "CAP-5"],
+    });
+    expect(compact.structuredContent?.data).not.toHaveProperty("images");
     expect(compact.content.filter((entry) => entry.type === "image")).toEqual(
       detailed.content.filter((entry) => entry.type === "image"),
     );
@@ -40,9 +44,11 @@ it.each(["completed", "failed", "timed-out", "cancelled"])(
       .flatMap((entry) => (entry.type === "text" ? [entry.text] : []))
       .join("\n");
     expect(text).toContain(status);
-    expect(text).toContain("Next: visp review");
+    expect(text).toContain("Next: visp_review");
     if (data.failure) expect(text).toContain(data.failure.message);
-    expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(detailed).length * 0.7);
+    expect(text).toBe(
+      detailed.content.flatMap((entry) => (entry.type === "text" ? [entry.text] : [])).join("\n"),
+    );
   },
 );
 
@@ -97,9 +103,50 @@ it("gives text-only work consumers the objective, scope and next failing check",
     "public module returns two",
     "second shot stays locked",
     "repeat-and-recover",
-    "--inspect",
+    "visp_work",
   ])
     expect(visible).toContain(essential);
+});
+
+it("routes next work through MCP and keeps one full copy of detail", () => {
+  const next = productReply(
+    "visp_next",
+    ok({
+      feature: "001-game",
+      task: "T001",
+      command: "visp work --feature 001-game --task T001",
+      action: "work",
+    }),
+  );
+  expect(next.structuredContent).toMatchObject({
+    nextAction: { tool: "visp_work", arguments: { feature: "001-game", task: "T001" } },
+  });
+  expect(next.content[0]).toMatchObject({ text: expect.stringContaining("visp_work") });
+  expect(next.content[0]).not.toMatchObject({ text: expect.stringContaining("Next: visp work") });
+  const large = { feature: "001-game", files: [{ content: "x".repeat(20000) }] };
+  const detailed = productReply("visp_work", ok(large), true);
+  expect(JSON.stringify(detailed.content)).not.toContain("x".repeat(1000));
+  expect(JSON.stringify(detailed.structuredContent)).toContain("x".repeat(1000));
+});
+
+it("makes a revoked brief grant and its recovery visible", () => {
+  const result = productReply(
+    "visp_brief",
+    ok({
+      feature: "001-game",
+      outcomes: [],
+      slices: [],
+      authorizationRevoked: true,
+      mayEdit: false,
+      nextCommand: "visp work --feature 001-game --task T001",
+    }),
+  );
+  const text = result.content
+    .flatMap((entry) => (entry.type === "text" ? [entry.text] : []))
+    .join("\n");
+  expect(text).toContain('"authorizationRevoked":true');
+  expect(text).toContain('"mayEdit":false');
+  expect(text).toContain("visp_work");
 });
 
 it("preserves the prepared review session's usable handoff in text-only hosts", () => {
@@ -116,7 +163,9 @@ it("preserves the prepared review session's usable handoff in text-only hosts", 
   const text = result.content
     .flatMap((entry) => (entry.type === "text" ? [entry.text] : []))
     .join("\n");
-  for (const value of Object.values(handoff)) expect(text).toContain(value);
+  for (const value of Object.values(handoff).filter((value) => value !== handoff.command))
+    expect(text).toContain(value);
+  expect(text).toContain("visp_review");
 });
 
 it("keeps environment recovery and retained critic feedback visible to text-only workers", () => {
@@ -185,7 +234,7 @@ it("keeps capture replay identity and the committed next action visible in compa
     "CAPRUN-repeat-input",
     "visp capture --replay",
     "Repeated input timed out",
-    "visp critic --preflight",
+    "visp_critic",
   ])
     expect(text).toContain(value);
 });
@@ -234,11 +283,12 @@ it("keeps a closed slice's reply short while retaining the next quality step", (
   const detailed = productReply("visp_done", ok(data), true);
   expect(compact.structuredContent).toEqual(detailed.structuredContent);
   const text = textOf(compact);
-  expect(text.length).toBeLessThan(textOf(detailed).length / 4);
+  expect(text).toBe(textOf(detailed));
+  expect(text.length).toBeLessThan(JSON.stringify(data).length / 4);
   expect(text).toContain('"closed":true');
   expect(text).toContain("C001: passed");
   expect(text).toContain(data.next.objective);
-  expect(text).toContain("Next: visp review --handoff");
+  expect(text).toContain("Next: visp_review");
 });
 
 it("keeps the reason an unresolved slice cannot close", () => {
@@ -337,10 +387,10 @@ it("keeps the next step's findings once and drops the repeated critic list", () 
     productReply("visp_next", ok(data), true).structuredContent,
   );
   expect(text).toContain('"action":"fix"');
-  expect(text).toContain("visp work --feature 001-api --task T001");
+  expect(text).toContain("visp_work");
   expect(text).toContain("O001: behavior passed; review failed");
   expect(text.split("Wrong-method routing").length - 1).toBeLessThanOrEqual(20);
-  expect(text.length).toBeLessThan(textOf(productReply("visp_next", ok(data), true)).length / 2);
+  expect(text).toBe(textOf(productReply("visp_next", ok(data), true)));
 });
 
 it("shows a check's full command and leaves browser guidance out of non-browser work", () => {
