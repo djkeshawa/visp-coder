@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="icon" href="data:,">
+  <title>Skyward Slingshot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="game" aria-label="Skyward Slingshot game" data-state="aiming" data-level="1" data-score="0" data-birds="3" data-pigs="0">
+    <canvas id="scene" width="960" height="540" aria-label="Drag the red bird back and release to launch it"></canvas>
+    <div class="topbar">
+      <div class="brand"><strong>SKYWARD</strong><span>SLINGSHOT</span></div>
+      <div class="stats"><span>LEVEL <b id="level">1</b></span><span>SCORE <b id="score">0</b></span><span>BIRDS <b id="birds">3</b></span></div>
+      <button id="restart" type="button">↻ Restart</button>
+    </div>
+    <div id="hint">Drag the bird back and release</div>
+    <div id="endcard" class="endcard" hidden>
+      <strong id="endtitle"></strong>
+      <span id="endsubtitle"></span>
+      <button id="continue" type="button"></button>
+    </div>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
