@@ -125,18 +125,17 @@ describe("product input and source trust boundaries", () => {
       error: { code: "ARTIFACT_INVALID" },
     });
   });
-  it("rejects directory symlinks before reading bytes and keeps the external symlink boundary", async () => {
+  it("snapshots directory and external symlinks without reading their targets", async () => {
     await mkdir(join(workspace.root, "local-dir"));
     await symlink("local-dir", join(workspace.root, "directory-link"));
-    expect(await productSourceSnapshot(await workspace.state())).toMatchObject({
-      ok: false,
-      error: { code: "UNSUPPORTED" },
-    });
+    expect(await productSourceSnapshot(await workspace.state())).toMatchObject({ ok: true });
     await unlink(join(workspace.root, "directory-link"));
     await symlink("/etc/passwd", join(workspace.root, "external-link"));
     const external = await productSourceSnapshot(await workspace.state());
-    expect(external.ok).toBe(false);
-    if (!external.ok) expect(external.error.message).toMatch(/outside|escape|symlink/i);
+    expect(external.ok).toBe(true);
+    expect(await (await workspace.state()).files.readBytes("external-link")).toMatchObject({
+      ok: false,
+    });
   });
   it("changes source identity for tracked deletion and supports an ordinary internal file symlink", async () => {
     const before = value(await productSourceDigest(await workspace.state()));

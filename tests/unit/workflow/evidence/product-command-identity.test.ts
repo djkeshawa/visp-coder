@@ -21,8 +21,9 @@ it.each([false, true])(
     if (!record.ok || !snapshot.ok) throw new Error("fixture");
     const original = setup.brief.checks[0];
     if (!original) throw new Error("check");
-    const check = {
+    const check: typeof original = {
       ...original,
+      command: [process.execPath, "--test", "--test-timeout", "5000", "test/value.test.mjs"],
       ...(declared ? { verifierFiles: ["test/value.test.mjs"] } : {}),
     };
     const digest = vi.spyOn(executables, "commandExecutableDigest");
