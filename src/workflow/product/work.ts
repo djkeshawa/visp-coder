@@ -1,5 +1,6 @@
 import { vispError } from "../../core/errors.js";
 import { filePrecondition } from "../../core/file-transaction.js";
+import { headCommit } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { requireImplementationFoundation } from "../gates/readiness.js";
@@ -257,6 +258,8 @@ async function grantAuthorization(
   if (!prior.ok) return prior;
   const session = await currentHostSession(workspace);
   if (!session.ok) return session;
+  const head = await headCommit(workspace.paths.root);
+  if (!head.ok) return head;
   return ok({
     version: 2,
     feature: record.brief.feature,
@@ -265,6 +268,7 @@ async function grantAuthorization(
     root: hashValue(workspace.paths.root),
     contractDigest: sliceDigest(record.brief, slice),
     baseline: prior.value?.task === slice.id ? prior.value.baseline : snapshot,
+    headCommit: prior.value?.task === slice.id ? prior.value.headCommit : head.value,
     ...(session.value ? { session: session.value } : {}),
   });
 }

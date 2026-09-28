@@ -124,6 +124,49 @@ export async function headCommit(cwd: string): Promise<Result<string>> {
   return ok(result.value.stdout.trim());
 }
 
+/** Committed changes since authorization whose working content still equals HEAD. */
+export async function committedChangesSince(
+  cwd: string,
+  reference: string,
+): Promise<Result<string[]>> {
+  if (!/^[a-f0-9]{40,64}$/.test(reference))
+    return err(vispError("ARTIFACT_INVALID", "Invalid authorization commit"));
+  const changed = await run(
+    "git",
+    ["diff", "--name-only", "-z", "--no-renames", reference, "HEAD", "--"],
+    { cwd, env: GIT_ENV },
+  );
+  if (!changed.ok) return changed;
+  if (changed.value.exitCode !== 0)
+    return err(
+      vispError("COMMAND_FAILED", "Could not compare the authorization commit with HEAD", {
+        recovery:
+          "Recover the recorded commit before checking scope; preserve incoming committed changes.",
+      }),
+    );
+  const local = await run("git", ["diff", "--name-only", "-z", "--no-renames", "HEAD", "--"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!local.ok) return local;
+  if (local.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not compare working content with HEAD"));
+  const untracked = await run("git", ["ls-files", "--others", "-z", "--exclude-standard"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!untracked.ok) return untracked;
+  if (untracked.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not list untracked files"));
+  const dirty = new Set([...local.value.stdout.split("\0"), ...untracked.value.stdout.split("\0")]);
+  return ok(
+    changed.value.stdout
+      .split("\0")
+      .filter((path) => path && !dirty.has(path))
+      .sort(),
+  );
+}
+
 /** Files changed in the working tree, including untracked files. */
 export async function workingTreeChanges(cwd: string): Promise<Result<DiffResult>> {
   const result = await run("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
