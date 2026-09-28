@@ -195,7 +195,7 @@ function cliExecutionOptions(name: string, opts: ProductOptions) {
   opts = {
     ...opts,
     signal: controller.signal,
-    deadline: Date.now() - process.uptime() * 1000 + 100_000,
+    deadline: Math.floor(Date.now() - process.uptime() * 1000) + 100_000,
     onProgress: (event) => {
       process.stderr.write(`VISP ${event.check}: ${event.status}\n`);
     },

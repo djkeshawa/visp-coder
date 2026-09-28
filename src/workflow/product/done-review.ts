@@ -227,14 +227,20 @@ export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
         workspace,
         { operation: "review", feature: selection.feature, task: selection.task },
         launcher,
-        selection.deadline === undefined
-          ? selection.signal
-          : AbortSignal.any([
-              AbortSignal.timeout(Math.max(1, selection.deadline - Date.now())),
-              ...(selection.signal ? [selection.signal] : []),
-            ]),
+        deadlineSignal(selection.deadline, selection.signal),
       ),
     );
+}
+
+/** The caller's signal, also aborted at `deadline` (epoch ms, possibly fractional). */
+export function deadlineSignal(
+  deadline: number | undefined,
+  signal: AbortSignal | undefined,
+): AbortSignal | undefined {
+  if (deadline === undefined) return signal;
+  // AbortSignal.timeout accepts only whole milliseconds.
+  const timeout = AbortSignal.timeout(Math.max(1, Math.ceil(deadline - Date.now())));
+  return signal ? AbortSignal.any([timeout, signal]) : timeout;
 }
 
 /**
