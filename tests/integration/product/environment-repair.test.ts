@@ -85,6 +85,7 @@ it.each(["service", "cli", "mcp"] as const)(
           checks: brief.checks.map((check) => ({
             ...check,
             verifierFiles: ["test/value.test.mjs"],
+            environmentVariables: ["VISP_TEST_APP_MODE"],
           })),
         },
         reason: "Identify the unchanged behavioral assertion",

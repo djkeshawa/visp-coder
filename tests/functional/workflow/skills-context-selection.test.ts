@@ -185,7 +185,16 @@ Run the generator, then commit both files together.
     it("never puts an unadmitted skill in a pack", async () => {
       await proposeSkill("auth-skill", "  paths:\n    - src/auth/**\n");
 
-      expect(contextFor("T004")).not.toContain("auth-skill");
+      const { result, envelope } = project.json<ProductWorkContext>(
+        "work",
+        "--task",
+        "T004",
+        "--feature",
+        activeFeature,
+      );
+      expect(result.exitCode, result.stdout).toBe(0);
+      expect(envelope.data?.skills).toEqual([]);
+      expect(result.stdout).not.toContain("Do the thing carefully.");
     });
 
     it("keeps a retired skill out again", async () => {
@@ -193,7 +202,16 @@ Run the generator, then commit both files together.
       project.run("skill", "admit", "auth-skill", "--by", "someone");
       project.run("skill", "retire", "auth-skill", "--reason", "Superseded");
 
-      expect(contextFor("T004")).not.toContain("auth-skill");
+      const { result, envelope } = project.json<ProductWorkContext>(
+        "work",
+        "--task",
+        "T004",
+        "--feature",
+        activeFeature,
+      );
+      expect(result.exitCode, result.stdout).toBe(0);
+      expect(envelope.data?.skills).toEqual([]);
+      expect(result.stdout).not.toContain("Do the thing carefully.");
     });
 
     it("says why it chose the file, like every other entry", async () => {
