@@ -16,6 +16,7 @@ vi.mock("../../../../src/workflow/product/rule-extraction.js", async (importOrig
 }));
 
 const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+const { recordEarlierRequests } = await import("../../../../src/memory/memory-service.js");
 
 const NOTES = [
   "An archived item cannot be reserved: 409 item_archived.",
@@ -111,6 +112,39 @@ it("uses keyword selection when the project asks for it", async () => {
   const second = await feature("Restock", "Add restocking.");
   expect(gate).not.toHaveBeenCalled();
   expect(second.projectMemory).toEqual(NOTES);
+});
+
+it("does not resend memory chunks that succeeded before another chunk failed", async () => {
+  const { log } = await project({});
+  const script = join(workspace?.root ?? "", ".fake-visp-memory");
+  const failure = join(workspace?.root ?? "", ".memory-failed-once");
+  await writeFile(
+    script,
+    `#!/bin/sh
+if [ "$1" = decision ]; then
+  printf '%s\n' "$2" >> '${log}'
+  case "$2" in *second*)
+    if [ ! -f '${failure}' ]; then touch '${failure}'; exit 1; fi ;;
+  esac
+fi
+`,
+  );
+  await chmod(script, 0o755);
+  const state = await workspace?.state();
+  if (!state) throw new Error("no workspace");
+  const earlier = [
+    {
+      feature: "001-example",
+      goal: "Remember choices",
+      originalRequest:
+        "The first decision must remain recorded.\n\nThe second decision must eventually be recorded.",
+    },
+  ];
+  await recordEarlierRequests(state, script, earlier);
+  await recordEarlierRequests(state, script, earlier);
+  const calls = (await readFile(log, "utf8")).trim().split("\n");
+  expect(calls.filter((chunk) => chunk.includes("first"))).toHaveLength(1);
+  expect(calls.filter((chunk) => chunk.includes("second"))).toHaveLength(2);
 });
 
 // Review: memory.enabled: false must switch off the long-term store too.

@@ -1,5 +1,10 @@
 import { run } from "../core/exec.js";
-import { type FileMutation, filePrecondition } from "../core/file-transaction.js";
+import {
+  applyFileTransaction,
+  type FileMutation,
+  filePrecondition,
+} from "../core/file-transaction.js";
+import { hashValue } from "../core/hash.js";
 import { ok, type Result } from "../core/result.js";
 import type { WorkspaceState } from "../workflow/state.js";
 
@@ -10,6 +15,7 @@ import type { WorkspaceState } from "../workflow/state.js";
  * Memory selects for the new request (none when nothing is relevant enough) to that request.
  */
 export const MEMORY_SERVICE_STATE = "state/memory-service.json";
+const MEMORY_SERVICE_PROGRESS = "state/memory-service-progress.json";
 /** Per feature: the recorded decisions its request carries, shown on every `work` reply. */
 export const PROJECT_MEMORY_FILE = "project-memory.json";
 const MEMORY_HEADING =
@@ -72,19 +78,20 @@ export async function recordEarlierRequests(
   const before = await workspace.files.readTextIfExists(path);
   if (!before.ok) return before;
   const recorded = new Set<string>(parseRecorded(before.value));
+  const progressPath = workspace.paths.stateFile(MEMORY_SERVICE_PROGRESS);
+  const progressText = await workspace.files.readTextIfExists(progressPath);
+  if (!progressText.ok) return progressText;
+  const progress = {
+    path: progressPath,
+    text: progressText.value,
+    completed: new Set(parseCompleted(progressText.value)),
+  };
   const added: string[] = [];
   for (const feature of earlier) {
     if (recorded.has(feature.feature)) continue;
-    let complete = true;
-    for (const chunk of requestChunks(feature.originalRequest)) {
-      const saved = await run(
-        command,
-        ["decision", chunk, `Stated by the user for feature ${feature.feature}: ${feature.goal}`],
-        { cwd: workspace.paths.root, timeoutMs: TIMEOUT_MS },
-      );
-      if (!saved.ok || saved.value.exitCode !== 0) complete = false;
-    }
-    if (complete) added.push(feature.feature);
+    const complete = await recordFeatureChunks(workspace, command, feature, progress);
+    if (!complete.ok) return complete;
+    if (complete.value) added.push(feature.feature);
   }
   if (added.length === 0) return ok(undefined);
   return ok({
@@ -93,6 +100,47 @@ export async function recordEarlierRequests(
     content: `${JSON.stringify({ version: 1, recorded: [...recorded, ...added] }, null, 2)}\n`,
     expectedBefore: filePrecondition(before.value),
   });
+}
+
+interface ChunkProgress {
+  path: string;
+  text: string | undefined;
+  completed: Set<string>;
+}
+
+async function recordFeatureChunks(
+  workspace: WorkspaceState,
+  command: string,
+  feature: EarlierFeature,
+  progress: ChunkProgress,
+): Promise<Result<boolean>> {
+  let complete = true;
+  for (const chunk of requestChunks(feature.originalRequest)) {
+    const key = hashValue({ feature: feature.feature, chunk });
+    if (progress.completed.has(key)) continue;
+    const saved = await run(
+      command,
+      ["decision", chunk, `Stated by the user for feature ${feature.feature}: ${feature.goal}`],
+      { cwd: workspace.paths.root, timeoutMs: TIMEOUT_MS },
+    );
+    if (!saved.ok || saved.value.exitCode !== 0) {
+      complete = false;
+      continue;
+    }
+    const next = `${JSON.stringify({ version: 1, completed: [...progress.completed, key] }, null, 2)}\n`;
+    const persisted = await applyFileTransaction(workspace.paths.root, "record-memory-chunk", [
+      {
+        kind: "write",
+        path: progress.path,
+        content: next,
+        expectedBefore: filePrecondition(progress.text),
+      },
+    ]);
+    if (!persisted.ok) return persisted;
+    progress.completed.add(key);
+    progress.text = next;
+  }
+  return ok(complete);
 }
 
 /** The recorded decisions a feature's request carries, for its `work` replies. */
@@ -163,6 +211,16 @@ function parseRecorded(text: string | undefined): string[] {
   try {
     const recorded = (JSON.parse(text) as { recorded?: unknown }).recorded;
     return Array.isArray(recorded) ? recorded.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseCompleted(text: string | undefined): string[] {
+  if (!text) return [];
+  try {
+    const completed = (JSON.parse(text) as { completed?: unknown }).completed;
+    return Array.isArray(completed) ? completed.filter((key) => typeof key === "string") : [];
   } catch {
     return [];
   }
