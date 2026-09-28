@@ -12,6 +12,17 @@ describe("parseCommand", () => {
     expect(result.ok && result.value).toEqual(["node", "-e", "a b"]);
   });
 
+  it("passes quoted test glob and pytest IDs literally", () => {
+    expect(parseCommand('node --test "test/**/*.test.mjs"')).toEqual({
+      ok: true,
+      value: ["node", "--test", "test/**/*.test.mjs"],
+    });
+    expect(parseCommand("pytest 'test_api.py::test_case[a]' ")).toEqual({
+      ok: true,
+      value: ["pytest", "test_api.py::test_case[a]"],
+    });
+  });
+
   it("refuses shell syntax rather than passing it to a shell", () => {
     for (const command of ["rm -rf / && echo done", "cat a | grep b", "echo $HOME"]) {
       const result = parseCommand(command);
