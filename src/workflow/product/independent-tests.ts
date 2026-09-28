@@ -37,6 +37,12 @@ import {
 } from "./brief.js";
 import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
 import { hostRequest } from "./host-prompts.js";
+import {
+  disputeSchema,
+  TESTS_RECORD,
+  WAIVED_TESTS_ENV,
+  waivedTestsEnv,
+} from "./pinned-dispute-model.js";
 import { rulesForRequest, withRules } from "./project-rules.js";
 import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
@@ -55,7 +61,7 @@ import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./
  * signal a worker cannot quietly weaken (see docs/research-summary.md).
  */
 
-const RECORD = "acceptance-tests.json";
+const RECORD = TESTS_RECORD;
 const START_SOURCE = "tester-source-digest";
 const TESTER_TIMEOUT_MS = 720_000;
 const BASELINE_TIMEOUT_MS = 120_000;
@@ -130,6 +136,8 @@ const independentTestsRecordSchema = z
     command: z.array(z.string()).optional(),
     tests: z.array(z.object({ name: z.string(), quote: z.string() })).optional(),
     ambiguities: z.array(requestAmbiguitySchema).optional(),
+    /** Failing tests the worker disputed, and the independent reviewer's rulings. */
+    disputes: z.array(disputeSchema).optional(),
     notes: z.string().optional(),
     content: z.string().optional(),
     sourceDigest: z.string().optional(),
@@ -500,7 +508,7 @@ function summary(record: IndependentTestsRecord): IndependentTestsSummary {
     ...(record.status === "pinned"
       ? {
           instructions:
-            "These acceptance tests were written from the original request by an independent tester and are pinned: do not edit them. Run them while you work; `done` on the last slice and `accept` run them. If one contradicts the request, record an intent change that quotes the request instead of weakening it.",
+            "These acceptance tests were written from the original request by an independent tester and are pinned: do not edit them. Run them while you work; `done` on the last slice and `accept` run them.",
         }
       : {}),
   };
@@ -929,7 +937,10 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
     "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
     "- Start and stop anything the tests need, the way the request says, with timeouts on every wait. Use a free port where one is needed.",
-    "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why.",
+    "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why, one line per failing test: `FAIL: <exact name from tests[].name>: <reason>`.",
+    "- Only the checks' own assertions may fail the run. Errors while cleaning up after the tests (closing a browser or server, killing a child process, removing temporary directories or browser profiles) must be caught and ignored, and must never change the exit status: wrap every teardown step in try/catch (or `ignore_errors=True` / `force: true` with retries) and exit from the assertion results alone.",
+    "- Assertions must not depend on incidental ordering the request does not state: object key order, Set or dict iteration order, the order of unordered results, or timing. Compare parsed values, sort before comparing, or check membership.",
+    `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
     "- The project is not implemented yet, so the file must fail now and pass once the request is met.",
     "- Before answering, check every case against the request and trace it through your own helpers (for example, how a missing body, None or null is actually sent). Remove any case you cannot justify from the quoted text.",
     "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines. Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
@@ -1068,7 +1079,7 @@ export async function readTestsRecord(
   }
 }
 
-async function saveTestsRecord(
+export async function saveTestsRecord(
   workspace: WorkspaceState,
   feature: string,
   record: IndependentTestsRecord,
@@ -1155,7 +1166,7 @@ export async function acceptanceProgress(
     const outcome = await runBaseline(
       workspace.paths.root,
       command,
-      {},
+      await waivedTestsEnv(workspace, feature),
       {
         signal: options.signal,
         timeoutMs: Math.max(
@@ -1171,7 +1182,7 @@ export async function acceptanceProgress(
       ...(passing ? {} : { failure: outcome.output.slice(-1200) }),
       note: passing
         ? "Pinned acceptance tests pass."
-        : "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one. If a test contradicts the request or that documentation, keep the product and record the disagreement with an intent change.",
+        : "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one.",
     });
   }
   return results;

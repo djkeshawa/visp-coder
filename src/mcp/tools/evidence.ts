@@ -68,25 +68,38 @@ function checkedReviewInput<T extends Record<string, unknown>>(input: T) {
       );
 }
 
+const disputeFields = {
+  dispute: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Failing pinned acceptance tests that contradict the request; the independent reviewer rules",
+    ),
+  reason: z
+    .string()
+    .optional()
+    .describe("With dispute: quote the request sentence the test contradicts, and why"),
+};
+
 export function registerEvidenceTools(server: McpServer, root: string): void {
   for (const [name, run] of [
     [TOOL.verify, runProductVerify],
     [
       TOOL.done,
-      (state: WorkspaceState, args: ProductSelection) =>
+      (state: WorkspaceState, args: ProductSelection & { reason?: string }) =>
         runProductDoneReviewed(
           state,
-          args,
+          { ...args, disputeReason: args.reason },
           configuredReviewStarter(state, "mcp"),
           reviewWaitMs(state, "mcp"),
         ),
     ],
     [
       TOOL.accept,
-      (state: WorkspaceState, args: ProductSelection) =>
+      (state: WorkspaceState, args: ProductSelection & { reason?: string }) =>
         runProductAcceptReviewed(
           state,
-          args,
+          { ...args, disputeReason: args.reason },
           configuredReviewStarter(state, "mcp"),
           reviewWaitMs(state, "mcp"),
         ),
@@ -103,6 +116,7 @@ export function registerEvidenceTools(server: McpServer, root: string): void {
             ...productSelectionInput,
             detail: z.boolean().optional(),
             retryEnvironment: z.boolean().optional(),
+            ...(name === TOOL.verify ? {} : disputeFields),
           })
           .strict(),
       },
@@ -110,7 +124,13 @@ export function registerEvidenceTools(server: McpServer, root: string): void {
         const operation = mcpOperationOptions(extra);
         const state = await mutatingWorkspaceFor(root);
         return state.ok
-          ? productReply(name, await run(state.value, { ...args, ...operation }), args.detail)
+          ? productReply(
+              name,
+              await run(state.value, { ...args, ...operation } as ProductSelection & {
+                reason?: string;
+              }),
+              args.detail,
+            )
           : failure(name, state.error);
       },
     );

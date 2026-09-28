@@ -151,6 +151,20 @@ const attemptSchema = z
     hostReport: nativeCapabilitySchema.optional(),
     requiresImages: z.boolean().optional(),
     sourceOnly: z.boolean().optional(),
+    /** Pinned tests the reviewer was asked to rule on, recorded at reservation. */
+    disputes: z.array(z.string()).optional(),
+    /** Rulings from an accepted, VISP-launched review; only these can waive a test. */
+    disputeRulings: z
+      .array(
+        z
+          .object({
+            test: z.string(),
+            ruling: z.enum(["upheld", "rejected"]),
+            reasoning: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
     startedAt: z.number(),
     status: z.enum(["pending", "reviewed", "unavailable"]),
     gaps: z.array(z.string()).optional(),

@@ -275,6 +275,7 @@ function compactVerificationText(
     findings:
       Array.isArray(plan.findings) && plan.findings.length ? bounded(plan.findings) : undefined,
     acceptanceTests: data.acceptanceTests ? bounded(data.acceptanceTests) : undefined,
+    pinnedTests: data.pinnedTests ? bounded(data.pinnedTests) : undefined,
     critic: data.critic ? bounded(data.critic) : undefined,
     nextProbe: plan.nextProbe ? bounded(object(plan.nextProbe).question) : undefined,
     next: data.next
