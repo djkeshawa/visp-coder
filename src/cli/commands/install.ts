@@ -16,11 +16,9 @@ import {
   installHarness,
   previewHarnessInstall,
 } from "../../harness/install.js";
+import { MCP_AWARE_HARNESSES } from "../../harness/mcp-registration.js";
 import { isJson, mutatingWorkspace, options, workspace } from "../context.js";
 import { emit, emitError } from "../output.js";
-
-/** Harnesses with a project-level MCP configuration visp can merge safely. */
-const MCP_AWARE: readonly Harness[] = ["claude-code", "codex", "cursor", "opencode"];
 
 export function installCommand(): Command {
   return new Command("install")
@@ -73,7 +71,7 @@ async function handleInstallCommand(_flags: unknown, command: Command): Promise<
     harness,
     profile,
     hooks: selectedHooks(choices.value.hooks, harness),
-    mcp: opts.mcp !== false && MCP_AWARE.includes(harness),
+    mcp: opts.mcp !== false && MCP_AWARE_HARNESSES.includes(harness),
     configUpdates: {
       ...(choices.value.harness ? { harness: choices.value.harness } : {}),
       ...(choices.value.profile ? { profile: choices.value.profile } : {}),

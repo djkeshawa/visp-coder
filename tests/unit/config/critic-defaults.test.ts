@@ -97,6 +97,31 @@ it("preserves global and host settings when toggling and applies enabled precede
   });
 });
 
+it("reads critic defaults through a symlinked user config directory", async () => {
+  const config = await mkdtemp(join(tmpdir(), "visp-dotfiles-"));
+  try {
+    await mkdir(join(config, "visp"));
+    await writeFile(
+      join(config, "visp/critic-defaults.json"),
+      '{"version":1,"hosts":{"codex":{"model":"chosen"}}}',
+    );
+    await symlink(config, join(home, ".config"), "dir");
+    expect(await resolveCriticPolicy("codex", undefined, home)).toMatchObject({
+      ok: true,
+      value: { config: { model: "chosen" } },
+    });
+  } finally {
+    await rm(config, { recursive: true, force: true });
+  }
+});
+
+it("ignores invalid personal critic defaults when no critic preset exists", async () => {
+  await mkdir(join(home, ".config/visp"), { recursive: true });
+  await writeFile(join(home, ".config/visp/critic-defaults.json"), "{invalid");
+  expect((await resolveCriticPolicy("generic", undefined, home)).ok).toBe(true);
+  expect((await resolveCriticPolicy("codex", undefined, home)).ok).toBe(false);
+});
+
 it("serializes concurrent switches without losing host overrides", async () => {
   const saved = await Promise.all([
     saveCriticEnabled(false, home),
@@ -213,13 +238,13 @@ it("reads without creating state, saves one host transactionally and applies pro
   expect(await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8")).toBe(before);
 });
 
-it("does not follow a user defaults symlink", async () => {
+it("does not write through a user defaults symlink", async () => {
   const other = await mkdtemp(join(tmpdir(), "visp-critic-outside-"));
   try {
     await symlink(other, join(home, ".config"));
     expect((await saveCriticDefaults("codex", { model: "chosen" }, home)).ok).toBe(false);
     expect((await saveCriticEnabled(false, home)).ok).toBe(false);
-    expect((await resolveCriticPolicy("generic", undefined, home)).ok).toBe(false);
+    expect((await resolveCriticPolicy("generic", undefined, home)).ok).toBe(true);
     expect(await readdir(other)).toEqual([]);
   } finally {
     await rm(other, { recursive: true, force: true });

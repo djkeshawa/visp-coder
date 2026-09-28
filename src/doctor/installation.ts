@@ -16,6 +16,7 @@ import {
 } from "../harness/asset-inspection.js";
 import {
   CLAUDE_SETTINGS_FILE,
+  hasClaudeSessionHooks,
   hookCommand,
   preToolUseRegistration,
 } from "../harness/claude-settings.js";
@@ -23,6 +24,8 @@ import { preCommitHookPath } from "../harness/git-hook.js";
 import { verifyGuardHandshake } from "../harness/guard-handshake.js";
 import { HOOK_MARKER, renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
 import { type InstallState, readInstallState } from "../harness/install-state.js";
+import { verifyRequestedMcp } from "../harness/install-verification.js";
+import { mcpConfigFile } from "../harness/mcp-registration.js";
 import { type Asset, planFor } from "../harness/targets.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import type { Check, DoctorRuntime } from "./checks.js";
@@ -98,6 +101,31 @@ export async function checkHarnessAssets(state: WorkspaceState): Promise<Check> 
   };
 }
 
+export async function checkMcpRegistration(state: WorkspaceState): Promise<Check> {
+  const recorded = await readInstallState(state.paths, state.files);
+  if (!recorded.ok)
+    return { name: "mcp registration", status: "unknown", detail: recorded.error.message };
+  if (!recorded.value?.mcp || recorded.value.harness !== state.config.harness)
+    return {
+      name: "mcp registration",
+      status: "ok",
+      detail: "No MCP registration requested for this harness",
+    };
+  const path = mcpConfigFile(state.config.harness);
+  const verified = await verifyRequestedMcp(state.files, {
+    harness: state.config.harness,
+    mcp: true,
+  });
+  return verified.ok
+    ? { name: "mcp registration", status: "ok", detail: `${path} registers VISP` }
+    : {
+        name: "mcp registration",
+        status: "warn",
+        detail: `${path} does not contain a usable VISP MCP registration`,
+        recovery: `${PRODUCT_NAME} doctor --fix`,
+      };
+}
+
 async function inspectHarnessAssetFiles(
   state: WorkspaceState,
   assets: readonly Asset[],
@@ -122,6 +150,13 @@ async function inspectHarnessAssetFiles(
 }
 
 export async function checkHarnessActivation(state: WorkspaceState): Promise<Check> {
+  if (state.config.harness === "generic")
+    return {
+      name: "harness activation",
+      status: "warn",
+      detail: "Generic hosts do not load AGENTS.visp.md automatically",
+      recovery: "Point your coding agent at AGENTS.visp.md or paste it into its system prompt",
+    };
   if (!requiresAgentActivation(state.config.harness)) {
     return {
       name: "harness activation",
@@ -287,11 +322,23 @@ export async function checkEnforcement(
     };
   }
 
+  if (
+    ["cursor", "copilot", "opencode", "generic"].includes(state.config.harness) &&
+    surfaces.inactive.length === 0
+  ) {
+    return {
+      name: "enforcement",
+      status: "warn",
+      detail: `Git pre-commit checks commits, but ${state.config.harness} has no installed host edit, prompt or Stop hook${installation?.hooks.includes("ci") ? "; CI checks pull requests" : ""}`,
+      recovery: "Run visp done before committing; use visp doctor to inspect local hooks",
+    };
+  }
+
   if (surfaces.inactive.length === 0) {
     return {
       name: "enforcement",
       status: state.config.harness === "codex" ? "warn" : "ok",
-      detail: `Refusals are enforced by local guardrails: ${surfaces.active.join(", ")}. ${state.config.harness === "codex" ? "Codex scope checks are commit-time only (apply_patch is not intercepted)." : ""}CI remains authoritative`,
+      detail: `Refusals are enforced by local guardrails: ${surfaces.active.join(", ")}${installation?.hooks.includes("ci") ? ". CI checks pull requests" : ""}${state.config.harness === "codex" ? ". Codex scope checks are commit-time only (apply_patch is not intercepted)" : ""}`,
     };
   }
 
@@ -350,6 +397,9 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
   const wired = await preToolUseRegistration(state.paths.root, hookPath);
   const registration = wired.ok ? wired.value : "absent";
   if (registration === "present") {
+    const settings = await state.files.readTextIfExists(CLAUDE_SETTINGS_FILE);
+    if (!settings.ok || !hasClaudeSessionHooks(settings.value, hookPath))
+      return { inactive: "prompt, Stop or Bash hook (settings registration is missing)" };
     const command = hookCommand(hookPath);
     const check = spawnSync(
       process.platform === "win32" ? "cmd.exe" : "/bin/sh",
@@ -363,7 +413,7 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
       },
     );
     return check.status === 0
-      ? { active: "edit hook (edit tools only)" }
+      ? { active: "edit hook (edit tools only), prompt, Stop and Bash hooks" }
       : { inactive: "edit hook (registered command cannot start)" };
   }
   if (registration === "malformed") {
@@ -380,7 +430,9 @@ async function inspectPreCommitHook(state: WorkspaceState): Promise<SurfaceState
   if (!resolved.ok) return { inactive: "pre-commit (configured path could not be resolved)" };
   const hook = await state.files.readTextIfExists(resolved.value.absolute);
   if (!hook.ok) return { inactive: `pre-commit (${hook.error.message})` };
-  if (hook.value === renderPreCommitHook()) {
+  const local = await state.files.readTextIfExists(`${resolved.value.absolute}.local`);
+  if (!local.ok) return { inactive: `pre-commit (${local.error.message})` };
+  if (hook.value === renderPreCommitHook(local.value !== undefined)) {
     const metadata = await state.files.metadata(resolved.value.absolute);
     if (metadata.ok && isExecutableMode(metadata.value?.mode)) return { active: "pre-commit" };
     return { inactive: "pre-commit (not executable)" };

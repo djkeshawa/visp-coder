@@ -10,9 +10,9 @@ Three surfaces call `visp guard`, so a refusal means the same thing everywhere:
 | --- | --- | --- | --- |
 | Edit hook (Claude Code) | `.visp/hooks/claude-pretooluse.mjs`, wired into `.claude/settings.json` | This checkout's authorization | Denies the write and says the check could not run |
 | Git `pre-commit` | The repository's pre-commit hook | This checkout's authorization | Blocks the commit while a slice is authorized; otherwise allows it with a warning |
-| CI (`visp install --hooks ci`) | `.github/workflows/visp.yml` | The feature's committed brief (`--scope tasks`) | The job fails |
+| CI (`visp install --hooks claude git ci`, or `--hooks git ci` outside Claude Code) | `.github/workflows/visp.yml` | The feature's committed brief (`--scope tasks`) | The job fails |
 
-The hooks read the JSON envelope from `visp guard --json` rather than the exit code, so a crash or an unrelated `visp` on `PATH` is never mistaken for a verdict. `--if-authorized` lets ordinary commits through when no slice is authorized; `--include-done` keeps finished slices' changes committable. A denial that blames the installation should be fixed with `visp doctor`, not by widening scope. The local hook can be bypassed with `git commit --no-verify`; CI is the authoritative check.
+The hooks read the JSON envelope from `visp guard --json` rather than the exit code, so a crash or an unrelated `visp` on `PATH` is never mistaken for a verdict. `--hooks` replaces the default hook set; retain `git` and, for Claude Code, `claude` when adding `ci`. `--if-authorized` lets ordinary commits through when no slice is authorized; `--include-done` keeps finished slices' changes committable. A denial that blames the installation should be fixed with `visp doctor`, not by widening scope. The local hook can be bypassed with `git commit --no-verify`; CI is the authoritative check.
 
 The generated CI workflow pins the VISP version that generated it, so a new release cannot change the verdict on an unchanged repository. A `pull_request` checkout is detached, so the workflow passes `--branch` to find the feature.
 

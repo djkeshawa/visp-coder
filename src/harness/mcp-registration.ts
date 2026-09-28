@@ -18,7 +18,16 @@ import {
 
 export const MCP_CONFIG_FILE = ".mcp.json";
 export const OPENCODE_CONFIG_FILE = "opencode.json";
+export const CURSOR_CONFIG_FILE = ".cursor/mcp.json";
+export const COPILOT_CONFIG_FILE = ".vscode/mcp.json";
 export const MCP_SERVER_NAME = PRODUCT_NAME;
+export const MCP_AWARE_HARNESSES: readonly Harness[] = [
+  "claude-code",
+  "codex",
+  "cursor",
+  "copilot",
+  "opencode",
+];
 export { CODEX_CONFIG_FILE } from "./codex-mcp-registration.js";
 
 export type RegistrationStatus = "added" | "current" | "customized" | "replaced" | "malformed";
@@ -30,6 +39,11 @@ const MCP_JSON_ENTRY = {
   args: [runtimeIdentity().executable, "serve", "--mcp"],
 } as const;
 const LEGACY_MCP_JSON_ENTRY = { command: PRODUCT_NAME, args: ["serve", "--mcp"] };
+
+const COPILOT_ENTRY = {
+  type: "stdio",
+  ...MCP_JSON_ENTRY,
+} as const;
 
 const OPENCODE_ENTRY = {
   type: "local",
@@ -48,9 +62,13 @@ interface RegistrationShape {
 }
 
 function registrationShape(harness: Harness): RegistrationShape {
-  return harness === "opencode"
-    ? { file: OPENCODE_CONFIG_FILE, container: "mcp", entry: OPENCODE_ENTRY }
-    : { file: MCP_CONFIG_FILE, container: "mcpServers", entry: MCP_JSON_ENTRY };
+  if (harness === "opencode")
+    return { file: OPENCODE_CONFIG_FILE, container: "mcp", entry: OPENCODE_ENTRY };
+  if (harness === "cursor")
+    return { file: CURSOR_CONFIG_FILE, container: "mcpServers", entry: MCP_JSON_ENTRY };
+  if (harness === "copilot")
+    return { file: COPILOT_CONFIG_FILE, container: "servers", entry: COPILOT_ENTRY };
+  return { file: MCP_CONFIG_FILE, container: "mcpServers", entry: MCP_JSON_ENTRY };
 }
 
 export function mcpConfigFile(harness: Harness): string {
@@ -87,13 +105,13 @@ export function planMcpRegistration(
   let config: McpConfig = {};
   if (current !== undefined && current.trim() !== "") {
     const parsed = parseConfig(current);
-    if (!parsed) return replacementPlan(shape, force);
+    if (!parsed) return ok({ status: "malformed" });
     config = parsed;
   }
 
   const containerPresent = Object.hasOwn(config, shape.container);
   const existingServers = objectRecord(config[shape.container]);
-  if (containerPresent && !existingServers) return replacementPlan(shape, force, config);
+  if (containerPresent && !existingServers) return ok({ status: "malformed" });
 
   const servers = { ...(existingServers ?? {}) };
   const existing = servers[MCP_SERVER_NAME];
@@ -181,11 +199,51 @@ export function inspectMcpRegistrationResidue(
 
 function parseConfig(text: string): McpConfig | undefined {
   try {
-    return objectRecord(JSON.parse(text));
+    return objectRecord(JSON.parse(stripJsonCommentsAndTrailingCommas(text)));
   } catch {
     // Rewriting a file we cannot parse would discard whatever it holds.
     return undefined;
   }
+}
+
+function stripJsonCommentsAndTrailingCommas(source: string): string {
+  let clean = "";
+  let quoted = false;
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i];
+    if (char === '"' && !isEscaped(source, i)) quoted = !quoted;
+    if (!quoted && char === "/" && source[i + 1] === "/") {
+      while (i < source.length && source[i] !== "\n") {
+        clean += " ";
+        i++;
+      }
+      clean += "\n";
+      continue;
+    }
+    if (!quoted && char === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end < 0) return source;
+      clean += source.slice(i, end + 2).replace(/[^\n]/gu, " ");
+      i = end + 1;
+      continue;
+    }
+    clean += char;
+  }
+  return clean.replace(/,\s*(?=[}\]])/gu, (match, offset: number) => {
+    return insideString(clean, offset) ? match : match.replace(",", " ");
+  });
+}
+
+function isEscaped(source: string, index: number): boolean {
+  let slashes = 0;
+  for (let i = index - 1; source[i] === "\\"; i--) slashes++;
+  return slashes % 2 === 1;
+}
+
+function insideString(source: string, offset: number): boolean {
+  let quoted = false;
+  for (let i = 0; i < offset; i++) if (source[i] === '"' && !isEscaped(source, i)) quoted = !quoted;
+  return quoted;
 }
 
 function parseConfigText(current: string | undefined): McpConfig | "malformed" {
@@ -195,22 +253,6 @@ function parseConfigText(current: string | undefined): McpConfig | "malformed" {
 
 function mentionsVispServer(current: string | undefined): boolean {
   return current !== undefined && /["']visp["']\s*:/u.test(current);
-}
-
-function replacementPlan(
-  shape: RegistrationShape,
-  force: boolean,
-  config?: McpConfig,
-): Result<PlannedMcpRegistration> {
-  if (!force) return ok({ status: "malformed" });
-
-  return ok({
-    status: "replaced",
-    content: formatConfig({
-      ...(config ?? {}),
-      [shape.container]: { [MCP_SERVER_NAME]: shape.entry },
-    }),
-  });
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | undefined {

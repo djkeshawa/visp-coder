@@ -148,6 +148,9 @@ describe("the pull request check", () => {
     const workflow = await project.read(".github/workflows/visp.yml");
     expect(workflow).toContain("--branch");
     expect(workflow).toContain("github.head_ref");
+    expect(workflow).toMatch(/env:\n\s+HEAD_REF: \$\{\{ github\.head_ref \}\}/u);
+    expect(workflow).toContain('--branch "$HEAD_REF"');
+    expect(workflow).toContain("permissions: contents: read");
   });
 
   it("rejects a scope source it does not have", () => {

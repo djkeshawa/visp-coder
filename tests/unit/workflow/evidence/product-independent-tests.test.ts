@@ -16,6 +16,7 @@ import {
   configuredTestsStarter,
   createProductFeatureWithTests,
   type IndependentTester,
+  independentTestsBeforeWork,
   inlineTests,
   readTestsRecord,
   startIndependentTests,
@@ -63,6 +64,20 @@ function tester(file: { name: string; content: string } | null, calls: string[] 
   };
   return run;
 }
+
+it("reports a skipped tester when codex-exec uses a non-Codex critic", async () => {
+  const fixture = await productWorkspace({ critic: true });
+  workspace = fixture.workspace;
+  const config = parse(await readFile(join(workspace.root, "visp.yml"), "utf8"));
+  config.critic = { ...config.critic, harness: "cursor", launch: "codex-exec", mode: "auto" };
+  await workspace.write("visp.yml", stringify(config));
+  const state = await workspace.state();
+  expect(configuredTestsStarter(state)).toBeUndefined();
+  expect(await independentTestsBeforeWork(state, undefined, undefined, 0)).toMatchObject({
+    ok: true,
+    value: { status: "skipped", reason: expect.stringContaining("critic.harness: codex") },
+  });
+});
 
 it("pins tests written from the original request when they fail before implementation", async () => {
   const fixture = await testerWorkspace();

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runtimeIdentity } from "../../../src/core/version.js";
 import {
@@ -32,6 +32,8 @@ async function readConfig(
 
 const REGISTRATIONS = [
   { harness: "claude-code" as const, file: MCP_CONFIG_FILE, container: "mcpServers" },
+  { harness: "cursor" as const, file: ".cursor/mcp.json", container: "mcpServers" },
+  { harness: "copilot" as const, file: ".vscode/mcp.json", container: "servers" },
   { harness: "opencode" as const, file: OPENCODE_CONFIG_FILE, container: "mcp" },
 ] as const;
 
@@ -120,12 +122,12 @@ describe("registerMcpServer", () => {
     expect(await readFile(join(root, MCP_CONFIG_FILE), "utf8")).toBe("{ not json");
   });
 
-  it("replaces a malformed config only when forced", async () => {
+  it("preserves a malformed config even when forced", async () => {
     await writeFile(join(root, MCP_CONFIG_FILE), "{ not json");
 
     const result = await registerMcpServer(root, true);
-    expect(result.ok && result.value).toBe("replaced");
-    expect((await readConfig()).mcpServers?.[MCP_SERVER_NAME]).toBeDefined();
+    expect(result.ok && result.value).toBe("malformed");
+    expect(await readFile(join(root, MCP_CONFIG_FILE), "utf8")).toBe("{ not json");
   });
 
   it("treats an empty file as no configuration", async () => {
@@ -192,12 +194,25 @@ describe("OpenCode MCP registration", () => {
     expect(await readFile(join(root, OPENCODE_CONFIG_FILE), "utf8")).toBe("{ commented: nope");
   });
 
-  it("replaces malformed OpenCode configuration only when forced", async () => {
+  it("preserves malformed OpenCode configuration even when forced", async () => {
     await writeFile(join(root, OPENCODE_CONFIG_FILE), "{ commented: nope");
 
     const result = await registerMcpServer(root, true, "opencode");
-    expect(result.ok && result.value).toBe("replaced");
-    expect((await readConfig(OPENCODE_CONFIG_FILE)).mcp?.[MCP_SERVER_NAME]).toBeDefined();
+    expect(result.ok && result.value).toBe("malformed");
+    expect(await readFile(join(root, OPENCODE_CONFIG_FILE), "utf8")).toBe("{ commented: nope");
+  });
+
+  it("merges JSONC while retaining models, permissions and other servers", async () => {
+    await writeFile(
+      join(root, OPENCODE_CONFIG_FILE),
+      '{\n // project settings\n "model": "my-model",\n "permission": {"edit": "ask",},\n "mcp": {"github": {"type": "remote", "url": "https://example.test"},},\n}\n',
+    );
+    const result = await registerMcpServer(root, true, "opencode");
+    expect(result.ok && result.value).toBe("added");
+    const config = await readConfig(OPENCODE_CONFIG_FILE);
+    expect(config.model).toBe("my-model");
+    expect(config.permission).toEqual({ edit: "ask" });
+    expect(config.mcp?.github).toEqual({ type: "remote", url: "https://example.test" });
   });
 });
 
@@ -227,13 +242,36 @@ describe("Codex MCP registration", () => {
     );
   });
 
-  it("preserves and refuses existing Codex settings and servers", async () => {
+  it("upgrades a legacy generated block inside other TOML", async () => {
+    const other = 'model = "gpt-5"\n';
+    await writeFile(
+      join(root, CODEX_CONFIG_FILE),
+      `${other}\n# visp: mcp:start\n[mcp_servers.visp]\ncommand = "visp"\nargs = ["serve", "--mcp"]\n# visp: mcp:end\n`,
+    );
+    const result = await registerMcpServer(root, false, "codex");
+    expect(result.ok && result.value).toBe("replaced");
+    const written = await readFile(join(root, CODEX_CONFIG_FILE), "utf8");
+    expect(written.startsWith(other)).toBe(true);
+    expect(written).toContain(runtimeIdentity().executable);
+  });
+
+  it("appends to existing Codex settings and servers", async () => {
     const current = `model = "gpt-5"\n\n[mcp_servers.other]\ncommand = "other"\n`;
     await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
 
     const result = await registerMcpServer(root, false, "codex");
 
-    expect(result.ok && result.value).toBe("malformed");
+    expect(result.ok && result.value).toBe("added");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toContain(current);
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toContain("[mcp_servers.visp]");
+  });
+
+  it("keeps a manually added Codex table, which runs whatever visp is on PATH", async () => {
+    const current =
+      'model = "gpt-6"\n\n[mcp_servers.visp]\nargs = ["serve", "--mcp"]\ncommand = "visp"\n';
+    await writeFile(join(root, CODEX_CONFIG_FILE), current);
+    const result = await registerMcpServer(root, false, "codex");
+    expect(result.ok && result.value).toBe("customized");
     expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
   });
 
@@ -284,6 +322,9 @@ describe("Codex MCP registration", () => {
 describe.each(REGISTRATIONS)(
   "unsafe $harness MCP configuration shapes",
   ({ harness, file, container }) => {
+    beforeEach(async () => {
+      await mkdir(dirname(join(root, file)), { recursive: true });
+    });
     it.each([
       ["a scalar root", '"not an object"'],
       ["an array root", '["not an object"]'],
@@ -315,52 +356,39 @@ describe.each(REGISTRATIONS)(
     it.each([
       ["a scalar root", '"not an object"'],
       ["an array root", '["not an object"]'],
-    ])("replaces %s only when forced", async (_description, content) => {
+    ])("preserves %s even when forced", async (_description, content) => {
       await writeFile(join(root, file), content);
 
       const result = await registerMcpServer(root, true, harness);
 
-      expect(result.ok && result.value).toBe("replaced");
-      const config = JSON.parse(await readFile(join(root, file), "utf8")) as Record<
-        string,
-        unknown
-      >;
-      expect(config[container]).toEqual({
-        [MCP_SERVER_NAME]: expect.any(Object),
-      });
+      expect(result.ok && result.value).toBe("malformed");
+      expect(await readFile(join(root, file), "utf8")).toBe(content);
     });
 
     it.each([
       ["a scalar container", '"not an object"'],
       ["an array container", '["not an object"]'],
-    ])(
-      "replaces %s only when forced and preserves top-level settings",
-      async (_description, invalidContainer) => {
-        const content = JSON.stringify({
-          projectSetting: "keep me",
-          [container]: JSON.parse(invalidContainer),
-        });
-        await writeFile(join(root, file), content);
+    ])("preserves %s even when forced", async (_description, invalidContainer) => {
+      const content = JSON.stringify({
+        projectSetting: "keep me",
+        [container]: JSON.parse(invalidContainer),
+      });
+      await writeFile(join(root, file), content);
 
-        const result = await registerMcpServer(root, true, harness);
+      const result = await registerMcpServer(root, true, harness);
 
-        expect(result.ok && result.value).toBe("replaced");
-        const config = JSON.parse(await readFile(join(root, file), "utf8")) as Record<
-          string,
-          unknown
-        >;
-        expect(config.projectSetting).toBe("keep me");
-        expect(config[container]).toEqual({
-          [MCP_SERVER_NAME]: expect.any(Object),
-        });
-      },
-    );
+      expect(result.ok && result.value).toBe("malformed");
+      expect(await readFile(join(root, file), "utf8")).toBe(content);
+    });
   },
 );
 
 describe.each(REGISTRATIONS)(
   "$harness MCP registration cleanup",
   ({ harness, file, container }) => {
+    beforeEach(async () => {
+      await mkdir(dirname(join(root, file)), { recursive: true });
+    });
     it("removes only the exact generated VISP entry", async () => {
       await registerMcpServer(root, false, harness);
       const config = await readConfig(file);

@@ -519,6 +519,27 @@ export class ProjectFileSystem {
     return parent.ok ? target : parent;
   }
 
+  /** Resolve an authored file link before planning an atomic replacement. */
+  async authoredWriteTarget(path: string): Promise<Result<string>> {
+    const target = this.confinedTarget(path);
+    if (!target.ok) return target;
+    try {
+      const canonical = await realpath(target.value);
+      if (!isInside(this.root, canonical) || this.isManagedTarget(canonical)) {
+        return err(
+          vispError(
+            "IO_ERROR",
+            `${path} links outside the project; replace the link with a local file or use an in-project target`,
+          ),
+        );
+      }
+      return this.validate(canonical);
+    } catch (cause) {
+      if (isNodeError(cause) && cause.code === "ENOENT") return this.validate(target.value);
+      return err(fromUnknown(cause, "IO_ERROR"));
+    }
+  }
+
   /**
    * Authored repository files may use a symlink whose resolved target remains
    * inside this project. Machine state and every mutation stay on the stricter
