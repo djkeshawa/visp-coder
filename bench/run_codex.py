@@ -45,6 +45,9 @@ argv = [
     "--cd", str(project),
     "--model", args.model, "--config", f'model_reasoning_effort="{args.effort}"',
     "--sandbox", "workspace-write", "--config", "sandbox_workspace_write.network_access=true",
+    # The clean home is the worker's own, as it is for a Claude worker: BMAD's setup step
+    # installs a Python there with uv and stopped on a read-only home.
+    "--config", f"sandbox_workspace_write.writable_roots={json.dumps([str(home)])}",
     "--config", 'approval_policy="never"', "-",
 ]
 started, report = time.time(), ""
