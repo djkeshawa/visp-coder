@@ -5,13 +5,13 @@ import { commandMap } from "./command-guide.js";
 export const TOOL_ACCESS_GUIDANCE =
   "Use VISP MCP tools when connected: `visp_next({})`, then `visp_<command>` schemas; otherwise use CLI `visp next`.";
 
-export const COMPACT_RULES = `- Keep original request with --source-brief. Preserve outcomes, expectations and scope.allowed.
+export const COMPACT_RULES = `- Keep request with --source-brief; preserve outcomes, expectations and scope.allowed.
 - Run visp work before editing; build a small runnable behavior. Each functional outcome needs a check: a test command, or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
-- Stateful work: act, settle, act again; check failure and restart.
-- When checks pass, visp done may start an independent review; visp next waits for it. Fix required findings, then visp done again. An accepted critic response records the review; otherwise use visp review --prepare, then --session <id> --from -.
-- Sandbox blocked sockets? Rerun with escalation.
+- Stateful work: act, settle, repeat; check failure and restart.
+- After checks pass, visp done may start review; visp next waits. Fix findings and rerun done. An accepted critic response records the review; otherwise use visp review --prepare, then --session <id> --from -.
+- Blocked sockets? Retry with escalation.
 - Missing product evidence stays unresolved. Report reviewer.context honestly. Do not force extra review rounds.
-- Before the final answer, run \`visp next\`; follow its action and respect execution refusals.`;
+- Before the final answer, run \`visp next\`; respect execution refusals.`;
 
 export const RULES_FOR_AGENTS = `- The original request and independent acceptance expectations cannot be weakened by a method revision.
   An explicit intent change records the reason and provenance; it is not proof of human authorization.
@@ -37,7 +37,7 @@ ${TOOL_ACCESS_GUIDANCE}
 ## The loop
 
 Loop: \`visp work\` → implement → \`visp done\` → \`visp next\`, one slice at a time. Run \`visp accept\` only when \`visp next\` directs it.
-Start: \`visp feature "<goal>" --source-brief "<verbatim request>"\`, then \`visp work --check "<test command>"\` to work the request as one slice; plan several slices with \`visp brief --template\` only for independently usable parts.
+Start: \`visp feature "<goal>" --source-brief -\` with a quoted heredoc for the request, then \`visp work --check "<test command>"\` to work the request as one slice; plan several slices with \`visp brief --template\` only for independently usable parts.
 
 ## Rules
 
@@ -65,12 +65,12 @@ Command examples and recovery: VISP.commands.md. Full guide: ${fullGuide}
 export function renderMinimalGuide(): string {
   return `# visp
 
-First: \`visp feature "<goal>" --source-brief "<verbatim request>"\`; \`visp brief --template\`.
+First: \`visp feature "<goal>" --source-brief - <<'REQUEST'\` (request, then REQUEST). \`visp work --check "<test command>"\`; \`visp brief --template\` for several slices.
 Loop: \`visp work\` → implement → \`visp done\` → \`visp next\`. Run \`visp accept\` only when \`visp next\` directs it.
 
 ${COMPACT_RULES}
 
-VISP generates records. See VISP.commands.md.
+VISP generates records; see VISP.commands.md.
 `;
 }
 
@@ -89,7 +89,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {
     name: "visp-feature",
     description: "Start a feature from the original goal",
-    body: `Use \`${PRODUCT_NAME} feature\` for $ARGUMENTS and pass the verbatim original request with \`--source-brief\`. Then define outcomes and the first usable slice with \`${PRODUCT_NAME} brief\`.`,
+    body: `Use \`${PRODUCT_NAME} feature\` for $ARGUMENTS and pass the verbatim original request with \`--source-brief -\` and a quoted heredoc. Then run \`${PRODUCT_NAME} work --check "<test command>"\` for the first usable slice; use \`${PRODUCT_NAME} brief --template\` for several usable slices.`,
   },
   {
     name: "visp-implement",

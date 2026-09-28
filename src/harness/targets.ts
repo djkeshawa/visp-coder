@@ -1,4 +1,4 @@
-import type { CriticConfig } from "../config/critic.js";
+import { balancedCritic, type CriticConfig } from "../config/critic.js";
 import type { Harness, Profile } from "../core/constants.js";
 import { DEFAULT_PROFILE } from "../core/constants.js";
 import { commandGuide } from "./command-guide.js";
@@ -37,14 +37,14 @@ export interface HarnessPlan {
 export function planFor(
   harness: Harness,
   profile: Profile = DEFAULT_PROFILE,
-  critic?: CriticConfig,
+  critic: CriticConfig | null = balancedCritic(harness) ?? null,
 ): HarnessPlan {
   const plan = basePlanFor(harness, profile);
   return {
     ...plan,
     assets: [
       ...plan.assets,
-      { path: "VISP.commands.md", content: commandGuide() },
+      { path: "VISP.commands.md", content: commandGuide(critic !== null) },
       ...criticAgentAssets(harness, critic),
       ...codexHookAssets(harness),
     ],

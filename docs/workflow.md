@@ -5,10 +5,13 @@ A feature is one brief plus the records VISP generates while the agent works thr
 ## Starting a feature
 
 ```sh
-visp feature "<goal>" --source-brief "<original request, verbatim>"
+visp feature "<goal>" --source-brief - <<'REQUEST'
+<original request, verbatim>
+REQUEST
+visp work --check "<test command>"
 ```
 
-Under Claude Code (with the installed prompt hook) and Codex, VISP takes the request from the user's recorded prompt; a `--source-brief` is kept only when it quotes that prompt verbatim, for example one request out of a longer message, so a paraphrase cannot replace it. On other hosts pass the complete request. `--risk low|medium|high|critical` records project risk and `--branch` creates a feature branch. The feature is created under `.visp/features/<id>/` with a `brief.yaml` that holds the preserved request and an empty plan. `feature` pins the current critic configuration into the feature; later changes to defaults do not affect it.
+The quoted heredoc preserves backticks and other shell characters literally. Under Claude Code (with the installed prompt hook) and Codex, VISP takes the request from the user's recorded prompt; a `--source-brief` is kept only when it quotes that prompt verbatim, for example one request out of a longer message, so a paraphrase cannot replace it. On other hosts pass the complete request. `--risk low|medium|high|critical` records project risk and `--branch` creates a feature branch. The feature is created under `.visp/features/<id>/` with a `brief.yaml` that holds the preserved request and an empty plan. `feature` pins the current critic configuration into the feature; later changes to defaults do not affect it.
 
 ## The brief
 
