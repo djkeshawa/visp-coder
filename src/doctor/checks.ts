@@ -2,13 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { browserExecutableIdentity } from "../core/browser-executable.js";
-import {
-  CONFIG_FILE,
-  DERIVED_STATE_PATHS,
-  LEGACY_STATE_IGNORE,
-  PRODUCT_NAME,
-  STATE_DIR,
-} from "../core/constants.js";
+import { CONFIG_FILE, LEGACY_STATE_IGNORE, PRODUCT_NAME, STATE_DIR } from "../core/constants.js";
 import { describeCommand, resolveCommand, run } from "../core/exec.js";
 import { inspectFileTransactions } from "../core/file-transaction.js";
 import { isRepository } from "../core/git.js";
@@ -636,9 +630,8 @@ async function checkEvidenceTracked(state: WorkspaceState): Promise<Check> {
 
   return {
     name: "evidence trail",
-    status: "warn",
-    detail: `.gitignore hides all of ${STATE_DIR}/, so no reviewer can see the evidence`,
-    recovery: `Replace the ${LEGACY_STATE_IGNORE} line with: ${DERIVED_STATE_PATHS.join(" ")}`,
+    status: "ok",
+    detail: `.gitignore deliberately keeps ${STATE_DIR}/ local; share any evidence needed for review separately`,
   };
 }
 

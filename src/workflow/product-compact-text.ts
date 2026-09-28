@@ -313,6 +313,7 @@ export function compactBriefText(
     normalized: data.normalized,
     branchCreated: data.branchCreated,
     branchWarning: data.branchWarning,
+    redactionNotice: data.redactionNotice,
   };
   // The adapter does not choose the next slice; visp_next owns that decision.
   const wording = WORDING[channel];

@@ -16,6 +16,7 @@ export interface CommandOutput {
 
 export interface RunOptions {
   readonly cwd: string;
+  readonly input?: string;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly env?: Record<string, string>;
@@ -41,7 +42,7 @@ export function run(
       child = spawn(prepared.file, prepared.args, {
         cwd: options.cwd,
         detached: process.platform !== "win32",
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         env,
         windowsVerbatimArguments: prepared.windowsVerbatimArguments,
       });
@@ -106,6 +107,10 @@ export function run(
       stop();
     });
     child.once("close", () => finish());
+    if (options.input !== undefined) {
+      child.stdin?.on("error", () => undefined);
+      child.stdin?.end(options.input);
+    }
     options.signal?.addEventListener("abort", cancel, { once: true });
     if (options.signal?.aborted) cancel();
   });

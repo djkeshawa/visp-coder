@@ -5,6 +5,8 @@ import {
   type FileMutation,
   filePrecondition,
 } from "../../core/file-transaction.js";
+import { sha256 } from "../../core/hash.js";
+import { redactRequest } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { withProductMutation } from "./runtime.js";
@@ -30,7 +32,7 @@ const RULES_HEADING =
 
 const projectRuleSchema = z
   .object({
-    id: z.string().regex(/^R\d{3,}$/),
+    id: z.string().regex(/^R(?:\d{3,}|-[a-f0-9]{16})$/),
     text: z.string().min(1),
     feature: z.string(),
     capturedAt: z.string(),
@@ -157,7 +159,7 @@ export async function readProjectRules(
   return ok({ rules: parsed.data.rules, before: text.value });
 }
 
-/** Adds rules not already recorded, numbered after the existing ones. */
+/** Content-derived identities stay stable across branches and worktrees. */
 export function mergeProjectRules(
   existing: readonly ProjectRule[],
   texts: readonly string[],
@@ -165,14 +167,13 @@ export function mergeProjectRules(
   capturedAt: string,
 ): { rules: ProjectRule[]; added: ProjectRule[] } {
   const seen = new Set(existing.map((rule) => comparable(rule.text)));
-  let next = existing.reduce((max, rule) => Math.max(max, Number(rule.id.slice(1))), 0);
   const added: ProjectRule[] = [];
-  for (const text of texts) {
+  for (const raw of texts) {
+    const text = redactRequest(raw);
     const key = comparable(text);
     if (seen.has(key)) continue;
     seen.add(key);
-    next += 1;
-    added.push({ id: `R${String(next).padStart(3, "0")}`, text: text.trim(), feature, capturedAt });
+    added.push({ id: `R-${sha256(key).slice(0, 16)}`, text: text.trim(), feature, capturedAt });
   }
   return { rules: [...existing, ...added], added };
 }
@@ -198,7 +199,16 @@ export function removeProjectRule(
   return withProductMutation(workspace, async () => {
     const recorded = await readProjectRules(workspace);
     if (!recorded.ok) return recorded;
-    const rule = recorded.value.rules.find((entry) => entry.id === id);
+    const matches = recorded.value.rules.filter((entry) => entry.id === id);
+    if (matches.length > 1)
+      return err(
+        vispError(
+          "ARTIFACT_INVALID",
+          `Project rule ${id} is ambiguous; resolve the duplicate IDs in .visp/rules.json before removing it`,
+          { recovery: "visp rules" },
+        ),
+      );
+    const rule = matches[0];
     if (!rule)
       return err(
         vispError("ARTIFACT_INVALID", `No project rule ${id}`, { recovery: "visp rules" }),

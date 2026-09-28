@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { withProductCheckContext } from "../../core/check-context.js";
 import { commandExecutableDigest } from "../../core/command-executable.js";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { type CommandOutput, resolveCommand, run } from "../../core/exec.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
+import { outputRedactor, privatePath } from "../../core/redaction.js";
 import { err, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
@@ -62,7 +64,22 @@ export async function executeProductCheck(
       check.timeoutMs,
     );
   const started = Date.now();
+  const argv = resolveCommand(check.command);
+  const envFiles = argv.ok
+    ? argv.value.flatMap((arg, index, args) =>
+        arg.startsWith("--env-file=")
+          ? [arg.slice("--env-file=".length)]
+          : arg === "--env-file" && args[index + 1]
+            ? [args[index + 1] as string]
+            : [],
+      )
+    : [];
+  const redact = await outputRedactor(workspace.paths.root, [
+    ...envFiles,
+    ...Object.keys(verifierSnapshot).filter((path) => privatePath(path)),
+  ]);
   const output = await executeCommand(workspace, check, !!base.verifierDigest, signal);
+  const raw = output.ok ? `${output.value.stdout}\n${output.value.stderr}` : output.error.message;
   const commandVerifier =
     base.verifierDigest && output.ok && output.value.executableDigest
       ? {
@@ -80,10 +97,18 @@ export async function executeProductCheck(
       status: commandStatus(output, workspace.paths.root),
       exitCode: output.ok ? output.value.exitCode : -1,
       durationMs: output.ok ? output.value.durationMs : Date.now() - started,
-      output: commandEvidenceOutput(output, !!base.verifierDigest, workspace.paths.root),
+      output: commandEvidenceOutput(output, !!base.verifierDigest, workspace.paths.root, redact),
     },
     state: record.state,
-    mutations: [],
+    mutations: [
+      {
+        kind: "write",
+        path: join(workspace.paths.sessionDir, "check-output", `${base.id}.log`),
+        content: raw,
+        mode: 0o600,
+        expectedBefore: { existed: false },
+      },
+    ],
   };
 }
 
@@ -91,18 +116,23 @@ function commandEvidenceOutput(
   output: Result<CommandOutput & { executableDigest?: string }>,
   verifierDeclared: boolean,
   root: string,
+  redact: (text: string) => string,
 ) {
   if (!output.ok)
-    return [output.error.message, sandboxDenial(output.error.message, root) ? SANDBOX_NOTE : ""]
+    return [
+      redact(output.error.message),
+      sandboxDenial(output.error.message, root) ? SANDBOX_NOTE : "",
+    ]
       .filter(Boolean)
       .join("\n")
       .slice(-8000);
-  const text = `${output.value.stdout}\n${output.value.stderr}`.trim();
+  const raw = `${output.value.stdout}\n${output.value.stderr}`.trim();
+  const text = redact(raw);
   const limitation =
     verifierDeclared && !output.value.executableDigest
       ? "VISP: executable identity was unavailable or changed during execution. This result cannot support a witnessed repair or disproof. Use a stable, readable executable on a qualified platform and rerun the relevant checks; do not treat this as a product failure."
       : "";
-  const sandbox = output.value.exitCode !== 0 && sandboxDenial(text, root) ? SANDBOX_NOTE : "";
+  const sandbox = output.value.exitCode !== 0 && sandboxDenial(raw, root) ? SANDBOX_NOTE : "";
   const timeout = output.value.timedOut
     ? "VISP: check timed out; increase this check's timeoutMs or fix a stalled check before retrying. No passing product result was established."
     : "";

@@ -60,3 +60,21 @@ it("refuses excessively nested history without deleting any original bytes", asy
   });
   expect(await readFile(path, "utf8")).toBe("preserved history");
 });
+
+it("excludes private derived state, including oversized databases and live WAL files", async () => {
+  const root = await fixture();
+  for (const path of [
+    "session/user-prompts.jsonl",
+    "state/install.json",
+    "graph/graph.db",
+    "graph/graph.db-wal",
+  ]) {
+    const full = join(root, ".visp", path);
+    await mkdir(full.slice(0, full.lastIndexOf("/")), { recursive: true });
+    await writeFile(full, "private session data");
+    if (path.endsWith(".db")) await truncate(full, 33 * 1024 * 1024);
+  }
+  const exported = await collectMigrationHistory(root);
+  expect(exported.ok).toBe(true);
+  expect(exported.ok && exported.value.files).toEqual([]);
+});

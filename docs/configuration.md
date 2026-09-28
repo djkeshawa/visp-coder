@@ -142,10 +142,10 @@ See [internals](internals.md#skills) for revision, evaluation and rollback recor
 | --- | --- | --- |
 | `features/<id>/brief.yaml` | yes | The authored brief |
 | `features/<id>/product-state.json` | yes | Generated slice status, executions, reviews and findings |
-| `features/<id>/captures/` | yes | Screenshots from browser journeys |
+| `features/<id>/captures/` | no | Local screenshots and journey receipts |
 | `features/<id>/review-sessions/` | yes | Prepared review packets and responses |
 | `features/<id>/critic/`, `critic-budget.json` | yes | Critic requests, attempts and the feature's call ledger |
-| `features/<id>/candidates/` | yes | Saved source candidates |
+| `features/<id>/candidates/` | no | Local source checkpoints; private inputs are hash-only |
 | `features/<id>/acceptance-tests.json` | yes | The independent tester's record: status, tests with their request quotes, the baseline run |
 | `features/<id>/reviewer-activity.jsonl`, `tester-activity.jsonl` | yes | Web searches and commands of VISP-launched reviewer and tester sessions |
 | `policy.json`, `overrides.json` | yes | Recorded rules and exceptions |
@@ -167,4 +167,8 @@ If a project tracked `.visp/hooks/` before this ignore rule was added, remove th
 
 Pinned acceptance tests live outside `.visp/`, under `acceptance/<feature>/`, and are committed with the feature.
 
-If an older `.gitignore` ignores all of `.visp/`, `init` leaves it alone and `visp doctor` reports it with the replacement lines.
+If `.gitignore` deliberately ignores all of `.visp/`, `init` and `visp doctor` respect that choice. Share any evidence needed by reviewers separately.
+
+New setups ignore captures and candidates. For existing setups, `visp init` or `visp-migrate apply` adds those ignore entries; already tracked files remain tracked until you explicitly remove them from the Git index. The tracked trail includes the request and redacted check-output tails (at most 8 KB per command execution). Raw command output remains in `.visp/session/check-output/`. Environment values, recognizable credentials and local paths are masked before storing diagnostic text; review the result before committing or publishing. Authored command definitions retain their exact argument vectors for evidence identity; avoid putting credentials in them.
+
+The rolling trail retains 100 executions, 20 capture runs and 40 captures, plus the latest result for each task/check and any evidence referenced by review or repair history. A 100-execution tail can use about 0.8 MB of output plus metadata; screenshots and source checkpoints can add many megabytes locally. Referenced history can exceed these retention targets. `visp trail prune [--feature <id>]` removes unreferenced local captures and candidates; it keeps candidates named by critic history. Share local image artifacts separately when a remote reviewer needs them.

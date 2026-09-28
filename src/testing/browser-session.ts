@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha256 } from "../core/hash.js";
+import { redactText } from "../core/redaction.js";
 import { imageDimensions } from "../workflow/evidence/observations/media.js";
 import type { ProductReviewCapture } from "../workflow/evidence/product-review.js";
 import type { InteractionPage } from "./browser.js";
@@ -115,7 +116,7 @@ export async function openBrowserSession(options: {
     const errors: string[] = [];
     const unsubscribeErrors = transport.onEvent((event) => {
       if (event.sessionId !== send.sessionId || event.method !== "Runtime.exceptionThrown") return;
-      const message = applicationException(event.params);
+      const message = redactText(applicationException(event.params), { root: options.fileRoot });
       if (errors.length < 5) {
         errors.push(message);
         record("observe", "Uncaught application exception", message);

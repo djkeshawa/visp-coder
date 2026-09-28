@@ -150,7 +150,7 @@ describe("product workflow", () => {
     );
   });
 
-  it("rejects unknown explicit and stale active task IDs before any command or state write", async () => {
+  it("rejects explicit unknown tasks and recovers stale implicit task selections", async () => {
     await setup();
     const state = await workspace.state();
     const before = await readFile(
@@ -172,15 +172,14 @@ describe("product workflow", () => {
         activeTask: "T999",
       }),
     );
-    const active = await runProductVerify(await workspace.state());
-    expect(!active.ok && active.error.code).toBe("TASK_NOT_FOUND");
-    expect(await runProductAccept(await workspace.state())).toMatchObject({
-      ok: false,
-      error: { code: "TASK_NOT_FOUND" },
-    });
+    expect((await runProductNext(await workspace.state())).ok).toBe(true);
+    expect((await runProductStatus(await workspace.state())).ok).toBe(true);
     expect(
       await readFile(join(workspace.root, ".visp/features", FEATURE, "product-state.json"), "utf8"),
     ).toBe(before);
+    const active = value(await runProductWork(await workspace.state()));
+    expect(active.task).toBe("T001");
+    expect(active.notes.join(" ")).toContain("Ignored saved task T999");
   });
 
   it("keeps prior unrelated changes and catches new changes to those files", async () => {

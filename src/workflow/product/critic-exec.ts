@@ -3,6 +3,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { redactStrings } from "../../core/redaction.js";
 import { prepareCommand } from "../../core/windows-command.js";
 import type { ProductCriticHost } from "./critic.js";
 import type { CriticPacket } from "./critic-packet.js";
@@ -195,7 +196,7 @@ async function recordActivity(
   const feature = (packet.selection as { feature?: unknown } | undefined)?.feature;
   if (typeof feature !== "string" || !/^[A-Za-z0-9._-]+$/.test(feature)) return;
   const task = (packet.selection as { task?: unknown } | undefined)?.task;
-  const line = `${JSON.stringify({ at: new Date().toISOString(), model, ...(typeof task === "string" ? { task } : {}), ...activity })}\n`;
+  const line = `${JSON.stringify(redactStrings({ at: new Date().toISOString(), model, ...(typeof task === "string" ? { task } : {}), ...activity }, root))}\n`;
   const directory = join(root, ".visp", "features", feature);
   await appendFile(join(directory, REVIEWER_ACTIVITY_FILE), line).catch(() => undefined);
 }

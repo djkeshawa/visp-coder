@@ -8,6 +8,7 @@ import {
 } from "../../core/file-transaction.js";
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
+import { redactRequest } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import {
   type EarlierFeature,
@@ -26,7 +27,7 @@ import type { WorkspaceState } from "../state.js";
 import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
-import { nextFeatureId } from "./feature-id.js";
+import { allocateFeatureId } from "./feature-id.js";
 import { hostRequest } from "./host-prompts.js";
 import { codexMemoryGate } from "./memory-gate.js";
 import {
@@ -72,6 +73,7 @@ export interface ProductFeatureOutcome {
   readonly projectMemory?: readonly string[];
   readonly branchCreated?: string;
   readonly branchWarning?: string;
+  readonly redactionNotice?: string;
 }
 
 export async function createProductFeature(
@@ -105,7 +107,10 @@ async function createProductFeatureLocked(
   if (!foundation.ok) return foundation;
   const listed = await workspace.store.listFeatures();
   if (!listed.ok) return listed;
-  const feature = nextFeatureId(listed.value, options.goal);
+  const goal = redactRequest(options.goal, workspace.paths.root);
+  const allocated = await allocateFeatureId(workspace.paths.root, listed.value, goal);
+  if (!allocated.ok) return allocated;
+  const feature = allocated.value;
   const timestamp = new Date().toISOString();
   const { host, memory } = request;
   const rules = await featureProjectRules(workspace, request.stated, feature, timestamp);
@@ -113,7 +118,7 @@ async function createProductFeatureLocked(
   const parsed = parseProductBrief({
     version: 2,
     feature,
-    goal: options.goal,
+    goal,
     originalRequest: request.originalRequest,
     acceptanceBaseline: baseline,
   });
@@ -157,6 +162,7 @@ async function createProductFeatureLocked(
         intent,
         ...rules.value.reported,
         ...memory.reported,
+        redactionNotice: featureRedactionNotice(request.redacted, goal, options.goal),
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
       })
@@ -282,7 +288,8 @@ async function featureRequest(workspace: WorkspaceState, options: ProductFeature
     "pending",
     new Date().toISOString(),
   );
-  const request = host.value?.request ?? options.sourceBrief ?? options.goal;
+  const raw = host.value?.request ?? options.sourceBrief ?? options.goal;
+  const request = redactRequest(raw, workspace.paths.root);
   const memory = await featureMemory(
     workspace,
     request,
@@ -292,6 +299,7 @@ async function featureRequest(workspace: WorkspaceState, options: ProductFeature
   // Earlier rules are not copied into the fixed request: work replies, the reviewer and the
   // tester read the current rules, so a removed rule stops applying at once.
   return ok({
+    redacted: raw !== request,
     host: host.value,
     stated,
     memory: memory.value,
@@ -612,4 +620,10 @@ function authorizationStillApplies(content: string | undefined, state: ProductSt
   } catch {
     return false;
   }
+}
+
+function featureRedactionNotice(requestChanged: boolean, goal: string, originalGoal: string) {
+  return requestChanged || goal !== originalGoal
+    ? "Credentials and local paths were masked before saving the request to the committed feature trail and PR text."
+    : undefined;
 }

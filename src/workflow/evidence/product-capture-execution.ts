@@ -6,6 +6,7 @@ import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
+import { redactText } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { BrowserSecurityError } from "../../testing/browser-files.js";
 import { browserInputIdentity } from "../../testing/browser-input-identity.js";
@@ -175,6 +176,7 @@ async function prepareCaptures(
     failure: result.failure
       ? {
           ...result.failure,
+          message: redactText(result.failure.message, { root: workspace.paths.root }),
           input: browserInputIdentity(journey.actions[result.failure.actionIndex ?? -1]),
         }
       : undefined,

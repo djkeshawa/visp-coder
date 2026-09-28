@@ -105,7 +105,7 @@ describe("rules read by a model", () => {
 describe("project rules", () => {
   const at = "2026-09-27T00:00:00.000Z";
 
-  it("numbers new rules after existing ones and ignores restated ones", () => {
+  it("uses content identities and ignores restated rules", () => {
     const first = mergeProjectRules([], ["Money is integer cents."], "001-a", at);
     const second = mergeProjectRules(
       first.rules,
@@ -114,15 +114,15 @@ describe("project rules", () => {
       at,
     );
     expect(second.added.map((rule) => [rule.id, rule.text])).toEqual([
-      ["R002", "Never hard-delete."],
+      [expect.stringMatching(/^R-[a-f0-9]{16}$/), "Never hard-delete."],
     ]);
-    expect(second.rules.map((rule) => rule.id)).toEqual(["R001", "R002"]);
+    expect(new Set(second.rules.map((rule) => rule.id)).size).toBe(2);
   });
 
   it("renders rules as plain numbered lines that say where they came from", () => {
     const { rules } = mergeProjectRules([], ["Money is integer cents."], "001-a", at);
     expect(projectRulesText(rules)).toBe(
-      "Project rules the user stated for all later work on this project (they apply here too):\nR001 Money is integer cents.",
+      `Project rules the user stated for all later work on this project (they apply here too):\n${rules[0]?.id} Money is integer cents.`,
     );
     expect(projectRulesText([])).toBe("");
   });

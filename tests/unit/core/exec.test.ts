@@ -58,6 +58,28 @@ it("resolves Windows npm shims through PATHEXT and escapes metacharacters", asyn
 });
 
 describe("run", () => {
+  it("delivers explicit stdin and closes it after the input", async () => {
+    const input = "first line\nUnicode: café\n";
+    const result = await run(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], {
+      cwd: process.cwd(),
+      input,
+      timeoutMs: 2000,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { exitCode: 0, stdout: input, timedOut: false },
+    });
+  });
+
+  it("tolerates a subprocess closing stdin before consuming all input", async () => {
+    const result = await run(process.execPath, ["-e", "process.exit(0)"], {
+      cwd: process.cwd(),
+      input: "x".repeat(1024 * 1024),
+      timeoutMs: 2000,
+    });
+    expect(result).toMatchObject({ ok: true, value: { exitCode: 0, timedOut: false } });
+  });
+
   it("retains bounded head and tail output without killing a verbose check", async () => {
     const result = await run(
       process.execPath,

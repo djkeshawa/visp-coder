@@ -9,6 +9,8 @@ import { TestProject } from "../support/project.js";
  * although VISP's records held the conventions; restated in the request, 24 of 24.
  */
 let project: TestProject;
+let moneyRule: string;
+let deletionRule: string;
 
 beforeAll(async () => {
   project = await TestProject.create({
@@ -64,7 +66,9 @@ it("captures rules stated for later work and puts them in every later feature", 
   );
   const first = project.run("feature", "List items");
   expect(first.exitCode, first.stdout + first.stderr).toBe(0);
-  expect(first.stdout).toContain("R001 Money is an integer number of cents");
+  const rules = JSON.parse(await project.read(".visp/rules.json")).rules;
+  [moneyRule, deletionRule] = rules.map((rule: { id: string }) => rule.id);
+  expect(first.stdout).toContain(`${moneyRule} Money is an integer number of cents`);
   expect(JSON.parse(await project.read(".visp/rules.json")).rules).toHaveLength(2);
   const firstWork = await workOn("001-list-items");
   expect(firstWork.exitCode, firstWork.stdout + firstWork.stderr).toBe(0);
@@ -77,12 +81,12 @@ it("captures rules stated for later work and puts them in every later feature", 
   // Rules are read when used, not copied into the fixed request, so removal takes effect.
   const brief = await project.read(".visp/features/002-add-prices/brief.yaml");
   expect(brief).toContain("Add prices to items.");
-  expect(brief).not.toContain("R002 Nothing is hard-deleted");
+  expect(brief).not.toContain(`${deletionRule} Nothing is hard-deleted`);
 
   const work = await workOn("002-add-prices");
   expect(work.exitCode, work.stdout + work.stderr).toBe(0);
   expect(work.stdout).toContain(
-    "Project rules the user stated for all later work on this project (they apply here too):\nR001 Money is an integer number of cents",
+    `Project rules the user stated for all later work on this project (they apply here too):\n${moneyRule} Money is an integer number of cents`,
   );
 });
 
@@ -95,11 +99,11 @@ it("captures nothing from an ordinary request", async () => {
 
 // A wrongly captured rule would otherwise join every later request.
 it("lists recorded rules and removes one the user did not mean", () => {
-  expect(project.run("rules").stdout).toContain("R002 Nothing is hard-deleted");
-  const removed = project.run("rules", "remove", "R002");
+  expect(project.run("rules").stdout).toContain(`${deletionRule} Nothing is hard-deleted`);
+  const removed = project.run("rules", "remove", deletionRule);
   expect(removed.exitCode, removed.stdout + removed.stderr).toBe(0);
   const listed = project.run("rules").stdout;
-  expect(listed).toContain("R001 Money");
-  expect(listed).not.toContain("R002");
+  expect(listed).toContain(`${moneyRule} Money`);
+  expect(listed).not.toContain(deletionRule);
   expect(project.run("rules", "remove", "R009").exitCode).not.toBe(0);
 });

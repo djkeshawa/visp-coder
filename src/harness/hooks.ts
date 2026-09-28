@@ -18,7 +18,7 @@ import { hookCommand } from "./claude-settings.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 14;
+export const HOOK_TEMPLATE_VERSION = 15;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -84,13 +84,7 @@ if (input?.hook_event_name === "UserPromptSubmit") {
     } catch {}
     lines.push(JSON.stringify({ at: new Date().toISOString(), prompt: String(input.prompt ?? "") }));
     writeFileSync(file, \`\${lines.slice(-20).join("\\n")}\\n\`);
-    // An edit authorization belongs to the session that ran \`${PRODUCT_NAME} work\`; a later
-    // session with a new request must not edit under it.
-    if (typeof input.session_id === "string" && input.session_id)
-      writeFileSync(
-        join(directory, "${HOST_SESSION_FILE}"),
-        JSON.stringify({ session: input.session_id, at: new Date().toISOString() }),
-      );
+    recordSession();
   } catch {}
   process.exit(0);
 }
@@ -112,6 +106,10 @@ if (input?.hook_event_name === "Stop") {
       }).toString(),
     );
     const next = envelope?.data;
+    if (!next?.feature && typeof input.session_id === "string") {
+      const edits = join(root, ".visp", "session", "edits", encodeURIComponent(input.session_id) + ".json");
+      try { readFileSync(edits); } catch { process.exit(0); }
+    }
     if (!envelope?.ok || !next?.action || next.action === "complete") process.exit(0);
     const counts = join(root, ".visp", "session", "stop-blocks.json");
     let blocked = {};
@@ -120,7 +118,7 @@ if (input?.hook_event_name === "Stop") {
     } catch {}
     // Once reviews are spent the loop ends in a handoff: one reminder to write it.
     const handoff = next.completion === "handoff";
-    const key = handoff ? \`\${status.activeFeature}:handoff\` : status.activeFeature;
+    const key = [input.session_id ?? "unknown", status.activeFeature, handoff ? "handoff" : "work"].join(":");
     const used = blocked[key] ?? 0;
     if (used >= (handoff ? 1 : 3)) process.exit(0);
     mkdirSync(join(root, ".visp", "session"), { recursive: true });
@@ -145,6 +143,9 @@ function recordSession() {
   try {
     const directory = join(projectRoot(), ".visp", "session");
     mkdirSync(directory, { recursive: true });
+    mkdirSync(join(directory, "hosts"), { recursive: true });
+    writeFileSync(join(directory, "hosts", encodeURIComponent(input.session_id) + ".json"),
+      JSON.stringify({ session: input.session_id, at: new Date().toISOString() }));
     writeFileSync(
       join(directory, "${HOST_SESSION_FILE}"),
       JSON.stringify({ session: input.session_id, at: new Date().toISOString() }),
@@ -442,6 +443,13 @@ if (envelope === undefined) {
 }
 
 if (status === 0 && envelope.ok) {
+  if (typeof input?.session_id === "string") {
+    try {
+      const directory = join(root, ".visp", "session", "edits");
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, encodeURIComponent(input.session_id) + ".json"), JSON.stringify({ at: new Date().toISOString() }));
+    } catch {}
+  }
   process.exit(0);
 }
 

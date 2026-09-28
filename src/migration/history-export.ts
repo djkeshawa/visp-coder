@@ -1,6 +1,8 @@
+import { DERIVED_STATE_PATHS } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { type ProjectFileMetadata, ProjectFileSystem } from "../core/fs.js";
 import { hashValue, sha256 } from "../core/hash.js";
+import { matchesPattern } from "../core/patterns.js";
 import { err, ok, type Result } from "../core/result.js";
 
 interface HistoryFile {
@@ -11,6 +13,7 @@ interface HistoryFile {
   contentBase64: string;
 }
 const excluded = [
+  ...DERIVED_STATE_PATHS,
   ".visp/exports",
   ".visp/migrations/backups",
   ".visp/state/mutation.lock",
@@ -30,7 +33,8 @@ export async function collectMigrationHistory(root: string) {
   let total = 0;
   let visited = 0;
   async function collect(path: string, depth: number): Promise<Result<void>> {
-    if (excluded.includes(path)) return ok(undefined);
+    if (excluded.some((pattern) => matchesPattern(path, pattern.replace(/\/$/, ""))))
+      return ok(undefined);
     if (++visited > limits.files) return invalid("History exceeds export entry limit");
     if (depth > limits.depth) return invalid("History exceeds export depth limit");
     const metadata = await fs.metadata(path);

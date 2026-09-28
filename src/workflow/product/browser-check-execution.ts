@@ -1,3 +1,4 @@
+import { redactText } from "../../core/redaction.js";
 import type { Result } from "../../core/result.js";
 import {
   type PreparedProductCapture,
@@ -89,13 +90,17 @@ async function runBrowserCheck(
   const startupFailed = !captured.ok && captured.error.details?.gap === "browser-unavailable";
   return {
     ...checked,
-    execution: { ...checked.execution, environmentDigest },
+    execution: {
+      ...checked.execution,
+      output: redactText(checked.execution.output, { root: workspace.paths.root }),
+      environmentDigest,
+    },
     state: {
       ...checked.state,
       browserCapability: startupFailed
         ? failedBrowserCapability(
             environmentDigest,
-            checked.execution.output,
+            redactText(checked.execution.output, { root: workspace.paths.root }),
             !captured.ok ? captured.error.details?.browserFailureKind : undefined,
           )
         : captured.ok
