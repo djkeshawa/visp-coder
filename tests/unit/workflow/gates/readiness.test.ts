@@ -3,6 +3,7 @@ import {
   featureFoundationError,
   foundationBlockers,
   implementationFoundationError,
+  inheritedChangedFiles,
 } from "../../../../src/workflow/gates/readiness.js";
 
 describe("implementation foundation", () => {
@@ -110,5 +111,39 @@ describe("implementation foundation", () => {
     });
     expect(error?.message).toContain("may be earlier work");
     expect(error?.message).toContain("do not discard");
+  });
+
+  // Codex's workspace-write sandbox keeps .git read-only: the commit can never succeed.
+  it("starts a feature on uncommitted changes that Git cannot commit, inheriting them", () => {
+    const context = {
+      repositoryAvailable: true,
+      harnessInstalled: true,
+      enforcementInstalled: true,
+      hasBaseline: true,
+      changedFiles: ["app.js", "visp.yml"],
+      gitWritable: false,
+    };
+    expect(featureFoundationError(context, "visp feature")).toBeUndefined();
+    expect(inheritedChangedFiles(context)).toEqual(["app.js", "visp.yml"]);
+    expect(inheritedChangedFiles({ ...context, gitWritable: true })).toEqual([]);
+    expect(inheritedChangedFiles({ ...context, gitWritable: undefined })).toEqual([]);
+    expect(
+      featureFoundationError({ ...context, gitWritable: true }, "visp feature")?.message,
+    ).toContain("Git accepts writes here");
+  });
+
+  it("does not waive the other feature blockers when Git is read-only", () => {
+    const blocked = featureFoundationError(
+      {
+        repositoryAvailable: true,
+        harnessInstalled: true,
+        enforcementInstalled: false,
+        hasBaseline: true,
+        changedFiles: ["app.js"],
+        gitWritable: false,
+      },
+      "visp feature",
+    );
+    expect(blocked?.message).toContain("assets-only or CI-only");
   });
 });

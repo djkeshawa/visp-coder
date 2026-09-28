@@ -1,3 +1,6 @@
+import { randomBytes } from "node:crypto";
+import { rm, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { type VispError, vispError } from "./errors.js";
 import { run } from "./exec.js";
 import { ProjectFileSystem } from "./fs.js";
@@ -27,6 +30,39 @@ const GIT_ENV = {
 export async function isRepository(cwd: string): Promise<boolean> {
   const result = await run("git", ["rev-parse", "--git-dir"], { cwd, env: GIT_ENV });
   return result.ok && result.value.exitCode === 0;
+}
+
+/**
+ * Whether Git can record anything here. Codex's workspace-write sandbox mounts `.git`
+ * read-only, so `git commit` fails with "Read-only file system" and uncommitted work can
+ * never be committed by the agent. Probed by creating and removing a file, because Git's
+ * own read commands succeed on a read-only repository. Unknown counts as writable, so a
+ * failed inspection never waives the commit requirement.
+ */
+export async function gitWritable(cwd: string): Promise<boolean> {
+  const dirs = await run("git", ["rev-parse", "--git-dir", "--git-common-dir"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!dirs.ok || dirs.value.exitCode !== 0) return true;
+  const unique = [...new Set(dirs.value.stdout.split("\n").filter(Boolean))];
+  // A commit writes the index in the git dir and objects and refs in the common dir.
+  for (const dir of unique) if (!(await directoryWritable(resolve(cwd, dir)))) return false;
+  return true;
+}
+
+async function directoryWritable(directory: string): Promise<boolean> {
+  const probe = join(
+    directory,
+    `visp-write-probe-${process.pid}-${randomBytes(4).toString("hex")}`,
+  );
+  try {
+    await writeFile(probe, "", { flag: "wx" });
+  } catch {
+    return false;
+  }
+  await rm(probe, { force: true }).catch(() => undefined);
+  return true;
 }
 
 /**

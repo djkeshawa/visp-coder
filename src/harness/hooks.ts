@@ -173,7 +173,7 @@ if (input?.tool_name === "Bash") {
           "This command would discard uncommitted changes to " +
             lost.slice(0, 5).join(", ") +
             (lost.length > 5 ? " and " + (lost.length - 5) + " more" : "") +
-            ". They may be earlier work: commit them instead (git add -A && git commit -m '<what they are>'). To undo an edit of your own, edit the file back.",
+            ". They may be earlier work: commit them instead (git add -A && git commit -m '<what they are>'); if the commit fails because Git is read-only, leave them uncommitted. To undo an edit of your own, edit the file back.",
         ),
       ),
     );

@@ -335,8 +335,10 @@ export function compactBriefText(
     branchWarning: data.branchWarning,
     redactionNotice: data.redactionNotice,
   };
-  const warning =
-    typeof data.hostHooksWarning === "string" ? `\nWarning: ${data.hostHooksWarning}` : "";
+  const warning = [data.hostHooksWarning, data.inheritedChangesNote]
+    .filter((text): text is string => typeof text === "string")
+    .map((text) => `\nWarning: ${text}`)
+    .join("");
   // The adapter does not choose the next slice; visp_next owns that decision.
   const wording = WORDING[channel];
   const feature = String(brief.feature);

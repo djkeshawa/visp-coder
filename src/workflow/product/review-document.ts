@@ -10,6 +10,7 @@ import {
   TESTER_ACTIVITY_FILE,
   testerNetworkCommands,
 } from "./independent-tests.js";
+import { unchangedInheritedPaths } from "./inherited-changes.js";
 import { checksFor, latestExecutionsByOwner, type ProductExecution } from "./model.js";
 import type { ProductNext } from "./status.js";
 import type { ProductRecord } from "./store.js";
@@ -102,9 +103,12 @@ function decisionSection(record: ProductRecord) {
 /** Uncommitted work is what an agent run usually leaves for review. */
 async function changeSection(workspace: WorkspaceState, record: ProductRecord) {
   const changes = await workingTreeChanges(workspace.paths.root);
-  const files = changes.ok
+  const inherited = await unchangedInheritedPaths(workspace, record.brief.feature);
+  const all = changes.ok
     ? changes.value.files.filter((file) => !file.path.startsWith(".visp/"))
     : [];
+  const files = all.filter((file) => !inherited.has(file.path));
+  const earlier = all.filter((file) => inherited.has(file.path));
   const scope = record.brief.slices.map(
     (slice) =>
       `- **${slice.id}** ${slice.goal} (${record.state.slices[slice.id]?.status ?? "pending"}; may edit ${slice.scope.allowed.join(", ")})`,
@@ -119,6 +123,14 @@ async function changeSection(workspace: WorkspaceState, record: ProductRecord) {
         ? ["Uncommitted changes:", "", ...files.map((file) => `- ${file.status}: ${file.path}`)]
         : ["No uncommitted changes; review the commits for this feature."]
       : ["Changed files are unavailable: git status failed."]),
+    ...(earlier.length
+      ? [
+          "",
+          "Uncommitted before this feature started, unchanged since (Git cannot be written here):",
+          "",
+          ...earlier.map((file) => `- ${file.status}: ${file.path}`),
+        ]
+      : []),
     "",
   ];
 }
