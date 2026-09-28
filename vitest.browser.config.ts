@@ -5,6 +5,7 @@ export default defineConfig({
   define: runtimeDefines,
   test: {
     include: ["tests/browser/**/*.browser.ts"],
+    setupFiles: ["tests/host-isolation.ts"],
     maxWorkers: 2,
     testTimeout: 30_000,
     hookTimeout: 30_000,
