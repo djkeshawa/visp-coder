@@ -118,7 +118,7 @@ export function registerEvidenceTools(server: McpServer, root: string): void {
     {
       title: "Review actual product evidence",
       description:
-        "prepare creates a confined tool-owned review session; submit session plus judgments without hashes or envelope fields. Without assessments or prepare, return relevant brief context and actual evidence. template returns editable unresolved assessments. Read structuredContent.data; detail:true also repeats the full result in text. Retain every outcome status; VISP selects at most three consequential corrections at a time.",
+        "prepare creates a confined tool-owned review session; submit session plus judgments without hashes or envelope fields. Without assessments or prepare, return relevant brief context and actual evidence. template returns editable unresolved assessments. Read the full result in structuredContent.data. Retain every outcome status; VISP selects at most three consequential corrections at a time.",
       inputSchema: z
         .object({
           ...productSelectionInput,

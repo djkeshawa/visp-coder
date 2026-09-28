@@ -123,11 +123,16 @@ describe("graph tools over MCP", () => {
 
   it("re-indexes without re-parsing when nothing changed", async () => {
     const result = await call("visp_index", { refresh: true });
+    const data = result.structuredContent?.data as {
+      diff: { unchanged: { count: number; sample?: string[] } };
+    };
+    expect(data.diff.unchanged.count).toBeGreaterThan(0);
+    expect(data.diff.unchanged).not.toHaveProperty("sample");
     expect(result.content[0]?.text).toContain("Nothing changed");
   });
 
   it("can omit file lists without hiding index identity, coverage or skipped counts", async () => {
-    const complete = await call("visp_index", { refresh: true });
+    const complete = await call("visp_index", { refresh: true, detail: true });
     const compact = await call("visp_index", { refresh: true, detail: false });
     const full = complete.structuredContent?.data as {
       snapshotId: string;
@@ -141,7 +146,7 @@ describe("graph tools over MCP", () => {
       snapshotId: full.snapshotId,
       counts: full.counts,
       languageCoverage: full.languageCoverage,
-      diff: { unchanged: full.diff.unchanged.length },
+      diff: { unchanged: { count: full.diff.unchanged.length } },
       skipped: { count: full.skipped.length },
       detail: expect.stringContaining("detail:true"),
     });

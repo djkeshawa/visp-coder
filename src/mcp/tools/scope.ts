@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { PRODUCT_NAME } from "../../core/constants.js";
 import { ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import { requireInstalledRuntime } from "../../harness/runtime.js";
@@ -79,7 +78,7 @@ export function registerScopeTools(server: McpServer, root: string): void {
                 ...data.violations.map((violation) => `  - ${violation.message}`),
                 "",
                 authorizedTasks.length === 0
-                  ? `No task is authorized. Run: ${PRODUCT_NAME} work --task <id>`
+                  ? `No task is authorized. Run: visp_next {}`
                   : `Authorized tasks: ${authorizedTasks.join(", ")}`,
               ].join("\n"),
       });
