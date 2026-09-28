@@ -120,6 +120,15 @@ it.each([true, false])(
       inlineTests(async (request) => {
         expect(request.prompt).toContain("ambiguities");
         expect(request.prompt).toContain("Do not write tests for ambiguous cases");
+        expect(request.prompt).toContain("Rule interactions:");
+        expect(request.prompt).toContain("only if one rule's own text covers that case");
+        expect(request.prompt).toContain("Quote both rules in `tests[].quote`");
+        expect(request.prompt).toContain("do not assert it");
+        expect(request.prompt).toContain("put the other positions in `ambiguities`");
+        expect(request.prompt).toContain("Assert only what the request states for that class");
+        expect(request.prompt).toContain("they are not new requirements");
+        expect(request.prompt).toContain("Input classes in every position:");
+        expect(request.prompt).toContain("a range endpoint");
         expect(request.schema).toMatchObject({ required: expect.arrayContaining(["ambiguities"]) });
         return {
           file: hasFile ? { name: "value.mjs", content: FAILS_FIRST } : null,
@@ -143,7 +152,11 @@ it.each([true, false])(
         work.value,
         channel,
       );
-      expect(text).toContain("Decide explicitly");
+      expect(text).toContain("Ambiguity:");
+      expect(text).toContain("implement the usual reading");
+      expect(text).toContain("unless the request");
+      expect(text).toContain("add a test for the reading you implement");
+      expect(text).toContain("record a different choice only with a reason");
       expect(text).toContain(ambiguity.quote);
       expect(text).toContain(ambiguity.conventionalReading);
     }
