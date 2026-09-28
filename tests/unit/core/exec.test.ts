@@ -1,5 +1,9 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseCommand, resolveCommand, run } from "../../../src/core/exec.js";
+import { prepareCommand } from "../../../src/core/windows-command.js";
 
 describe("parseCommand", () => {
   it("splits a plain command into an argv vector", () => {
@@ -12,6 +16,13 @@ describe("parseCommand", () => {
     expect(result.ok && result.value).toEqual(["node", "-e", "a b"]);
   });
 
+  it("accepts Windows path separators as literal argv content", () => {
+    expect(parseCommand("node test\\a.test.mjs")).toEqual({
+      ok: true,
+      value: ["node", "test\\a.test.mjs"],
+    });
+  });
+
   it("refuses shell syntax rather than passing it to a shell", () => {
     for (const command of ["rm -rf / && echo done", "cat a | grep b", "echo $HOME"]) {
       const result = parseCommand(command);
@@ -22,6 +33,28 @@ describe("parseCommand", () => {
   it("refuses an empty command", () => {
     expect(parseCommand("   ").ok).toBe(false);
   });
+});
+
+it("resolves Windows npm shims through PATHEXT and escapes metacharacters", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "visp-windows-command-"));
+  try {
+    await writeFile(join(directory, "npm.cmd"), "@echo off\r\n");
+    const prepared = prepareCommand(
+      "npm",
+      ["test", "a&b", "%USERPROFILE%"],
+      {
+        PATH: directory,
+        PATHEXT: ".cmd;.exe",
+      },
+      "win32",
+    );
+    expect(prepared.file).toBe("cmd.exe");
+    expect(prepared.windowsVerbatimArguments).toBe(true);
+    expect(prepared.args).toEqual(["/d", "/s", "/c", expect.stringContaining("^&")]);
+    expect(prepared.args[3]).toContain("^%USERPROFILE^%");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 describe("run", () => {

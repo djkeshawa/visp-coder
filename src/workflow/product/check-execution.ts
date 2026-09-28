@@ -163,7 +163,7 @@ async function executeCommand(
       return err(
         vispError(
           "COMMAND_FAILED",
-          `${result.error.message}. Check ${check.id} could not start executable ${JSON.stringify(argv.value[0])}. Correct the command or recover the installed executable in this environment. A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples. No product behavior was tested.`,
+          `${result.error.message}. Check ${check.id} could not start executable ${JSON.stringify(argv.value[0])}.${process.platform === "win32" ? " Check PATH and the tool's .cmd/.bat shim." : " Correct the command or recover the installed executable in this environment."} A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples. No product behavior was tested.`,
           { details: result.error.details },
         ),
       );

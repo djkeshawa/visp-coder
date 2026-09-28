@@ -13,6 +13,7 @@ import { applyFileTransaction, filePrecondition } from "../../core/file-transact
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { prepareCommand } from "../../core/windows-command.js";
 import type { WorkspaceState } from "../state.js";
 import {
   createProductFeature,
@@ -678,12 +679,15 @@ function testCommand(path: string): string[] {
 async function runBaseline(root: string, command: string[], extra: Record<string, string> = {}) {
   const [file, ...args] = command as [string, ...string[]];
   const env = await resolvedProductExecutionEnvironment();
+  const executionEnv = { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra };
+  const prepared = prepareCommand(file, args, executionEnv);
   return new Promise<{ exitCode: number; timedOut: boolean; output: string }>((resolve) => {
     let output = "";
     let timedOut = false;
-    const child = spawn(file, args, {
+    const child = spawn(prepared.file, prepared.args, {
       cwd: root,
-      env: { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra },
+      env: executionEnv,
+      windowsVerbatimArguments: prepared.windowsVerbatimArguments,
       // Its own process group on POSIX; on Windows detached would open a new console.
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
