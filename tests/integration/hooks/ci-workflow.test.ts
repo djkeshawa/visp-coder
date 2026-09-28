@@ -14,7 +14,12 @@ describe("the pull request check", () => {
   const feature = "001-scoped-change";
 
   beforeEach(async () => {
-    project = await TestProject.create({
+    // Setup is a dozen CLI calls, so it is built once per file and each test gets a copy.
+    ({ project } = await TestProject.cached("ci-workflow", buildFixture));
+  });
+
+  async function buildFixture() {
+    const project = await TestProject.create({
       "src/auth/login.ts": "export const login = () => null;\n",
       "src/billing/invoice.ts": "export const invoice = () => null;\n",
     });
@@ -36,7 +41,9 @@ describe("the pull request check", () => {
         },
       ],
     });
-  });
+
+    return { project, value: null };
+  }
 
   afterEach(async () => {
     await project.destroy();
