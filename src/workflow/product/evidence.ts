@@ -21,6 +21,7 @@ import { environmentNext } from "./environment.js";
 import { currentJourneyFeedback } from "./evidence-references.js";
 import { productFailureSignature } from "./failures.js";
 import { findingAppliesToSlice, outstandingFeedback, productFeedbackPlan } from "./feedback.js";
+import { productInputWarnings } from "./input-warnings.js";
 import {
   checksFor,
   closedSlice,
@@ -47,6 +48,7 @@ export type { ProductOutcomeStatus } from "./assessment.js";
 export { type ProductReviewBundle, type ProductReviewOptions, runProductReview } from "./review.js";
 
 export interface ProductVerification {
+  readonly warnings?: readonly string[];
   readonly committedChanges?: readonly string[];
   readonly checkpoint?: { candidate: string; provenance: string } | { gap: string };
   readonly delivery?: { status: string; summary: string };
@@ -165,6 +167,7 @@ async function execute(
       executions.some((entry) => entry.status === "environment-failed"),
     ),
     checkpoint: checkpointDelivery(checkpoint),
+    warnings: await productInputWarnings(workspace, record.brief),
     committedChanges: prepared.value.committedChanges,
     ...progress,
     ...(trace?.ok ? { trace: trace.value } : {}),

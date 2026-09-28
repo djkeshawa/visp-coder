@@ -100,6 +100,10 @@ Supervised checks inherit the operator’s environment, including tokens and oth
 
 ## Work, done, next, accept
 
+Untracked, non-ignored files still affect evidence freshness so new source is checked. `work`, `next` and verification name the first untracked file outside all slice scopes and check inputs; ignore generated logs and reports, or declare intended product files before checking.
+
+Authorizations record the Git commit at `work`. Incoming committed changes whose working content still matches `HEAD` are reported separately and do not count against the slice scope or changed-file limit; local edits on top of them still do.
+
 **`visp work [--task <id>]`** selects the next ready slice (or the named one), checks that it has an outcome, a bounded scope and runnable checks, and authorizes edits in its scope. It returns the objective, scope, relevant outcomes and findings, source excerpts, graph neighbors, memory notes and admitted skills, trimmed to `context.tokenBudget`. `--inspect` reads the same context without authorizing, probing the environment or refreshing the graph. For slices with browser checks, `work` first confirms an isolated browser can start and capture; `--retry-environment` retries after the host environment is fixed.
 
 **Independent acceptance tests.** With `critic.launch: codex-exec`, `visp feature` starts an independent tester on a new project that writes tests from the original request. VISP keeps them only if they fail before implementation and pins them whenever the tester finishes; `work` does not wait and reports them as `independentTests`. See [the critic guide](critic.md#independent-acceptance-tests).
