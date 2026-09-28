@@ -49,6 +49,7 @@ import { productSourceSnapshot } from "./subject.js";
  */
 
 const RECORD = "acceptance-tests.json";
+const START_SOURCE = "tester-source-digest";
 const TESTER_TIMEOUT_MS = 720_000;
 const BASELINE_TIMEOUT_MS = 120_000;
 const STALE_RUNNING_MS = 2 * TESTER_TIMEOUT_MS + BASELINE_TIMEOUT_MS;
@@ -296,6 +297,8 @@ export async function independentTestsBeforeWork(
   // work proceeds and the tests are pinned whenever the tester finishes.
   if (!record) {
     if (!(await testerLaunches(workspace, loaded.value))) return ok(undefined);
+    const source = await startingSourceDigest(workspace, brief.feature, brief);
+    if (!source.ok) return source;
     const started = await starter(workspace, brief.feature, waitMs);
     if (!started.ok) return started;
     record = started.value;
@@ -316,7 +319,50 @@ export async function startIndependentTests(
   const loaded = await readProductRecord(workspace, { feature });
   const existing = await readTestsRecord(workspace, feature);
   if (!loaded.ok || !existing.ok || existing.value) return;
-  if (await testerLaunches(workspace, loaded.value)) await starter(workspace, feature, 0);
+  if (await testerLaunches(workspace, loaded.value)) {
+    const source = await startingSourceDigest(workspace, feature, loaded.value.brief);
+    if (source.ok) await starter(workspace, feature, 0);
+  }
+}
+
+async function readStartingSource(
+  workspace: WorkspaceState,
+  feature: string,
+): Promise<Result<string | undefined>> {
+  const stored = await workspace.files.readTextIfExists(
+    workspace.paths.featureFile(feature, START_SOURCE),
+  );
+  if (!stored.ok) return stored;
+  if (stored.value === undefined) return ok(undefined);
+  const digest = stored.value.trim();
+  return /^[a-f0-9]{64}$/.test(digest)
+    ? ok(digest)
+    : err(vispError("ARTIFACT_INVALID", `Unreadable ${START_SOURCE}`));
+}
+
+async function startingSourceDigest(
+  workspace: WorkspaceState,
+  feature: string,
+  brief: ProductRecord["brief"],
+): Promise<Result<string>> {
+  const stored = await readStartingSource(workspace, feature);
+  if (!stored.ok) return stored;
+  if (stored.value) return ok(stored.value);
+  const source = await productSourceSnapshot(workspace, brief);
+  if (!source.ok) return source;
+  const digest = hashValue(source.value);
+  const saved = await retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "record-tester-source", [
+      {
+        kind: "write",
+        path: workspace.paths.featureFile(feature, START_SOURCE),
+        content: `${digest}\n`,
+        expectedBefore: { existed: false },
+      },
+    ]),
+  );
+  if (!saved.ok) return saved;
+  return ok(digest);
 }
 
 /** `visp feature`, then the tester in the background when VISP launches one. */
@@ -424,14 +470,24 @@ export async function writeIndependentTests(
   }
   const loaded = await readProductRecord(workspace, { feature });
   if (!loaded.ok) return loaded;
-  const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
-  if (!policy.ok) return policy;
-  const model = policy.value.config?.model;
-  if (!model) return err(vispError("CONFIG_INVALID", "The tester needs a configured critic model"));
-  const source = await productSourceSnapshot(workspace, loaded.value.brief);
-  if (!source.ok) return source;
-  const sourceDigest = existing.value?.sourceDigest ?? hashValue(source.value);
+  const setup = await testerSetup(workspace, feature, loaded.value.brief, existing.value);
+  if (!setup.ok) return setup;
+  const { model, sourceDigest } = setup.value;
   const startedAt = new Date().toISOString();
+  if (setup.value.sourceChanged) {
+    const declined: IndependentTestsRecord = {
+      version: 1,
+      status: "declined",
+      startedAt,
+      finishedAt: startedAt,
+      model,
+      sourceDigest,
+      reason:
+        "Product sources changed before the tester started; the before-implementation baseline is inconclusive",
+    };
+    const saved = await saveTestsRecord(workspace, feature, declined, existing.value);
+    return saved.ok ? ok(declined) : saved;
+  }
   const running: IndependentTestsRecord = {
     version: 1,
     status: "running",
@@ -447,7 +503,7 @@ export async function writeIndependentTests(
   const request = {
     root: workspace.paths.root,
     model,
-    ...testerEffort(policy.value.config?.reasoningEffort),
+    ...testerEffort(setup.value.reasoningEffort),
     prompt: testerPrompt(
       withRules(loaded.value.brief.originalRequest, rules),
       feature,
@@ -464,6 +520,32 @@ export async function writeIndependentTests(
   const record = { ...running, ...fields, finishedAt: new Date().toISOString() };
   const saved = await saveTestsRecord(workspace, feature, record, running);
   return saved.ok ? ok(independentTestsRecordSchema.parse(record)) : saved;
+}
+
+async function testerSetup(
+  workspace: WorkspaceState,
+  feature: string,
+  brief: ProductRecord["brief"],
+  previous: IndependentTestsRecord | undefined,
+): Promise<
+  Result<{ model: string; reasoningEffort?: string; sourceDigest: string; sourceChanged: boolean }>
+> {
+  const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
+  if (!policy.ok) return policy;
+  const model = policy.value.config?.model;
+  if (!model) return err(vispError("CONFIG_INVALID", "The tester needs a configured critic model"));
+  const source = await productSourceSnapshot(workspace, brief);
+  if (!source.ok) return source;
+  const startedSource = await readStartingSource(workspace, feature);
+  if (!startedSource.ok) return startedSource;
+  const current = hashValue(source.value);
+  const sourceDigest = previous?.sourceDigest ?? startedSource.value ?? current;
+  return ok({
+    model,
+    reasoningEffort: policy.value.config?.reasoningEffort,
+    sourceDigest,
+    sourceChanged: sourceDigest !== current,
+  });
 }
 
 function mayRestartTester(record: IndependentTestsRecord, retryFailed: boolean): boolean {

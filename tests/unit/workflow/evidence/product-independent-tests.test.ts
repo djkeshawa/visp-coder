@@ -18,6 +18,7 @@ import {
   type IndependentTester,
   inlineTests,
   readTestsRecord,
+  startIndependentTests,
   writeIndependentTests,
 } from "../../../../src/workflow/product/independent-tests.js";
 import { runProductReport } from "../../../../src/workflow/product/index.js";
@@ -189,6 +190,23 @@ it("declines a baseline when the worker changes source during testing", async ()
   );
   expect(result.ok && result.value.status).toBe("declined");
   expect(result.ok && result.value.reason).toContain("changed while the tester");
+});
+
+it("captures source before launching a detached tester", async () => {
+  const fixture = await testerWorkspace();
+  const state = await fixture.workspace.state();
+  let calls = 0;
+  await startIndependentTests(state, fixture.brief.feature, async (workspace, feature) => {
+    await fixture.workspace.write("src/value.mjs", "export const value = 2;\n");
+    return writeIndependentTests(workspace, feature, async () => {
+      calls += 1;
+      return { file: null, tests: [], notes: "" };
+    });
+  });
+  const record = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+  expect(record.ok && record.value?.status).toBe("declined");
+  expect(record.ok && record.value?.reason).toContain("before the tester started");
+  expect(calls).toBe(0);
 });
 
 it("declines a suite that admits it checks only file structure", async () => {
