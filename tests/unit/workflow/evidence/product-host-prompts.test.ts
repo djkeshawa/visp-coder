@@ -1,8 +1,61 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
-import { codexSessionPrompts } from "../../../../src/workflow/product/host-prompts.js";
+import { afterEach, expect, it, vi } from "vitest";
+import {
+  codexHooksWarning,
+  codexSessionPrompts,
+  HOST_PROMPTS_FILE,
+  hostRequest,
+} from "../../../../src/workflow/product/host-prompts.js";
+import { TestWorkspace } from "../../support/workspace.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+async function codexSession(text: string): Promise<{ home: string; thread: string }> {
+  const home = await mkdtemp(join(tmpdir(), "visp-codex-session-"));
+  const thread = "01a0e3cf-fc9f-71d3-9b4d-dc086a0db889";
+  const day = join(home, "sessions", "2026", "09", "27");
+  await mkdir(day, { recursive: true });
+  await writeFile(
+    join(day, `rollout-2026-09-27T22-30-53-${thread}.jsonl`),
+    JSON.stringify({
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        item: { type: "UserMessage", content: [{ type: "text", text }] },
+      },
+    }),
+  );
+  return { home, thread };
+}
+
+// A headless codex exec in a project whose hooks were never trusted ran with no Stop
+// reminder and no shell protection, and nothing said so.
+it("warns a Codex feature when the request came from the session file, not VISP's hook", async () => {
+  const workspace = await TestWorkspace.create();
+  const state = await workspace.state();
+  const { home, thread } = await codexSession("Build an Angry Birds-style game.");
+  vi.stubEnv("CODEX_HOME", home);
+  vi.stubEnv("CODEX_THREAD_ID", thread);
+
+  const unhooked = await hostRequest(state, undefined);
+  expect(unhooked.ok && unhooked.value?.recordedByHook).toBe(false);
+  expect(unhooked.ok && codexHooksWarning("codex", unhooked.value)).toContain("/hooks");
+  expect(unhooked.ok && codexHooksWarning("claude-code", unhooked.value)).toBeUndefined();
+
+  await mkdir(state.paths.sessionDir, { recursive: true });
+  await writeFile(
+    join(state.paths.sessionDir, HOST_PROMPTS_FILE),
+    `${JSON.stringify({ prompt: "Build an Angry Birds-style game." })}\n`,
+  );
+  const hooked = await hostRequest(state, undefined);
+  expect(hooked.ok && hooked.value?.recordedByHook).toBe(true);
+  expect(hooked.ok && codexHooksWarning("codex", hooked.value)).toBeUndefined();
+  expect(codexHooksWarning("codex", undefined)).toBeUndefined();
+});
 
 // Codex workers passed short summaries as the verbatim request; Codex has no prompt hook,
 // but commands see their session id and the session file records the user messages.

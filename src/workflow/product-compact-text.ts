@@ -320,6 +320,8 @@ export function compactBriefText(
     branchWarning: data.branchWarning,
     redactionNotice: data.redactionNotice,
   };
+  const warning =
+    typeof data.hostHooksWarning === "string" ? `\nWarning: ${data.hostHooksWarning}` : "";
   // The adapter does not choose the next slice; visp_next owns that decision.
   const wording = WORDING[channel];
   const feature = String(brief.feature);
@@ -329,7 +331,7 @@ export function compactBriefText(
       : name.endsWith("feature")
         ? wording.template(feature)
         : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  return `${name}: ${JSON.stringify(summary)}${warning}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {

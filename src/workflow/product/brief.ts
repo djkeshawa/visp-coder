@@ -24,7 +24,7 @@ import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
 import { allocateFeatureId } from "./feature-id.js";
-import { hostRequest } from "./host-prompts.js";
+import { codexHooksWarning, type HostRequest, hostRequest } from "./host-prompts.js";
 import { codexMemoryGate } from "./memory-gate.js";
 import {
   closedSlice,
@@ -71,6 +71,7 @@ export interface ProductFeatureOutcome {
   readonly branchCreated?: string;
   readonly branchWarning?: string;
   readonly redactionNotice?: string;
+  readonly hostHooksWarning?: string;
 }
 
 export async function createProductFeature(
@@ -162,6 +163,7 @@ async function createProductFeatureLocked(
         redactionNotice: featureRedactionNotice(request.redacted, goal, options.goal),
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
+        ...hooksWarning(workspace, host),
       })
     : saved;
 }
@@ -663,6 +665,11 @@ function authorizationStillApplies(content: string | undefined, state: ProductSt
   } catch {
     return false;
   }
+}
+
+function hooksWarning(workspace: WorkspaceState, host: HostRequest | undefined) {
+  const warning = codexHooksWarning(workspace.config.harness, host);
+  return warning ? { hostHooksWarning: warning } : {};
 }
 
 function featureRedactionNotice(requestChanged: boolean, goal: string, originalGoal: string) {

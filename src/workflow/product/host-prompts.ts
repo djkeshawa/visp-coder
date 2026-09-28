@@ -17,6 +17,8 @@ export interface HostRequest {
   readonly origin: "worker-quoted-host-prompt" | "host-prompt";
   /** Every recorded user prompt since the last feature, oldest first. */
   readonly prompts: readonly string[];
+  /** Whether a host prompt hook recorded them; false when they were read from the Codex session. */
+  readonly recordedByHook: boolean;
   /** Consumes the recorded prompts so the next feature starts from newer ones. */
   readonly mutation?: FileMutation;
 }
@@ -56,9 +58,31 @@ export async function hostRequest(
       request: quoted,
       origin: "worker-quoted-host-prompt",
       prompts,
+      recordedByHook: recorded.length > 0,
       ...(mutation ? { mutation } : {}),
     });
-  return ok({ request: latest, origin: "host-prompt", prompts, ...(mutation ? { mutation } : {}) });
+  return ok({
+    request: latest,
+    origin: "host-prompt",
+    prompts,
+    recordedByHook: recorded.length > 0,
+    ...(mutation ? { mutation } : {}),
+  });
+}
+
+/**
+ * Codex runs project hooks only once the user trusts them with /hooks, and a headless
+ * `codex exec` in an untrusted project runs none: no prompt record, no shell protection and
+ * no Stop reminder, with nothing saying so. VISP installs a Codex prompt hook, so a request
+ * that could only be read from the Codex session file means the hooks did not run.
+ */
+export function codexHooksWarning(
+  harness: string,
+  host: Pick<HostRequest, "recordedByHook"> | undefined,
+): string | undefined {
+  return harness === "codex" && host && !host.recordedByHook
+    ? "Codex did not run VISP's project hooks in this session (they are probably not trusted), so the Stop reminder and shell protection are off. Open Codex in this project and trust them once with /hooks, including before headless codex exec runs."
+    : undefined;
 }
 
 /** Whether the host recorded user prompts that no feature has taken yet. */
