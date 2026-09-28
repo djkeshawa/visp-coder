@@ -1,16 +1,26 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sha256 } from "../../../src/core/hash.js";
+import { inspectStudyBudget } from "../../../src/runner/budgets.js";
 import type { RunnerSpec } from "../../../src/runner/contracts.js";
 import {
   evaluateRun,
   hashEvaluatorPolicy,
   inspectEvaluation,
 } from "../../../src/runner/evaluator.js";
-import { inspectRun, runExperiment } from "../../../src/runner/run.js";
+import { inspectRun, runExperiment, summarizeRun } from "../../../src/runner/run.js";
 
 let root: string;
 let repo: string;
@@ -112,6 +122,12 @@ describe.skipIf(process.platform === "win32")("optional runner with real fixture
     expect(await readFile(join(repo, "app.txt"), "utf8")).toBe("original\n");
     const checked = await inspectRun(join(root, "runs", spec.id));
     expect(checked.result).toEqual(result);
+    expect(summarizeRun(checked)).toMatchObject({
+      runId: spec.id,
+      status: "completed",
+      snapshotFileCount: 2,
+    });
+    expect(JSON.stringify(summarizeRun(checked))).not.toContain(spec.prompt);
     expect(checked.snapshot.files.map((file) => file.path)).toEqual(["app.txt", "new.txt"]);
     const event = await readFile(join(root, "runs", spec.id, "events", "00000002.json"), "utf8");
     expect(event).toContain("clean");
@@ -140,6 +156,39 @@ describe.skipIf(process.platform === "win32")("optional runner with real fixture
     ).rejects.toThrow(/sandbox/i);
   });
 
+  it("records and executes the pinned real path behind a host symlink", async () => {
+    const link = join(root, "host-link");
+    await symlink(executable, link);
+    const result = await runExperiment(
+      { ...spec, host: { ...spec.host, executable: link } },
+      { outputRoot: join(root, "runs") },
+    );
+    expect(result.status).toBe("completed");
+    expect((await inspectRun(join(root, "runs", spec.id))).manifest.hostExecutableRealpath).toBe(
+      executable,
+    );
+  });
+
+  it("does not reserve study allocation when harness preflight fails", async () => {
+    await expect(
+      runExperiment(
+        {
+          ...spec,
+          harness: {
+            mode: "visp",
+            files: [{ path: "app.txt", sha256: "0".repeat(64) }],
+            requiredTools: ["visp.next"],
+            requiredHooks: [],
+          },
+        },
+        { outputRoot: join(root, "runs") },
+      ),
+    ).rejects.toThrow(/drift/i);
+    await expect(inspectStudyBudget(join(root, "runs"), spec.assignment.study)).rejects.toThrow(
+      /Missing study budget ledger/i,
+    );
+  });
+
   it("records malformed streams and cancellation as unsuccessful attempts", async () => {
     const broken = await runExperiment(
       { ...spec, prompt: "malformed" },
@@ -158,7 +207,12 @@ describe.skipIf(process.platform === "win32")("optional runner with real fixture
 
   it("retains a cost-only host result without reporting complete attributable usage", async () => {
     const result = await runExperiment(
-      { ...spec, host: { ...spec.host, kind: "claude" }, prompt: "cost-only" },
+      {
+        ...spec,
+        host: { ...spec.host, kind: "claude" },
+        permissions: { ...spec.permissions, allowedTools: ["Read", "Bash"] },
+        prompt: "cost-only",
+      },
       { outputRoot: join(root, "runs") },
     );
     expect(result.status).toBe("failed");

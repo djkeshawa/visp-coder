@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { executeStream } from "../../../src/runner/process.js";
+import { executeStream, executionEnvironment } from "../../../src/runner/process.js";
 
 let root: string;
 beforeEach(async () => {
@@ -13,6 +13,18 @@ afterEach(async () => {
 });
 
 describe.skipIf(process.platform === "win32")("bounded runner processes", () => {
+  it("passes host proxy and CA paths without passing unrelated credentials", () => {
+    const prior = process.env.HTTPS_PROXY;
+    process.env.HTTPS_PROXY = "http://proxy.invalid:8080";
+    try {
+      expect(executionEnvironment(true).HTTPS_PROXY).toBe("http://proxy.invalid:8080");
+      expect(executionEnvironment().HTTPS_PROXY).toBeUndefined();
+      expect(executionEnvironment(true).VISP_RUNNER_SECRET).toBeUndefined();
+    } finally {
+      if (prior === undefined) delete process.env.HTTPS_PROXY;
+      else process.env.HTTPS_PROXY = prior;
+    }
+  });
   it("terminates descendant commands when an attempt times out", async () => {
     const child = join(root, "child.cjs");
     const heartbeat = join(root, "heartbeat");
@@ -92,5 +104,24 @@ describe.skipIf(process.platform === "win32")("bounded runner processes", () => 
     });
     expect(oversized.reason).toBe("output-limit");
     expect(oversized.stderr.length).toBeLessThanOrEqual(64 * 1024);
+  });
+
+  it("streams an evaluator-sized single-line report without dropping blank lines", async () => {
+    let output = "";
+    const result = await executeStream({
+      file: process.execPath,
+      args: ["-e", "process.stdout.write('x'.repeat(3*1024*1024)+'\\n\\n')"],
+      cwd: root,
+      input: "",
+      timeoutMs: 3000,
+      rawOutput: true,
+      onLine: (chunk) => {
+        output += chunk;
+        return undefined;
+      },
+    });
+    expect(result.reason).toBe("exited");
+    expect(output.length).toBe(3 * 1024 * 1024 + 2);
+    expect(output.endsWith("\n\n")).toBe(true);
   });
 });
