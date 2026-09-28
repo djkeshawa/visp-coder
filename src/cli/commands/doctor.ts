@@ -171,7 +171,9 @@ function renderFeatureReadiness(
 }
 
 async function readFeatureReadiness(state: WorkspaceState) {
-  const foundation = await buildFoundationContext(state);
+  const foundation = await buildFoundationContext(state, {
+    probeGit: !state.status?.activeFeature,
+  });
   return foundation.ok
     ? foundationBlockers(
         foundation.value,

@@ -14,6 +14,7 @@ import {
   hasPendingCriticReview,
   PENDING_REVIEW_MESSAGE,
 } from "../../workflow/product/critic-policy.js";
+import { unchangedInheritedPaths } from "../../workflow/product/inherited-changes.js";
 import {
   activeProtectedEnvChanges,
   productScopes as authorizedScopes,
@@ -200,7 +201,7 @@ async function evaluateGuard(
     if (!agreed.ok) return agreed;
   }
 
-  const paths = await resolvePaths(state.paths.root, opts);
+  const paths = await resolveScopedPaths(state, opts, feature);
   if (!paths.ok) return paths;
   const protectedChanges =
     opts.path || opts.scope === "tasks"
@@ -395,6 +396,26 @@ async function closedTaskPaths(
   );
 
   return violations.map((violation) => violation.path).filter((path) => !stillRefused.has(path));
+}
+
+/**
+ * The working-tree diff leaves out uncommitted work the feature inherited because Git
+ * cannot be written, while it is unchanged: it is earlier work, not this feature's change.
+ * A staged diff is not filtered: the index may hold content that differs from the file.
+ */
+async function resolveScopedPaths(
+  state: WorkspaceState,
+  opts: GuardCliOptions,
+  feature: string | undefined,
+) {
+  const paths = await resolvePaths(state.paths.root, opts);
+  const localDiff =
+    !opts.path?.length && !opts.all && !opts.base && !opts.staged && opts.scope !== "tasks";
+  if (!paths.ok || !localDiff) return paths;
+  const inherited = await unchangedInheritedPaths(state, feature ?? state.status?.activeFeature);
+  return inherited.size
+    ? { ok: true as const, value: paths.value.filter((path) => !inherited.has(path)) }
+    : paths;
 }
 
 async function resolvePaths(

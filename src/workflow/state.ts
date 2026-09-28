@@ -5,7 +5,13 @@ import { DIR, FILE, STATE_DIR } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { RecoveringProjectFileSystem, recoverFileTransactions } from "../core/file-transaction.js";
 import type { ProjectFileSystem } from "../core/fs.js";
-import { currentBranch, headCommit, isRepository, workingTreeChanges } from "../core/git.js";
+import {
+  currentBranch,
+  gitWritable,
+  headCommit,
+  isRepository,
+  workingTreeChanges,
+} from "../core/git.js";
 import { parseFeatureId } from "../core/input.js";
 import { isExecutableMode } from "../core/mode.js";
 import { ProjectPaths } from "../core/paths.js";
@@ -198,11 +204,14 @@ export interface FoundationContext {
   readonly repositoryAvailable?: boolean;
   readonly hasBaseline?: boolean;
   readonly changedFiles?: readonly string[];
+  /** Probed on request, and only when the tree has changes: whether Git can be written. */
+  readonly gitWritable?: boolean;
 }
 
 /** Foundation checks do not read feature artifacts, including historical legacy drafts. */
 export async function buildFoundationContext(
   state: WorkspaceState,
+  options: { readonly probeGit?: boolean } = {},
 ): Promise<Result<FoundationContext>> {
   const [harnessInstalled, enforcementInstalled, repositoryAvailable, baseline, changedFiles] =
     await Promise.all([
@@ -213,12 +222,16 @@ export async function buildFoundationContext(
       changedFilesOf(state),
     ]);
   if (!harnessInstalled.ok) return harnessInstalled;
+  // Only feature start uses the answer, so no other command pays for the probe.
+  const writable =
+    options.probeGit && changedFiles?.length ? await gitWritable(state.paths.root) : undefined;
   return ok({
     harnessInstalled: harnessInstalled.value,
     enforcementInstalled,
     repositoryAvailable,
     hasBaseline: baseline.ok,
     ...(changedFiles ? { changedFiles } : {}),
+    ...(writable === undefined ? {} : { gitWritable: writable }),
   });
 }
 

@@ -1,7 +1,11 @@
 import { resolveCriticPolicy } from "../../config/critic-defaults.js";
 import type { RiskLevel } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
-import { applyFileTransaction, type FileMutation } from "../../core/file-transaction.js";
+import {
+  applyFileTransaction,
+  type FileMutation,
+  filePrecondition,
+} from "../../core/file-transaction.js";
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { redactRequest } from "../../core/redaction.js";
@@ -25,6 +29,11 @@ import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
 import { allocateFeatureId } from "./feature-id.js";
 import { codexHooksWarning, type HostRequest, hostRequest } from "./host-prompts.js";
+import {
+  captureInheritedChanges,
+  inheritedChangesContent,
+  inheritedChangesPath,
+} from "./inherited-changes.js";
 import { codexMemoryGate } from "./memory-gate.js";
 import {
   closedSlice,
@@ -72,6 +81,9 @@ export interface ProductFeatureOutcome {
   readonly branchWarning?: string;
   readonly redactionNotice?: string;
   readonly hostHooksWarning?: string;
+  /** Uncommitted files the feature started from because Git cannot be written here. */
+  readonly inheritedChanges?: readonly string[];
+  readonly inheritedChangesNote?: string;
 }
 
 export async function createProductFeature(
@@ -80,24 +92,70 @@ export async function createProductFeature(
 ): Promise<Result<ProductFeatureOutcome>> {
   if (!options.goal.trim())
     return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
-  const baseline = await withProductMutation(workspace, async () => {
+  const start = await withProductMutation(workspace, async () => {
     const foundation = await requireFeatureFoundation(workspace, "visp feature <goal>");
-    return foundation.ok ? captureAcceptanceBaseline(workspace) : foundation;
+    if (!foundation.ok) return foundation;
+    const baseline = await captureAcceptanceBaseline(workspace);
+    if (!baseline.ok) return baseline;
+    const inherited = await captureInheritedChanges(workspace, foundation.value.inherited);
+    return inherited.ok ? ok({ baseline: baseline.value, inherited: inherited.value }) : inherited;
   });
-  if (!baseline.ok) return baseline;
+  if (!start.ok) return start;
   const request = await featureRequest(workspace, options);
   if (!request.ok) return request;
   return withProductMutation(workspace, () =>
-    createProductFeatureLocked(workspace, options, request.value, baseline.value),
+    createProductFeatureLocked(workspace, options, request.value, start.value),
   );
+}
+
+interface FeatureStart {
+  readonly baseline: AcceptanceBaseline;
+  readonly inherited: Record<string, string>;
+}
+
+/** The active-feature status, and the inherited record, which is written with the feature or not at all. */
+async function localStateMutations(
+  workspace: WorkspaceState,
+  feature: string,
+  inherited: Record<string, string>,
+): Promise<Result<FileMutation[]>> {
+  const status = await statusMutation(workspace, feature, undefined, "feature");
+  if (!status.ok) return status;
+  if (Object.keys(inherited).length === 0) return ok([status.value]);
+  const path = inheritedChangesPath(workspace, feature);
+  const existing = await workspace.files.readTextIfExists(path);
+  if (!existing.ok) return existing;
+  return ok([
+    status.value,
+    {
+      kind: "write",
+      path,
+      content: inheritedChangesContent(inherited),
+      expectedBefore: filePrecondition(existing.value),
+    },
+  ]);
+}
+
+function inheritedOutcome(inherited: Record<string, string>) {
+  const paths = Object.keys(inherited);
+  return paths.length
+    ? { inheritedChanges: paths, inheritedChangesNote: inheritedNote(paths) }
+    : {};
+}
+
+function inheritedNote(paths: readonly string[]): string {
+  const shown = paths.slice(0, 20).join(", ");
+  const more = paths.length > 20 ? ` and ${paths.length - 20} more` : "";
+  return `Git cannot be written here, so ${paths.length} uncommitted change(s) from earlier work stay uncommitted: ${shown}${more}. Keep them: they are recorded as this feature's starting point and are not attributed to it unless you change those files further. Never discard them with git checkout, restore, reset or rm. Continue with visp work.`;
 }
 
 async function createProductFeatureLocked(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
   request: Extract<Awaited<ReturnType<typeof featureRequest>>, { ok: true }>["value"],
-  baseline: AcceptanceBaseline,
+  start: FeatureStart,
 ): Promise<Result<ProductFeatureOutcome>> {
+  const { baseline, inherited } = start;
   if (!options.goal.trim())
     return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
   // Cleanliness was checked before model/service calls, which may write their own logs.
@@ -126,8 +184,8 @@ async function createProductFeatureLocked(
   if (!critic.ok) return critic;
   const featureMetadata = await createFeatureMetadata(workspace, brief, options, timestamp);
   const { intent, branchCreated, branchWarning } = featureMetadata;
-  const status = await statusMutation(workspace, feature, undefined, "feature");
-  if (!status.ok) return status;
+  const local = await localStateMutations(workspace, feature, inherited);
+  if (!local.ok) return local;
   const saved = await applyFileTransaction(workspace.paths.root, "create-product-feature", [
     ...recordMutations(workspace, undefined, brief, {
       ...initialProductState(brief, timestamp),
@@ -139,7 +197,7 @@ async function createProductFeatureLocked(
       content: json(intent),
       expectedBefore: { existed: false },
     },
-    status.value,
+    ...local.value,
     ...(host?.mutation ? [host.mutation] : []),
     ...rules.value.mutations,
     ...memory.mutations,
@@ -163,6 +221,7 @@ async function createProductFeatureLocked(
         redactionNotice: featureRedactionNotice(request.redacted, goal, options.goal),
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
+        ...inheritedOutcome(inherited),
         ...hooksWarning(workspace, host),
       })
     : saved;
