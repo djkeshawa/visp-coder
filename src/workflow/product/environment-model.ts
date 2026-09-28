@@ -43,6 +43,7 @@ export async function browserExecutionEnvironmentIdentity(root: string, binary?:
     node: process.execPath,
     uid: process.getuid?.(),
     security,
+    permissionProfile: process.env.CODEX_PERMISSION_PROFILE,
     environment: productIdentityEnvironment(),
   });
 }

@@ -109,8 +109,8 @@ describe("capture publication lifecycle", () => {
       const state = await workspace.state();
       const before = await readFile(store.productStatePath(state, feature), "utf8");
       const snapshot = vi.spyOn(subject, "productSourceDigest");
-      if (stage === "after")
-        snapshot.mockResolvedValueOnce(ok("a".repeat(64))).mockResolvedValueOnce(ok("environment"));
+      vi.spyOn(subject, "productComparisonEnvironmentDigest").mockResolvedValue(ok("environment"));
+      if (stage === "after") snapshot.mockResolvedValueOnce(ok("a".repeat(64)));
       snapshot.mockResolvedValueOnce(err(vispError("IO_ERROR", "Cannot inspect product source")));
       const publish = vi.spyOn(store, "saveProductState");
       expect(

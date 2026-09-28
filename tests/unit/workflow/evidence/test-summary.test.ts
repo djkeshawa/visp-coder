@@ -85,3 +85,25 @@ describe("browser runner summaries", () => {
     ).toThrow();
   });
 });
+
+describe("Node spec summary", () => {
+  const spec =
+    "✔ works (1ms)\nℹ tests 4\nℹ suites 0\nℹ pass 1\nℹ fail 1\nℹ cancelled 1\nℹ skipped 1\nℹ todo 0\nℹ duration_ms 10.404\n";
+  it("reads a complete spec footer, including color and Windows line endings", () => {
+    expect(runnerTestSummary(spec)).toEqual({ passed: 1, failed: 2, skipped: 1 });
+    expect(runnerTestSummary(`\u001b[32m${spec.replaceAll("\n", "\r\n")}\u001b[39m`)).toEqual({
+      passed: 1,
+      failed: 2,
+      skipped: 1,
+    });
+  });
+  it("rejects incomplete, inconsistent and nested spec counters", () => {
+    for (const text of [
+      spec.replace("ℹ tests 4", "ℹ tests 8"),
+      spec.replaceAll("ℹ", "  ℹ"),
+      "ℹ pass 1\nℹ fail 0",
+    ]) {
+      expect(runnerTestSummary(text)).toBeUndefined();
+    }
+  });
+});

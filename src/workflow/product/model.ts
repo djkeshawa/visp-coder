@@ -66,6 +66,7 @@ export const productCheckSchema = z
     files: z.array(pathPatternSchema).default([]),
     verifierFiles: z.array(pathPatternSchema).optional(),
     environment: z.enum(["node", "browser", "other"]).default("other"),
+    environmentVariables: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
   })
   .strict();
 

@@ -108,13 +108,17 @@ it("enforces bounds for source, serialized evidence, file count and saved record
     ok: false,
     error: { message: "Oversized candidate" },
   });
-  await setup.workspace.write("src/huge.bin", Buffer.alloc(32 * 1024 * 1024 + 1));
+  await setup.workspace.write("src/value.mjs", Buffer.alloc(32 * 1024 * 1024 + 1));
   expect(await prepareCandidate(state, selected, {})).toMatchObject({
     ok: false,
     error: { code: "UNSUPPORTED" },
   });
   vi.spyOn(subjects, "productSourceSnapshot").mockResolvedValueOnce(
-    ok(Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`file-${i}`, "hash"]))),
+    ok(
+      Object.fromEntries(
+        Array.from({ length: 2001 }, (_, i) => [`src/value.mjs/file-${i}`, "hash"]),
+      ),
+    ),
   );
   expect(await prepareCandidate(state, selected, {})).toMatchObject({
     ok: false,

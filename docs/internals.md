@@ -40,7 +40,9 @@ This coordinates cooperating local processes. It does not stop an editor, a shel
 
 ## Evidence identity
 
-Checks run without shell bookkeeping variables (`_`, `SHLVL`, `PWD`, `OLDPWD`). The evidence fingerprint also leaves out host session identifiers (`CODEX_THREAD_ID`, `CODEX_SESSION_ID`), so a new reviewer session does not make unchanged evidence stale. Other variables such as `PATH` and `NODE_OPTIONS` are part of the fingerprint. Python bytecode is redirected with `PYTHONPYCACHEPREFIX` so checks do not write into the product.
+Checks inherit the operator’s environment except shell bookkeeping (`_`, `SHLVL`, `PWD`, `OLDPWD`), and their output is recorded. Evidence freshness includes only `PATH`, `NODE_*`, `PYTHON*`, `LANG`, `LC_*`, `TZ`, `CI`, and variables named by a check’s `environmentVariables`. Terminal settings, host session identifiers and sandbox routing variables do not make unchanged product evidence stale. The full inherited environment is hashed separately as `comparisonEnvironment` for comparing executions; variable values are not stored in plaintext. Python bytecode defaults to a private per-user cache whose ownership and permissions are checked; an explicit `PYTHONPYCACHEPREFIX` still wins.
+
+Source snapshots read the declared slice scopes, check inputs and control files directly. Other tracked paths retain Git object identities, with working-tree edits hashed separately; unrelated repository size does not consume the declared-input byte budget. Symlinks are identified by their link target text, including directory, dangling and external links, without reading their targets. Candidates preserve only the selected slice’s declared inputs and controls, with recoverable link-aware restoration.
 
 An execution is bound to the product source, the slice contract, the verifier inputs, the environment and the VISP runtime. For declared command verifiers on POSIX, the resolved executable's path and content are also recorded. Browser executables that resolve to the same file share an identity.
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
+import { committedChangesSince } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { checkPaths } from "../../orchestrate/guard.js";
@@ -28,6 +29,10 @@ export const productAuthorizationSchema = z
     baseline: z.record(z.string()),
     blockedPaths: z.array(z.string()).optional(),
     envBaseline: z.record(z.string()).optional(),
+    headCommit: z
+      .string()
+      .regex(/^[a-f0-9]{40,64}$/)
+      .optional(),
     /** The host session that ran `visp work`, when the host's prompt hook reports one. */
     session: z.string().optional(),
   })
@@ -223,7 +228,7 @@ export async function checkProductScope(
   workspace: WorkspaceState,
   record: ProductRecord,
   slice: ProductSlice,
-): Promise<Result<void>> {
+): Promise<Result<{ committedChanges: string[] }>> {
   const auth = await readProductAuthorization(workspace, record);
   if (!auth.ok) return auth;
   if (!auth.value || auth.value.task !== slice.id)
@@ -242,11 +247,17 @@ export async function checkProductScope(
     );
   const changedEnv = await changedProtectedEnvFiles(workspace.paths.root, auth.value.envBaseline);
   if (!changedEnv.ok) return changedEnv;
+  const committed = auth.value.headCommit
+    ? await committedChangesSince(workspace.paths.root, auth.value.headCommit)
+    : ok([]);
+  if (!committed.ok) return committed;
+  const committedPaths = new Set(committed.value);
   const pinned = new Set(
     record.brief.acceptanceBaseline.flatMap((entry) => entry.files.map((file) => file.path)),
   );
   const paths = [...new Set([...Object.keys(current.value), ...Object.keys(auth.value.baseline)])]
     .filter((path) => current.value[path] !== auth.value?.baseline[path])
+    .filter((path) => !committedPaths.has(path))
     // Pinned acceptance files are VISP's, may be pinned mid-slice, and are hash-checked.
     .filter((path) => !pinned.has(path));
   paths.push(...changedEnv.value.filter((path) => !paths.includes(path)));
@@ -282,10 +293,11 @@ export async function checkProductScope(
           details: {
             forbidden,
             outside,
+            committedChanges: committed.value,
             deleted: paths.filter((path) => current.value[path] === undefined),
           },
           recovery:
-            "Restore unintended changes to the named files, or add intended ones to the slice scope with a reason and run visp work again. Never delete .visp/ or the pinned acceptance tests. Pass temporary brief input through --from - to avoid creating a product file.",
+            "Inspect the named local changes against git diff HEAD. Preserve incoming committed content; undo only unintended local edits, or add intended ones to the slice scope with a reason and run visp work again. Never delete .visp/ or the pinned acceptance tests. Pass temporary brief input through --from - to avoid creating a product file.",
         },
       ),
     );
@@ -300,12 +312,13 @@ export async function checkProductScope(
         "SCOPE_VIOLATION",
         `Changed-file count ${paths.length} exceeds configured limit ${limit}`,
         {
+          details: { paths, committedChanges: committed.value },
           recovery:
-            "Narrow the slice change or record a time-limited scope.max-changed-files override with a reason, then retry visp done.",
+            "Narrow the slice change or record a time-limited scope.max-changed-files override with a reason, then retry visp done. Preserve incoming committed content.",
         },
       ),
     );
-  return ok(undefined);
+  return ok({ committedChanges: committed.value });
 }
 
 function scopeList(forbidden: readonly string[], outside: readonly string[]): string {

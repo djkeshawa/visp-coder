@@ -1,5 +1,7 @@
 import { type VispError, vispError } from "./errors.js";
 import { run } from "./exec.js";
+import { ProjectFileSystem } from "./fs.js";
+import { flaggedSourcePaths, headSourceObjects, workingSourceObject } from "./git-source.js";
 import { err, ok, type Result } from "./result.js";
 
 export interface ChangedFile {
@@ -122,6 +124,84 @@ export async function headCommit(cwd: string): Promise<Result<string>> {
     return err(vispError("COMMAND_FAILED", "Repository has no commits yet"));
   }
   return ok(result.value.stdout.trim());
+}
+
+/** Committed changes since authorization whose working content still equals HEAD. */
+export async function committedChangesSince(
+  cwd: string,
+  reference: string,
+): Promise<Result<string[]>> {
+  if (!/^[a-f0-9]{40,64}$/.test(reference))
+    return err(vispError("ARTIFACT_INVALID", "Invalid authorization commit"));
+  const changed = await run(
+    "git",
+    ["diff", "--name-status", "-z", "--no-renames", reference, "HEAD", "--"],
+    { cwd, env: GIT_ENV },
+  );
+  if (!changed.ok) return changed;
+  if (changed.value.exitCode !== 0)
+    return err(
+      vispError("COMMAND_FAILED", "Could not compare the authorization commit with HEAD", {
+        recovery:
+          "Recover the recorded commit before checking scope; preserve incoming committed changes.",
+      }),
+    );
+  const local = await run("git", ["diff", "--name-only", "-z", "--no-renames", "HEAD", "--"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!local.ok) return local;
+  if (local.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not compare working content with HEAD"));
+  const untracked = await run("git", ["ls-files", "--others", "-z", "--exclude-standard"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!untracked.ok) return untracked;
+  if (untracked.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not list untracked files"));
+  const dirty = new Set([...local.value.stdout.split("\0"), ...untracked.value.stdout.split("\0")]);
+  const changes = parseNameStatus(changed.value.stdout);
+  const flags = await flaggedSourcePaths(cwd);
+  if (!flags.ok) return flags;
+  const candidates = changes.filter((file) => !dirty.has(file.path));
+  const uncertain = candidates.filter(
+    (file) => file.status === "deleted" || flags.value.has(file.path),
+  );
+  if (uncertain.length) {
+    const observed = await matchingCommittedPaths(
+      cwd,
+      uncertain.map((file) => file.path),
+    );
+    if (!observed.ok) return observed;
+    for (const file of uncertain.filter((file) => !observed.value.has(file.path)))
+      dirty.add(file.path);
+  }
+  return ok(
+    candidates
+      .map((file) => file.path)
+      .filter((path) => !dirty.has(path))
+      .sort(),
+  );
+}
+
+async function matchingCommittedPaths(cwd: string, paths: string[]): Promise<Result<Set<string>>> {
+  const head = await headSourceObjects(cwd, paths);
+  if (!head.ok) return head;
+  const files = new ProjectFileSystem(cwd);
+  const matching = new Set<string>();
+  for (const path of paths) {
+    const expected = head.value.get(path);
+    const current = await workingSourceObject(
+      files,
+      path,
+      expected?.object.length === 64 ? "sha256" : "sha1",
+    );
+    if (!current.ok) return current;
+    if (current.value?.mode === expected?.mode && current.value?.object === expected?.object)
+      matching.add(path);
+  }
+  return ok(matching);
 }
 
 /** Files changed in the working tree, including untracked files. */

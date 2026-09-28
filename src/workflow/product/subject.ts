@@ -1,16 +1,20 @@
-import { lstat, readlink, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
 import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { vispError } from "../../core/errors.js";
-import { productIdentityEnvironment } from "../../core/execution-environment.js";
+import {
+  productExecutionEnvironment,
+  productIdentityEnvironment,
+} from "../../core/execution-environment.js";
 import { repositoryFiles, repositoryGitlinks } from "../../core/git.js";
+import { repositorySourceObjects } from "../../core/git-source.js";
 import { hashValue, sha256 } from "../../core/hash.js";
-import { canonicalProjectRoot, isInside } from "../../core/paths.js";
-import { matchesPattern } from "../../core/patterns.js";
+import { matchesAny, matchesPattern } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
 import { type ProductBrief, type ProductSlice, sliceDigest } from "./model.js";
+import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
+import { repositorySourceIdentity } from "./source-git.js";
+import { sourceInputPatterns } from "./source-inputs.js";
 import { readProductRecord } from "./store.js";
 
 const INPUT_LIMITS = {
@@ -27,8 +31,12 @@ function inputLimit(path: string) {
   return err(
     vispError(
       "UNSUPPORTED",
-      `Product evidence input budget exceeded at ${path}; narrow declared input patterns or reduce oversized inputs`,
-      { details: INPUT_LIMITS },
+      `Product evidence input budget exceeded at ${path}; declared slice scopes and check inputs exceed the snapshot budget`,
+      {
+        details: INPUT_LIMITS,
+        recovery:
+          "Narrow slice scopes and check file patterns, or reduce oversized declared inputs. Other tracked files use Git identities and do not consume this budget.",
+      },
     ),
   );
 }
@@ -54,11 +62,18 @@ export async function productSourceSnapshot(
   if (!selected.ok) return selected;
   const declared = await declaredCheckFiles(workspace, selected.value);
   if (!declared.ok) return declared;
+  const objects = await repositorySourceObjects(workspace.paths.root);
+  if (!objects.ok) return objects;
+  const patterns = sourceInputPatterns(workspace, selected.value);
+  const algorithm =
+    [...objects.value.entries.values()][0]?.object.length === 64 ? "sha256" : "sha1";
   const paths = listed.value.filter((path) => path !== ".visp" && !path.startsWith(".visp/"));
   const files: Record<string, string> = {};
   const budget: InputBudget = { entries: 0, bytes: 0 };
   for (const path of [...new Set([...paths, ...declared.value])].sort()) {
-    const hash = await productFileHash(workspace, path, budget);
+    const hash = matchesAny(path, patterns)
+      ? await productFileHash(workspace, path, budget)
+      : await repositorySourceIdentity(workspace, path, objects.value, algorithm);
     if (!hash.ok) return hash;
     files[path] = hash.value;
   }
@@ -70,66 +85,26 @@ async function productFileHash(
   path: string,
   budget: InputBudget,
 ): Promise<Result<string>> {
-  const absolute = workspace.paths.absolute(path);
-  const link = await lstat(absolute).catch((cause: NodeJS.ErrnoException) => {
-    if (cause.code === "ENOENT") return undefined;
-    throw cause;
-  });
-  if (link?.isSymbolicLink()) {
-    budget.entries += 1;
-    if (budget.entries > INPUT_LIMITS.entries) return inputLimit(path);
-    const destination = await readlink(absolute);
-    if (
-      !isInside(workspace.paths.root, canonicalProjectRoot(resolve(dirname(absolute), destination)))
-    )
-      return err(
-        vispError("IO_ERROR", `Refusing project read through an external symlink: ${path}`),
-      );
-    const target = await stat(absolute).catch(() => undefined);
-    if (!target?.isFile())
-      return err(
-        vispError("UNSUPPORTED", `Product evidence requires regular files; cannot inspect ${path}`),
-      );
-    return ok(hashValue({ link: destination, mode: link.mode & 0o777 }));
-  }
-  const metadata = await workspace.files.readMetadata(path);
-  if (!metadata.ok) return metadata;
-  if (metadata.value && metadata.value.type !== "file")
-    return err(
-      vispError("UNSUPPORTED", `Product evidence requires regular files; cannot inspect ${path}`, {
-        details: { path, type: metadata.value.type },
-      }),
-    );
   budget.entries += 1;
-  budget.bytes += metadata.value?.size ?? 0;
-  if (
-    budget.entries > INPUT_LIMITS.entries ||
-    (metadata.value?.size ?? 0) > INPUT_LIMITS.fileBytes ||
-    budget.bytes > INPUT_LIMITS.totalBytes
-  )
-    return inputLimit(path);
-  const content = await workspace.files.readBytesIfExists(path);
-  if (!content.ok) return content;
-  // A file can grow between metadata and the confined read.
-  budget.bytes += (content.value?.byteLength ?? 0) - (metadata.value?.size ?? 0);
-  if (
-    (content.value?.byteLength ?? 0) > INPUT_LIMITS.fileBytes ||
-    budget.bytes > INPUT_LIMITS.totalBytes
-  )
-    return inputLimit(path);
-  return ok(
-    hashValue({
-      hash: content.value === undefined ? null : sha256(content.value),
-      mode: metadata.value?.mode,
-    }),
+  if (budget.entries > INPUT_LIMITS.entries) return inputLimit(path);
+  const entry = await readSourceEntry(
+    workspace.files,
+    path,
+    Math.min(INPUT_LIMITS.fileBytes, INPUT_LIMITS.totalBytes - budget.bytes),
   );
+  if (!entry.ok) return entry;
+  budget.bytes += entry.value.bytes?.byteLength ?? 0;
+  return ok(sourceEntryHash(entry.value.bytes, entry.value.mode, entry.value.symlink));
 }
 
 export async function productSourceDigest(
   workspace: WorkspaceState,
   brief?: ProductBrief,
   snapshot?: Record<string, string>,
+  environment?: Record<string, string>,
 ): Promise<Result<string>> {
+  const selected = await subjectBrief(workspace, brief);
+  if (!selected.ok) return selected;
   const files = snapshot ? ok(snapshot) : await productSourceSnapshot(workspace, brief);
   if (!files.ok) return files;
   const controls: Record<string, string | null> = {};
@@ -150,10 +125,22 @@ export async function productSourceDigest(
         platform: process.platform,
         arch: process.arch,
       },
-      environment: productIdentityEnvironment(),
+      environment:
+        environment ??
+        productIdentityEnvironment(
+          selected.value?.checks.flatMap((check) => check.environmentVariables ?? []),
+        ),
       browser: await browserExecutableIdentity(),
     }),
   );
+}
+
+/** Full inherited environment is comparison context, never product freshness or plaintext state. */
+export function productComparisonEnvironmentDigest(
+  workspace: WorkspaceState,
+  brief?: ProductBrief,
+) {
+  return productSourceDigest(workspace, brief, {}, productExecutionEnvironment());
 }
 
 async function subjectBrief(
@@ -180,22 +167,30 @@ async function declaredCheckFiles(
   const paths = new Set<string>();
   const budget: InputBudget = { entries: 0, bytes: 0 };
   for (const pattern of patterns) {
-    const wildcard = pattern.search(/[*?[]/);
-    const prefix =
-      wildcard < 0
-        ? pattern
-        : pattern.slice(0, pattern.lastIndexOf("/", wildcard) + 1).replace(/\/$/, "");
-    const metadata = await workspace.files.readMetadata(prefix || ".");
-    if (!metadata.ok) return metadata;
-    if (wildcard < 0 && metadata.value?.type !== "directory") {
-      paths.add(pattern);
-      continue;
-    }
-    const selected = await matchingCheckFiles(workspace, prefix || ".", pattern, budget, 0);
+    const selected = await declaredPatternFiles(workspace, pattern, budget);
     if (!selected.ok) return selected;
     for (const path of selected.value) paths.add(path);
   }
   return ok([...paths]);
+}
+
+async function declaredPatternFiles(
+  workspace: WorkspaceState,
+  pattern: string,
+  budget: InputBudget,
+): Promise<Result<string[]>> {
+  const wildcard = pattern.search(/[*?[]/);
+  const prefix =
+    wildcard < 0
+      ? pattern
+      : pattern.slice(0, pattern.lastIndexOf("/", wildcard) + 1).replace(/\/$/, "");
+  const link = await workspace.files.readSymbolicLink(prefix || ".");
+  if (!link.ok) return link;
+  if (link.value !== undefined) return ok(wildcard < 0 ? [pattern] : []);
+  const metadata = await workspace.files.readMetadata(prefix || ".");
+  if (!metadata.ok) return metadata;
+  if (wildcard < 0 && metadata.value?.type !== "directory") return ok([pattern]);
+  return matchingCheckFiles(workspace, prefix || ".", pattern, budget, 0);
 }
 
 async function matchingCheckFiles(
