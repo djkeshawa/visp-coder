@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GUARD_PROTOCOL_VERSION } from "../../../src/core/constants.js";
@@ -50,12 +50,12 @@ describe("generated hooks", () => {
         env,
       },
     );
-    return JSON.parse(output);
+    return output ? JSON.parse(output) : {};
   }
 
   function decision(response: Record<string, unknown>): string {
-    const output = response.hookSpecificOutput as Record<string, string>;
-    return output.permissionDecision ?? "";
+    const output = response.hookSpecificOutput as Record<string, string> | undefined;
+    return output?.permissionDecision ?? "";
   }
 
   function callPreCommit(env: NodeJS.ProcessEnv): string {
@@ -103,6 +103,24 @@ describe("generated hooks", () => {
     await rm(join(project.root, ".visp/session/user-prompts.jsonl"));
   });
 
+  it("records a session started in a subdirectory at the initialized root", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const nested = join(project.root, "src/auth");
+    execFileSync(process.execPath, [join(project.root, ".visp/hooks/claude-pretooluse.mjs")], {
+      cwd: nested,
+      input: JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        cwd: nested,
+        prompt: "nested request",
+      }),
+      env: { ...project.env(), CLAUDE_PROJECT_DIR: "" },
+    });
+    expect(
+      await readFile(join(project.root, ".visp/session/user-prompts.jsonl"), "utf8"),
+    ).toContain("nested request");
+    await rm(join(project.root, ".visp/session/user-prompts.jsonl"));
+  });
+
   // Weak workers stopped with slices open; the Stop hook sends them back a few times.
   it("sends a stopping worker back to an unfinished feature at most three times", async () => {
     const stop = () =>
@@ -124,7 +142,7 @@ describe("generated hooks", () => {
   // A worker hand-edited the brief, left it unreadable and abandoned the workflow.
   it("refuses agent edits of VISP state except drafts", () => {
     expect(decision(callPreToolUse(".visp/features/x/brief.yaml"))).toBe("deny");
-    expect(decision(callPreToolUse(".visp/drafts/assessment.json"))).toBe("allow");
+    expect(decision(callPreToolUse(".visp/drafts/assessment.json"))).toBe("");
   });
 
   // A worker ran rm -rf .visp acceptance to get past a scope error it could not read.
@@ -140,6 +158,10 @@ describe("generated hooks", () => {
     expect(decision(JSON.parse(shell("git clean -fd")))).toBe("deny");
     expect(shell("python3 acceptance/x/test.py")).toBe("");
     expect(shell("git stash")).toBe("");
+    expect(shell("node --test acceptance/ && rm -rf dist")).toBe("");
+    expect(shell("git checkout main && ls acceptance")).toBe("");
+    expect(shell('git commit -m "fix rm handling in acceptance tests"')).toBe("");
+    expect(decision(JSON.parse(shell("find .visp -delete")))).toBe("deny");
     const { readFile } = await import("node:fs/promises");
     const settings = JSON.parse(
       await readFile(join(project.root, ".claude/settings.json"), "utf8"),
@@ -178,8 +200,57 @@ describe("generated hooks", () => {
   );
 
   it("runs without a syntax error and allows an in-scope write", () => {
-    expect(decision(callPreToolUse("src/auth/login.ts"))).toBe("allow");
+    expect(decision(callPreToolUse("src/auth/login.ts"))).toBe("");
   });
+
+  it("leaves Claude's normal permission decision in place outside the project", () => {
+    expect(callPreToolUse(join(project.root, "../.claude/plans/draft.md"))).toEqual({});
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "accepts the symlinked spelling of an in-scope path",
+    async () => {
+      const alias = `${project.root}-alias`;
+      await symlink(project.root, alias, "dir");
+      try {
+        expect(callPreToolUse(join(alias, "src/auth/login.ts"))).toEqual({});
+      } finally {
+        await rm(alias);
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "refuses an in-scope symlink that resolves to a blocked file",
+    async () => {
+      await project.write(".env", "SECRET=fixture\n");
+      const link = join(project.root, "src/auth/settings.ts");
+      await symlink("../../.env", link);
+      try {
+        expect(decision(callPreToolUse("src/auth/settings.ts"))).toBe("deny");
+      } finally {
+        await rm(link);
+        await rm(join(project.root, ".env"));
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "refuses a dangling link that would write outside the project",
+    async () => {
+      const link = join(project.root, "src/auth/leak.ts");
+      await symlink(join(project.root, "../outside-leak.ts"), link);
+      try {
+        const response = callPreToolUse("src/auth/leak.ts");
+        expect(decision(response)).toBe("deny");
+        expect(
+          (response.hookSpecificOutput as Record<string, string>).permissionDecisionReason,
+        ).toContain("resolves outside");
+      } finally {
+        await rm(link);
+      }
+    },
+  );
 
   /**
    * A broken install is not a scope violation. Denying is still right — a hook
@@ -235,7 +306,7 @@ describe("generated hooks", () => {
         encoding: "utf8",
       },
     );
-    expect(decision(JSON.parse(output))).toBe("allow");
+    expect(output).toBe("");
   });
 
   it("refuses a commit whose staged files are out of scope", async () => {
@@ -251,6 +322,15 @@ describe("generated hooks", () => {
     ).toThrow();
 
     project.git("reset", "-q");
+  });
+
+  it("refuses a commit after an ignored environment file changes", async () => {
+    await project.write(".env", "SECRET=fixture\n");
+    try {
+      expect(() => callPreCommit(project.env())).toThrow();
+    } finally {
+      await rm(join(project.root, ".env"));
+    }
   });
 
   it("fails closed when visp is unavailable and an authorization is active", () => {
@@ -409,14 +489,13 @@ describe("edit authorization across host sessions", () => {
   }
 
   function write(path: string, session: string): { decision: string; reason: string } {
-    const output = JSON.parse(
-      execFileSync(process.execPath, [hook()], {
-        cwd: project.root,
-        input: JSON.stringify({ session_id: session, tool_input: { file_path: path } }),
-        encoding: "utf8",
-        env: env(),
-      }),
-    ).hookSpecificOutput as Record<string, string>;
+    const raw = execFileSync(process.execPath, [hook()], {
+      cwd: project.root,
+      input: JSON.stringify({ session_id: session, tool_input: { file_path: path } }),
+      encoding: "utf8",
+      env: env(),
+    });
+    const output = raw ? (JSON.parse(raw).hookSpecificOutput as Record<string, string>) : {};
     return {
       decision: output.permissionDecision ?? "",
       reason: output.permissionDecisionReason ?? "",
@@ -427,7 +506,7 @@ describe("edit authorization across host sessions", () => {
     const { readFile } = await import("node:fs/promises");
     prompt("session-1", "Change the auth module");
     await setUpTask(project);
-    expect(write("src/auth/login.ts", "session-1").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-1").decision).toBe("");
     const authorization = join(
       project.root,
       ".visp/state/product-authorizations/001-scoped-work.json",
@@ -460,7 +539,7 @@ describe("edit authorization across host sessions", () => {
     const worked = project.run("work", "--task", "T001");
     expect(worked.exitCode, worked.stdout + worked.stderr).toBe(0);
     prompt("session-2", "Also keep the login response unchanged");
-    expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("");
     expect(JSON.parse(await readFile(authorization, "utf8")).baseline).toEqual(baseline);
   });
 
@@ -468,7 +547,7 @@ describe("edit authorization across host sessions", () => {
   // hook names the session that is editing, and only the one that ran `visp work` may.
   it("judges an edit by the session making it, not the one that prompted last", () => {
     prompt("session-3", "Unrelated question in another window");
-    expect(write("src/auth/login.ts", "session-2").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-2").decision).toBe("");
     expect(write("src/auth/login.ts", "session-3").decision).toBe("deny");
   });
 
@@ -490,7 +569,7 @@ describe("edit authorization across host sessions", () => {
       ".visp/state/product-authorizations/001-scoped-work.json",
     );
     expect(JSON.parse(await readFile(authorization, "utf8")).session).toBe("session-4");
-    expect(write("src/auth/login.ts", "session-4").decision).toBe("allow");
+    expect(write("src/auth/login.ts", "session-4").decision).toBe("");
     expect(write("src/auth/login.ts", "session-2").decision).toBe("deny");
   });
 });

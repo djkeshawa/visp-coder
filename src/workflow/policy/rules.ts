@@ -51,6 +51,13 @@ export const RULE_IDS = [
 
 export type RuleId = (typeof RULE_IDS)[number];
 
+/** Rules whose policy state is consulted by current workflow decisions. */
+export const EVALUATED_RULE_IDS: readonly RuleId[] = [
+  "scope.forbidden-paths",
+  "scope.allowed-files",
+  "scope.max-changed-files",
+];
+
 const ALL: readonly StrictnessMode[] = ["relaxed", "standard", "strict", "locked"];
 const STANDARD_UP: readonly StrictnessMode[] = ["standard", "strict", "locked"];
 const STRICT_UP: readonly StrictnessMode[] = ["strict", "locked"];

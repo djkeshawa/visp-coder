@@ -6,16 +6,16 @@ import { changesSince, stagedChanges, trackedFiles, workingTreeChanges } from ".
 import { ok, type Result } from "../../core/result.js";
 import { type RuntimeIdentity, runtimeIdentity } from "../../core/version.js";
 import { requireInstalledRuntime } from "../../harness/runtime.js";
-import { checkPaths, decideScope, type ScopeViolation } from "../../orchestrate/guard.js";
+import { checkPaths, decideScope } from "../../orchestrate/guard.js";
+import { evaluateGuardPaths, type GuardViolation } from "../../orchestrate/guard-evaluation.js";
 import type { ImplementMarker } from "../../workflow/artifacts/evidence.js";
-import { resolveRule, ruleContextFor } from "../../workflow/policy/resolve.js";
 import {
   hasPendingCriticReview,
   PENDING_REVIEW_MESSAGE,
 } from "../../workflow/product/critic-policy.js";
 import {
+  activeProtectedEnvChanges,
   productScopes as authorizedScopes,
-  earlierSessionAuthorization,
 } from "../../workflow/product/scopes.js";
 import { featureForBranch, isStatePath, type WorkspaceState } from "../../workflow/state.js";
 import {
@@ -85,14 +85,6 @@ interface GuardPayload {
   readonly violations: GuardViolation[];
   readonly authorizedTasks: string[];
 }
-
-type GuardViolation =
-  | ScopeViolation
-  | {
-      readonly path: string;
-      readonly reason: "transaction-pending" | "review-pending";
-      readonly message: string;
-    };
 
 type GuardEvaluation =
   | { readonly kind: "unscoped" }
@@ -219,71 +211,37 @@ async function evaluateGuard(
 
   const paths = await resolvePaths(state.paths.root, opts);
   if (!paths.ok) return paths;
+  const protectedChanges =
+    opts.path || opts.scope === "tasks"
+      ? ok([] as string[])
+      : await activeProtectedEnvChanges(state);
+  if (!protectedChanges.ok) return protectedChanges;
+  const checkedPaths = [...new Set([...paths.value, ...protectedChanges.value])];
   const markers = selected.value.markers;
-  const allowedFilesRule = resolveRule(
-    "scope.allowed-files",
-    state.policy,
-    state.overrides,
-    ruleContextFor(state, { ...(opts.task ? { task: opts.task } : {}) }),
-  );
-  const checked = checkPaths(paths.value, {
-    markers,
-    blockedPaths: state.config.workflow.blockedPaths,
-    enforceAllowedFiles: allowedFilesRule.active,
+  const guarded = await evaluateGuardPaths(state, checkedPaths, markers, {
+    ...(feature ? { feature } : {}),
+    ...(opts.task ? { task: opts.task } : {}),
+    ...(opts.session ? { hostSession: opts.session } : {}),
+    ...(opts.scope ? { source: opts.scope as "markers" | "tasks" } : {}),
+    writeTime: opts.path !== undefined,
   });
-  const violations = await explainEarlierSession(state, opts, feature, checked);
-  if (!violations.ok) return violations;
-  const guarded = await pendingReviewViolations(
-    state,
-    feature ?? state.status?.activeFeature ?? markers[0]?.feature,
-    paths.value,
-    violations.value,
-  );
   if (!guarded.ok) return guarded;
   const checkedViolations = guarded.value;
   const committable = opts.includeDone ? [] : await closedTaskPaths(state, checkedViolations);
   return ok({
     kind: "checked",
-    paths: paths.value,
+    paths: checkedPaths,
     markers,
     committable,
     payload: {
       runtime: runtimeIdentity(),
       protocolVersion: GUARD_PROTOCOL_VERSION,
-      checked: paths.value.length,
+      checked: checkedPaths.length,
       allowed: checkedViolations.length === 0,
       violations: checkedViolations,
       authorizedTasks: markers.map((marker) => marker.task),
     },
   });
-}
-
-/**
- * A refusal because the only authorization came from an earlier host session says so,
- * and names both ways on: a new feature for a new request, or re-confirming the old task.
- */
-async function explainEarlierSession(
-  state: WorkspaceState,
-  opts: GuardCliOptions,
-  feature: string | undefined,
-  violations: readonly GuardViolation[],
-): Promise<Result<GuardViolation[]>> {
-  if (opts.scope === "tasks" || !violations.some((v) => v.reason === "no-authorization"))
-    return ok([...violations]);
-  const earlier = await earlierSessionAuthorization(state, scopeFilter(opts, feature));
-  if (!earlier.ok) return earlier;
-  const auth = earlier.value;
-  if (!auth) return ok([...violations]);
-  return ok(
-    violations.map((violation) =>
-      violation.reason === "no-authorization"
-        ? {
-            ...violation,
-            message: `${violation.path} was authorized for ${auth.task} of ${auth.feature} in an earlier session, which no longer permits edits. For a new request, start it with \`visp feature "<request>"\`; to continue ${auth.task}, run \`visp work --task ${auth.task}\``,
-          }
-        : violation,
-    ),
-  );
 }
 
 async function evaluateUnscopedGuard(
@@ -320,29 +278,6 @@ async function evaluateUnscopedGuard(
       authorizedTasks: [],
     },
   });
-}
-
-async function pendingReviewViolations(
-  state: WorkspaceState,
-  feature: string | undefined,
-  paths: readonly string[],
-  violations: readonly GuardViolation[],
-): Promise<Result<GuardViolation[]>> {
-  if (!feature || paths.length === 0) return ok([...violations]);
-  const pending = await hasPendingCriticReview(state, feature);
-  if (!pending.ok) return pending;
-  if (!pending.value) return ok([...violations]);
-  const alreadyRefused = new Set(violations.map((violation) => violation.path));
-  return ok([
-    ...violations,
-    ...paths
-      .filter((path) => !alreadyRefused.has(path) && !isStatePath(path))
-      .map((path) => ({
-        path,
-        reason: "review-pending" as const,
-        message: PENDING_REVIEW_MESSAGE,
-      })),
-  ]);
 }
 
 type GuardMarkerSelection =

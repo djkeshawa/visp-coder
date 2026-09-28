@@ -4,7 +4,7 @@ import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { now } from "../../workflow/artifacts/common.js";
 import { mutateOverrides } from "../../workflow/policy/mutations.js";
-import { RULES } from "../../workflow/policy/rules.js";
+import { EVALUATED_RULE_IDS, RULES } from "../../workflow/policy/rules.js";
 import type { Override } from "../../workflow/policy/schema.js";
 import { overrideSchema } from "../../workflow/policy/schema.js";
 import { isJson, options, projectRoot, validateArtifactSelection, workspace } from "../context.js";
@@ -90,6 +90,12 @@ function buildOverride(
 
   if (!known.overridable) {
     return err(vispError("UNSUPPORTED", `${rule} cannot be overridden: ${known.reason}`));
+  }
+
+  if (!EVALUATED_RULE_IDS.includes(known.id)) {
+    return err(
+      vispError("UNSUPPORTED", `${rule} is catalogued but not evaluated by this workflow`),
+    );
   }
 
   if (opts.stage && !STAGES.includes(opts.stage as Stage)) {

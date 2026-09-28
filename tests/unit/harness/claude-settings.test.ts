@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -45,6 +46,14 @@ async function read(): Promise<Settings> {
 }
 
 describe("registerPreToolUseHook", () => {
+  it.skipIf(process.platform === "win32")("turns an unstartable hook into a blocking exit", () => {
+    expect(() =>
+      execFileSync("/bin/sh", ["-c", hookCommand(HOOK_PATH)], {
+        cwd: root,
+        env: { ...process.env, CLAUDE_PROJECT_DIR: root, PATH: "/nonexistent" },
+      }),
+    ).toThrow(expect.objectContaining({ status: 2 }));
+  });
   it("creates the file when none exists", async () => {
     const result = await registerPreToolUseHook(root, HOOK_PATH, false);
     expect(result.ok && result.value).toBe("added");

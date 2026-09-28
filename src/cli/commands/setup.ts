@@ -1,8 +1,9 @@
+import { resolve } from "node:path";
 import { Command } from "commander";
 import { HARNESSES, PRODUCT_NAME } from "../../core/constants.js";
 import { parseHarness } from "../../core/input.js";
 import { runInit } from "../../workflow/stages/init.js";
-import { isJson, options, projectRoot } from "../context.js";
+import { isJson, options } from "../context.js";
 import { emit, emitError } from "../output.js";
 
 export function initCommand(): Command {
@@ -19,7 +20,7 @@ export function initCommand(): Command {
       }
 
       const result = await runInit({
-        root: projectRoot(opts),
+        root: resolve(opts.project ?? process.cwd()),
         ...(harness?.ok ? { harness: harness.value } : {}),
         ...(opts.force ? { force: true } : {}),
       });

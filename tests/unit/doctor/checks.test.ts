@@ -141,6 +141,24 @@ describe("the enforcement check", () => {
     expect(result.detail).not.toContain("mcp");
   });
 
+  it("warns that Codex scope checks happen at commit time", async () => {
+    const state = await workspace.state();
+    await setConfigScalar(state.paths, "harness", "codex");
+    const installed = await installHarness(
+      state.paths,
+      {
+        harness: "codex",
+        hooks: ["git"],
+        mcp: false,
+      },
+      { guardHandshake: healthyGuard },
+    );
+    if (!installed.ok) throw new Error(installed.error.message);
+    const result = await check("enforcement");
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("commit-time only");
+  });
+
   /**
    * The script on disk does nothing on its own: Claude Code runs the hooks its
    * settings file names, so an unwired script is not an installed surface.

@@ -37,7 +37,9 @@ interface ClaudeSettings {
 
 /** The command Claude Code runs. Relative to the project, so it survives a move. */
 export function hookCommand(hookPath: string): string {
-  return `node "$CLAUDE_PROJECT_DIR/${hookPath}"`;
+  if (process.platform === "win32")
+    return `node "%CLAUDE_PROJECT_DIR%\\${hookPath.replaceAll("/", "\\")}" || exit /b 2`;
+  return `node "$CLAUDE_PROJECT_DIR/${hookPath}" || exit 2`;
 }
 
 /**

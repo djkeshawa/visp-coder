@@ -9,6 +9,7 @@ import { currentBranch, headCommit, isRepository, workingTreeChanges } from "../
 import { parseFeatureId } from "../core/input.js";
 import { isExecutableMode } from "../core/mode.js";
 import { ProjectPaths } from "../core/paths.js";
+import { discoverProjectRoot } from "../core/project-root.js";
 import { err, ok, type Result } from "../core/result.js";
 import {
   agentActivationFile,
@@ -43,7 +44,7 @@ export interface WorkspaceState {
 }
 
 export async function loadWorkspace(root: string): Promise<Result<WorkspaceState>> {
-  const paths = new ProjectPaths(root);
+  const paths = new ProjectPaths(discoverProjectRoot(root));
   const files = new RecoveringProjectFileSystem(paths.root);
 
   // A lock may create .visp/state before init; the tracked project record marks setup.
@@ -86,7 +87,7 @@ export async function loadWorkspace(root: string): Promise<Result<WorkspaceState
 
 /** Recover first, then load; mutators must never plan from a partly applied transaction. */
 export async function loadWorkspaceForMutation(root: string): Promise<Result<WorkspaceState>> {
-  const recovered = await recoverFileTransactions(root);
+  const recovered = await recoverFileTransactions(discoverProjectRoot(root));
   if (!recovered.ok) return recovered;
   return loadWorkspace(root);
 }
