@@ -125,6 +125,8 @@ Adapt the selectors, URL and files to the real application. HTTP(S) journeys nee
 
 CLI text output is compact. `--json` prints the full result envelope. MCP tools reply with compact text plus the complete result in `structuredContent`; pass `detail: true` for full text.
 
+Library callers should obtain a `LoadedWorkspaceState` with `loadWorkspace()` before calling the exported product and observation services. The older `WorkspaceState` shape without `files` remains supported by `resolveFeature()` only.
+
 ## Independent review
 
 The critic is a separate model session that receives the original request, current source, check results and screenshots, but not the actor's verdicts or history. It returns an assessment of each outcome and up to three findings. With `critic.launch: codex-exec` (written by `visp init --harness codex`), VISP launches a read-only `codex exec` reviewer and tester itself; this needs the Codex CLI signed in, whichever host does the coding. With `launch: host` (the default), the coding host delegates the review to its own subagent using the packet VISP prepares. See [the critic guide](docs/critic.md).
