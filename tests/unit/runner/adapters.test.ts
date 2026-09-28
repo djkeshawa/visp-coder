@@ -552,7 +552,7 @@ describe("runner host adapters", () => {
       host: { kind: "claude", model: "small" },
       permissions: { mode: "workspace-write" },
       budget: { maxEstimatedUsd: 1 },
-      harness: { requiredTools: ["mcp__visp__visp_next"] },
+      harness: { files: [], requiredTools: ["mcp__visp__visp_next"] },
     };
     expect(adapterFor("claude").arguments(spec as never)).not.toContain("--allowedTools");
     expect(adapterFor("claude").arguments(spec as never)).toContain("--strict-mcp-config");
