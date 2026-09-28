@@ -56,7 +56,12 @@ export function redactText(
     .replace(/\b[A-Za-z0-9_+/=-]{32,}\b/g, (token) => (highEntropy(token) ? MASK : token));
 }
 
+/** VISP's own identities (CAP-…, CAPRUN-…, CAN-…): an uppercase kind and lowercase hex. */
+const VISP_IDENTITY = /^[A-Z]{2,12}-[0-9a-f][0-9a-f-]*$/;
+
 function highEntropy(token: string): boolean {
+  // Replay, review and attribution resolve these; masking them breaks the evidence trail.
+  if (VISP_IDENTITY.test(token)) return false;
   if (!/[a-z]/.test(token) || !/[A-Z]/.test(token) || !/[0-9]/.test(token)) return false;
   const counts = new Map<string, number>();
   for (const character of token) counts.set(character, (counts.get(character) ?? 0) + 1);

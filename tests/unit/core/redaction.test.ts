@@ -52,3 +52,19 @@ it("preserves technical prose and ordinary environment names in the request", ()
     "The next token is Identifier; use development mode.",
   );
 });
+
+// A browser check's output lists its run and capture IDs; replay and review resolve them.
+it("keeps VISP evidence identities readable", () => {
+  const output = JSON.stringify({
+    status: "completed",
+    runId: "CAPRUN-214c973b-9f2b-4b34-b48a-a149c455c902",
+    captures: [
+      "CAP-dfec4717-9c15-40fb-91be-fc27c24170fe",
+      "CAP-bbb57ca2-6912-4b2b-aaa1-b8317df5b114",
+    ],
+    candidate: "CAN-0123456789abcdef0123456789abcdef",
+  });
+  expect(redactText(output)).toBe(output);
+  expect(redactText("key sk-live-Zq8LmN3pRt6VwX9yB2cD5fG7hJ1kL4mN")).toContain("[REDACTED]");
+  expect(redactText("CAP-Zq8LmN3pRt6VwX9yB2cD5fG7hJ1kL4mNq")).toContain("[REDACTED]");
+});
