@@ -5,13 +5,16 @@ import {
   productIdentityEnvironment,
 } from "../../core/execution-environment.js";
 import { repositoryFiles, repositoryGitlinks } from "../../core/git.js";
+import { repositorySourceObjects } from "../../core/git-source.js";
 import { hashValue, sha256 } from "../../core/hash.js";
-import { matchesPattern } from "../../core/patterns.js";
+import { matchesAny, matchesPattern } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
 import { type ProductBrief, type ProductSlice, sliceDigest } from "./model.js";
 import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
+import { repositorySourceIdentity } from "./source-git.js";
+import { sourceInputPatterns } from "./source-inputs.js";
 import { readProductRecord } from "./store.js";
 
 const INPUT_LIMITS = {
@@ -28,8 +31,12 @@ function inputLimit(path: string) {
   return err(
     vispError(
       "UNSUPPORTED",
-      `Product evidence input budget exceeded at ${path}; narrow declared input patterns or reduce oversized inputs`,
-      { details: INPUT_LIMITS },
+      `Product evidence input budget exceeded at ${path}; declared slice scopes and check inputs exceed the snapshot budget`,
+      {
+        details: INPUT_LIMITS,
+        recovery:
+          "Narrow slice scopes and check file patterns, or reduce oversized declared inputs. Other tracked files use Git identities and do not consume this budget.",
+      },
     ),
   );
 }
@@ -55,11 +62,18 @@ export async function productSourceSnapshot(
   if (!selected.ok) return selected;
   const declared = await declaredCheckFiles(workspace, selected.value);
   if (!declared.ok) return declared;
+  const objects = await repositorySourceObjects(workspace.paths.root);
+  if (!objects.ok) return objects;
+  const patterns = sourceInputPatterns(workspace, selected.value);
+  const algorithm =
+    [...objects.value.entries.values()][0]?.object.length === 64 ? "sha256" : "sha1";
   const paths = listed.value.filter((path) => path !== ".visp" && !path.startsWith(".visp/"));
   const files: Record<string, string> = {};
   const budget: InputBudget = { entries: 0, bytes: 0 };
   for (const path of [...new Set([...paths, ...declared.value])].sort()) {
-    const hash = await productFileHash(workspace, path, budget);
+    const hash = matchesAny(path, patterns)
+      ? await productFileHash(workspace, path, budget)
+      : await repositorySourceIdentity(workspace, path, objects.value, algorithm);
     if (!hash.ok) return hash;
     files[path] = hash.value;
   }

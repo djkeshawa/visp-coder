@@ -16,6 +16,7 @@ import { type CriticSelection, recordGuards } from "./critic-store.js";
 import type { ProductSlice } from "./model.js";
 import { checkProductScope } from "./scopes.js";
 import { readSourceEntry, sourceEntryHash, sourceEntryMutation } from "./source-entry.js";
+import { candidateSourcePaths } from "./source-inputs.js";
 import { json } from "./store.js";
 import { productSourceDigest, productSourceSnapshot } from "./subject.js";
 
@@ -67,12 +68,23 @@ export async function prepareCandidate(
 ) {
   const snapshot = await productSourceSnapshot(workspace, selected.record.brief);
   if (!snapshot.ok) return snapshot;
-  if (Object.keys(snapshot.value).length > 2000)
-    return err(vispError("UNSUPPORTED", "Candidate exceeds 2000 source files"));
+  const paths = candidateSourcePaths(
+    workspace,
+    selected.record.brief,
+    snapshot.value,
+    selected.slice,
+  );
+  if (paths.length > 2000)
+    return err(
+      vispError("UNSUPPORTED", "Candidate exceeds 2000 declared source files", {
+        recovery: "Narrow this slice's scope and check inputs before preserving a candidate.",
+      }),
+    );
   const files: ProductCandidate["files"] = [];
   const guards: FileMutation[] = [];
   let bytes = 0;
-  for (const [path, expected] of Object.entries(snapshot.value)) {
+  for (const path of paths) {
+    const expected = snapshot.value[path] ?? "";
     const captured = await captureFile(workspace, path, expected, bytes);
     if (!captured.ok) return captured;
     bytes += captured.value.bytes;
@@ -170,7 +182,12 @@ export async function restoreCandidate(
   if (!subject.ok) return subject;
   if (subject.value !== expectedSubject)
     return err(vispError("EVIDENCE_FAILED", "Source changed since the restore request"));
-  const planned = await planRestore(workspace, selected.slice, current.value, candidate.value);
+  const selectedCurrent = Object.fromEntries(
+    candidateSourcePaths(workspace, selected.record.brief, current.value, selected.slice).map(
+      (path) => [path, current.value[path] ?? ""],
+    ),
+  );
+  const planned = await planRestore(workspace, selected.slice, selectedCurrent, candidate.value);
   if (!planned.ok) return planned;
   const result = await applyFileTransaction(workspace.paths.root, "restore-product-candidate", [
     ...recordGuards(workspace, selected.record),
