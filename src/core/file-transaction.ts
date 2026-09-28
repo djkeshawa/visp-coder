@@ -371,7 +371,11 @@ async function applyPreparedMutation(
   }
 }
 
-async function matchesAfter(fs: ProjectFileSystem, entry: JournalEntry): Promise<Result<boolean>> {
+async function matchesAfter(
+  fs: ProjectFileSystem,
+  entry: JournalEntry,
+  ignoreMode = false,
+): Promise<Result<boolean>> {
   const metadata = await fs.metadata(entry.path);
   if (!metadata.ok) return metadata;
   const bytes = await fs.readBytesIfExists(entry.path);
@@ -380,7 +384,7 @@ async function matchesAfter(fs: ProjectFileSystem, entry: JournalEntry): Promise
   return ok(
     bytes.value !== undefined &&
       metadata.value?.type === "file" &&
-      sameMode(metadata.value.mode, entry.afterMode) &&
+      (ignoreMode || sameMode(metadata.value.mode, entry.afterMode)) &&
       sha256(bytes.value) === entry.afterHash,
   );
 }
@@ -477,11 +481,11 @@ async function classifyRecoveryEntry(
   transaction: string,
   entry: JournalEntry,
 ): Promise<Result<"restored" | "applied">> {
-  const alreadyRestored = await matchesSnapshot(fs, entry.path, entry.before);
+  const alreadyRestored = await matchesSnapshot(fs, entry.path, entry.before, true);
   if (!alreadyRestored.ok) return alreadyRestored;
   if (alreadyRestored.value) return ok("restored");
 
-  const stillApplied = await matchesAfter(fs, entry);
+  const stillApplied = await matchesAfter(fs, entry, true);
   if (!stillApplied.ok) return stillApplied;
   if (stillApplied.value) return ok("applied");
   return err(
@@ -507,6 +511,7 @@ async function matchesSnapshot(
   fs: ProjectFileSystem,
   path: string,
   expected: FileSnapshot,
+  ignoreMode = false,
 ): Promise<Result<boolean>> {
   const metadata = await fs.metadata(path);
   if (!metadata.ok) return metadata;
@@ -516,7 +521,7 @@ async function matchesSnapshot(
   return ok(
     bytes.value !== undefined &&
       metadata.value?.type === "file" &&
-      sameMode(metadata.value.mode, expected.mode) &&
+      (ignoreMode || sameMode(metadata.value.mode, expected.mode)) &&
       sha256(bytes.value) === expected.hash,
   );
 }
@@ -553,8 +558,9 @@ async function readJournals(
   const journals: { path: string; journal: TransactionJournal }[] = [];
   for (const name of entries.value.filter((entry) => entry.endsWith(".json"))) {
     const path = `${TRANSACTIONS_DIR}/${name}`;
-    const parsed = await fs.readJson(path, parseJournal);
+    const parsed = await fs.readJsonIfExists(path, parseJournal);
     if (!parsed.ok) return parsed;
+    if (!parsed.value) continue;
     if (name !== `${parsed.value.id}.json`) {
       return err(
         vispError("ARTIFACT_INVALID", `Transaction journal name does not match its id: ${name}`),

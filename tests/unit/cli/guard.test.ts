@@ -61,6 +61,41 @@ function guard(...args: string[]) {
 }
 
 describe("refusing a change", () => {
+  it("waits for a live transaction before checking authorized paths", async () => {
+    await withProductFeature(workspace, "001-guard");
+    await authorize(workspace, { feature: "001-guard", task: "T001" });
+    await guard("--handshake");
+    let ready!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const writer = applyFileTransaction(
+      workspace.root,
+      "live",
+      [{ kind: "write", path: "unrelated.txt", content: "saved" }],
+      {
+        afterMutation: async () => {
+          ready();
+          await held;
+        },
+      },
+    );
+    await entered;
+    const timer = setTimeout(release, 150);
+    try {
+      const result = await guard("--path", "src/app.ts");
+      expect(result.envelope.data?.allowed).toBe(true);
+    } finally {
+      clearTimeout(timer);
+      release();
+      await writer;
+    }
+  });
+
   it.each([{ flags: [] }, { flags: ["--staged"] }, { flags: ["--base", "HEAD~1"] }])(
     "refuses the protected source of a rename with %j",
     async ({ flags }) => {

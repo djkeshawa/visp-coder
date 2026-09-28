@@ -9,6 +9,7 @@ import { checkMutationGuard } from "./check-context.js";
 import { STATE_DIR } from "./constants.js";
 import { fromUnknown, isNodeError, vispError } from "./errors.js";
 import { ProjectFileSystem } from "./fs.js";
+import { processIdentity } from "./process-identity.js";
 import { err, ok, type Result } from "./result.js";
 
 export const STATE_LOCK_DIRECTORY = `${STATE_DIR}/state/mutation.lock`;
@@ -21,6 +22,9 @@ const ownerSchema = z
     pid: z.number().int().positive(),
     host: z.string().min(1),
     createdAt: z.string().datetime(),
+    processStart: z.string().optional(),
+    bootId: z.string().optional(),
+    pidNamespace: z.string().optional(),
   })
   .strict();
 type Owner = z.infer<typeof ownerSchema>;
@@ -33,6 +37,8 @@ interface Scope {
   active: boolean;
   children: Promise<void>;
 }
+const activeTokens = new Set<string>();
+const writers = new Map<string, Promise<void>>();
 const ownership = new AsyncLocalStorage<ReadonlyMap<string, Scope>>();
 
 /** One mutation owner per canonical worktree, shared by independent CLI/MCP processes. */
@@ -53,9 +59,33 @@ export async function withStateLock<T>(
   let parent = inherited?.get(canonical);
   while (parent && !parent.active) parent = parent.parent;
   if (parent?.lease.active) return enqueueChild(canonical, inherited, parent, operation);
+  if (options.timeoutMs !== undefined)
+    return ownLock(canonical, inherited, operation, options.timeoutMs);
+  const previous = writers.get(canonical);
+  let done!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    done = resolve;
+  });
+  writers.set(canonical, pending);
+  await previous;
+  try {
+    return await ownLock(canonical, inherited, operation, 5000);
+  } finally {
+    done();
+    if (writers.get(canonical) === pending) writers.delete(canonical);
+  }
+}
+
+async function ownLock<T>(
+  canonical: string,
+  inherited: ReadonlyMap<string, Scope> | undefined,
+  operation: () => Promise<Result<T>>,
+  timeoutMs: number,
+): Promise<Result<T>> {
   const files = new ProjectFileSystem(canonical);
-  const acquired = await acquire(files, options.timeoutMs ?? 5_000);
+  const acquired = await acquire(files, timeoutMs);
   if (!acquired.ok) return acquired;
+  activeTokens.add(acquired.value.token);
   const lease: Lease = { active: true };
   const frame: Scope = { lease, active: true, children: Promise.resolve() };
   let result: Result<T>;
@@ -65,6 +95,7 @@ export async function withStateLock<T>(
     lease.active = false;
   }
   const released = await release(files, acquired.value);
+  activeTokens.delete(acquired.value.token);
   return released.ok ? result : released;
 }
 
@@ -132,7 +163,7 @@ export async function inspectStateLock(root: string): Promise<
   if (!exists.value) return ok({ state: "unlocked" });
   const owner = await readOwner(files);
   if (!owner.ok || !owner.value) return ok({ state: "ambiguous" });
-  return ok({ state: ownerState(owner.value), owner: owner.value });
+  return ok({ state: await ownerState(owner.value), owner: owner.value });
 }
 
 async function acquire(files: ProjectFileSystem, timeoutMs: number): Promise<Result<Owner>> {
@@ -141,13 +172,14 @@ async function acquire(files: ProjectFileSystem, timeoutMs: number): Promise<Res
   }
   const owner: Owner = {
     version: 1,
+    ...(await processIdentity(process.pid)),
     token: randomUUID(),
     pid: process.pid,
     host: hostname(),
     createdAt: new Date().toISOString(),
   };
   const deadline = performance.now() + timeoutMs;
-  do {
+  for (;;) {
     const created = await createOwner(files, owner);
     if (!created.ok) return created;
     if (created.value) return ok(owner);
@@ -156,8 +188,12 @@ async function acquire(files: ProjectFileSystem, timeoutMs: number): Promise<Res
     if (abandoned.value) continue;
     if (performance.now() >= deadline) break;
     await delay(Math.min(25, Math.max(1, deadline - performance.now())));
-  } while (performance.now() <= deadline);
-  return busy("Another writer owns the worktree, or its ownership cannot be established");
+  }
+  const current = await readOwner(files);
+  return busy(
+    "Another writer owns the worktree, or its ownership cannot be established",
+    current.ok ? current.value : undefined,
+  );
 }
 
 async function createOwner(files: ProjectFileSystem, owner: Owner): Promise<Result<boolean>> {
@@ -187,8 +223,15 @@ async function readOwner(files: ProjectFileSystem): Promise<Result<Owner | undef
   });
 }
 
-function ownerState(owner: Owner): "active" | "abandoned" | "ambiguous" {
+async function ownerState(owner: Owner): Promise<"active" | "abandoned" | "ambiguous"> {
   if (owner.host !== hostname()) return "ambiguous";
+  const identity = await processIdentity(owner.pid);
+  if (owner.bootId && identity.bootId && owner.bootId !== identity.bootId) return "abandoned";
+  if (owner.pidNamespace && identity.pidNamespace !== owner.pidNamespace) return "ambiguous";
+  if (owner.processStart && identity.processStart && owner.processStart !== identity.processStart)
+    return "abandoned";
+  if (owner.pid === process.pid && !activeTokens.has(owner.token))
+    return owner.pidNamespace ? "abandoned" : "ambiguous";
   try {
     process.kill(owner.pid, 0);
     return "active";
@@ -197,9 +240,31 @@ function ownerState(owner: Owner): "active" | "abandoned" | "ambiguous" {
   }
 }
 
-async function reclaimAbandoned(files: ProjectFileSystem): Promise<Result<boolean>> {
+export async function recoverStateLock(root: string, token: string): Promise<Result<boolean>> {
+  const files = new ProjectFileSystem(root);
+  const guarded = await checkMutationGuard(root);
+  if (guarded) return err(guarded);
   const observed = await readOwner(files);
-  if (!observed.ok || !observed.value || ownerState(observed.value) !== "abandoned")
+  if (!observed.ok) return observed;
+  if (!observed.value || observed.value.token !== token)
+    return busy(
+      "State lock owner changed; inspect it again before confirming recovery",
+      observed.value,
+    );
+  if ((await ownerState(observed.value)) === "active")
+    return busy(
+      "The confirmed owner is still active; cancel that operation before recovering",
+      observed.value,
+    );
+  return reclaimAbandoned(files, token);
+}
+
+async function reclaimAbandoned(
+  files: ProjectFileSystem,
+  confirmedToken?: string,
+): Promise<Result<boolean>> {
+  const observed = await readOwner(files);
+  if (!observed.ok || !observed.value || !(await recoverable(observed.value, confirmedToken)))
     return ok(false);
   const safe = await files.metadata(RECOVERY_DIRECTORY);
   if (!safe.ok) return safe;
@@ -214,7 +279,10 @@ async function reclaimAbandoned(files: ProjectFileSystem): Promise<Result<boolea
     // A second reclaimer must not unlink a new owner's lock after the first succeeds.
     const current = await readOwner(files);
     if (!current.ok) return current;
-    if (current.value?.token !== observed.value.token || ownerState(current.value) !== "abandoned")
+    if (
+      current.value?.token !== observed.value.token ||
+      !(await recoverable(current.value, confirmedToken))
+    )
       return ok(false);
     const removed = await files.removeFile(OWNER_FILE);
     if (!removed.ok) return removed;
@@ -223,6 +291,11 @@ async function reclaimAbandoned(files: ProjectFileSystem): Promise<Result<boolea
   } finally {
     await files.removeDir(RECOVERY_DIRECTORY);
   }
+}
+
+async function recoverable(owner: Owner, confirmedToken?: string) {
+  const state = await ownerState(owner);
+  return state === "abandoned" || (state === "ambiguous" && owner.token === confirmedToken);
 }
 
 async function release(files: ProjectFileSystem, owner: Owner): Promise<Result<void>> {
@@ -238,14 +311,14 @@ async function release(files: ProjectFileSystem, owner: Owner): Promise<Result<v
   return ok(undefined);
 }
 
-function busy(message: string): Result<never> {
+function busy(message: string, owner?: Owner): Result<never> {
   return err(
     vispError("STATE_BUSY", message, {
       recovery:
         "Retain and poll the original host command/session handle; a yielded command may still own this lock. " +
         "Wait for it to finish or cancel that session before retrying. PIDs can repeat across sandboxes; " +
         "do not delete a lock based only on its PID or age. Inspect ownership before recovering an ambiguous lock.",
-      details: { lock: STATE_LOCK_DIRECTORY },
+      details: { lock: STATE_LOCK_DIRECTORY, ...(owner ? { owner } : {}) },
     }),
   );
 }

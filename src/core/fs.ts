@@ -308,6 +308,7 @@ export class ProjectFileSystem {
       const ready = await this.validateMutationTarget(target.value);
       if (!ready.ok) return ready;
       await writeFile(temporary, content, { flag: "wx", mode });
+      await chmodPath(temporary, mode);
       const stillSafe = await this.validateMutationTarget(target.value);
       if (!stillSafe.ok) return stillSafe;
       const safeTemporary = await this.validate(temporary);

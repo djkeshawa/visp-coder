@@ -103,7 +103,7 @@ async function checkStateOwnership(state: WorkspaceState): Promise<Check> {
     recovery:
       ownership.state === "abandoned"
         ? `${PRODUCT_NAME} doctor --fix`
-        : `Inspect ${STATE_LOCK_DIRECTORY}/owner.json and the named host before recovering ownership`,
+        : `Inspect ${STATE_LOCK_DIRECTORY}/owner.json and the named host before recovering ownership${ownership.owner ? `; after confirming it has stopped, run visp doctor --fix --recover-lock ${ownership.owner.token}` : ""}`,
   };
 }
 

@@ -365,9 +365,11 @@ try {
 const envelope = guardEnvelope(stdout);
 
 if (envelope === undefined) {
-  const cause = status === 0 || status === ${EXIT.refused}
+  let guardError;
+  try { guardError = JSON.parse(stdout?.toString() ?? "").error?.message; } catch {}
+  const cause = guardError || (status === 0 || status === ${EXIT.refused}
     ? \`no guard result on stdout — is \\\`${PRODUCT_NAME}\\\` on PATH the right one?\`
-    : \`exit \${status}\`;
+    : \`exit \${status}\`);
   process.stdout.write(
     JSON.stringify(
       deny(
@@ -393,6 +395,8 @@ if (first?.message) {
     reason = \`\${first.message}. No task is authorized right now — run \\\`${PRODUCT_NAME} next\\\` to see what is next, then \\\`${PRODUCT_NAME} work --task <id>\\\`.\`;
   } else if (first.reason === "outside-allowed-files") {
     reason = \`\${first.message}. Authorize the task that owns this file, or widen its allowedFiles — do not work around the refusal.\`;
+  } else if (first.reason === "transaction-pending") {
+    reason = first.message;
   } else {
     reason = \`\${first.message}. This path cannot be written by any task.\`;
   }
