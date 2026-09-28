@@ -3,6 +3,7 @@ import type { ImplementMarker } from "../../../../src/workflow/artifacts/evidenc
 import type { Task } from "../../../../src/workflow/artifacts/tasks.js";
 import { runProductMigrate, updateProductBrief } from "../../../../src/workflow/product/index.js";
 import { sliceDigest } from "../../../../src/workflow/product/model.js";
+import { protectedEnvSnapshot } from "../../../../src/workflow/product/protected-env.js";
 import { authorizationPath, readProductRecord } from "../../../../src/workflow/product/store.js";
 import { productSourceSnapshot } from "../../../../src/workflow/product/subject.js";
 import type { TestWorkspace } from "../../support/workspace.js";
@@ -56,6 +57,8 @@ export async function authorize(
   if (!selected) throw new Error("Guard fixture slice is missing");
   const snapshot = await productSourceSnapshot(state, updated.value);
   if (!snapshot.ok) throw new Error(snapshot.error.message);
+  const env = await protectedEnvSnapshot(state.paths.root);
+  if (!env.ok) throw new Error(env.error.message);
   const written = await state.files.writeJson(authorizationPath(state, marker.feature), {
     version: 2,
     feature: marker.feature,
@@ -64,6 +67,7 @@ export async function authorize(
     root: hashValue(state.paths.root),
     contractDigest: sliceDigest(updated.value, selected),
     baseline: snapshot.value,
+    envBaseline: env.value,
   });
   if (!written.ok) throw new Error(written.error.message);
 }

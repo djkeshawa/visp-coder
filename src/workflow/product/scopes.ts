@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
-import { matchesAny } from "../../core/patterns.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { checkPaths } from "../../orchestrate/guard.js";
 import type { ImplementMarker } from "../artifacts/evidence.js";
+import { resolveRule, ruleContextFor } from "../policy/resolve.js";
 import type { ScopeOptions, WorkspaceState } from "../state.js";
 import { currentHostSession } from "./host-prompts.js";
 import { closedSlice, type ProductBrief, type ProductSlice, sliceDigest } from "./model.js";
+import { changedProtectedEnvFiles } from "./protected-env.js";
 import {
   authorizationPath,
   type ProductRecord,
@@ -24,6 +26,8 @@ export const productAuthorizationSchema = z
     root: z.string(),
     contractDigest: z.string(),
     baseline: z.record(z.string()),
+    blockedPaths: z.array(z.string()).optional(),
+    envBaseline: z.record(z.string()).optional(),
     /** The host session that ran `visp work`, when the host's prompt hook reports one. */
     session: z.string().optional(),
   })
@@ -157,6 +161,38 @@ export async function earlierSessionAuthorization(
   return ok(earlier.value ? auth.value : undefined);
 }
 
+/** Ignored secret-file changes that Git's staged and working-tree lists omit. */
+export async function activeProtectedEnvChanges(
+  workspace: WorkspaceState,
+): Promise<Result<string[]>> {
+  const record = await readProductRecord(workspace);
+  if (!record.ok) return record.error.code === "NO_ACTIVE_FEATURE" ? ok([]) : record;
+  const auth = await readProductAuthorization(workspace, record.value);
+  if (!auth.ok) return auth;
+  if (!auth.value) return ok([]);
+  if (!auth.value.envBaseline)
+    return err(
+      vispError("STAGE_BLOCKED", "Re-authorize this slice to protect ignored environment files", {
+        recovery: `visp work --task ${auth.value.task}`,
+      }),
+    );
+  return changedProtectedEnvFiles(workspace.paths.root, auth.value.envBaseline);
+}
+
+/** Keep write-time blocked rules fixed to the config that granted the slice. */
+export async function activeBlockedPaths(
+  workspace: WorkspaceState,
+): Promise<Result<readonly string[]>> {
+  const record = await readProductRecord(workspace);
+  if (!record.ok)
+    return record.error.code === "NO_ACTIVE_FEATURE"
+      ? ok(workspace.config.workflow.blockedPaths)
+      : record;
+  const auth = await readProductAuthorization(workspace, record.value);
+  if (!auth.ok) return auth;
+  return ok(auth.value?.blockedPaths ?? workspace.config.workflow.blockedPaths);
+}
+
 /** The feature's authorization, when it was granted in an earlier host session. */
 export async function earlierSessionGrant(
   workspace: WorkspaceState,
@@ -198,6 +234,14 @@ export async function checkProductScope(
     );
   const current = await productSourceSnapshot(workspace, record.brief);
   if (!current.ok) return current;
+  if (!auth.value.envBaseline)
+    return err(
+      vispError("STAGE_BLOCKED", "Re-authorize this slice to protect ignored environment files", {
+        recovery: `visp work --task ${slice.id}`,
+      }),
+    );
+  const changedEnv = await changedProtectedEnvFiles(workspace.paths.root, auth.value.envBaseline);
+  if (!changedEnv.ok) return changedEnv;
   const pinned = new Set(
     record.brief.acceptanceBaseline.flatMap((entry) => entry.files.map((file) => file.path)),
   );
@@ -205,16 +249,29 @@ export async function checkProductScope(
     .filter((path) => current.value[path] !== auth.value?.baseline[path])
     // Pinned acceptance files are VISP's, may be pinned mid-slice, and are hash-checked.
     .filter((path) => !pinned.has(path));
-  // The baseline already preserves prior slices and user changes. New changes need this grant.
-  const scopes = [slice];
-  const forbidden = paths.filter(
-    (path) =>
-      matchesAny(path, workspace.config.workflow.blockedPaths) ||
-      scopes.some((entry) => matchesAny(path, entry.scope.forbidden)),
+  paths.push(...changedEnv.value.filter((path) => !paths.includes(path)));
+  const context = ruleContextFor(workspace, {
+    feature: record.brief.feature,
+    task: slice.id,
+    stage: "implement",
+  });
+  const allowedRule = resolveRule(
+    "scope.allowed-files",
+    workspace.policy,
+    workspace.overrides,
+    context,
   );
-  const outside = paths.filter(
-    (path) => !scopes.some((entry) => matchesAny(path, entry.scope.allowed)),
-  );
+  const violations = checkPaths(paths, {
+    markers: [markerForProduct(record.brief, slice, auth.value.createdAt)],
+    blockedPaths: auth.value.blockedPaths ?? workspace.config.workflow.blockedPaths,
+    enforceAllowedFiles: allowedRule.active,
+  });
+  const forbidden = violations
+    .filter((entry) => entry.reason !== "outside-allowed-files")
+    .map((entry) => entry.path);
+  const outside = violations
+    .filter((entry) => entry.reason === "outside-allowed-files")
+    .map((entry) => entry.path);
   if (forbidden.length || outside.length)
     return err(
       // Workers never saw the details and deleted VISP state guessing which change it meant.
@@ -233,11 +290,19 @@ export async function checkProductScope(
       ),
     );
   const limit = workspace.policy.maxChangedFiles ?? workspace.config.workflow.maxChangedFiles;
-  if (paths.length > limit)
+  const limitRule = resolveRule("scope.max-changed-files", workspace.policy, workspace.overrides, {
+    ...context,
+    stage: "review",
+  });
+  if (limitRule.active && paths.length > limit)
     return err(
       vispError(
         "SCOPE_VIOLATION",
         `Changed-file count ${paths.length} exceeds configured limit ${limit}`,
+        {
+          recovery:
+            "Narrow the slice change or record a time-limited scope.max-changed-files override with a reason, then retry visp done.",
+        },
       ),
     );
   return ok(undefined);

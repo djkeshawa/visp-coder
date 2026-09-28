@@ -1,3 +1,4 @@
+import { lstat, readlink } from "node:fs/promises";
 import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { vispError } from "../../core/errors.js";
 import { productIdentityEnvironment } from "../../core/execution-environment.js";
@@ -67,6 +68,16 @@ async function productFileHash(
   path: string,
   budget: InputBudget,
 ): Promise<Result<string>> {
+  const absolute = workspace.paths.absolute(path);
+  const link = await lstat(absolute).catch((cause: NodeJS.ErrnoException) => {
+    if (cause.code === "ENOENT") return undefined;
+    throw cause;
+  });
+  if (link?.isSymbolicLink()) {
+    budget.entries += 1;
+    if (budget.entries > INPUT_LIMITS.entries) return inputLimit(path);
+    return ok(hashValue({ link: await readlink(absolute), mode: link.mode & 0o777 }));
+  }
   const metadata = await workspace.files.readMetadata(path);
   if (!metadata.ok) return metadata;
   if (metadata.value && metadata.value.type !== "file")
