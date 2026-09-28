@@ -93,7 +93,11 @@ process.stdin.on('end',async()=>{
       version: "fixture 1",
       model: "fixture",
     },
-    permissions: { mode: "workspace-write", requireSandbox: false },
+    permissions: {
+      mode: "workspace-write",
+      requireSandbox: false,
+      ...(kind === "claude" ? { allowedTools: ["Read", "Edit", "Write", "Bash"] } : {}),
+    },
     budget: {
       maxDurationMs: 6000,
       maxEstimatedUsd: 1,
