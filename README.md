@@ -24,7 +24,7 @@ visp install --harness codex --dry-run   # preview what will be written
 visp install --harness codex
 ```
 
-`init` writes `visp.yml` and `.visp/`. `install` writes the host's instruction files and `VISP.commands.md`, registers the MCP server, and installs hooks: a Git `pre-commit` scope check for every host; for Claude Code, edit, shell, prompt and Stop hooks in `.claude/settings.json`; for Codex, prompt, shell and Stop hooks in `.codex/hooks.json`, which Codex runs after you trust them once with `/hooks`. Commit the setup before starting feature work. `visp doctor` checks the installation.
+`init` writes `visp.yml` and `.visp/`. `install` writes the host's instruction files and `VISP.commands.md`, registers the MCP server, and installs hooks: a Git `pre-commit` scope check for every host; for Claude Code, edit, shell, prompt and Stop hooks in `.claude/settings.json`; for Codex, prompt, shell and Stop hooks in `.codex/hooks.json`, which Codex runs after you trust them once with `/hooks`. The MCP and hook entries use the installed CLI path, and generated scripts under `.visp/hooks/` are local to each checkout. Commit the setup before starting feature work. `visp doctor` checks the installation. When switching VISP builds, use `visp install --replace-runtime` and restart MCP and host processes using the old build; `--force` only replaces edited files.
 
 ## Quick start
 

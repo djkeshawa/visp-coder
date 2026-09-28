@@ -277,10 +277,21 @@ describe("hook templates", () => {
   it("fails closed on an unchecked active authorization", () => {
     const hook = renderPreCommitHook();
 
-    expect(hook).toContain("command -v visp");
+    expect(hook).toContain("command -v node");
     expect(hook).toContain("implement-allowed");
-    expect(hook).toContain(process.execPath);
+    expect(hook).not.toContain(process.execPath);
     expect(hook).not.toContain("Committing anyway");
+  });
+
+  it("renders the same pre-commit hook under a different Node executable", () => {
+    const original = process.execPath;
+    const first = renderPreCommitHook();
+    try {
+      process.execPath = "/another/node";
+      expect(renderPreCommitHook()).toBe(first);
+    } finally {
+      process.execPath = original;
+    }
   });
 
   /**

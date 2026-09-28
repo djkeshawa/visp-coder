@@ -1,12 +1,16 @@
 import { ok, type Result } from "../core/result.js";
+import { runtimeIdentity } from "../core/version.js";
 
 /** Codex reads project MCP servers from this trusted project configuration. */
 export const CODEX_CONFIG_FILE = ".codex/config.toml";
 
-const CODEX_MCP_ENTRY =
+const CODEX_MCP_ENTRY = `# visp: mcp:start\n[mcp_servers.visp]\ncommand = "node"\nargs = [${JSON.stringify(runtimeIdentity().executable)}, "serve", "--mcp"]\n# visp: mcp:end\n`;
+const LEGACY_CODEX_MCP_ENTRY =
   '# visp: mcp:start\n[mcp_servers.visp]\ncommand = "visp"\nargs = ["serve", "--mcp"]\n# visp: mcp:end\n';
+const MANAGED_CODEX_MCP_ENTRY =
+  /^# visp: mcp:start\n\[mcp_servers\.visp\]\ncommand = "node"\nargs = \["(?:[^"\\]|\\.)+", "serve", "--mcp"\]\n# visp: mcp:end\n$/;
 
-export type CodexRegistrationStatus = "added" | "current" | "customized" | "malformed";
+export type CodexRegistrationStatus = "added" | "current" | "customized" | "replaced" | "malformed";
 
 export interface CodexRegistrationPlan {
   readonly status: CodexRegistrationStatus;
@@ -25,12 +29,14 @@ export interface CodexRegistrationResidue {
  */
 export function planCodexMcpRegistration(
   current: string | undefined,
-  _force: boolean,
+  force: boolean,
 ): Result<CodexRegistrationPlan> {
   if (current === undefined || current.trim() === "") {
     return ok({ status: "added", content: CODEX_MCP_ENTRY });
   }
   if (current === CODEX_MCP_ENTRY) return ok({ status: "current" });
+  if (current === LEGACY_CODEX_MCP_ENTRY || (force && MANAGED_CODEX_MCP_ENTRY.test(current)))
+    return ok({ status: "replaced", content: CODEX_MCP_ENTRY });
   return ok({ status: referencesVisp(current) ? "customized" : "malformed" });
 }
 
@@ -40,7 +46,8 @@ export function planCodexMcpUnregistration(current: string | undefined): {
   readonly content?: string;
 } {
   if (current === undefined || current.trim() === "") return { status: "absent" };
-  if (current === CODEX_MCP_ENTRY) return { status: "removed", content: "" };
+  if (current === CODEX_MCP_ENTRY || current === LEGACY_CODEX_MCP_ENTRY)
+    return { status: "removed", content: "" };
   return referencesVisp(current) ? { status: "customized" } : { status: "absent" };
 }
 
@@ -50,7 +57,8 @@ export function inspectCodexMcpRegistrationResidue(
   if (current === undefined || current.trim() === "") {
     return { exact: false, customized: false, malformed: false };
   }
-  if (current === CODEX_MCP_ENTRY) return { exact: true, customized: false, malformed: false };
+  if (current === CODEX_MCP_ENTRY || current === LEGACY_CODEX_MCP_ENTRY)
+    return { exact: true, customized: false, malformed: false };
   return referencesVisp(current)
     ? { exact: false, customized: true, malformed: false }
     : { exact: false, customized: false, malformed: false };

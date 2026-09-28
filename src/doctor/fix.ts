@@ -40,6 +40,9 @@ export async function applyFixes(
   const failing = new Set(
     checks.filter((check) => check.status !== "ok").map((check) => check.name),
   );
+  const runtimeMismatch = checks.some(
+    (check) => check.name === "installed runtime" && check.status === "fail",
+  );
 
   const enforcement = failing.has("enforcement");
   if (failing.has("file transactions")) {
@@ -55,7 +58,10 @@ export async function applyFixes(
   if (failing.has("authorization markers")) {
     repairs.push(await clearInconsistentAuthorizations(state));
   }
-  if (failing.has("harness assets") || failing.has("harness activation") || enforcement) {
+  if (
+    !runtimeMismatch &&
+    (failing.has("harness assets") || failing.has("harness activation") || enforcement)
+  ) {
     repairs.push(await reinstallAssets(state, enforcement, runtime));
   }
   if (failing.has("repository index")) repairs.push(await rebuildIndex(state));

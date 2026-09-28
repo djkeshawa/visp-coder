@@ -48,14 +48,23 @@ it("a running MCP detects a newly mismatched guard even when package versions ma
       ),
     );
     env.PATH = `${bin}${delimiter}${env.PATH ?? ""}`;
-    async function install(entry: string) {
+    async function install(entry: string, replaceRuntime = false) {
       await promisify(execFile)(
         process.execPath,
-        [entry, "--project", workspace.root, "install", "--hooks", "git", "--json"],
+        [
+          entry,
+          "--project",
+          workspace.root,
+          "install",
+          "--hooks",
+          "git",
+          "--json",
+          ...(replaceRuntime ? ["--replace-runtime"] : []),
+        ],
         { env },
       );
     }
-    await install(join(previous, "cli.js"));
+    await install(join(previous, "cli.js"), true);
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [join(previous, "cli.js"), "--project", workspace.root, "serve", "--mcp"],
@@ -79,7 +88,35 @@ it("a running MCP detects a newly mismatched guard even when package versions ma
       },
     });
     await pointGuardAt(resolve("dist/cli.js"));
-    await install(resolve("dist/cli.js"));
+    const pinned = await readFile(join(workspace.root, ".visp/state/install.json"), "utf8");
+    for (const arguments_ of [
+      ["install", "--force"],
+      ["doctor", "--fix"],
+    ]) {
+      await expect(
+        promisify(execFile)(
+          process.execPath,
+          [resolve("dist/cli.js"), "--project", workspace.root, ...arguments_, "--json"],
+          { env },
+        ),
+      ).rejects.toThrow();
+      expect(await readFile(join(workspace.root, ".visp/state/install.json"), "utf8")).toBe(pinned);
+    }
+    const mismatchedDoctor = await promisify(execFile)(
+      process.execPath,
+      [resolve("dist/cli.js"), "--project", workspace.root, "doctor", "--json"],
+      { env },
+    ).catch((failure: { stdout: string }) => failure);
+    expect(mismatchedDoctor.stdout).toContain("installed assets");
+    expect(JSON.parse(mismatchedDoctor.stdout).data.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "installed runtime", status: "fail" }),
+        expect.objectContaining({ name: "PATH visp", status: "warn" }),
+        expect.objectContaining({ name: "harness assets", status: "unknown" }),
+        expect.objectContaining({ name: "enforcement", status: "unknown" }),
+      ]),
+    );
+    await install(resolve("dist/cli.js"), true);
     const after = await client.callTool({ name: "visp_doctor", arguments: {} });
     expect(after.structuredContent).toMatchObject({
       ok: true,

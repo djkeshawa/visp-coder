@@ -1,4 +1,5 @@
 import { requireRuntimeAgreement } from "../core/runtime-agreement.js";
+import { runtimeIdentity } from "../core/version.js";
 import { readInstallState } from "../harness/install-state.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import type { Check } from "./checks.js";
@@ -7,7 +8,7 @@ import type { Check } from "./checks.js";
 export async function checkInstalledRuntime(state: WorkspaceState): Promise<Check> {
   const name = "installed runtime";
   const recovery =
-    "Choose the intended VISP build, run visp install to refresh project assets, and restart stale MCP/host processes.";
+    "Run the executable recorded in the installed runtime check, or explicitly replace the installation with visp install --replace-runtime and restart MCP/host processes using the old build.";
   const installed = await readInstallState(state.paths, state.files);
   if (!installed.ok) return { name, status: "fail", detail: installed.error.message, recovery };
   const runtime = installed.value?.runtime;
@@ -19,8 +20,14 @@ export async function checkInstalledRuntime(state: WorkspaceState): Promise<Chec
         "No identified installation runtime; product mutations require refreshed installation assets",
       recovery,
     };
-  const agreed = requireRuntimeAgreement(runtime);
-  if (!agreed.ok) return { name, status: "fail", detail: agreed.error.message, recovery };
+  const agreed = requireRuntimeAgreement(runtime, runtimeIdentity(), "installed assets");
+  if (!agreed.ok)
+    return {
+      name,
+      status: "fail",
+      detail: agreed.error.message,
+      recovery: `Run node ${JSON.stringify(runtime.executable)} for this installation, or use its MCP tools. To switch builds, run visp install --replace-runtime and restart stale MCP/host processes.`,
+    };
   return {
     name,
     status: "ok",
