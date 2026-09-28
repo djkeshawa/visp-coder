@@ -46,6 +46,16 @@ export async function allocateFeatureId(root: string, existing: readonly string[
     );
     if (!claimed.ok) return claimed;
     if (claimed.value.exitCode === 0) return ok(id);
+    // Only an existing ref means another allocator won this ordinal. Any other refusal is
+    // Git itself being unwritable, as .git is inside Codex's workspace-write sandbox: the
+    // reservation only guards linked worktrees, so fall back to the local ordinal.
+    const taken = await run(
+      "git",
+      ["show-ref", "--verify", "--quiet", `refs/visp/feature-ids/${id.split("-")[0]}`],
+      { cwd: root },
+    );
+    if (!taken.ok) return taken;
+    if (taken.value.exitCode !== 0) return ok(id);
   }
   return err(
     vispError("COMMAND_FAILED", "Cannot reserve a feature ID; retry when Git ref writers are idle"),

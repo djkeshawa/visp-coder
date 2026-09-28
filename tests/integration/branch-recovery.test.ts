@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { AUTHORIZATION_CHECK } from "../../src/harness/authorization-check.js";
 import { branchFeatures } from "../../src/workflow/product/branch-scope.js";
@@ -74,6 +76,17 @@ it("allocates distinct feature and rule ids on parallel branches", async () => {
   const second = mergeProjectRules([], ["Use spaces"], "001-two", "now").added[0];
   expect(first?.id).not.toBe(second?.id);
   expect(first?.id).toBe(mergeProjectRules([], ["Use tabs"], "001-two", "later").added[0]?.id);
+});
+
+// Codex's workspace-write sandbox keeps .git read-only; every reservation failed there and
+// visp feature reported "Git ref writers busy" 100 times over.
+it("allocates the local id when Git refs cannot be written", async () => {
+  ({ workspace: project } = await productWorkspace());
+  // A file where Git needs the refs/visp directory makes every update-ref fail.
+  await rm(join(project.root, ".git/refs/visp"), { recursive: true, force: true });
+  await writeFile(join(project.root, ".git/refs/visp"), "not a directory\n");
+  const id = await allocateFeatureId(project.root, ["041-earlier"], "Add the next thing");
+  expect(id).toEqual({ ok: true, value: "042-add-the-next-thing" });
 });
 
 it("refuses ambiguous legacy rule removal", async () => {
