@@ -158,6 +158,39 @@ function commandObserved(state: HostStreamState): boolean {
 }
 
 describe("host stream tool observations", () => {
+  it("completes after a transient Codex reconnecting event", async () => {
+    const state = await stateFor("codex", { requiredTools: [] });
+    state.accept(JSON.stringify({ type: "thread.started", thread_id: "session" }));
+    state.accept(JSON.stringify({ type: "error", message: "Reconnecting... 1/5" }));
+    state.accept(
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }),
+    );
+    state.finish({ exitCode: 0, reason: "exited", stderr: "" });
+    expect(state.terminal).toBe("completed");
+    expect(state.diagnostics).not.toContain("Host emitted more than one terminal event");
+  });
+
+  it("accepts auxiliary Claude usage when the initialized primary model matches", async () => {
+    const state = await stateFor("claude", { requiredTools: [] });
+    state.accept(
+      JSON.stringify({ type: "system", subtype: "init", session_id: "session", model: "small" }),
+    );
+    state.accept(
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        total_cost_usd: 0.02,
+        modelUsage: {
+          small: { inputTokens: 1, outputTokens: 1 },
+          auxiliary: { inputTokens: 1, outputTokens: 1 },
+        },
+      }),
+    );
+    state.finish({ exitCode: 0, reason: "exited", stderr: "" });
+    expect(state.diagnostics).not.toContain("Usage includes an unpinned model: auxiliary");
+    expect(state.estimatedUsd).toBe(0.02);
+  });
   it("does not count the Claude initialization inventory", async () => {
     const state = await stateFor();
     state.accept(
@@ -290,7 +323,6 @@ describe("host stream tool observations", () => {
     "visp next --json > result.json",
     "cd /repo && visp next --json",
     "VISP_MODE=1 visp next --json",
-    "/bin/bash -c 'visp next --json'",
   ])("does not credit a false command match: %s", async (command) => {
     const state = await stateFor("claude", {
       requiredTools: [],

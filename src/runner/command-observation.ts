@@ -1,3 +1,4 @@
+import { basename, isAbsolute } from "node:path";
 import { parseCommand } from "../core/exec.js";
 
 const maxRawCommandLength = 65_536;
@@ -25,7 +26,7 @@ function hasNonAsciiWhitespace(value: string): boolean {
 /**
  * Parses a host-reported command only when it has one unambiguous argv form.
  * Shell syntax is deliberately rejected even when it appears inside quotes;
- * the one supported wrapper is the native `/bin/bash -lc 'command'` form.
+ * shell wrappers are unwrapped only for bash, zsh, or sh with -c or -lc.
  */
 export function parseObservedCommand(value: unknown): readonly string[] | undefined {
   if (
@@ -46,7 +47,13 @@ export function parseObservedCommand(value: unknown): readonly string[] | undefi
     )
   )
     return undefined;
-  if (parsed.value[0] === "/bin/bash" && parsed.value[1] === "-lc") {
+  const executable = parsed.value[0];
+  if (
+    executable &&
+    isAbsolute(executable) &&
+    ["bash", "zsh", "sh"].includes(basename(executable)) &&
+    ["-c", "-lc"].includes(parsed.value[1] ?? "")
+  ) {
     if (parsed.value.length !== 3) return undefined;
     const wrappedCommand = parsed.value[2];
     if (wrappedCommand === undefined) return undefined;
