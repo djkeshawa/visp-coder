@@ -48,6 +48,7 @@ describe("runner host adapters", () => {
         order: 0,
       },
     } as const;
+    expect(() => runnerSpecSchema.parse(base)).toThrow(/allowedTools/i);
     expect(
       runnerSpecSchema.parse({
         ...base,
@@ -90,7 +91,11 @@ describe("runner host adapters", () => {
         version: "1",
         model: "small",
       },
-      permissions: { mode: "workspace-write", requireSandbox: false },
+      permissions: {
+        mode: "workspace-write",
+        requireSandbox: false,
+        allowedTools: ["Read", "Bash"],
+      },
       budget: {
         maxDurationMs: 1000,
         maxEstimatedUsd: 1,
@@ -279,6 +284,25 @@ describe("runner host adapters", () => {
     ).toThrow(/cached/i);
   });
 
+  it("keeps resumed Codex turns inside the pinned sandbox and ignores user configuration", () => {
+    const args = adapterFor("codex").arguments(
+      {
+        host: { model: "small" },
+        permissions: { mode: "workspace-write" },
+      } as never,
+      "session-1",
+    );
+    expect(args).toContain("--ignore-user-config");
+    expect(args).toContain('sandbox_mode="workspace-write"');
+    expect(args).toContain('approval_policy="never"');
+  });
+
+  it("treats transient Codex error rows as progress", () => {
+    expect(
+      adapterFor("codex").parse({ type: "error", message: "Reconnecting... 1/5" }, "small"),
+    ).toMatchObject({ type: "progress" });
+  });
+
   it("uses per-model Claude totals instead of adding cumulative assistant usage", () => {
     const adapter = adapterFor("claude");
     expect(
@@ -395,6 +419,15 @@ describe("runner host adapters", () => {
     ).toEqual([{ id: "tool-2", outcome: "failed" }]);
   });
 
+  it("records the Claude MCP inventory from the init event", () => {
+    expect(
+      adapterFor("claude").parse(
+        { type: "system", subtype: "init", session_id: "session", mcp_servers: ["study-server"] },
+        "small",
+      ).mcpServers,
+    ).toEqual(["study-server"]);
+  });
+
   it("normalizes Claude Bash command lifecycle observations", () => {
     const adapter = adapterFor("claude");
     expect(
@@ -444,6 +477,17 @@ describe("runner host adapters", () => {
     "rejects shell comments in observed commands, including quoted markers: %s",
     (command) => {
       expect(parseObservedCommand(command)).toBeUndefined();
+    },
+  );
+
+  it.each(["/bin/zsh -lc", "/usr/bin/bash -c", "/usr/bin/sh -lc"])(
+    "unwraps safe shell commands from %s",
+    (shell) => {
+      expect(parseObservedCommand(`${shell} 'visp next --json'`)).toEqual([
+        "visp",
+        "next",
+        "--json",
+      ]);
     },
   );
 
@@ -508,9 +552,17 @@ describe("runner host adapters", () => {
       host: { kind: "claude", model: "small" },
       permissions: { mode: "workspace-write" },
       budget: { maxEstimatedUsd: 1 },
-      harness: { requiredTools: ["mcp__visp__visp_next"] },
+      harness: { files: [], requiredTools: ["mcp__visp__visp_next"] },
     };
     expect(adapterFor("claude").arguments(spec as never)).not.toContain("--allowedTools");
+    expect(adapterFor("claude").arguments(spec as never)).toContain("--strict-mcp-config");
+    const pinned = adapterFor("claude").arguments({
+      ...spec,
+      harness: { files: [{ path: ".mcp.json", sha256: "a".repeat(64) }] },
+    } as never);
+    expect(
+      pinned.slice(pinned.indexOf("--mcp-config"), pinned.indexOf("--mcp-config") + 2),
+    ).toEqual(["--mcp-config", ".mcp.json"]);
     expect(
       adapterFor("claude")
         .arguments({

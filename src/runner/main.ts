@@ -29,7 +29,7 @@ import {
   inspectEvaluation,
 } from "./evaluator.js";
 import { prepareReviewCalibration } from "./review-calibration.js";
-import { inspectRun, runExperiment } from "./run.js";
+import { inspectRun, runExperiment, summarizeRun } from "./run.js";
 
 async function jsonFile(path: string): Promise<unknown> {
   const bytes = await readFile(path);
@@ -96,7 +96,11 @@ export function buildRunnerProgram(signal?: AbortSignal): Command {
   program
     .command("inspect")
     .argument("<directory>")
-    .action(async (directory: string) => print(await inspectRun(directory)));
+    .option("--full", "Print the complete manifest, result, and snapshot")
+    .action(async (directory: string, options: { full?: boolean }) => {
+      const run = await inspectRun(directory);
+      print(options.full ? run : summarizeRun(run));
+    });
   program
     .command("evaluate")
     .requiredOption("--run <directory>")

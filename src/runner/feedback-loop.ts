@@ -17,6 +17,7 @@ interface LoopOptions {
   readonly journal: EventJournal;
   readonly signal?: AbortSignal;
   readonly sessionId?: string;
+  readonly hostExecutableRealpath: string;
 }
 type LoopResult = HostTurnResult & { feedbackLoop: FeedbackLoopSummary };
 

@@ -162,6 +162,17 @@ export const runnerSpecSchema = z
         path: ["permissions", "allowedTools"],
       });
     }
+    if (
+      spec.host.kind === "claude" &&
+      spec.permissions.mode === "workspace-write" &&
+      !spec.permissions.allowedTools?.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Claude workspace-write runs require allowedTools because dontAsk denies unapproved tools",
+        path: ["permissions", "allowedTools"],
+      });
     if (spec.permissions.mode === "read-only" && spec.permissions.allowedTools) {
       const readOnlyTools = new Set(["Read", "Glob", "Grep"]);
       if (spec.permissions.allowedTools.some((tool) => !readOnlyTools.has(tool)))
@@ -234,6 +245,7 @@ export interface HostEvent {
   readonly observedTools?: readonly string[];
   readonly observedHooks?: readonly string[];
   readonly reportedModel?: string;
+  readonly mcpServers?: readonly string[];
   readonly toolCalls?: readonly {
     readonly id: string;
     readonly name?: string;
