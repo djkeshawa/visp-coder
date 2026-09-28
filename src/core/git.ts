@@ -1,5 +1,7 @@
 import { type VispError, vispError } from "./errors.js";
 import { run } from "./exec.js";
+import { ProjectFileSystem } from "./fs.js";
+import { flaggedSourcePaths, headSourceObjects, workingSourceObject } from "./git-source.js";
 import { err, ok, type Result } from "./result.js";
 
 export interface ChangedFile {
@@ -133,7 +135,7 @@ export async function committedChangesSince(
     return err(vispError("ARTIFACT_INVALID", "Invalid authorization commit"));
   const changed = await run(
     "git",
-    ["diff", "--name-only", "-z", "--no-renames", reference, "HEAD", "--"],
+    ["diff", "--name-status", "-z", "--no-renames", reference, "HEAD", "--"],
     { cwd, env: GIT_ENV },
   );
   if (!changed.ok) return changed;
@@ -159,12 +161,47 @@ export async function committedChangesSince(
   if (untracked.value.exitCode !== 0)
     return err(vispError("COMMAND_FAILED", "Could not list untracked files"));
   const dirty = new Set([...local.value.stdout.split("\0"), ...untracked.value.stdout.split("\0")]);
+  const changes = parseNameStatus(changed.value.stdout);
+  const flags = await flaggedSourcePaths(cwd);
+  if (!flags.ok) return flags;
+  const candidates = changes.filter((file) => !dirty.has(file.path));
+  const uncertain = candidates.filter(
+    (file) => file.status === "deleted" || flags.value.has(file.path),
+  );
+  if (uncertain.length) {
+    const observed = await matchingCommittedPaths(
+      cwd,
+      uncertain.map((file) => file.path),
+    );
+    if (!observed.ok) return observed;
+    for (const file of uncertain.filter((file) => !observed.value.has(file.path)))
+      dirty.add(file.path);
+  }
   return ok(
-    changed.value.stdout
-      .split("\0")
-      .filter((path) => path && !dirty.has(path))
+    candidates
+      .map((file) => file.path)
+      .filter((path) => !dirty.has(path))
       .sort(),
   );
+}
+
+async function matchingCommittedPaths(cwd: string, paths: string[]): Promise<Result<Set<string>>> {
+  const head = await headSourceObjects(cwd, paths);
+  if (!head.ok) return head;
+  const files = new ProjectFileSystem(cwd);
+  const matching = new Set<string>();
+  for (const path of paths) {
+    const expected = head.value.get(path);
+    const current = await workingSourceObject(
+      files,
+      path,
+      expected?.object.length === 64 ? "sha256" : "sha1",
+    );
+    if (!current.ok) return current;
+    if (current.value?.mode === expected?.mode && current.value?.object === expected?.object)
+      matching.add(path);
+  }
+  return ok(matching);
 }
 
 /** Files changed in the working tree, including untracked files. */

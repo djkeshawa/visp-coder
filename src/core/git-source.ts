@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { vispError } from "./errors.js";
 import { run } from "./exec.js";
+import type { ProjectFileSystem } from "./fs.js";
 import { err, ok, type Result } from "./result.js";
 
 export interface GitSourceEntry {
@@ -34,12 +36,9 @@ export async function repositorySourceObjects(root: string) {
   const changed = await gitOutput(root, ["diff-files", "--name-only", "--no-renames", "-z", "--"]);
   if (!changed.ok) return changed;
   for (const path of changed.value.split("\0")) if (path) dirty.add(path);
-  // Git may hide edits behind these index flags; they are not an evidence exemption.
-  const flags = await gitOutput(root, ["ls-files", "-v", "-z"]);
+  const flags = await flaggedSourcePaths(root);
   if (!flags.ok) return flags;
-  for (const line of flags.value.split("\0")) {
-    if (/^[a-zS] /.test(line)) dirty.add(line.slice(2));
-  }
+  for (const path of flags.value) dirty.add(path);
   return ok({ entries, dirty });
 }
 
@@ -47,4 +46,64 @@ export async function repositorySourceObjects(root: string) {
 export async function workingFileObject(root: string, path: string): Promise<Result<string>> {
   const result = await gitOutput(root, ["hash-object", "--no-filters", "--", path]);
   return result.ok ? ok(result.value.trim()) : result;
+}
+
+/** Git index flags are not proof that a working file is unchanged. */
+export async function flaggedSourcePaths(root: string): Promise<Result<Set<string>>> {
+  const flags = await gitOutput(root, ["ls-files", "-v", "-z"]);
+  if (!flags.ok) return flags;
+  return ok(
+    new Set(
+      flags.value
+        .split("\0")
+        .filter((line) => /^[a-zS] /.test(line))
+        .map((line) => line.slice(2)),
+    ),
+  );
+}
+
+export async function headSourceObjects(
+  root: string,
+  paths: string[],
+): Promise<Result<Map<string, GitSourceEntry>>> {
+  const tree = await gitOutput(root, [
+    "ls-tree",
+    "-rz",
+    "HEAD",
+    "--",
+    ...paths.map((path) => `:(literal)${path}`),
+  ]);
+  if (!tree.ok) return tree;
+  const entries = new Map<string, GitSourceEntry>();
+  for (const line of tree.value.split("\0")) {
+    const match = /^(\d+) blob ([a-f0-9]+)\t([\s\S]+)$/.exec(line);
+    if (match?.[1] && match[2] && match[3])
+      entries.set(match[3], { mode: match[1], object: match[2] });
+  }
+  return ok(entries);
+}
+
+export async function workingSourceObject(
+  files: ProjectFileSystem,
+  path: string,
+  algorithm: "sha1" | "sha256",
+): Promise<Result<GitSourceEntry | undefined>> {
+  const link = await files.readSymbolicLink(path);
+  if (!link.ok) return link;
+  if (link.value !== undefined) {
+    const object = createHash(algorithm)
+      .update(`blob ${link.value.length}\0`)
+      .update(link.value)
+      .digest("hex");
+    return ok({ mode: "120000", object });
+  }
+  const metadata = await files.readMetadata(path);
+  if (!metadata.ok) return metadata;
+  if (!metadata.value) return ok(undefined);
+  if (metadata.value.type !== "file")
+    return err(vispError("UNSUPPORTED", `Unsupported source entry: ${path}`));
+  const object = await workingFileObject(files.root, path);
+  return object.ok
+    ? ok({ mode: metadata.value.mode & 0o111 ? "100755" : "100644", object: object.value })
+    : object;
 }

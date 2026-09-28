@@ -60,3 +60,28 @@ it("excludes committed paths from the changed-file limit", async () => {
   const limited = { ...state, policy: { ...state.policy, maxChangedFiles: 1 } };
   expect(await checkProductScope(limited, record, slice)).toMatchObject({ ok: true });
 });
+
+it.each(["--assume-unchanged", "--skip-worktree"])(
+  "does not exempt a committed path with a local edit hidden by %s",
+  async (flag) => {
+    const { state, record, slice } = await prepare();
+    setup.workspace.git("update-index", flag, "README.md");
+    await setup.workspace.write("README.md", "Hidden local edit over upstream\n");
+    expect(await checkProductScope(state, record, slice)).toMatchObject({
+      ok: false,
+      error: { details: { outside: ["README.md"] } },
+    });
+  },
+);
+
+it.each(["--assume-unchanged", "--skip-worktree"])(
+  "still exempts unchanged incoming content marked %s",
+  async (flag) => {
+    const { state, record, slice } = await prepare();
+    setup.workspace.git("update-index", flag, "README.md");
+    expect(await checkProductScope(state, record, slice)).toMatchObject({
+      ok: true,
+      value: { committedChanges: ["README.md", "src/other.mjs"] },
+    });
+  },
+);
