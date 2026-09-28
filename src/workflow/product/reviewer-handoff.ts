@@ -132,7 +132,9 @@ export function independentReviewGaps(gaps: readonly string[]) {
 
 /** Follow-up questions retain failures without replaying approval history or the actor's diagnosis. */
 function repairQuestions(bundle: ReturnType<typeof productReviewerContext>) {
-  const pending = bundle.feedbackPlan.findings.filter((finding) => finding.phase === "product");
+  const pending = bundle.feedbackPlan.findings.filter(
+    (finding) => finding.required && finding.phase === "product",
+  );
   if (!pending.length) return {};
   return {
     repairQuestions: pending.map(

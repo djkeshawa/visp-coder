@@ -131,7 +131,7 @@ function callDeadline(options: ProductSelection, waitMs: number) {
 }
 
 /**
- * After a review with no failed assessment and no open finding, another review of a
+ * After a review with no failed assessment and no required open finding, another review of a
  * middle slice rarely found anything in weak-worker runs and cost 1–2 minutes each.
  * The slice that completes the feature is always reviewed.
  */
@@ -147,7 +147,7 @@ async function reviewNotNeeded(
     reviewed: false,
     findings: [],
     reason:
-      "The previous independent review found no problems; the next review runs when the last slice is done",
+      "The previous independent review found no required problems; the next review runs when the last slice is done",
   };
 }
 
@@ -158,7 +158,7 @@ export function skippableReview(record: ProductRecord, task: string): boolean {
   if (!last?.reviewer?.model) return false;
   const clean =
     last.assessments.every((assessment) => assessment.status !== "failed") &&
-    !outstandingFeedback(record).some((finding) => finding.phase === "product");
+    !outstandingFeedback(record).some((finding) => finding.required && finding.phase === "product");
   const completesFeature = brief.slices.every(
     (slice) => slice.id === task || closedSlice(state.slices[slice.id]?.status),
   );

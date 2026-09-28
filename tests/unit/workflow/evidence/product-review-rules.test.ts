@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { skippableReview } from "../../../../src/workflow/product/done-review.js";
 import { reviewerVerifiedRepair } from "../../../../src/workflow/product/feedback.js";
+import { CRITIC_INSTRUCTIONS } from "../../../../src/workflow/product/review-instructions.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 
 function record(
@@ -30,6 +31,40 @@ it("skips a middle slice's review after a clean one, never the slice completing 
   expect(skippableReview(record("failed", open), "T002")).toBe(false);
   const last = { T001: "closed", T002: "in-progress" } as const;
   expect(skippableReview(record("satisfied", last), "T002")).toBe(false);
+});
+
+it("sweeps stated rules and ordinary variants before spending findings on unstated limits", () => {
+  expect(CRITIC_INSTRUCTIONS).toContain("every stated rule one by one");
+  expect(CRITIC_INSTRUCTIONS).toContain("concrete input");
+  expect(CRITIC_INSTRUCTIONS).toContain("whitespace-only lines");
+  expect(CRITIC_INSTRUCTIONS).toContain("empty cells inside ranges");
+  expect(CRITIC_INSTRUCTIONS).toContain("sign and zero formatting");
+  expect(CRITIC_INSTRUCTIONS).toContain("required: false");
+  expect(CRITIC_INSTRUCTIONS).toContain("recursion depth");
+  expect(CRITIC_INSTRUCTIONS).toContain("Do not fail an outcome solely for advisory findings");
+});
+
+it.each([false, true])("only required findings prevent skipping middle reviews: %s", (required) => {
+  const current = record("satisfied", { T001: "closed", T002: "in-progress", T003: "pending" });
+  const review = current.state.reviews[0];
+  if (!review) throw new Error("Missing review");
+  review.feedback = {
+    phase: "product",
+    summary: "Review",
+    dimensions: [],
+    resolutions: [],
+    findings: [
+      {
+        dimension: "functional",
+        problem: "Extreme input",
+        nextCheck: "Try a huge number",
+        outcomes: [],
+        required,
+        evidence: [],
+      },
+    ],
+  };
+  expect(skippableReview(current, "T002")).toBe(!required);
 });
 
 // Workers repair before anyone records a failing reproduction.
