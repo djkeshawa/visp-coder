@@ -1,10 +1,7 @@
 import { resolveCriticPolicy } from "../../config/critic-defaults.js";
 import type { RiskLevel } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
-import {
-  applyFileTransaction,
-  type FileMutation,
-} from "../../core/file-transaction.js";
+import { applyFileTransaction, type FileMutation } from "../../core/file-transaction.js";
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
@@ -446,6 +443,15 @@ async function updateProductBriefLocked(
   const saved = await applyFileTransaction(workspace.paths.root, "update-product-brief", [
     ...recordMutations(workspace, previous, brief, state),
     ...critic.value,
+    ...(auth.value && !validAuthorization(auth.value)
+      ? [
+          {
+            kind: "remove" as const,
+            path: authorizationPath(workspace, brief.feature),
+            expectedBefore: { existed: true as const, hash: sha256(auth.value) },
+          },
+        ]
+      : []),
   ]);
   return saved.ok
     ? ok(
@@ -631,6 +637,14 @@ function authorizationStillApplies(content: string | undefined, state: ProductSt
       parsed.data.feature === state.feature &&
       state.slices[parsed.data.task]?.contractDigest === parsed.data.contractDigest
     );
+  } catch {
+    return false;
+  }
+}
+
+function validAuthorization(content: string): boolean {
+  try {
+    return productAuthorizationSchema.safeParse(JSON.parse(content)).success;
   } catch {
     return false;
   }
