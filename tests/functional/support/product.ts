@@ -1,4 +1,5 @@
 import { parse, stringify } from "yaml";
+import { hashValue } from "../../../src/core/hash.js";
 import type { ProductBrief } from "../../../src/workflow/product/model.js";
 import { TestProject } from "./project.js";
 
@@ -12,16 +13,30 @@ export function succeeded(project: TestProject, ...args: string[]): string {
   return result.stdout;
 }
 
+interface ProductProjectOptions {
+  goal?: string;
+  files?: Record<string, string>;
+  definition?: Record<string, unknown>;
+  allowed?: string[];
+  forbidden?: string[];
+}
+
 /** An actual installed project and authored brief, ready for work authorization. */
 export async function productProject(
-  options: {
-    goal?: string;
-    files?: Record<string, string>;
-    definition?: Record<string, unknown>;
-    allowed?: string[];
-    forbidden?: string[];
-  } = {},
+  options: ProductProjectOptions = {},
 ): Promise<{ project: TestProject; feature: string }> {
+  // Reaching this state takes a dozen CLI calls, so each test file builds it once and copies it.
+  const { project, value } = await TestProject.cached(hashValue(options), async () => {
+    const built = await buildProductProject(options);
+    return { project: built.project, value: built.feature };
+  });
+  return { project, feature: value };
+}
+
+async function buildProductProject(options: ProductProjectOptions): Promise<{
+  project: TestProject;
+  feature: string;
+}> {
   const project = await TestProject.create(
     options.files ?? { "src/value.mjs": VALUE_SOURCE, "tests/value.test.mjs": VALUE_TEST },
   );

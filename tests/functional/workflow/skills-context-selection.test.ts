@@ -8,7 +8,12 @@ describe("learned skill context selection", () => {
   let activeFeature: string;
 
   beforeEach(async () => {
-    project = await TestProject.create({
+    // Setup is a dozen CLI calls, so it is built once per file and each test gets a copy.
+    ({ project, value: activeFeature } = await TestProject.cached("skills-context", buildFixture));
+  });
+
+  async function buildFixture() {
+    const project = await TestProject.create({
       "src/auth/login.ts": "export const login = () => null;\n",
       "src/billing/invoice.ts": "export const invoice = () => null;\n",
     });
@@ -45,7 +50,7 @@ describe("learned skill context selection", () => {
       ],
     }));
     const created = project.json<{ brief: { feature: string } }>("feature", "Active skill context");
-    activeFeature = created.envelope.data?.brief.feature ?? "";
+    const activeFeature = created.envelope.data?.brief.feature ?? "";
     expect(created.result.exitCode, created.result.stdout).toBe(0);
     // These fixtures exercise context selection; critic scheduling has dedicated coverage.
     expect(project.run("critic", "--off").exitCode).toBe(0);
@@ -71,7 +76,8 @@ describe("learned skill context selection", () => {
         },
       ],
     });
-  });
+    return { project, value: activeFeature };
+  }
 
   function taskShape(id: string) {
     return {

@@ -6,7 +6,12 @@ describe("portable learned skills", () => {
   const feature = "001-scoped-change";
 
   beforeEach(async () => {
-    project = await TestProject.create({
+    // Setup is a dozen CLI calls, so it is built once per file and each test gets a copy.
+    ({ project } = await TestProject.cached("skills-portability", buildFixture));
+  });
+
+  async function buildFixture() {
+    const project = await TestProject.create({
       "src/auth/login.ts": "export const login = () => null;\n",
       "src/billing/invoice.ts": "export const invoice = () => null;\n",
     });
@@ -42,7 +47,9 @@ describe("portable learned skills", () => {
         },
       ],
     }));
-  });
+
+    return { project, value: null };
+  }
 
   function taskShape(id: string) {
     return {

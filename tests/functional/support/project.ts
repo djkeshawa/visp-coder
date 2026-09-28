@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -15,6 +16,12 @@ export interface RunResult {
   readonly stderr: string;
   readonly exitCode: number;
 }
+
+const templates = new Map<string, Promise<{ project: TestProject; value: unknown }>>();
+const templateRoots = new Set<string>();
+process.once("exit", () => {
+  for (const root of templateRoots) rmSync(root, { recursive: true, force: true });
+});
 
 export class TestProject {
   private constructor(readonly root: string) {}
@@ -49,6 +56,29 @@ export class TestProject {
     await project.installShim();
 
     return project;
+  }
+
+  /**
+   * A project that needs many CLI calls to reach a starting state is built once
+   * per test file as a template; each call gets a private copy of the directory
+   * and a structured clone of `value`, so tests still share no state. `build`
+   * must not depend on the project's own path, and `value` must be plain data.
+   */
+  static async cached<T>(
+    key: string,
+    build: () => Promise<{ project: TestProject; value: T }>,
+  ): Promise<{ project: TestProject; value: T }> {
+    let template = templates.get(key);
+    if (!template) {
+      template = build();
+      templates.set(key, template);
+      template.catch(() => templates.delete(key));
+    }
+    const built = await template;
+    templateRoots.add(built.project.root);
+    const root = await mkdtemp(join(tmpdir(), "visp-functional-"));
+    await cp(built.project.root, root, { recursive: true, preserveTimestamps: true });
+    return { project: new TestProject(root), value: structuredClone(built.value) as T };
   }
 
   async write(path: string, content: string): Promise<void> {
