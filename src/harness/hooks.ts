@@ -17,7 +17,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 13;
+export const HOOK_TEMPLATE_VERSION = 14;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -25,6 +25,7 @@ export const HOOK_TEMPLATE_VERSION = 13;
  * can still be prevented rather than merely reported.
  */
 export function renderPreToolUseHook(): string {
+  const cli = JSON.stringify(runtimeIdentity().executable);
   return `#!/usr/bin/env node
 // ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 // Refuses edits outside the active task's declared scope.
@@ -33,6 +34,8 @@ export function renderPreToolUseHook(): string {
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
+
+const cli = ${cli};
 
 const ALLOW = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } };
 
@@ -95,7 +98,7 @@ if (input?.hook_event_name === "Stop") {
     if (!status.activeFeature || !recent) process.exit(0);
     const envelope = JSON.parse(
       // Unselected, so a later session's untaken request is sent to a feature of its own.
-      execFileSync("${PRODUCT_NAME}", ["next", "--json"], {
+      execFileSync(process.execPath, [cli, "next", "--json"], {
         cwd: root,
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 170000,
@@ -352,7 +355,7 @@ let stdout;
 try {
   const asking =
     typeof input?.session_id === "string" && input.session_id ? ["--session", input.session_id] : [];
-  stdout = execFileSync("${PRODUCT_NAME}", ["guard", "--path", path, "--json", ...asking], {
+  stdout = execFileSync(process.execPath, [cli, "guard", "--path", path, "--json", ...asking], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -365,8 +368,19 @@ try {
 const envelope = guardEnvelope(stdout);
 
 if (envelope === undefined) {
+  let authorization = "unknown";
+  try {
+    authorization = execFileSync(process.execPath, ["-e", ${JSON.stringify(AUTHORIZATION_CHECK)}], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim();
+  } catch {}
+  if (authorization === "inactive") {
+    process.stdout.write(JSON.stringify(ALLOW));
+    process.exit(0);
+  }
   const cause = status === 0 || status === ${EXIT.refused}
-    ? \`no guard result on stdout — is \\\`${PRODUCT_NAME}\\\` on PATH the right one?\`
+    ? \`no guard result on stdout — is the installed VISP CLI intact?\`
     : \`exit \${status}\`;
   process.stdout.write(
     JSON.stringify(
@@ -421,7 +435,7 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
 
 /** Pre-commit hook: the last checkpoint before out-of-scope work is recorded. */
 export function renderPreCommitHook(): string {
-  const installedNode = shellLiteral(process.execPath);
+  const installedCli = shellLiteral(runtimeIdentity().executable);
   return `#!/bin/sh
 # ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 # Refuses a commit whose staged files fall outside the active task's scope.
@@ -434,9 +448,6 @@ has_authorization=0
 # an interrupted older closure. A malformed marker or graph stays conservative:
 # without enough state to prove it stale, the hook treats it as active.
 node_runtime=$(command -v node 2>/dev/null)
-if [ -z "$node_runtime" ] && [ -x ${installedNode} ]; then
-  node_runtime=${installedNode}
-fi
 if [ -n "$node_runtime" ]; then
   authorization_state=$("$node_runtime" - "$authorization_dir" <<'VISP_AUTHORIZATION_CHECK' 2>/dev/null
 ${AUTHORIZATION_CHECK}
@@ -470,8 +481,8 @@ unchecked() {
   return 0
 }
 
-if ! command -v ${PRODUCT_NAME} >/dev/null 2>&1; then
-  unchecked "${PRODUCT_NAME} is not on PATH"
+if [ -z "$node_runtime" ]; then
+  unchecked "node is not on PATH"
   exit $?
 fi
 
@@ -479,13 +490,12 @@ fi
 # ordinary commits are left alone.
 # --include-done: work from a task visp already closed is still in the tree and
 # must remain committable, or finishing a task would strand it.
-output=$(${PRODUCT_NAME} guard --staged --if-authorized --include-done --json 2>/dev/null)
+output=$("$node_runtime" ${installedCli} guard --staged --if-authorized --include-done --json 2>/dev/null)
 
-# The exit code alone cannot be trusted. Another program named \`${PRODUCT_NAME}\` on
-# PATH — an older release, say — exits 1 for its own reasons, and 1 is also the
-# refusal code. Only a parseable guard envelope proves this check actually ran,
+# The exit code alone cannot be trusted. A stale or corrupted CLI might also
+# exit 1, the refusal code. Only a parseable guard envelope proves this check ran,
 # so that is what the decision reads.
-verdict=$(printf '%s' "$output" | node -e '
+verdict=$(printf '%s' "$output" | "$node_runtime" -e '
 let raw = "";
 process.stdin.on("data", (chunk) => { raw += chunk; });
 process.stdin.on("end", () => {

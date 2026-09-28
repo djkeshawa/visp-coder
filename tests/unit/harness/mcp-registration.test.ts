@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import {
   CODEX_CONFIG_FILE,
   inspectMcpRegistrationResidue,
@@ -41,8 +42,8 @@ describe("registerMcpServer", () => {
 
     const config = await readConfig();
     expect(config.mcpServers?.[MCP_SERVER_NAME]).toEqual({
-      command: "visp",
-      args: ["serve", "--mcp"],
+      command: "node",
+      args: [runtimeIdentity().executable, "serve", "--mcp"],
     });
   });
 
@@ -72,6 +73,19 @@ describe("registerMcpServer", () => {
     await registerMcpServer(root, false);
     const second = await registerMcpServer(root, false);
     expect(second.ok && second.value).toBe("current");
+  });
+
+  it("upgrades a legacy PATH registration to the installed CLI", async () => {
+    await writeFile(
+      join(root, MCP_CONFIG_FILE),
+      JSON.stringify({ mcpServers: { visp: { command: "visp", args: ["serve", "--mcp"] } } }),
+    );
+    const result = await registerMcpServer(root, false);
+    expect(result.ok && result.value).toBe("replaced");
+    expect((await readConfig()).mcpServers?.visp).toMatchObject({
+      command: "node",
+      args: [runtimeIdentity().executable, "serve", "--mcp"],
+    });
   });
 
   it("leaves a customised visp entry alone unless forced", async () => {
@@ -131,7 +145,7 @@ describe("OpenCode MCP registration", () => {
     const config = await readConfig(OPENCODE_CONFIG_FILE);
     expect(config.mcp?.[MCP_SERVER_NAME]).toEqual({
       type: "local",
-      command: ["visp", "serve", "--mcp"],
+      command: ["node", runtimeIdentity().executable, "serve", "--mcp"],
     });
     await expect(readFile(join(root, MCP_CONFIG_FILE), "utf8")).rejects.toThrow();
   });
@@ -199,6 +213,18 @@ describe("Codex MCP registration", () => {
     expect(mcpConfigFile("codex")).toBe(CODEX_CONFIG_FILE);
     expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toContain("[mcp_servers.visp]");
     await expect(readFile(join(root, MCP_CONFIG_FILE), "utf8")).rejects.toThrow();
+  });
+
+  it("upgrades the legacy generated block without rewriting other TOML", async () => {
+    await writeFile(
+      join(root, CODEX_CONFIG_FILE),
+      '# visp: mcp:start\n[mcp_servers.visp]\ncommand = "visp"\nargs = ["serve", "--mcp"]\n# visp: mcp:end\n',
+    );
+    const result = await registerMcpServer(root, false, "codex");
+    expect(result.ok && result.value).toBe("replaced");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toContain(
+      runtimeIdentity().executable,
+    );
   });
 
   it("preserves and refuses existing Codex settings and servers", async () => {

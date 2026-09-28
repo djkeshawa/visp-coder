@@ -147,7 +147,7 @@ See [internals](internals.md#skills) for revision, evaluation and rollback recor
 | `memory/` | yes | Project notes |
 | `skills/` | yes | Skill documents, revisions and lifecycle history |
 | `exports/`, `migrations/backups/` | yes | History exports and upgrade backups from `visp-migrate` |
-| `hooks/` | yes | Generated hook scripts |
+| `hooks/` | no | Generated, build-specific hook scripts; reinstall locally after cloning |
 | `state/` | no | Local slice authorizations (`state/product-authorizations/`), install records, transaction journals and the writer lock |
 | `graph/` | no | The repository index database |
 | `session/` | no | Per-session data, including recent user prompts recorded by the host's prompt hook |
@@ -156,6 +156,8 @@ See [internals](internals.md#skills) for revision, evaluation and rollback recor
 | `telemetry.json`, `telemetry.json.events/` | no | Local usage records |
 
 Authorizations are per checkout: authorizing a slice on one machine grants nothing elsewhere, which is why CI judges a pull request against the committed brief instead. Let VISP commands write everything under `.visp/`; do not edit generated records by hand.
+
+If a project tracked `.visp/hooks/` before this ignore rule was added, remove those generated files from the Git index once with `git rm --cached -r .visp/hooks/`, then commit the updated `.gitignore`. Each developer's `visp install` recreates the hooks locally.
 
 Pinned acceptance tests live outside `.visp/`, under `acceptance/<feature>/`, and are committed with the feature.
 

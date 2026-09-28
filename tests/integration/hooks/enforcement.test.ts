@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GUARD_PROTOCOL_VERSION } from "../../../src/core/constants.js";
 import {
@@ -150,35 +150,52 @@ describe("generated hooks", () => {
     });
   });
 
-  it.each(["missing", "different"])(
-    "refuses an otherwise valid guard response with %s build identity",
-    async (kind) => {
-      const envelope = {
-        command: "guard",
-        ok: true,
-        data: {
-          protocolVersion: GUARD_PROTOCOL_VERSION,
-          checked: 1,
-          allowed: true,
-          violations: [],
-          authorizedTasks: ["T001"],
-          ...(kind === "different"
-            ? { runtime: { ...runtimeIdentity(), buildId: "0123456789abcdef" } }
-            : {}),
-        },
-      };
-      const env = await fakeGuardEnv(
-        project,
-        `.identity-${kind}`,
-        `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify(envelope))});\n`,
-      );
-      expect(decision(callPreToolUse("src/auth/login.ts", env))).toBe("deny");
-      expect(() => callPreCommit(env)).toThrow();
-    },
-  );
+  it.each(["missing", "different"])("ignores a PATH guard with %s build identity", async (kind) => {
+    const envelope = {
+      command: "guard",
+      ok: true,
+      data: {
+        protocolVersion: GUARD_PROTOCOL_VERSION,
+        checked: 1,
+        allowed: true,
+        violations: [],
+        authorizedTasks: ["T001"],
+        ...(kind === "different"
+          ? { runtime: { ...runtimeIdentity(), buildId: "0123456789abcdef" } }
+          : {}),
+      },
+    };
+    const env = await fakeGuardEnv(
+      project,
+      `.identity-${kind}`,
+      `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify(envelope))});\n`,
+    );
+    expect(decision(callPreToolUse("src/auth/login.ts", env))).toBe("allow");
+    expect(callPreCommit(env)).toBe("");
+  });
 
   it("runs without a syntax error and allows an in-scope write", () => {
     expect(decision(callPreToolUse("src/auth/login.ts"))).toBe("allow");
+  });
+
+  it("allows ordinary edits when the pinned CLI is unavailable and no task is active", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const hook = join(project.root, ".visp/hooks/claude-pretooluse.mjs");
+    const original = await readFile(hook, "utf8");
+    const marker = join(project.root, ".visp/state/product-authorizations");
+    const parked = `${marker}.parked`;
+    await writeFile(hook, original.replace(/const cli = .*;/, 'const cli = "/missing/visp.js";'));
+    try {
+      expect(decision(callPreToolUse("src/auth/login.ts"))).toBe("deny");
+      await rename(marker, parked);
+      try {
+        expect(decision(callPreToolUse("README.md"))).toBe("allow");
+      } finally {
+        await rename(parked, marker);
+      }
+    } finally {
+      await writeFile(hook, original);
+    }
   });
 
   /**
@@ -186,17 +203,14 @@ describe("generated hooks", () => {
    * that cannot check must not allow — but reporting it as an out-of-scope path
    * sends someone to edit allowedFiles to fix a missing binary.
    */
-  it("names the install when it cannot run visp at all", () => {
+  it("uses the installed CLI when visp is absent from PATH", () => {
     const response = callPreToolUse("src/auth/login.ts", {
       ...project.env(),
       PATH: "/nonexistent",
     });
     const output = response.hookSpecificOutput as Record<string, string>;
 
-    expect(output.permissionDecision).toBe("deny");
-    expect(output.permissionDecisionReason).toContain("could not check");
-    expect(output.permissionDecisionReason).toContain("visp doctor");
-    expect(output.permissionDecisionReason).not.toContain("outside the scope");
+    expect(output.permissionDecision).toBe("allow");
   });
 
   it("denies a write outside the task's scope", () => {
@@ -268,25 +282,22 @@ describe("generated hooks", () => {
     }
   });
 
-  it("fails closed on malformed guard output while authorization is active", async () => {
+  it("ignores malformed guard output from a PATH shadow", async () => {
     const env = await malformedGuardEnv(project);
 
-    expect(() => callPreCommit(env)).toThrow();
+    expect(callPreCommit(env)).toBe("");
   });
 
-  it("fails closed on an underspecified legacy guard envelope", async () => {
+  it("ignores an underspecified legacy guard on PATH", async () => {
     const env = await fakeGuardEnv(
       project,
       ".old-bin",
       '#!/bin/sh\necho \'{"command":"guard","ok":true,"data":{"allowed":true}}\'\n',
     );
 
-    expect(() => callPreCommit(env)).toThrow();
+    expect(callPreCommit(env)).toBe("");
     const edit = callPreToolUse("src/auth/login.ts", env);
-    expect(decision(edit)).toBe("deny");
-    expect((edit.hookSpecificOutput as Record<string, string>).permissionDecisionReason).toContain(
-      "could not check",
-    );
+    expect(decision(edit)).toBe("allow");
   });
 
   it("fails closed when interrupted closure removed the marker before commit", async () => {
@@ -323,7 +334,9 @@ describe("generated hooks", () => {
       },
     }));
     try {
-      expect(callPreCommit({ ...project.env(), PATH: "/usr/bin:/bin" })).toBe("");
+      expect(
+        callPreCommit({ ...project.env(), PATH: `${dirname(process.execPath)}:/usr/bin:/bin` }),
+      ).toBe("");
     } finally {
       await project.editArtifact("001-scoped-work", "product-state.json", (state) => ({
         ...state,
@@ -613,7 +626,7 @@ async function fakeGuardEnv(
   const fake = join(bin, "visp");
   await writeFile(fake, source, "utf8");
   await chmod(fake, 0o755);
-  return { ...project.env(), PATH: `${bin}:/usr/bin:/bin` };
+  return { ...project.env(), PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` };
 }
 
 async function setUpTask(project: TestProject): Promise<void> {
