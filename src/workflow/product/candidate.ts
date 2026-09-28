@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
+import { run } from "../../core/exec.js";
 import {
   applyFileTransaction,
   type FileMutation,
@@ -10,6 +11,7 @@ import {
 import { hashValue, sha256 } from "../../core/hash.js";
 import { isPortableAbsolute } from "../../core/paths.js";
 import { matchesAny } from "../../core/patterns.js";
+import { privatePath } from "../../core/redaction.js";
 import { err, ok } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { type CriticSelection, recordGuards } from "./critic-store.js";
@@ -32,6 +34,7 @@ const fileSchema = z
   .object({
     path: pathSchema,
     content: z.string().nullable(),
+    omitted: z.literal(true).optional(),
     mode: z.number().int().optional(),
     hash: z.string(),
   })
@@ -47,7 +50,7 @@ const candidateSchema = z
     contract: z.string(),
     intent: z.string(),
     files: z.array(fileSchema).max(2000),
-    brief: z.string(),
+    brief: z.string().optional(),
     productState: z.string(),
     evidence: z.unknown(),
   })
@@ -70,8 +73,14 @@ export async function prepareCandidate(
   const files: ProductCandidate["files"] = [];
   const guards: FileMutation[] = [];
   let bytes = 0;
+  const ignored = await ignoredPaths(workspace, Object.keys(snapshot.value));
+  if (!ignored.ok) return ignored;
   for (const [path, expected] of Object.entries(snapshot.value)) {
-    const captured = await captureFile(workspace, path, expected, bytes);
+    const omitted =
+      ignored.value.has(path) ||
+      privatePath(path) ||
+      privatePath(path, workspace.config.workflow.blockedPaths);
+    const captured = await captureFile(workspace, path, expected, bytes, omitted);
     if (!captured.ok) return captured;
     bytes += captured.value.bytes;
     files.push(captured.value.file);
@@ -89,9 +98,8 @@ export async function prepareCandidate(
     contract: selected.contract,
     intent: selected.intent,
     files,
-    brief: selected.record.briefText,
-    productState: selected.record.stateText,
-    evidence,
+    productState: json({ executions: selected.record.state.executions }),
+    evidence: compactEvidence(evidence),
   };
   const content = json(candidate);
   if (Buffer.byteLength(content) > MAX_BYTES)
@@ -189,14 +197,15 @@ async function captureFile(
   path: string,
   expected: string,
   bytes: number,
+  omitted: boolean,
 ) {
   const metadata = await workspace.files.readMetadata(path);
   if (!metadata.ok) return metadata;
-  if ((metadata.value?.size ?? 0) + bytes > MAX_BYTES)
+  if (!omitted && (metadata.value?.size ?? 0) + bytes > MAX_BYTES)
     return err(vispError("UNSUPPORTED", "Candidate exceeds 32 MiB"));
   const read = await workspace.files.readBytesIfExists(path);
   if (!read.ok) return read;
-  if ((read.value?.length ?? 0) + bytes > MAX_BYTES)
+  if (!omitted && (read.value?.length ?? 0) + bytes > MAX_BYTES)
     return err(vispError("UNSUPPORTED", "Candidate exceeds 32 MiB"));
   const hash = hashValue({
     hash: read.value === undefined ? null : sha256(read.value),
@@ -204,12 +213,7 @@ async function captureFile(
   });
   if (hash !== expected)
     return err(vispError("EVIDENCE_FAILED", "Source changed during candidate capture"));
-  const file = {
-    path,
-    content: read.value === undefined ? null : Buffer.from(read.value).toString("base64"),
-    mode: metadata.value?.mode,
-    hash,
-  };
+  const file = candidateFile(path, read.value, metadata.value?.mode, hash, omitted);
   const guard: FileMutation =
     read.value === undefined
       ? { kind: "remove", path, expectedBefore: filePrecondition(undefined) }
@@ -220,20 +224,24 @@ async function captureFile(
           mode: metadata.value?.mode,
           expectedBefore: filePrecondition(read.value, metadata.value?.mode),
         };
-  return ok({ file, guard, bytes: read.value?.length ?? 0 });
+  return ok({ file, guard, bytes: omitted ? 0 : (read.value?.length ?? 0) });
 }
 
 function validateFiles(candidate: ProductCandidate) {
   if (new Set(candidate.files.map((f) => f.path)).size !== candidate.files.length)
     throw new Error("duplicates");
-  for (const file of candidate.files) {
-    const bytes = file.content === null ? undefined : Buffer.from(file.content, "base64");
-    if (bytes && bytes.toString("base64") !== file.content) throw new Error("encoding");
-    if (
-      hashValue({ hash: bytes === undefined ? null : sha256(bytes), mode: file.mode }) !== file.hash
-    )
-      throw new Error("hash");
+  for (const file of candidate.files) validateFile(file);
+}
+
+function validateFile(file: ProductCandidate["files"][number]) {
+  if (file.omitted) {
+    if (file.content !== null || !/^[a-f0-9]{64}$/.test(file.hash))
+      throw new Error("private input");
+    return;
   }
+  const bytes = file.content === null ? undefined : Buffer.from(file.content, "base64");
+  if (bytes && bytes.toString("base64") !== file.content) throw new Error("encoding");
+  if (sourceHash(bytes, file.mode) !== file.hash) throw new Error("hash");
 }
 
 async function planRestore(
@@ -247,14 +255,8 @@ async function planRestore(
   for (const path of new Set([...Object.keys(current), ...files.keys()])) {
     const file = files.get(path);
     if (file?.hash === current[path]) continue;
-    if (
-      path.startsWith(".visp/") ||
-      !matchesAny(path, slice.scope.allowed) ||
-      matchesAny(path, slice.scope.forbidden)
-    )
-      return err(
-        vispError("SCOPE_VIOLATION", `Restoration would change out-of-scope file: ${path}`),
-      );
+    const refusal = restorationError(workspace, slice, path, file);
+    if (refusal) return err(refusal);
     const before = await workspace.files.readBytesIfExists(path);
     if (!before.ok) return before;
     const meta = await workspace.files.readMetadata(path);
@@ -286,4 +288,70 @@ function matchesSnapshot(
   mode: number | undefined,
 ) {
   return expected === undefined ? bytes === undefined : sourceHash(bytes, mode) === expected;
+}
+
+async function ignoredPaths(workspace: WorkspaceState, paths: string[]) {
+  const ignored = new Set<string>();
+  for (let offset = 0; offset < paths.length; offset += 100) {
+    const result = await run("git", ["check-ignore", "--no-index", "-z", "--stdin"], {
+      cwd: workspace.paths.root,
+      input: `${paths.slice(offset, offset + 100).join("\0")}\0`,
+    });
+    if (!result.ok) return result;
+    if (result.value.exitCode > 1)
+      return err(vispError("COMMAND_FAILED", "Cannot determine ignored candidate inputs"));
+    for (const path of result.value.stdout.split("\0").filter(Boolean)) ignored.add(path);
+  }
+  return ok(ignored);
+}
+
+function compactEvidence(evidence: unknown): unknown {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return evidence;
+  const { images, ...rest } = evidence as Record<string, unknown>;
+  return {
+    ...rest,
+    ...(Array.isArray(images)
+      ? { images: images.map((image) => ({ id: image.id, sha256: image.sha256 })) }
+      : {}),
+  };
+}
+
+function privateInput(workspace: WorkspaceState, path: string) {
+  return privatePath(path) || privatePath(path, workspace.config.workflow.blockedPaths);
+}
+
+function candidateFile(
+  path: string,
+  bytes: Uint8Array | undefined,
+  mode: number | undefined,
+  hash: string,
+  omitted: boolean,
+): ProductCandidate["files"][number] {
+  return {
+    path,
+    content: omitted || bytes === undefined ? null : Buffer.from(bytes).toString("base64"),
+    mode,
+    hash,
+    ...(omitted ? { omitted: true } : {}),
+  };
+}
+
+function restorationError(
+  workspace: WorkspaceState,
+  slice: ProductSlice,
+  path: string,
+  file?: ProductCandidate["files"][number],
+) {
+  if (file?.omitted || privateInput(workspace, path))
+    return vispError(
+      "SCOPE_VIOLATION",
+      `Cannot restore private input ${path}; only its hash was saved`,
+    );
+  if (
+    path.startsWith(".visp/") ||
+    !matchesAny(path, slice.scope.allowed) ||
+    matchesAny(path, slice.scope.forbidden)
+  )
+    return vispError("SCOPE_VIOLATION", `Restoration would change out-of-scope file: ${path}`);
+  return undefined;
 }

@@ -14,6 +14,7 @@ export interface CommandOutput {
 
 export interface RunOptions {
   readonly cwd: string;
+  readonly input?: string;
   readonly timeoutMs?: number;
   readonly env?: Record<string, string>;
   /** Use exactly the supplied environment instead of extending the caller's. */
@@ -34,7 +35,7 @@ export function run(
 
   return new Promise((resolvePromise) => {
     try {
-      execFile(
+      const child = execFile(
         file,
         [...args],
         {
@@ -54,6 +55,10 @@ export function run(
           );
         },
       );
+      if (options.input !== undefined) {
+        child.stdin?.on("error", () => undefined);
+        child.stdin?.end(options.input);
+      }
     } catch (cause) {
       resolvePromise(err(fromUnknown(cause, "COMMAND_FAILED")));
     }

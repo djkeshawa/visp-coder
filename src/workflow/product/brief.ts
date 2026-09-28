@@ -8,6 +8,7 @@ import {
 } from "../../core/file-transaction.js";
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
+import { redactText } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import {
   type EarlierFeature,
@@ -71,6 +72,7 @@ export interface ProductFeatureOutcome {
   readonly projectMemory?: readonly string[];
   readonly branchCreated?: string;
   readonly branchWarning?: string;
+  readonly redactionNotice?: string;
 }
 
 export function createProductFeature(
@@ -92,7 +94,8 @@ async function createProductFeatureLocked(
   if (!listed.ok) return listed;
   const baseline = await captureAcceptanceBaseline(workspace);
   if (!baseline.ok) return baseline;
-  const allocated = await allocateFeatureId(workspace.paths.root, listed.value, options.goal);
+  const goal = redactText(options.goal, { root: workspace.paths.root });
+  const allocated = await allocateFeatureId(workspace.paths.root, listed.value, goal);
   if (!allocated.ok) return allocated;
   const feature = allocated.value;
   const timestamp = new Date().toISOString();
@@ -102,7 +105,7 @@ async function createProductFeatureLocked(
   const parsed = parseProductBrief({
     version: 2,
     feature,
-    goal: options.goal,
+    goal,
     originalRequest: request.value.originalRequest,
     acceptanceBaseline: baseline.value,
   });
@@ -136,6 +139,7 @@ async function createProductFeatureLocked(
         intent,
         ...rules.reported,
         ...memory.reported,
+        redactionNotice: featureRedactionNotice(request.value.redacted, goal, options.goal),
         ...(branchCreated ? { branchCreated } : {}),
         ...(branchWarning ? { branchWarning } : {}),
       })
@@ -260,7 +264,8 @@ async function featureRequest(
   if (!host.ok) return host;
   const rules = await featureProjectRules(workspace, host.value, feature, timestamp);
   if (!rules.ok) return rules;
-  const request = host.value?.request ?? options.sourceBrief ?? options.goal;
+  const raw = host.value?.request ?? options.sourceBrief ?? options.goal;
+  const request = redactText(raw, { root: workspace.paths.root });
   const memory = await featureMemory(
     workspace,
     feature,
@@ -271,6 +276,7 @@ async function featureRequest(
   // Earlier rules are not copied into the fixed request: work replies, the reviewer and the
   // tester read the current rules, so a removed rule stops applying at once.
   return ok({
+    redacted: raw !== request,
     host: host.value,
     rules: rules.value,
     memory: memory.value,
@@ -599,4 +605,10 @@ function authorizationStillApplies(content: string | undefined, state: ProductSt
   } catch {
     return false;
   }
+}
+
+function featureRedactionNotice(requestChanged: boolean, goal: string, originalGoal: string) {
+  return requestChanged || goal !== originalGoal
+    ? "Credentials and local paths were masked before saving the request to the committed feature trail and PR text."
+    : undefined;
 }

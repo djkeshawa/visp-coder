@@ -12,6 +12,7 @@ import { resolvedProductExecutionEnvironment } from "../../core/execution-enviro
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
+import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import {
@@ -545,7 +546,7 @@ async function recordTesterActivity(
   network: boolean,
   activity: SessionActivity,
 ): Promise<void> {
-  const line = `${JSON.stringify({ at: new Date().toISOString(), model, network, ...activity })}\n`;
+  const line = `${JSON.stringify(redactStrings({ at: new Date().toISOString(), model, network, ...activity }, workspace.paths.root))}\n`;
   await appendFile(workspace.paths.featureFile(feature, TESTER_ACTIVITY_FILE), line).catch(
     () => undefined,
   );
@@ -573,20 +574,6 @@ export async function testerNetworkCommands(
 }
 
 /** Never copied for a session with network, whatever the project's settings say. */
-const SECRET_FILES = [
-  ".env",
-  ".env.*",
-  "*.pem",
-  "*.key",
-  "*.p12",
-  "*.pfx",
-  "id_rsa*",
-  "id_ecdsa*",
-  "id_ed25519*",
-  ".npmrc",
-  ".pypirc",
-  ".netrc",
-];
 
 /** Like .gitignore: a pattern without a slash matches a name at any depth. */
 function leftOut(path: string, patterns: readonly string[]): boolean {
@@ -678,6 +665,7 @@ function testCommand(path: string): string[] {
 async function runBaseline(root: string, command: string[], extra: Record<string, string> = {}) {
   const [file, ...args] = command as [string, ...string[]];
   const env = await resolvedProductExecutionEnvironment();
+  const redact = await outputRedactor(root);
   return new Promise<{ exitCode: number; timedOut: boolean; output: string }>((resolve) => {
     let output = "";
     let timedOut = false;
@@ -708,12 +696,12 @@ async function runBaseline(root: string, command: string[], extra: Record<string
     }, BASELINE_TIMEOUT_MS);
     child.on("error", (error) => {
       clearTimeout(timer);
-      resolve({ exitCode: -1, timedOut: false, output: error.message });
+      resolve({ exitCode: -1, timedOut: false, output: redact(error.message) });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
       endGroup();
-      resolve({ exitCode: code ?? -1, timedOut, output: output.trim().slice(-2000) });
+      resolve({ exitCode: code ?? -1, timedOut, output: redact(output.trim()).slice(-2000) });
     });
   });
 }
