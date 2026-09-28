@@ -1,6 +1,6 @@
 import { homedir, tmpdir } from "node:os";
 import { expect, it } from "vitest";
-import { redactStrings, redactText } from "../../../src/core/redaction.js";
+import { redactRequest, redactStrings, redactText } from "../../../src/core/redaction.js";
 
 it("masks long environment values, short credentials, token patterns and local paths", () => {
   const root = `${tmpdir()}/redaction-project`;
@@ -36,4 +36,19 @@ it("masks pasted credential assignments even when they are not in the environmen
   expect(
     redactText('DEPLOY_SECRET="human readable secret"; api key is short-key', { environment: {} }),
   ).toBe('DEPLOY_SECRET="[REDACTED]"; api key is [REDACTED]');
+});
+
+it("redacts a full secret containing a local path before abbreviating that path", () => {
+  expect(
+    redactText("/project/credential /project/app.ts", {
+      root: "/project",
+      environment: { API_KEY: "/project/credential", PWD: "/project" },
+    }),
+  ).toBe("[REDACTED] <project>/app.ts");
+});
+
+it("preserves technical prose and ordinary environment names in the request", () => {
+  expect(redactRequest("The next token is Identifier; use development mode.")).toBe(
+    "The next token is Identifier; use development mode.",
+  );
 });

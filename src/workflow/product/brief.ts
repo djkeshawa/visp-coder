@@ -8,7 +8,7 @@ import {
 } from "../../core/file-transaction.js";
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
-import { redactText } from "../../core/redaction.js";
+import { redactRequest } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import {
   type EarlierFeature,
@@ -94,7 +94,7 @@ async function createProductFeatureLocked(
   if (!listed.ok) return listed;
   const baseline = await captureAcceptanceBaseline(workspace);
   if (!baseline.ok) return baseline;
-  const goal = redactText(options.goal, { root: workspace.paths.root });
+  const goal = redactRequest(options.goal, workspace.paths.root);
   const allocated = await allocateFeatureId(workspace.paths.root, listed.value, goal);
   if (!allocated.ok) return allocated;
   const feature = allocated.value;
@@ -265,7 +265,7 @@ async function featureRequest(
   const rules = await featureProjectRules(workspace, host.value, feature, timestamp);
   if (!rules.ok) return rules;
   const raw = host.value?.request ?? options.sourceBrief ?? options.goal;
-  const request = redactText(raw, { root: workspace.paths.root });
+  const request = redactRequest(raw, workspace.paths.root);
   const memory = await featureMemory(
     workspace,
     feature,

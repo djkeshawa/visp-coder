@@ -37,24 +37,10 @@ export function redactText(
   options: { root?: string; environment?: NodeJS.ProcessEnv; values?: readonly string[] } = {},
 ): string {
   let safe = text;
-  for (const [path, label] of [
-    [options.root, "<project>"],
-    [homedir(), "~"],
-    [tmpdir(), "<tmp>"],
-  ] as const) {
-    if (path && path.length > 1) safe = safe.replaceAll(path, label);
-  }
-  const values = [
-    ...Object.entries(options.environment ?? process.env)
-      .filter(([name, value]) => sensitiveValue(name, value))
-      .map(([, value]) => value as string),
-    ...(options.values ?? []),
-  ].filter(Boolean);
-  for (const value of [...new Set(values)].sort((a, b) => b.length - a.length))
-    safe = safe.replaceAll(value, MASK);
+  for (const [value, label] of redactionValues(options)) safe = safe.replaceAll(value, label);
   return safe
     .replace(
-      /(\b(?:[a-z_]*(?:token|secret|password|passwd|api_key|private_key)|(?:api|deploy|private)[ -]key)\s*(?:=|:|\bis\b)\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi,
+      /(\b(?:[a-z_]*(?:token|secret|password|passwd|api_key|private_key)|(?:api|deploy|private)[ -]key)\s*(?:=|:)\s*|\b(?:api|deploy|private)[ -]key\s+is\s+)("[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi,
       (_match, prefix: string, value: string) =>
         `${prefix}${value.startsWith('"') || value.startsWith("'") ? `${value[0]}${MASK}${value[0]}` : MASK}`,
     )
@@ -128,4 +114,36 @@ function envValues(text: string): string[] {
   } catch {
     return [];
   }
+}
+
+function redactionValues(options: {
+  root?: string;
+  environment?: NodeJS.ProcessEnv;
+  values?: readonly string[];
+}): [string, string][] {
+  const paths = [
+    [options.root, "<project>"],
+    [homedir(), "~"],
+    [tmpdir(), "<tmp>"],
+  ].filter((entry): entry is [string, string] => !!entry[0] && entry[0].length > 1);
+  const environment: [string, string][] = Object.entries(options.environment ?? process.env)
+    .filter(
+      ([name, value]) =>
+        sensitiveValue(name, value) &&
+        (SECRET_NAME.test(name) || !paths.some(([path]) => path === value)),
+    )
+    .map(([, value]) => [value as string, MASK]);
+  return [
+    ...environment,
+    ...(options.values ?? []).filter(Boolean).map((value): [string, string] => [value, MASK]),
+    ...paths,
+  ].sort((a, b) => b[0].length - a[0].length);
+}
+
+/** Requests preserve ordinary wording; only credential-named environment values are secrets. */
+export function redactRequest(text: string, root?: string): string {
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => SECRET_NAME.test(name)),
+  );
+  return redactText(text, { root, environment });
 }

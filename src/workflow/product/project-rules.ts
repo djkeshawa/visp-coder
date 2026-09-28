@@ -6,7 +6,7 @@ import {
   filePrecondition,
 } from "../../core/file-transaction.js";
 import { sha256 } from "../../core/hash.js";
-import { redactText } from "../../core/redaction.js";
+import { redactRequest } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { withProductMutation } from "./runtime.js";
@@ -169,7 +169,7 @@ export function mergeProjectRules(
   const seen = new Set(existing.map((rule) => comparable(rule.text)));
   const added: ProjectRule[] = [];
   for (const raw of texts) {
-    const text = redactText(raw);
+    const text = redactRequest(raw);
     const key = comparable(text);
     if (seen.has(key)) continue;
     seen.add(key);
