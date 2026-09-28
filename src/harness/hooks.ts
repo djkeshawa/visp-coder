@@ -8,6 +8,7 @@ import {
 import { runtimeIdentity } from "../core/version.js";
 import { HOST_SESSION_FILE } from "../workflow/product/host-prompts.js";
 import { AUTHORIZATION_CHECK } from "./authorization-check.js";
+import { hookCommand } from "./claude-settings.js";
 
 /**
  * Enforcement surfaces. Each one shells out to `visp guard` rather than
@@ -17,7 +18,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 13;
+export const HOOK_TEMPLATE_VERSION = 14;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -31,10 +32,8 @@ export function renderPreToolUseHook(): string {
 // Decisions come from \`${PRODUCT_NAME} guard\`, so this file holds no rules of its own.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
-
-const ALLOW = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } };
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 function deny(reason) {
   return {
@@ -58,7 +57,15 @@ const input = readInput();
 
 // Claude Code names the project in its environment; Codex passes the session cwd instead.
 function projectRoot() {
-  return process.env.CLAUDE_PROJECT_DIR ?? input?.cwd ?? process.cwd();
+  const start = resolve(process.env.CLAUDE_PROJECT_DIR ?? input?.cwd ?? process.cwd());
+  let directory = start;
+  while (true) {
+    if (existsSync(join(directory, ".visp", "project.json"))) return directory;
+    if (existsSync(join(directory, ".git"))) return start;
+    const parent = dirname(directory);
+    if (parent === directory) return start;
+    directory = parent;
+  }
 }
 
 // The user's own words are the contract the tester and reviewer judge against; workers
@@ -145,17 +152,11 @@ function recordSession() {
 if (input?.tool_name === "Bash") {
   recordSession();
   const command = String(input?.tool_input?.command ?? "");
-  const touchesState = /(^|[\\s'"=/])(\\.visp|acceptance)(\\/|[\\s'"]|$)/.test(command);
-  const destructive =
-    /\\bgit\\s+clean\\b/.test(command) ||
-    /\\bgit\\s+stash\\b.*(\\s-u\\b|--include-untracked|\\s-a\\b|--all)/.test(command) ||
-    (touchesState && /\\b(rm|mv|git\\s+(checkout|restore|rm|reset))\\b/.test(command));
+  const destructive = destructiveShellReason(command);
   if (destructive) {
     process.stdout.write(
       JSON.stringify(
-        deny(
-          "This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead.",
-        ),
+        deny(destructive),
       ),
     );
     process.exit(0);
@@ -217,6 +218,24 @@ function shellCommands(command) {
   }
   end();
   return commands.filter((words) => words.length > 0);
+}
+
+function destructiveShellReason(command) {
+  const protectedOperand = (word) => /^(?:\\.\\/)?(?:\\.visp|acceptance)(?:\\/|$)/.test(word);
+  for (const words of shellCommands(command)) {
+    const executable = words[0];
+    const operands = words.slice(1).filter((word) => !word.startsWith("-"));
+    if (executable === "git" && words[1] === "clean")
+      return "git clean may delete untracked VISP state or acceptance tests; inspect and remove individual files instead.";
+    if (executable === "git" && words[1] === "stash" && words.slice(2).some((word) => /^(?:-[A-Za-z]*[ua]|--include-untracked|--all)$/.test(word)))
+      return "git stash of untracked files may hide VISP state or acceptance tests; commit the work instead.";
+    const gitDestructive = executable === "git" && ["checkout", "restore", "rm", "reset"].includes(words[1]);
+    const fileDestructive = ["rm", "mv"].includes(executable);
+    const findDelete = executable === "find" && words.includes("-delete");
+    if ((gitDestructive || fileDestructive || findDelete) && operands.some(protectedOperand))
+      return "This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead.";
+  }
+  return undefined;
 }
 
 function workingTreeChanges() {
@@ -282,17 +301,47 @@ function discardedChanges(command) {
 const target = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
 
 if (!target) {
-  process.stdout.write(JSON.stringify(ALLOW));
   process.exit(0);
 }
 
 const root = projectRoot();
-const path = isAbsolute(target) ? relative(root, target) : target;
+function realPath(path, depth = 0) {
+  if (depth > 40) throw new Error("Too many symlinks in " + path);
+  try {
+    return realpathSync.native(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    try {
+      if (lstatSync(path).isSymbolicLink())
+        return realPath(resolve(dirname(path), readlinkSync(path)), depth + 1);
+    } catch (cause) {
+      if (cause?.code !== "ENOENT") throw cause;
+    }
+    const parent = dirname(path);
+    if (parent === path) return path;
+    return resolve(realPath(parent, depth + 1), path.slice(parent.length + 1));
+  }
+}
+
+function outside(path) {
+  return path === ".." || path.startsWith(".." + sep) || isAbsolute(path);
+}
+
+const absoluteTarget = isAbsolute(target) ? target : resolve(input?.cwd ?? root, target);
+const logical = relative(root, absoluteTarget);
+const physical = relative(realPath(root), realPath(absoluteTarget));
+if (isAbsolute(target) && outside(logical) && outside(physical)) process.exit(0);
+if (!outside(logical) && outside(physical)) {
+  process.stdout.write(JSON.stringify(deny(String(target) + " resolves outside the project root")));
+  process.exit(0);
+}
+const path = isAbsolute(target) ? (outside(logical) ? physical : logical) : target;
+const paths = physical !== path && !outside(physical) ? [path, physical] : [path];
 
 // VISP state changes only through visp commands, which validate and record it. A worker
 // that hand-edited the brief left it unreadable and abandoned the workflow. Drafts are
 // the one place the workflow asks agents to write.
-const statePath = path.replaceAll(String.fromCharCode(92), "/");
+const statePath = path.replaceAll(String.fromCharCode(92), "/").toLowerCase();
 if (
   (statePath === "${STATE_DIR}" || statePath.startsWith("${STATE_DIR}/")) &&
   !statePath.startsWith("${STATE_DIR}/drafts/") &&
@@ -352,7 +401,7 @@ let stdout;
 try {
   const asking =
     typeof input?.session_id === "string" && input.session_id ? ["--session", input.session_id] : [];
-  stdout = execFileSync("${PRODUCT_NAME}", ["guard", "--path", path, "--json", ...asking], {
+  stdout = execFileSync("${PRODUCT_NAME}", ["guard", "--path", ...paths, "--json", ...asking], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -379,7 +428,6 @@ if (envelope === undefined) {
 }
 
 if (status === 0 && envelope.ok) {
-  process.stdout.write(JSON.stringify(ALLOW));
   process.exit(0);
 }
 
@@ -409,7 +457,7 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
         PreToolUse: [
           {
             matcher: "Edit|Write|NotebookEdit",
-            hooks: [{ type: "command", command: `node "$CLAUDE_PROJECT_DIR/${hookPath}"` }],
+            hooks: [{ type: "command", command: hookCommand(hookPath) }],
           },
         ],
       },
@@ -579,7 +627,10 @@ jobs:
 
 /** Codex runs hooks through a shell from the session directory; resolve the project root. */
 export const CODEX_HOOK_SCRIPT = ".visp/hooks/codex-hooks.mjs";
-const CODEX_HOOK_COMMAND = `node "$(git rev-parse --show-toplevel)/${CODEX_HOOK_SCRIPT}"`;
+const CODEX_HOOK_COMMAND =
+  process.platform === "win32"
+    ? `for /f %i in ('git rev-parse --show-toplevel') do @node "%i\\${CODEX_HOOK_SCRIPT.replaceAll("/", "\\")}" || exit /b 2`
+    : `node "$(git rev-parse --show-toplevel)/${CODEX_HOOK_SCRIPT}" || exit 2`;
 
 /**
  * Codex reads `.codex/hooks.json` in Claude Code's format. The same script records user

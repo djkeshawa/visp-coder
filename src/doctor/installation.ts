@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { resolveCriticDefault } from "../config/critic-defaults.js";
 import { DIR, PRODUCT_NAME, STATE_DIR } from "../core/constants.js";
 import { isExecutableMode } from "../core/mode.js";
@@ -13,7 +14,11 @@ import {
   inspectForeignHarnessAssets,
   readAssetManifest,
 } from "../harness/asset-inspection.js";
-import { CLAUDE_SETTINGS_FILE, preToolUseRegistration } from "../harness/claude-settings.js";
+import {
+  CLAUDE_SETTINGS_FILE,
+  hookCommand,
+  preToolUseRegistration,
+} from "../harness/claude-settings.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { verifyGuardHandshake } from "../harness/guard-handshake.js";
 import { HOOK_MARKER, renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
@@ -285,8 +290,8 @@ export async function checkEnforcement(
   if (surfaces.inactive.length === 0) {
     return {
       name: "enforcement",
-      status: "ok",
-      detail: `Refusals are enforced by local guardrails: ${surfaces.active.join(", ")}. CI remains authoritative`,
+      status: state.config.harness === "codex" ? "warn" : "ok",
+      detail: `Refusals are enforced by local guardrails: ${surfaces.active.join(", ")}. ${state.config.harness === "codex" ? "Codex scope checks are commit-time only (apply_patch is not intercepted)." : ""}CI remains authoritative`,
     };
   }
 
@@ -344,7 +349,23 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
 
   const wired = await preToolUseRegistration(state.paths.root, hookPath);
   const registration = wired.ok ? wired.value : "absent";
-  if (registration === "present") return { active: "edit hook" };
+  if (registration === "present") {
+    const command = hookCommand(hookPath);
+    const check = spawnSync(
+      process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+      process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command],
+      {
+        cwd: state.paths.root,
+        env: { ...process.env, CLAUDE_PROJECT_DIR: state.paths.root },
+        input: "{}",
+        encoding: "utf8",
+        timeout: 5_000,
+      },
+    );
+    return check.status === 0
+      ? { active: "edit hook (edit tools only)" }
+      : { inactive: "edit hook (registered command cannot start)" };
+  }
   if (registration === "malformed") {
     return { inactive: `edit hook (${CLAUDE_SETTINGS_FILE} is not valid JSON)` };
   }
