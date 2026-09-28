@@ -35,6 +35,7 @@ import {
 import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
 import { hostRequest } from "./host-prompts.js";
 import { rulesForRequest, withRules } from "./project-rules.js";
+import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
 import { productSourceSnapshot } from "./subject.js";
 
@@ -62,6 +63,7 @@ const testerResponseSchema = z.object({
   file: z.object({ name: z.string(), content: z.string() }).nullable(),
   existingBehavior: z.boolean().default(false),
   tests: z.array(z.object({ name: z.string(), quote: z.string() })),
+  ambiguities: z.array(requestAmbiguitySchema).default([]),
   notes: z.string(),
 });
 type TesterResponse = z.infer<typeof testerResponseSchema>;
@@ -70,7 +72,7 @@ type TesterResponse = z.infer<typeof testerResponseSchema>;
 const TESTER_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["file", "existingBehavior", "tests", "notes"],
+  required: ["file", "existingBehavior", "tests", "ambiguities", "notes"],
   properties: {
     existingBehavior: { type: "boolean" },
     file: {
@@ -94,6 +96,19 @@ const TESTER_OUTPUT_SCHEMA = {
       },
     },
     notes: { type: "string" },
+    ambiguities: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["quote", "readings", "conventionalReading"],
+        properties: {
+          quote: { type: "string" },
+          readings: { type: "array", items: { type: "string" }, minItems: 2 },
+          conventionalReading: { type: "string" },
+        },
+      },
+    },
   },
 } as const;
 
@@ -110,6 +125,7 @@ export const independentTestsRecordSchema = z
     file: z.string().optional(),
     command: z.array(z.string()).optional(),
     tests: z.array(z.object({ name: z.string(), quote: z.string() })).optional(),
+    ambiguities: z.array(requestAmbiguitySchema).optional(),
     notes: z.string().optional(),
     content: z.string().optional(),
     sourceDigest: z.string().optional(),
@@ -132,6 +148,7 @@ export interface IndependentTestsSummary {
   readonly command?: readonly string[];
   readonly reason?: string;
   readonly instructions?: string;
+  readonly ambiguities?: readonly RequestAmbiguity[];
 }
 
 export interface TesterRequest {
@@ -292,8 +309,8 @@ export function backgroundTests(cli: string): TestsStarter {
 }
 
 /**
- * Called by `work` before authorization. Pinning changes the slice contract, so the tests
- * must exist before the first slice is authorized, never in the middle of one.
+ * Called by `work` before authorization. Deliver existing tests and interpretation notes;
+ * a background tester can pin its suite while the worker continues.
  */
 export async function independentTestsBeforeWork(
   workspace: WorkspaceState,
@@ -301,11 +318,6 @@ export async function independentTestsBeforeWork(
   starter: TestsStarter | undefined,
   waitMs: number,
 ): Promise<Result<IndependentTestsSummary | undefined>> {
-  if (!starter)
-    return workspace.config.critic?.launch === "codex-exec" &&
-      workspace.config.critic.harness !== "codex"
-      ? ok({ status: "skipped", reason: "The independent tester requires critic.harness: codex" })
-      : ok(undefined);
   const loaded = await readProductRecord(workspace, feature ? { feature } : {});
   if (!loaded.ok) return ok(undefined);
   const { brief } = loaded.value;
@@ -316,6 +328,7 @@ export async function independentTestsBeforeWork(
   // Workers waited 1–2 minutes here. Pinned tests are not part of a slice's contract, so
   // work proceeds and the tests are pinned whenever the tester finishes.
   if (!record) {
+    if (!starter) return ok(unavailableTester(workspace));
     if (!(await testerLaunches(workspace, loaded.value))) return ok(undefined);
     const source = await startingSourceDigest(workspace, brief.feature, brief);
     if (!source.ok) return source;
@@ -324,6 +337,13 @@ export async function independentTestsBeforeWork(
     record = started.value;
   }
   return ok(summary(record));
+}
+
+function unavailableTester(workspace: WorkspaceState): IndependentTestsSummary | undefined {
+  return workspace.config.critic?.launch === "codex-exec" &&
+    workspace.config.critic.harness !== "codex"
+    ? { status: "skipped", reason: "The independent tester requires critic.harness: codex" }
+    : undefined;
 }
 
 /**
@@ -465,6 +485,7 @@ function summary(record: IndependentTestsRecord): IndependentTestsSummary {
     ...(record.file ? { file: record.file } : {}),
     ...(record.command ? { command: record.command } : {}),
     ...(record.reason ? { reason: record.reason } : {}),
+    ...(record.ambiguities?.length ? { ambiguities: record.ambiguities } : {}),
     ...(record.status === "pinned"
       ? {
           instructions:
@@ -617,7 +638,11 @@ async function attemptTests(
   } catch (cause) {
     return { status: "failed", reason: message(cause) };
   }
-  const described = { tests: response.tests, notes: response.notes };
+  const described = {
+    tests: response.tests,
+    notes: response.notes,
+    ambiguities: redactStrings(response.ambiguities, workspace.paths.root),
+  };
   if (!response.file)
     return { status: "declined", reason: "No testable interface in the request", ...described };
   // The rejected file stays in the record so a person can see what the tester wrote.
@@ -875,6 +900,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "Rules:",
     "- Test only behavior the request states. Quote the sentence each test relies on in `tests[].quote`. Do not invent requirements, messages or formats the request leaves open.",
     "- A wrong test is worse than a missing one: the implementer must satisfy it. Leave out any case where a careful reader could expect a different result (for example extra fields or an empty body when the request does not say).",
+    "- Surface those cases in `ambiguities`: quote the exact rule in `quote`, list its reasonable `readings`, and give the reading most implementations/users expect in `conventionalReading`. Consider common natural variants, such as whitespace-only lines for 'blank lines'. Do not write tests for ambiguous cases. Return ambiguities even when file is null; use [] when none exist. These notes ask the worker to decide explicitly, not to satisfy an invented requirement.",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
     "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
     "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",

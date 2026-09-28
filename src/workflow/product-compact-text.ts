@@ -106,7 +106,22 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}${skillText(data.skills)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}${skillText(data.skills)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+}
+
+function ambiguityText(tests: unknown): string {
+  const ambiguities = object(tests).ambiguities;
+  if (!Array.isArray(ambiguities)) return "";
+  const short = (text: unknown) =>
+    String(text ?? "")
+      .replace(/\s+/g, " ")
+      .slice(0, 240);
+  return ambiguities
+    .map((entry) => {
+      const ambiguity = object(entry);
+      return `\nDecide explicitly: "${short(ambiguity.quote)}" — usual reading: ${short(ambiguity.conventionalReading)}. Record your choice; alternatives are in the full result.`;
+    })
+    .join("");
 }
 
 function memoryText(memories: unknown): string {

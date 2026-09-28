@@ -25,6 +25,7 @@ import {
 import { runProductReport } from "../../../../src/workflow/product/index.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
+import { compactProductReply } from "../../../../src/workflow/product-compact-text.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
@@ -103,6 +104,53 @@ it("pins tests written from the original request when they fail before implement
   // Authorization follows the pin, so the slice contract already includes the tests.
   expect(record.value.state.slices.T001?.status).toBe("in-progress");
 });
+
+it.each([true, false])(
+  "preserves ambiguity notes in records and both work reply channels (file: %s)",
+  async (hasFile) => {
+    const fixture = await testerWorkspace();
+    const ambiguity = {
+      quote: "Return two from the public module",
+      readings: ["Export the number directly", "Return a promise of the number"],
+      conventionalReading: "Export the number directly",
+    };
+    const work = await runProductWork(
+      await fixture.workspace.state(),
+      { task: "T001" },
+      inlineTests(async (request) => {
+        expect(request.prompt).toContain("ambiguities");
+        expect(request.prompt).toContain("Do not write tests for ambiguous cases");
+        expect(request.schema).toMatchObject({ required: expect.arrayContaining(["ambiguities"]) });
+        return {
+          file: hasFile ? { name: "value.mjs", content: FAILS_FIRST } : null,
+          tests: [],
+          ambiguities: [ambiguity],
+          notes: "",
+        };
+      }),
+    );
+    expect(work.ok, JSON.stringify(work)).toBe(true);
+    if (!work.ok) return;
+    const record = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+    expect(record.ok && record.value).toMatchObject({
+      ambiguities: [ambiguity],
+      status: hasFile ? "pinned" : "declined",
+    });
+    expect(work.value.independentTests).toMatchObject({ ambiguities: [ambiguity] });
+    for (const channel of ["cli", "mcp"] as const) {
+      const text = compactProductReply(
+        channel === "cli" ? "work" : "visp_work",
+        work.value,
+        channel,
+      );
+      expect(text).toContain("Decide explicitly");
+      expect(text).toContain(ambiguity.quote);
+      expect(text).toContain(ambiguity.conventionalReading);
+    }
+    const later = await runProductWork(await fixture.workspace.state(), { task: "T001" });
+    expect(later.ok && later.value.independentTests).toMatchObject({ ambiguities: [ambiguity] });
+  },
+);
 
 it("rejects tests that already pass, removes them and still authorizes the slice", async () => {
   const fixture = await testerWorkspace();
