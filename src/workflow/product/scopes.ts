@@ -193,7 +193,7 @@ export async function checkProductScope(
   if (!auth.value || auth.value.task !== slice.id)
     return err(
       vispError("STAGE_BLOCKED", `No current authorization for ${slice.id}`, {
-        recovery: `visp work --task ${slice.id}`,
+        recovery: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
       }),
     );
   const current = await productSourceSnapshot(workspace, record.brief);

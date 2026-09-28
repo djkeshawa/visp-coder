@@ -4,7 +4,6 @@ import { vispError } from "../../core/errors.js";
 import {
   applyFileTransaction,
   type FileMutation,
-  filePrecondition,
 } from "../../core/file-transaction.js";
 import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
@@ -29,6 +28,7 @@ import { nextFeatureId } from "./feature-id.js";
 import { type HostRequest, hostRequest } from "./host-prompts.js";
 import { codexMemoryGate } from "./memory-gate.js";
 import {
+  closedSlice,
   initialProductState,
   outcomeDigest,
   type ProductBrief,
@@ -388,7 +388,13 @@ export interface ProductBriefUpdate extends ProductSelection {
 }
 
 /** `normalized` lists authored shapes VISP rewrote before validation; absent when none. */
-export type ProductBriefUpdateResult = ProductBrief & { readonly normalized?: readonly string[] };
+export type ProductBriefUpdateResult = ProductBrief & {
+  readonly normalized?: readonly string[];
+  readonly authorizationRevoked?: boolean;
+  readonly mayEdit?: false;
+  readonly nextCommand?: string;
+  readonly resetSlices?: readonly string[];
+};
 
 export function updateProductBrief(
   workspace: WorkspaceState,
@@ -409,33 +415,52 @@ async function updateProductBriefLocked(
   const authored = authoredBrief(previous, options);
   if (!authored.ok) return authored;
   const { brief, normalized } = authored.value;
-  const reported = (saved: ProductBrief): ProductBriefUpdateResult =>
-    normalized.length ? { ...saved, normalized } : saved;
+  const reported = (
+    saved: ProductBrief,
+    extra: Partial<ProductBriefUpdateResult> = {},
+  ): ProductBriefUpdateResult => ({
+    ...saved,
+    ...(normalized.length ? { normalized } : {}),
+    ...extra,
+  });
   const digest = hashValue(brief);
   if (digest === previous.state.briefDigest && hashValue(previous.brief) === digest)
     return ok(reported(brief));
   const revision = validateRevision(previous.state, brief, options);
   if (!revision.ok) return revision;
-  const state = revisedProductState(previous.state, brief, revision.value);
+  const subject = await productSourceDigest(workspace, previous.brief);
+  if (!subject.ok) return subject;
+  const state = revisedProductState(previous.state, brief, revision.value, subject.value);
   const auth = await workspace.files.readTextIfExists(authorizationPath(workspace, brief.feature));
   if (!auth.ok) return auth;
   const keepAuthorization = authorizationStillApplies(auth.value, state);
   const critic = await planCriticRevision(workspace, previous, brief, revision.value);
   if (!critic.ok) return critic;
+  const resetSlices = brief.slices
+    .filter(
+      (slice) =>
+        previous.state.slices[slice.id]?.status === "closed" &&
+        state.slices[slice.id]?.status === "pending",
+    )
+    .map((slice) => slice.id);
   const saved = await applyFileTransaction(workspace.paths.root, "update-product-brief", [
     ...recordMutations(workspace, previous, brief, state),
     ...critic.value,
-    ...(auth.value && !keepAuthorization
-      ? [
-          {
-            kind: "remove" as const,
-            path: authorizationPath(workspace, brief.feature),
-            expectedBefore: filePrecondition(auth.value),
-          },
-        ]
-      : []),
   ]);
-  return saved.ok ? ok(reported(brief)) : saved;
+  return saved.ok
+    ? ok(
+        reported(brief, {
+          ...(auth.value && !keepAuthorization
+            ? {
+                authorizationRevoked: true,
+                mayEdit: false,
+                nextCommand: `visp work --feature ${brief.feature}`,
+              }
+            : {}),
+          ...(resetSlices.length ? { resetSlices } : {}),
+        }),
+      )
+    : saved;
 }
 
 /** Authored input, normalized and parsed, that keeps the record's identity and original request. */
@@ -550,8 +575,10 @@ function revisedProductState(
   previous: ProductState,
   brief: ProductBrief,
   revision: ProductState["revisions"][number],
+  subjectDigest: string,
 ): ProductState {
   const slices: ProductState["slices"] = {};
+  const resets: ProductState["sliceHistory"] = [];
   for (const slice of brief.slices) {
     const contractDigest = sliceDigest(brief, slice);
     const before = previous.slices[slice.id];
@@ -559,6 +586,15 @@ function revisedProductState(
       status: before?.contractDigest === contractDigest ? before.status : "pending",
       contractDigest,
     };
+    if (before && closedSlice(before.status) && slices[slice.id]?.status === "pending")
+      resets.push({
+        task: slice.id,
+        from: before.status,
+        to: "pending",
+        createdAt: revision.createdAt,
+        subjectDigest,
+        reason: `Brief revision: ${revision.reason}`,
+      });
   }
   const acceptanceApplies = previous.acceptedContract === productContractDigest(brief);
   const slicesUnchanged = Object.entries(slices).every(
@@ -581,6 +617,7 @@ function revisedProductState(
         : "active",
     acceptedSubject: acceptanceApplies ? previous.acceptedSubject : undefined,
     slices,
+    sliceHistory: [...previous.sliceHistory, ...resets],
     revisions: [...previous.revisions, revision],
   };
 }
