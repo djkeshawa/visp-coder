@@ -11,13 +11,13 @@ The runner never picks a model, a price or a budget for you, and preparing a stu
 | Execution | `exec --json` | `--print --output-format stream-json --verbose` |
 | Model and executable pin | Yes | Yes |
 | Resume | Named session in the same worktree | Named session in the same worktree |
-| Dollar limit | Estimated from a supplied price snapshot | Host estimate plus `--max-budget-usd` |
+| Dollar limit | Estimated from a supplied price snapshot after each reported usage event; Codex normally reports usage only when a turn ends | Host estimate plus `--max-budget-usd` |
 | Tool observation | Completed MCP calls | Tool calls correlated with successful results |
 | Command observation | Completed `command_execution` with exit 0 | Successful `Bash` calls |
 
 `visp-runner capabilities` prints the enforced controls and what each host can observe. A requested host sandbox is not independently verified, and dollar limits are estimates, not billing caps. Execution is supported on POSIX systems.
 
-Only a small environment allowlist reaches the host process; API-key variables are not inherited. CLI credentials under the home directory can still be read, so this local mode assumes a trusted machine and repository.
+Only a small environment allowlist reaches the host process: path, locale, temporary-directory, host-home/config, HTTP(S)/ALL proxy, NO_PROXY, and `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE` variables. API-key variables are not inherited. Claude runs also receive `DISABLE_AUTOUPDATER=1`. CLI credentials under the home directory can still be read, so this local mode assumes a trusted machine and repository.
 
 ## Running an attempt
 
@@ -26,7 +26,7 @@ Write a JSON `RunnerSpec` (exported as `runnerSpecSchema`). Required parts:
 - `schemaVersion: 1`, a unique `id`, an absolute `repository` and an existing commit `revision`;
 - `task` (`feature`, `task`) and the complete `prompt`;
 - `host`: `kind` (`codex` or `claude`), absolute `executable`, its SHA-256, exact `--version` output, `model`, optional `effort`;
-- `permissions`: `mode` (`read-only` or `workspace-write`), `requireSandbox: false`, optional `allowedTools` (Claude only);
+- `permissions`: `mode` (`read-only` or `workspace-write`), `requireSandbox: false`, and `allowedTools` (required for Claude workspace-write);
 - `budget`: `maxDurationMs`, `maxEstimatedUsd`, `studyMaxEstimatedUsd`, `studyApprovalId`, `monetaryEnforcement: "estimated"`, and a `prices` snapshot;
 - `harness`: `mode`, pinned `files` with hashes, `requiredTools`, `requiredHooks`, optional exact `requiredCommands` argument vectors;
 - `assignment`: `study`, `scenario`, `repositoryGroup`, `arm` (`economical-baseline`, `economical-visp`, `strong-reference` or `ablation`), `split`, `repetition`, `order`.
@@ -37,9 +37,11 @@ visp-runner inspect runs/<run-id>
 visp-runner run --spec resume.json --output runs/ --resume-from runs/<run-id>
 ```
 
-The output directory must be outside the candidate repository. Each attempt gets a detached worktree, a hash-chained event log, source snapshots and `result.json`; `inspect` verifies them. SIGINT and SIGTERM stop the host's process group and record an unsuccessful attempt.
+The output directory must be outside the candidate repository. Each attempt gets a detached worktree, a hash-chained event log, source snapshots and `result.json`; `inspect` verifies them and prints a summary. Use `inspect --full` for the prompt, complete manifest and snapshot entries. SIGINT and SIGTERM stop the host's process group and record an unsuccessful attempt.
 
-Before the first model turn the runner reserves the attempt's full `maxEstimatedUsd` against the study in a ledger under `.visp-runner/studies/<study>` in the output root. Reservations are never refunded, and a study's approval ID and ceiling cannot change after its first reservation.
+After worktree, resume-source, harness and source-snapshot preflight succeeds, but before the first model turn, the runner reserves the attempt's full `maxEstimatedUsd` against the study in a ledger under `.visp-runner/studies/<study>` in the output root. Reservations are never refunded, and a study's approval ID and ceiling cannot change after its first reservation. Codex has no in-turn dollar cap when it reports usage only at completion; `maxDurationMs` bounds the turn's elapsed time, and an estimate over the budget is recorded afterward.
+
+Claude uses `dontAsk`, so workspace-write runs must explicitly allow the tools they need, such as `Read`, `Edit`, `Write` and bounded `Bash(...)` rules. The runner ignores ambient Claude MCP configuration with `--strict-mcp-config`; no MCP servers are supplied by default. The init event's `mcp_servers` inventory is recorded in the event journal. Auxiliary-model usage, such as a subagent, remains in the usage rows and Claude's reported total cost; the pinned primary model is checked against the init event.
 
 Required tools and commands are evidence requirements: an unobserved requirement makes the attempt unsuccessful. Only successful, correlated tool results count; command observations accept plain commands and must match the declared argument vector exactly.
 
