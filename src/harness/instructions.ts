@@ -6,16 +6,18 @@ export const TOOL_ACCESS_GUIDANCE =
   "Use VISP MCP tools when connected: `visp_next({})`, then `visp_<command>` schemas; otherwise use CLI `visp next`.";
 
 export const COMPACT_RULES = `- Keep original request with --source-brief. Preserve outcomes, expectations and scope.allowed.
-- Run visp work before editing; build a small runnable behavior. Each functional outcome needs a check: a test command, or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
-- Stateful work: act, settle, act again; check failure and restart.
-- When checks pass, visp done may start an independent review; visp next waits for it. Fix required findings, then visp done again. An accepted critic response records the review; otherwise use visp review --prepare, then --session <id> --from -.
-- Run visp done, verify, accept and next with the host's maximum shell timeout (at least 10 minutes when supported). Retain the command handle and poll it; completed checks are saved for retry after interruption.
-- Sandbox blocked process, filesystem or socket access? Inspect the denial and rerun with supported escalation.
+- Before editing run visp work; build runnable behavior. Each functional outcome needs a test command or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
+- Stateful: act, settle, repeat; test failure and restart.
+- visp done may start independent review; visp next waits. Fix required findings; rerun visp done. An accepted critic response records the review; otherwise visp review --prepare, then --session <id> --from -.
+- Run done/verify/accept/next with the host's maximum shell timeout.
+- Sandbox denied access? Rerun with escalation.
 - Missing product evidence stays unresolved. Report reviewer.context honestly. Do not force extra review rounds.
 - Before the final answer, run \`visp next\`; follow its action and respect execution refusals.`;
 
 export const RULES_FOR_AGENTS = `- The original request and independent acceptance expectations cannot be weakened by a method revision.
   An explicit intent change records the reason and provenance; it is not proof of human authorization.
+- Use at least 10 minutes for done/verify/accept/next when the host supports it. Retain and poll the command handle;
+  completed checks are saved for retry after interruption. Inspect sandbox denials before using supported escalation.
 - Write Given/When/Then examples and counterexamples for stateful behavior. Check downstream results,
   boundaries, failure, and recovery. Preview and runtime should share a model or a consistency check,
   and both must satisfy an expectation that does not come from the implementation.

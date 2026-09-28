@@ -168,6 +168,7 @@ describe("the minimal profile", () => {
 
     // chars/4 as a coarse token proxy; the point is an enforced ceiling.
     expect(guide.length / 4).toBeLessThanOrEqual(300);
+    expect(guide).toContain("done/verify/accept/next with the host's maximum shell timeout");
     expect(guide).toContain("scope.allowed");
     expect(guide).toContain("runnable");
     expect(guide).toContain("execution refusals");
