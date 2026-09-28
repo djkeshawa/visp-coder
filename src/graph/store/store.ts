@@ -44,7 +44,10 @@ export class GraphStore {
   private localMutation = 0;
   private revision: GraphRevision | undefined;
 
-  private constructor(private readonly db: DatabaseSyncType) {}
+  private constructor(
+    private readonly db: DatabaseSyncType,
+    readonly cachePath: string,
+  ) {}
 
   static open(path: string): Result<GraphStore> {
     try {
@@ -99,7 +102,7 @@ export class GraphStore {
       return ok(this.revision);
     } catch (cause) {
       this.revision = undefined;
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
     }
   }
 
@@ -113,7 +116,7 @@ export class GraphStore {
     try {
       this.db.exec("BEGIN IMMEDIATE");
     } catch (cause) {
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
     }
 
     try {
@@ -124,7 +127,7 @@ export class GraphStore {
       this.invalidateRevision();
     } catch (cause) {
       this.rollback();
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
     }
 
     this.pruneTo(snapshot.id);
@@ -146,7 +149,25 @@ export class GraphStore {
       if (!row) return ok(undefined);
       return ok(text(row, "snapshot_id"));
     } catch (cause) {
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
+    }
+  }
+
+  /** Small identity probe used by query caches across short-lived read connections. */
+  readHeadIdentity(): Result<string | undefined> {
+    try {
+      const row = this.db
+        .prepare(
+          "SELECT h.snapshot_id, s.fingerprint, s.created_at FROM head h JOIN snapshots s ON s.id = h.snapshot_id WHERE h.id = 1",
+        )
+        .get();
+      return ok(
+        row
+          ? `${text(row, "snapshot_id")}\0${text(row, "fingerprint")}\0${text(row, "created_at")}`
+          : undefined,
+      );
+    } catch (cause) {
+      return err(graphError(cause));
     }
   }
 
@@ -156,7 +177,7 @@ export class GraphStore {
     if (!head.value) {
       return err(
         vispError("GRAPH_MISSING", "No graph snapshot has been published", {
-          recovery: "visp graph index",
+          recovery: "visp index",
         }),
       );
     }
@@ -209,7 +230,7 @@ export class GraphStore {
       return ok(undefined);
     } catch (cause) {
       this.rollback();
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
     }
   }
 
@@ -223,7 +244,7 @@ export class GraphStore {
     try {
       this.db.exec("BEGIN");
     } catch (cause) {
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
     }
     try {
       const result = read();
@@ -231,7 +252,7 @@ export class GraphStore {
       return result;
     } catch (cause) {
       this.rollback();
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
     }
   }
 
@@ -259,7 +280,13 @@ export class GraphStore {
       // Deleted rows only ever moved to the freelist — real stores measured
       // ~half free pages, 6–10× the source they described. Cannot run inside
       // the transaction; failing to compact is not failing to publish.
-      this.db.exec("VACUUM");
+      const count = this.db.prepare("PRAGMA page_count").get();
+      const free = this.db.prepare("PRAGMA freelist_count").get();
+      if (
+        Number(free?.freelist_count) > 1024 &&
+        Number(free?.freelist_count) > Number(count?.page_count) / 4
+      )
+        this.db.exec("VACUUM");
     } catch {
       // The snapshot is already durable; a skipped compaction costs disk only.
     }
@@ -276,6 +303,7 @@ export class GraphStore {
   private static connect(path: string, writable = true): Result<GraphStore> {
     try {
       const db = writable ? new DatabaseSync(path) : new DatabaseSync(path, { readOnly: true });
+      db.exec("PRAGMA busy_timeout = 5000");
       if (writable) db.exec("PRAGMA journal_mode = WAL");
       db.exec("PRAGMA foreign_keys = ON");
       if (writable) {
@@ -293,11 +321,20 @@ export class GraphStore {
           throw cause;
         }
       }
-      return ok(new GraphStore(db));
+      return ok(new GraphStore(db, path));
     } catch (cause) {
-      return err(fromUnknown(cause, "IO_ERROR"));
+      return err(graphError(cause));
     }
   }
+}
+
+function graphError(cause: unknown) {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return /database is locked|SQLITE_BUSY/i.test(message)
+    ? vispError("GRAPH_BUSY", "Another process is updating the graph", {
+        recovery: "Retry visp index --refresh shortly",
+      })
+    : fromUnknown(cause, "IO_ERROR");
 }
 
 async function prepareGraphDirectory(

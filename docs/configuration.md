@@ -96,13 +96,14 @@ Policy and overrides are stored in `.visp/policy.json` and `.visp/overrides.json
 ```sh
 visp query describe                    # what is in this repository
 visp query search makeToken            # where is it defined
-visp query callers src/auth/token.ts   # what would break
+visp query callers 'src/auth/token.ts#function:makeToken'   # what calls this symbol
 visp query testsFor src/auth/token.ts  # what covers it
 visp query impact src/auth/token.ts    # what depends on it, transitively
+visp query tracePath src/app.ts src/auth/token.ts  # shortest structural path
 visp query unknowns                    # what the index could not resolve
 ```
 
-Other operations are `entity`, `neighbors`, `callees` and `tracePath`. `--depth`, `--results`, `--nodes` and `--edges` bound a query (defaults 3, 50, 2,000 and 8,000; maxima 8, 200, 20,000 and 80,000). A truncated answer keeps its unknowns, so a partial result never looks complete. MCP exposes `visp_index` and `visp_query`.
+Other operations are `entity`, `neighbors` and `callees`. `tracePath` takes a source and destination; MCP passes the destination as `to`. `--depth`, `--results`, `--nodes` and `--edges` bound a query (defaults 3, 50, 2,000 and 8,000; maxima 8, 200, 20,000 and 80,000). A truncated answer keeps its unknowns, so a partial result never looks complete. Query receipts include the snapshot ID and creation time, and replies flag source changes newer than that snapshot. MCP exposes `visp_index` and `visp_query`.
 
 ## Memory and skills
 

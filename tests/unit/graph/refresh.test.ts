@@ -50,6 +50,56 @@ describe("indexRepository", () => {
 });
 
 describe("refreshRepository", () => {
+  it("does not reparse transitive importers of an ordinary changed module", async () => {
+    await repo.write("src/base.ts", "export const value = 1;\n");
+    await repo.write(
+      "src/middle.ts",
+      'import { value } from "./base.js";\nexport const middle = value;\n',
+    );
+    await repo.write(
+      "src/top.ts",
+      'import { middle } from "./middle.js";\nexport const top = middle;\n',
+    );
+    await index();
+    await repo.write("src/base.ts", "export const value = 2;\n");
+    const report = await refresh();
+    expect(report.filesParsed).toBe(2);
+  });
+
+  it("keeps calls through an unchanged barrel after editing its consumer", async () => {
+    await repo.write("src/leaf.ts", "export function helper() { return 1; }\n");
+    await repo.write("src/barrel.ts", 'export { helper } from "./leaf.js";\n');
+    await repo.write(
+      "src/consumer.ts",
+      'import { helper } from "./barrel.js";\nexport function run() { return helper(); }\n',
+    );
+    await index();
+    await repo.write(
+      "src/consumer.ts",
+      'import { helper } from "./barrel.js";\n// edited\nexport function run() { return helper(); }\n',
+    );
+    const report = await refresh();
+    expect(report.filesParsed).toBe(2);
+    expect(head().relations).toContainEqual(
+      expect.objectContaining({
+        kind: "calls",
+        source: "src/consumer.ts#function:run",
+        target: "src/leaf.ts#function:helper",
+      }),
+    );
+  });
+
+  it("reparses an importer when a formerly external Python module is added", async () => {
+    await repo.write("main.py", "import utils\ndef run():\n    return utils.helper()\n");
+    await index();
+    await repo.write("utils.py", "def helper():\n    return 1\n");
+    const report = await refresh();
+    expect(report.filesParsed).toBeGreaterThanOrEqual(2);
+    expect(head().relations).toContainEqual(
+      expect.objectContaining({ kind: "calls", target: "utils.py#function:helper" }),
+    );
+  });
+
   it("parses nothing when no file changed, and says so", async () => {
     await index();
     resetParseCount();

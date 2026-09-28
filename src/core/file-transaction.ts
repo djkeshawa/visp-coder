@@ -21,11 +21,16 @@ const activeJournals = new Set<string>();
 export function withStateMutation<T>(
   root: string,
   operation: () => Promise<Result<T>>,
+  options: { readonly timeoutMs?: number } = {},
 ): Promise<Result<T>> {
-  return withStateLock(root, async () => {
-    const recovered = await recoverLocked(root);
-    return recovered.ok ? operation() : recovered;
-  });
+  return withStateLock(
+    root,
+    async () => {
+      const recovered = await recoverLocked(root);
+      return recovered.ok ? operation() : recovered;
+    },
+    options,
+  );
 }
 
 export type FilePrecondition =
