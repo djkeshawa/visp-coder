@@ -15,14 +15,22 @@ import { collectMigrationHistory } from "./history-export.js";
 export async function previewMigration(root: string, feature?: string) {
   const workspace = await loadWorkspace(root);
   if (!workspace.ok) return workspace;
-  const plan = await planProductMigration(workspace.value, { feature });
-  return plan.ok
-    ? ok({
-        operation: "preview",
-        features: plan.value.features,
-        changes: plan.value.mutations.map(({ kind, path }) => ({ kind, path })),
-      })
-    : plan;
+  const ids = feature ? ok([feature]) : await workspace.value.store.listFeatures();
+  if (!ids.ok) return ids;
+  const features: ProductMigrationOutcome["features"][number][] = [];
+  const failures: { feature: string; message: string; recovery?: string }[] = [];
+  const changes = new Map<string, { kind: string; path: string }>();
+  for (const id of ids.value) {
+    const plan = await planProductMigration(workspace.value, { feature: id });
+    if (!plan.ok) {
+      if (feature) return plan;
+      failures.push({ feature: id, message: plan.error.message, recovery: plan.error.recovery });
+      continue;
+    }
+    features.push(...plan.value.features);
+    for (const { kind, path } of plan.value.mutations) changes.set(path, { kind, path });
+  }
+  return ok({ operation: "preview", features, failures, changes: [...changes.values()] });
 }
 
 /** Export uses writer ownership but does not recover or reinterpret old records. */

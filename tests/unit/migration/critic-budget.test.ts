@@ -353,7 +353,10 @@ it.each(["malformed-json", "invalid-state", "directory"] as const)(
     } else await writeFile(path, condition === "malformed-json" ? "{unfinished" : "{}");
     const before = await collectMigrationHistory(p.workspace.root);
     const stateBefore = await readFile(p.statePath, "utf8");
-    expect(await previewMigration(p.workspace.root)).toMatchObject({ ok: false });
+    expect(await previewMigration(p.workspace.root)).toMatchObject({
+      ok: true,
+      value: { failures: [expect.objectContaining({ message: expect.any(String) })] },
+    });
     expect(await applyMigration(p.workspace.root)).toMatchObject({ ok: false });
     expect(await collectMigrationHistory(p.workspace.root)).toEqual(before);
     expect(await readFile(p.statePath, "utf8")).toBe(stateBefore);

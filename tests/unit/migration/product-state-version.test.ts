@@ -64,7 +64,10 @@ it.each([{ version: 2, slices: null }, { version: 99 }])(
     const current = JSON.parse(await readFile(join(workspace.root, path), "utf8"));
     await workspace.write(path, JSON.stringify({ ...current, ...override }));
     const before = await collectMigrationHistory(workspace.root);
-    expect(await previewMigration(workspace.root)).toMatchObject({ ok: false });
+    expect(await previewMigration(workspace.root)).toMatchObject({
+      ok: true,
+      value: { failures: [expect.objectContaining({ message: expect.any(String) })] },
+    });
     expect(await applyMigration(workspace.root)).toMatchObject({ ok: false });
     expect(await collectMigrationHistory(workspace.root)).toEqual(before);
   },
