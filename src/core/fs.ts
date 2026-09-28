@@ -29,14 +29,6 @@ export async function exists(path: string): Promise<boolean> {
   }
 }
 
-export async function isDirectory(path: string): Promise<boolean> {
-  try {
-    return (await lstat(path)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 export async function ensureDir(path: string): Promise<Result<void>> {
   try {
     await mkdir(path, { recursive: true });
@@ -69,20 +61,6 @@ export async function readTextIfExists(path: string): Promise<Result<string | un
   return result.error.code === "ARTIFACT_MISSING" ? ok(undefined) : result;
 }
 
-/** Reads exact file bytes, refusing symlinks and distinguishing an absent file. */
-export async function readBytesIfExists(path: string): Promise<Result<Uint8Array | undefined>> {
-  try {
-    const stats = await lstat(path);
-    if (stats.isSymbolicLink()) {
-      return err(vispError("IO_ERROR", `Refusing to read symlink: ${path}`));
-    }
-    return ok(await readFile(path));
-  } catch (cause) {
-    if (isNodeError(cause) && cause.code === "ENOENT") return ok(undefined);
-    return err(fromUnknown(cause, "IO_ERROR"));
-  }
-}
-
 /** Writes via a temporary file and rename so readers never see a partial file. */
 export async function writeTextAtomic(path: string, content: string): Promise<Result<void>> {
   const directory = dirname(path);
@@ -106,16 +84,6 @@ export async function readJson<T>(
 ): Promise<Result<T>> {
   const text = await readText(path);
   if (!text.ok) return text;
-  return parseJson(text.value, parse, path);
-}
-
-export async function readJsonIfExists<T>(
-  path: string,
-  parse: (value: unknown) => Result<T>,
-): Promise<Result<T | undefined>> {
-  const text = await readTextIfExists(path);
-  if (!text.ok) return text;
-  if (text.value === undefined) return ok(undefined);
   return parseJson(text.value, parse, path);
 }
 
@@ -214,17 +182,6 @@ export class ProjectFileSystem {
     try {
       await access(target.value, constants.F_OK);
       return ok(true);
-    } catch (cause) {
-      if (isNodeError(cause) && cause.code === "ENOENT") return ok(false);
-      return err(fromUnknown(cause, "IO_ERROR"));
-    }
-  }
-
-  async isDirectory(path: string): Promise<Result<boolean>> {
-    const target = await this.validate(path);
-    if (!target.ok) return target;
-    try {
-      return ok((await lstat(target.value)).isDirectory());
     } catch (cause) {
       if (isNodeError(cause) && cause.code === "ENOENT") return ok(false);
       return err(fromUnknown(cause, "IO_ERROR"));

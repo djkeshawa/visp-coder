@@ -14,8 +14,6 @@ export const projectSchema = z
   })
   .strict();
 
-export type Project = z.infer<typeof projectSchema>;
-
 /** Which feature and task are active, and what ran last. */
 export const statusSchema = z
   .object({

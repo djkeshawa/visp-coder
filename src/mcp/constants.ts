@@ -63,5 +63,3 @@ export const RESOURCE = {
   scope: "visp://scope",
   brief: "visp://feature/{id}/brief",
 } as const;
-
-export type ResourceUri = (typeof RESOURCE)[keyof typeof RESOURCE];

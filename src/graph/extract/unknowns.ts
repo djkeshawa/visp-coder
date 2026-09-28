@@ -18,10 +18,6 @@ export class UnknownCollector {
     for (const record of records) this.record(record.kind, record.path, record.detail);
   }
 
-  get size(): number {
-    return this.records.size;
-  }
-
   toArray(): UnknownRecord[] {
     return [...this.records.values()].sort(compareUnknowns);
   }

@@ -6,10 +6,6 @@ export function named(node: SyntaxNode): SyntaxNode[] {
   return node.namedChildren.filter((child): child is SyntaxNode => child !== null);
 }
 
-export function children(node: SyntaxNode): SyntaxNode[] {
-  return node.children.filter((child): child is SyntaxNode => child !== null);
-}
-
 export function field(node: SyntaxNode, name: string): SyntaxNode | undefined {
   return node.childForFieldName(name) ?? undefined;
 }

@@ -20,7 +20,6 @@ import {
  */
 
 export const SKILL_STATES = ["proposed", "admitted", "rejected", "retired", "orphaned"] as const;
-export type SkillState = (typeof SKILL_STATES)[number];
 
 /**
  * `declared` names a proposed check, never an executed one. `verified` is a
@@ -103,7 +102,6 @@ export const SKILL_ENTRYPOINT_KINDS = [
   "test_entrypoint",
   "page_entrypoint",
 ] as const;
-export type SkillEntrypointKind = (typeof SKILL_ENTRYPOINT_KINDS)[number];
 
 /**
  * `stage: plan` is the same claim as `stage: [plan]`, and reads better. A key

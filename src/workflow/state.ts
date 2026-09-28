@@ -292,40 +292,6 @@ export function isStatePath(path: string): boolean {
   return normalized === STATE_DIR || normalized.startsWith(`${STATE_DIR}/`);
 }
 
-/**
- * The feature whose intent records this branch.
- *
- * CI has no active feature of its own: `status.json` is per-developer and is not
- * committed. The branch is, so it is what ties a pull request back to the scope
- * it was supposed to stay inside. Undefined when nothing matches, which the
- * caller must treat as "ask explicitly" rather than "any feature will do".
- */
-export async function featureForBranch(
-  state: WorkspaceState,
-  branchOverride?: string,
-): Promise<string | undefined> {
-  // A detached checkout has no branch to read — `rev-parse --abbrev-ref HEAD`
-  // answers the literal string "HEAD" — and that is the normal state in CI:
-  // actions/checkout detaches for a pull_request event. So the caller may say
-  // which branch this checkout represents when git cannot.
-  const name = (branchOverride ?? (await readBranch(state))).trim();
-  if (name === "" || name === "HEAD") return undefined;
-
-  const features = await state.store.listFeatures();
-  if (!features.ok) return undefined;
-
-  for (const feature of features.value) {
-    const intent = await state.store.readIntent(feature);
-    if (intent.ok && intent.value.branch === name) return feature;
-  }
-  return undefined;
-}
-
-async function readBranch(state: WorkspaceState): Promise<string> {
-  const branch = await currentBranch(state.paths.root);
-  return branch.ok ? branch.value : "";
-}
-
 /** Where the scope being enforced comes from. */
 export type ScopeSource = "markers" | "tasks";
 

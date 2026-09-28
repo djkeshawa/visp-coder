@@ -213,8 +213,6 @@ export const criterionCheckSchema = z
   })
   .strict();
 
-export type CriterionCheck = z.infer<typeof criterionCheckSchema>;
-
 export const reviewSchema = z
   .object({
     ...artifactEnvelope("review"),
@@ -386,8 +384,6 @@ export const pullRequestSchema = z
     summary: featureEvidenceSummarySchema.optional(),
   })
   .strict();
-
-export type PullRequest = z.infer<typeof pullRequestSchema>;
 
 /**
  * Authorization to edit a specific task's files. Written by `gate implement`,

@@ -53,7 +53,6 @@ export type ValidationLayer = z.infer<typeof validationLayerSchema>;
 
 /** Runtime needed to execute a criterion command. Kept explicit so prose is never classified. */
 export const verificationEnvironmentSchema = z.enum(["project", "browser"]);
-export type VerificationEnvironment = z.infer<typeof verificationEnvironmentSchema>;
 
 /** How an acceptance criterion says it can be settled. */
 export const verificationKindSchema = z.enum(["command", "computed", "inspection"]);
@@ -73,8 +72,6 @@ export const provenanceSchema = z.object({
   path: z.string(),
   hash: sha256Schema,
 });
-
-export type Provenance = z.infer<typeof provenanceSchema>;
 
 /** Every artifact carries its kind and when it was written. */
 export function artifactEnvelope<Kind extends string>(kind: Kind) {

@@ -25,8 +25,6 @@ export const validationCheckSchema = z
   })
   .strict();
 
-export type ValidationCheck = z.infer<typeof validationCheckSchema>;
-
 /**
  * Engineering shapes that determine evidence needs. These are deliberately
  * domain-neutral: a task declares the boundary it changes instead of Visp

@@ -125,8 +125,6 @@ export const behaviorScenarioSchema = z
   })
   .strict();
 
-export type BehaviorScenario = z.infer<typeof behaviorScenarioSchema>;
-
 /** What the change must do. Draft stages leave `draft: true` until validated. */
 export const specSchema = z
   .object({

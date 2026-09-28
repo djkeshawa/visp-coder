@@ -52,7 +52,6 @@ export function configuredCriticMode(
  * worker that never orchestrates delegation still receives independent review.
  */
 export const criticLaunchSchema = z.enum(["host", "codex-exec"]);
-export type CriticLaunch = z.infer<typeof criticLaunchSchema>;
 
 export const criticDefaultsSchema = criticConfigSchema
   .partial()
