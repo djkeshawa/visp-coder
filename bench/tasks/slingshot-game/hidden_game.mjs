@@ -26,7 +26,8 @@ async function openPage(viewport, extra = {}) {
   const errors = [];
   const foreign = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  // Browsers ask for /favicon.ico on their own; a missing one is not a game error.
+  page.on("console", (m) => m.type() === "error" && !/\/favicon\.ico$/.test(m.location()?.url ?? "") && errors.push(m.text()));
   page.on("request", (r) => {
     const u = r.url();
     if (!u.startsWith(new URL(URL_).origin) && !u.startsWith("data:") && !u.startsWith("blob:")) foreign.push(u);
@@ -257,16 +258,16 @@ await check("losing all birds ends the level as lost", async () => {
   const pigs = (await attrs(page)).pigs;
   for (let i = 0; i < 3; i++) await shoot(page, 180, 1); // straight back out of the world
   const a = await attrs(page);
-  const retry = await buttonVisible(page, "retry");
-  return (a.state === "lost" && a.birds === 0 && a.pigs === pigs && retry) || JSON.stringify({ a, retry });
+  return (a.state === "lost" && a.birds === 0 && a.pigs === pigs) || JSON.stringify(a);
 });
-await check("retry restores the level", async () => {
+await check("ui: a retry button follows a loss", async () => (await buttonVisible(page, "retry")) || "no visible DOM button labelled Retry");
+await check("ui: retry restores the level", async () => {
   const clicked = await clickButton(page, "retry");
   await call(page, "window.gameTest.pause()");
   const a = await attrs(page);
   return (clicked && a.state === "aiming" && a.birds === 3 && a.score === 0 && a.pigs === initial.pigs) || JSON.stringify({ clicked, a });
 });
-await check("restart button restarts the current level", async () => {
+await check("ui: restart button restarts the current level", async () => {
   await fresh(page);
   await shoot(page, 45, 0.6);
   const visible = await buttonVisible(page, "restart");
@@ -314,10 +315,13 @@ await check("clearing every pig wins the level", async () => {
     }
     return "never";
   });
-  const next = await buttonVisible(page, "next level");
-  return (wonAt === "won" && next) || JSON.stringify({ wonAt, next });
+  return wonAt === "won" || `state when the last pig went: ${wonAt}`;
 });
-await check("next level starts level 2", async () => {
+await check("ui: a next level button follows a win", async () => {
+  if (!winning) return "no win reached";
+  return (await buttonVisible(page, "next level")) || "no visible DOM button labelled Next level";
+});
+await check("ui: next level starts level 2", async () => {
   if (!winning) return "no win to continue from";
   const clicked = await clickButton(page, "next level");
   await call(page, "window.gameTest.pause()");
@@ -335,7 +339,7 @@ await check("three distinct levels", async () => {
   }
   return new Set(layouts).size === 3 || "layouts repeat";
 });
-await check("level, score and birds are shown", async () => {
+await check("ui: level, score and birds are shown", async () => {
   await fresh(page, 2);
   const text = await page.evaluate(() => document.body.innerText.toLowerCase());
   return (/level/.test(text) && /score/.test(text) && /bird/.test(text)) || text.slice(0, 200);

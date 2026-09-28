@@ -13,7 +13,7 @@ import sys
 from common import RUNS
 
 BENCH = pathlib.Path(__file__).resolve().parent
-GROUPS = ("ext", "new", "code", "memory")
+GROUPS = ("ext", "new", "code", "memory", "ui")
 task, names = sys.argv[1], sys.argv[2:]
 stage = []
 if names[:1] == ["--stage"]:
