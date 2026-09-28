@@ -190,13 +190,15 @@ function browserExecution(
       mutations: [],
     };
   const { result } = captured.value;
+  // A wait-for that never observes its state ends the journey as timed out with a behavior
+  // failure: that is the product failing, not the check running out of time.
   const status =
-    result.status === "timed-out"
-      ? "timed-out"
-      : result.status === "completed"
-        ? "passed"
-        : result.failure?.kind === "behavior"
-          ? "failed"
+    result.status === "completed"
+      ? "passed"
+      : result.failure?.kind === "behavior"
+        ? "failed"
+        : result.status === "timed-out"
+          ? "timed-out"
           : "environment-failed";
   return {
     execution: {

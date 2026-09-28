@@ -197,7 +197,7 @@ describe("runner-owned browser product checks", () => {
           closed: false,
           executions: [
             {
-              status: "timed-out",
+              status: "failed",
               assertions: "runner-observed",
               captureRunId: expect.any(String),
             },
@@ -273,7 +273,7 @@ describe("runner-owned browser product checks", () => {
     expect(await runProductWork(await workspace.state())).toMatchObject({ ok: true });
     expect(await runProductDone(await workspace.state())).toMatchObject({
       ok: true,
-      value: { closed: false, executions: [{ status: "timed-out" }] },
+      value: { closed: false, executions: [{ status: "failed" }] },
     });
     expect(browser.open).toHaveBeenCalledTimes(2);
   });
