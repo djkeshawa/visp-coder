@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import { runProductCritic } from "../../../../src/workflow/product/critic.js";
@@ -41,6 +41,22 @@ it.each(["current", "observation-preview"] as const)(
   "delivers the same product rubric through native, prepared and host review in %s mode",
   async (reviewMode) => {
     const workspace = await ready(true);
+    const ambiguities = [
+      {
+        quote: "Blank lines are ignored.",
+        readings: ["Only empty lines", "Empty and whitespace-only lines"],
+        conventionalReading: "Empty and whitespace-only lines",
+      },
+    ];
+    await writeFile(
+      workspace.paths.featureFile(workspace.status?.activeFeature ?? "", "acceptance-tests.json"),
+      JSON.stringify({
+        version: 1,
+        status: "declined",
+        startedAt: new Date().toISOString(),
+        ambiguities,
+      }),
+    );
     workspace.config.workflow.reviewMode = reviewMode;
     const handoff = await runProductReviewerHandoff(workspace, { task: "T001" });
     const selected = await criticSelection(workspace, { task: "T001" });
@@ -68,6 +84,9 @@ it.each(["current", "observation-preview"] as const)(
     );
     expect(packet.instructions).toBe(native.value.instructions);
     expect(delivered).toMatchObject({ instructions: native.value.instructions });
+    for (const input of [packet, delivered, native.value.current])
+      expect(input).toMatchObject({ ambiguities });
+    expect(packet.instructions).toContain("deliberate, conventional choice");
     expect(packet.instructions).toContain("visual quality");
     expect(packet.instructions).toContain("composition");
     expect(packet.instructions.includes(OBSERVATION_REVIEW_INSTRUCTIONS)).toBe(

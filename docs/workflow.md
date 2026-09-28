@@ -118,7 +118,7 @@ Authorizations record the Git commit at `work`. Incoming committed changes whose
 
 **`visp work [--task <id>]`** selects the next ready slice (or the named one), checks that it has an outcome, a bounded scope and runnable checks, and authorizes edits in its scope. It returns the objective, scope, relevant outcomes and findings, source excerpts, graph neighbors, memory notes and admitted skills, trimmed to `context.tokenBudget`. `--inspect` reads the same context without authorizing, probing the environment or refreshing the graph. For slices with browser checks, `work` first confirms an isolated browser can start and capture; `--retry-environment` retries after the host environment is fixed.
 
-**Independent acceptance tests.** With `critic.launch: codex-exec` and `critic.harness: codex`, `visp feature` starts an independent tester on a new project that writes tests from the original request. VISP keeps them only if they fail before implementation and pins them whenever the tester finishes; `work` does not wait and reports them as `independentTests`. See [the critic guide](critic.md#independent-acceptance-tests).
+**Independent acceptance tests.** With `critic.launch: codex-exec` and `critic.harness: codex`, `visp feature` starts an independent tester on a new project that writes tests from the original request. VISP keeps them only if they fail against a private launch-time source copy and pins them whenever the tester finishes, even if the worker has since edited the product; `work` does not wait and reports them as `independentTests`. Ambiguous request rules are recorded separately from tests and arrive as "Decide explicitly" notes, with the conventional reading; record the choice in the implementation, tests or documentation. Reviewers receive the same readings as advice. See [the critic guide](critic.md#independent-acceptance-tests).
 
 **Light path.** `visp work --check "<test command>"` on a feature without slices creates one slice covering the whole request (scope `**`, the command as its check) and authorizes it; on a slice without checks it declares that check. Use a full brief only for several independently usable parts.
 
@@ -134,6 +134,8 @@ Without a check, `done` has nothing to execute and the reviewer has no evidence.
 **`visp verify`** runs the slice's checks without closing it.
 
 **`visp done`** runs the checks and records each execution. When all pass and any required review is current, the slice closes. If `critic.launch: codex-exec` is set and every check passed, `done` then starts the independent reviewer and waits for it (using the time left in a 100-second CLI or 50-second MCP call budget), so its findings usually arrive in the same step; see [the critic guide](critic.md). On the last open slice `done` also runs the pinned acceptance tests; on earlier slices it reports them without blocking. While a review is pending, editing, closing and acceptance wait for it.
+
+The reviewer checks stated rules and common natural input variants before optional robustness concerns. Only required findings cause repair routing or reopening; advisory findings remain visible without blocking closure or acceptance.
 
 **`visp next`** is read-only and returns one action with its command. When a background review is running it waits within a 100-second CLI or 50-second MCP call budget; if the review is still running it returns `action: wait` with `visp next --feature <id>` to run again. `visp status` shows outcomes, slice progress, evidence and open findings.
 

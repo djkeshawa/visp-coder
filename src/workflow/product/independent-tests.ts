@@ -3,15 +3,18 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import {
   appendFile,
   copyFile,
+  cp,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
+  readlink,
   rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { resolveCriticPolicy } from "../../config/critic-defaults.js";
@@ -35,8 +38,10 @@ import {
 import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
 import { hostRequest } from "./host-prompts.js";
 import { rulesForRequest, withRules } from "./project-rules.js";
+import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
 import { productSourceSnapshot } from "./subject.js";
+import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./tester-snapshot.js";
 
 /**
  * Independent acceptance tests. Before the first slice is authorized, a tester that never
@@ -62,6 +67,7 @@ const testerResponseSchema = z.object({
   file: z.object({ name: z.string(), content: z.string() }).nullable(),
   existingBehavior: z.boolean().default(false),
   tests: z.array(z.object({ name: z.string(), quote: z.string() })),
+  ambiguities: z.array(requestAmbiguitySchema).default([]),
   notes: z.string(),
 });
 type TesterResponse = z.infer<typeof testerResponseSchema>;
@@ -70,7 +76,7 @@ type TesterResponse = z.infer<typeof testerResponseSchema>;
 const TESTER_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["file", "existingBehavior", "tests", "notes"],
+  required: ["file", "existingBehavior", "tests", "ambiguities", "notes"],
   properties: {
     existingBehavior: { type: "boolean" },
     file: {
@@ -94,6 +100,19 @@ const TESTER_OUTPUT_SCHEMA = {
       },
     },
     notes: { type: "string" },
+    ambiguities: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["quote", "readings", "conventionalReading"],
+        properties: {
+          quote: { type: "string" },
+          readings: { type: "array", items: { type: "string" }, minItems: 2 },
+          conventionalReading: { type: "string" },
+        },
+      },
+    },
   },
 } as const;
 
@@ -110,6 +129,7 @@ export const independentTestsRecordSchema = z
     file: z.string().optional(),
     command: z.array(z.string()).optional(),
     tests: z.array(z.object({ name: z.string(), quote: z.string() })).optional(),
+    ambiguities: z.array(requestAmbiguitySchema).optional(),
     notes: z.string().optional(),
     content: z.string().optional(),
     sourceDigest: z.string().optional(),
@@ -132,10 +152,13 @@ export interface IndependentTestsSummary {
   readonly command?: readonly string[];
   readonly reason?: string;
   readonly instructions?: string;
+  readonly ambiguities?: readonly RequestAmbiguity[];
 }
 
 export interface TesterRequest {
   readonly root: string;
+  /** Private launch-time source copy, never exposed to a new-project tester. */
+  readonly sourceRoot?: string;
   readonly model: string;
   readonly reasoningEffort?: string;
   readonly prompt: string;
@@ -209,7 +232,12 @@ export function codexTester(
     const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
     try {
       const root = request.explore
-        ? await repositoryCopy(request.root, directory, request.blockedPaths ?? [])
+        ? await repositoryCopy(
+            request.root,
+            directory,
+            request.blockedPaths ?? [],
+            request.sourceRoot,
+          )
         : await mkdir(join(directory, "empty-project"), { recursive: true }).then(() =>
             join(directory, "empty-project"),
           );
@@ -292,8 +320,8 @@ export function backgroundTests(cli: string): TestsStarter {
 }
 
 /**
- * Called by `work` before authorization. Pinning changes the slice contract, so the tests
- * must exist before the first slice is authorized, never in the middle of one.
+ * Called by `work` before authorization. Deliver existing tests and interpretation notes;
+ * a background tester can pin its suite while the worker continues.
  */
 export async function independentTestsBeforeWork(
   workspace: WorkspaceState,
@@ -301,11 +329,6 @@ export async function independentTestsBeforeWork(
   starter: TestsStarter | undefined,
   waitMs: number,
 ): Promise<Result<IndependentTestsSummary | undefined>> {
-  if (!starter)
-    return workspace.config.critic?.launch === "codex-exec" &&
-      workspace.config.critic.harness !== "codex"
-      ? ok({ status: "skipped", reason: "The independent tester requires critic.harness: codex" })
-      : ok(undefined);
   const loaded = await readProductRecord(workspace, feature ? { feature } : {});
   if (!loaded.ok) return ok(undefined);
   const { brief } = loaded.value;
@@ -316,6 +339,7 @@ export async function independentTestsBeforeWork(
   // Workers waited 1–2 minutes here. Pinned tests are not part of a slice's contract, so
   // work proceeds and the tests are pinned whenever the tester finishes.
   if (!record) {
+    if (!starter) return ok(unavailableTester(workspace));
     if (!(await testerLaunches(workspace, loaded.value))) return ok(undefined);
     const source = await startingSourceDigest(workspace, brief.feature, brief);
     if (!source.ok) return source;
@@ -324,6 +348,13 @@ export async function independentTestsBeforeWork(
     record = started.value;
   }
   return ok(summary(record));
+}
+
+function unavailableTester(workspace: WorkspaceState): IndependentTestsSummary | undefined {
+  return workspace.config.critic?.launch === "codex-exec" &&
+    workspace.config.critic.harness !== "codex"
+    ? { status: "skipped", reason: "The independent tester requires critic.harness: codex" }
+    : undefined;
 }
 
 /**
@@ -465,6 +496,7 @@ function summary(record: IndependentTestsRecord): IndependentTestsSummary {
     ...(record.file ? { file: record.file } : {}),
     ...(record.command ? { command: record.command } : {}),
     ...(record.reason ? { reason: record.reason } : {}),
+    ...(record.ambiguities?.length ? { ambiguities: record.ambiguities } : {}),
     ...(record.status === "pinned"
       ? {
           instructions:
@@ -474,7 +506,7 @@ function summary(record: IndependentTestsRecord): IndependentTestsSummary {
   };
 }
 
-/** Runs the tester, keeps its file only if it fails on the current project, and pins it. */
+/** Runs the tester, keeps its file only if it fails on launch-time sources, and pins it. */
 export async function writeIndependentTests(
   workspace: WorkspaceState,
   feature: string,
@@ -518,28 +550,51 @@ export async function writeIndependentTests(
   };
   const marked = await saveTestsRecord(workspace, feature, running, existing.value);
   if (!marked.ok) return marked;
-  const existingCodebase = await existingCode(workspace.paths.root);
-  const rules = await rulesForRequest(workspace, feature);
-  const request = {
-    root: workspace.paths.root,
-    model,
-    ...testerEffort(setup.value.reasoningEffort),
-    prompt: testerPrompt(
-      withRules(loaded.value.brief.originalRequest, rules),
-      feature,
-      existingCodebase,
-    ),
-    schema: TESTER_OUTPUT_SCHEMA,
-    ...(existingCodebase
-      ? { explore: true, blockedPaths: workspace.config.workflow.blockedPaths }
-      : {}),
-    onActivity: (activity: SessionActivity) =>
-      recordTesterActivity(workspace, feature, model, existingCodebase, activity),
-  };
-  const fields = await testOutcome(workspace, feature, tester, request, sourceDigest);
+  const fields = await testsFromSnapshot(
+    workspace,
+    feature,
+    tester,
+    loaded.value.brief,
+    setup.value,
+  );
   const record = { ...running, ...fields, finishedAt: new Date().toISOString() };
   const saved = await saveTestsRecord(workspace, feature, record, running);
   return saved.ok ? ok(independentTestsRecordSchema.parse(record)) : saved;
+}
+
+async function testsFromSnapshot(
+  workspace: WorkspaceState,
+  feature: string,
+  tester: IndependentTester,
+  brief: ProductRecord["brief"],
+  setup: { model: string; reasoningEffort?: string; sourceDigest: string },
+): Promise<TestFields> {
+  let snapshot: TesterSnapshot | undefined;
+  try {
+    const captured = await captureTesterSnapshot(workspace, brief, setup.sourceDigest);
+    if (!captured.ok) return { status: "failed", reason: captured.error.message };
+    snapshot = captured.value;
+    const existingCodebase = await existingCode(workspace.paths.root);
+    const rules = await rulesForRequest(workspace, feature);
+    const request: TesterRequest = {
+      root: workspace.paths.root,
+      sourceRoot: snapshot.root,
+      model: setup.model,
+      ...testerEffort(setup.reasoningEffort),
+      prompt: testerPrompt(withRules(brief.originalRequest, rules), feature, existingCodebase),
+      schema: TESTER_OUTPUT_SCHEMA,
+      ...(existingCodebase
+        ? { explore: true, blockedPaths: workspace.config.workflow.blockedPaths }
+        : {}),
+      onActivity: (activity) =>
+        recordTesterActivity(workspace, feature, setup.model, existingCodebase, activity),
+    };
+    return await testOutcome(workspace, feature, tester, request, snapshot);
+  } catch (cause) {
+    return { status: "failed", reason: message(cause) };
+  } finally {
+    await snapshot?.dispose();
+  }
 }
 
 async function testerSetup(
@@ -581,9 +636,9 @@ async function testOutcome(
   feature: string,
   tester: IndependentTester,
   request: TesterRequest,
-  sourceDigest: string,
+  snapshot: TesterSnapshot,
 ): Promise<TestFields> {
-  const first = await attemptTests(workspace, feature, tester, request, sourceDigest);
+  const first = await attemptTests(workspace, feature, tester, request, snapshot);
   if (first.status !== "rejected" || !first.content) return first;
   if (
     first.baseline &&
@@ -600,7 +655,7 @@ async function testOutcome(
       ...request,
       prompt: repairPrompt(request.prompt, first.content, first.reason ?? ""),
     },
-    sourceDigest,
+    snapshot,
   );
 }
 
@@ -609,7 +664,7 @@ async function attemptTests(
   feature: string,
   tester: IndependentTester,
   request: TesterRequest,
-  sourceDigest: string,
+  snapshot: TesterSnapshot,
 ): Promise<TestFields> {
   let response: TesterResponse;
   try {
@@ -617,7 +672,11 @@ async function attemptTests(
   } catch (cause) {
     return { status: "failed", reason: message(cause) };
   }
-  const described = { tests: response.tests, notes: response.notes };
+  const described = {
+    tests: response.tests,
+    notes: response.notes,
+    ambiguities: redactStrings(response.ambiguities, workspace.paths.root),
+  };
   if (!response.file)
     return { status: "declined", reason: "No testable interface in the request", ...described };
   // The rejected file stays in the record so a person can see what the tester wrote.
@@ -635,8 +694,8 @@ async function attemptTests(
     feature,
     response.file,
     response.existingBehavior,
-    sourceDigest,
-  );
+    snapshot,
+  ).catch((cause) => ({ status: "failed" as const, reason: message(cause) }));
   return {
     ...kept,
     ...(["rejected", "failed"].includes(kept.status ?? "") ? { content } : {}),
@@ -668,7 +727,7 @@ function repairPrompt(prompt: string, content: string, reason: string): string {
   return [
     prompt,
     "",
-    "Your previous file was rejected when VISP ran it against the current repository:",
+    "Your previous file was rejected when VISP ran it against the launch-time repository copy:",
     reason,
     "",
     "Previous file:",
@@ -684,19 +743,24 @@ async function keepFailingTests(
   feature: string,
   file: { name: string; content: string },
   existingBehavior: boolean,
-  sourceDigest: string,
+  snapshot: TesterSnapshot,
 ): Promise<TestFields> {
-  const unchanged = await sourceUnchanged(workspace, sourceDigest);
-  if (!unchanged.ok) return { status: "failed", reason: unchanged.error.message };
-  if (!unchanged.value)
-    return {
-      status: "declined",
-      reason:
-        "Product sources changed while the tester was writing; the before-implementation baseline is inconclusive",
-    };
   const safeName = file.name.replace(/\.(?:test|spec)\.mjs$/, ".acceptance.mjs");
   const path = `acceptance/${feature}/${safeName}`;
   const command = testCommand(path);
+  // Keep redaction anchored to the real project, including values from its env files.
+  const redact = await outputRedactor(workspace.paths.root);
+  const execute = (extra: Record<string, string> = {}) =>
+    inTesterSnapshot(snapshot, async (root) => {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), file.content, { flag: "wx" });
+      return runBaseline(root, command, extra, { redact });
+    });
+  const baseline = await execute();
+  const existing = existingBehavior ? await execute({ VISP_TEST_SCOPE: "existing" }) : undefined;
+  const kept = { file: path, command, baseline };
+  const rejection = baselineRejection(baseline, existing);
+  if (rejection) return { status: "rejected", reason: rejection, content: file.content, ...kept };
   const written = await retryBusy(() =>
     applyFileTransaction(workspace.paths.root, "write-acceptance-tests", [
       {
@@ -707,32 +771,7 @@ async function keepFailingTests(
       },
     ]),
   );
-  if (!written.ok) return { status: "failed", reason: written.error.message, file: path };
-  const baseline = await runBaseline(workspace.paths.root, command);
-  const kept = { file: path, command, baseline };
-  // On an existing codebase the current code is the oracle for documented behavior: tests
-  // of it, with the same helpers, must pass now. Wrong assumed formats fail here.
-  const existing = existingBehavior
-    ? await runBaseline(workspace.paths.root, command, { VISP_TEST_SCOPE: "existing" })
-    : undefined;
-  const stillUnchanged = await sourceUnchanged(workspace, sourceDigest, path);
-  if (!stillUnchanged.ok) {
-    await removeFile(workspace, path, file.content);
-    return { status: "failed", reason: stillUnchanged.error.message };
-  }
-  if (!stillUnchanged.value) {
-    await removeFile(workspace, path, file.content);
-    return {
-      status: "declined",
-      reason:
-        "Product sources changed during the baseline; the before-implementation result is inconclusive",
-    };
-  }
-  const rejection = baselineRejection(baseline, existing);
-  if (rejection) {
-    await removeFile(workspace, path, file.content);
-    return { status: "rejected", reason: rejection, content: file.content, ...kept };
-  }
+  if (!written.ok) return { status: "failed", reason: written.error.message };
   const pinned = await pinTests(workspace, feature, path, command, file.content);
   if (pinned.ok) return { status: "pinned", ...kept };
   if (pinned.error.code !== "STATE_BUSY") await removeFile(workspace, path, file.content);
@@ -744,26 +783,13 @@ function baselineRejection(
   existing?: Awaited<ReturnType<typeof runBaseline>>,
 ): string | undefined {
   if (existing && (existing.exitCode !== 0 || existing.timedOut || existing.spawnFailed))
-    return `Tests of existing behavior fail on the current repository, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`;
+    return `Tests of existing behavior fail on the launch-time repository copy, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`;
   if (baseline.spawnFailed || [127, 9009].includes(baseline.exitCode))
     return "The test interpreter could not start; no product behavior was tested";
   if (baseline.timedOut) return "The tests did not finish on the unimplemented project";
   if (baseline.exitCode === 0)
     return "The tests pass before any implementation, so they check nothing new";
   return undefined;
-}
-
-async function sourceUnchanged(
-  workspace: WorkspaceState,
-  digest: string,
-  candidate?: string,
-): Promise<Result<boolean>> {
-  const current = await productSourceSnapshot(workspace);
-  if (!current.ok) return current;
-  const files = Object.fromEntries(
-    Object.entries(current.value).filter(([path]) => path !== candidate),
-  );
-  return ok(hashValue(files) === digest);
 }
 
 function onlyStructuralChecks(response: TesterResponse): boolean {
@@ -851,8 +877,27 @@ async function repositoryCopy(
   root: string,
   directory: string,
   blockedPaths: readonly string[],
+  sourceRoot?: string,
 ): Promise<string> {
   const copy = join(directory, "repository");
+  if (sourceRoot) {
+    await cp(sourceRoot, copy, {
+      recursive: true,
+      verbatimSymlinks: true,
+      filter: async (path) => {
+        const local = relative(sourceRoot, path).replaceAll("\\", "/");
+        const link = await readlink(path).catch(() => undefined);
+        const target =
+          link === undefined
+            ? local
+            : relative(sourceRoot, resolve(dirname(path), link)).replaceAll("\\", "/");
+        return ![local, target].some((entry) =>
+          leftOut(entry, [".git", ".visp", "acceptance", ...SECRET_FILES, ...blockedPaths]),
+        );
+      },
+    });
+    return copy;
+  }
   const listed = await run("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
     cwd: root,
     timeoutMs: 20_000,
@@ -875,6 +920,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "Rules:",
     "- Test only behavior the request states. Quote the sentence each test relies on in `tests[].quote`. Do not invent requirements, messages or formats the request leaves open.",
     "- A wrong test is worse than a missing one: the implementer must satisfy it. Leave out any case where a careful reader could expect a different result (for example extra fields or an empty body when the request does not say).",
+    "- Surface those cases in `ambiguities`: quote the exact rule in `quote`, list its reasonable `readings`, and give the reading most implementations/users expect in `conventionalReading`. Consider common natural variants, such as whitespace-only lines for 'blank lines'. Do not write tests for ambiguous cases. Return ambiguities even when file is null; use [] when none exist. These notes ask the worker to decide explicitly, not to satisfy an invented requirement.",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
     "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
     "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
@@ -887,7 +933,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
       ? [
           "- This request changes an existing codebase, and you are in a disposable copy of it where you may run the existing program and its tests. Before asserting anything about existing behavior (routes, status codes, body shapes, error formats, the requests your setup makes), run the program and observe it; base every such assertion on what you observed, not on assumptions.",
           "- Create every item, record or file your tests need through the documented interfaces; never depend on data, fixtures or documentation examples already in the repository.",
-          "- Include tests of existing behavior that use the same helpers as the new tests: at least one for every existing route, command or interface your new tests call or assert on (for example, if a new test expects a status from an existing endpoint, also test that endpoint's documented existing case), and every assertion helper the new tests use (such as an error-body check) must also be used by at least one existing-behavior test. Set existingBehavior: true. When the environment variable VISP_TEST_SCOPE is `existing`, run only those tests; they must pass on the repository as it is now. Your file is judged by running it against the real repository.",
+          "- Include tests of existing behavior that use the same helpers as the new tests: at least one for every existing route, command or interface your new tests call or assert on (for example, if a new test expects a status from an existing endpoint, also test that endpoint's documented existing case), and every assertion helper the new tests use (such as an error-body check) must also be used by at least one existing-behavior test. Set existingBehavior: true. When the environment variable VISP_TEST_SCOPE is `existing`, run only those tests; they must pass on the launch-time repository copy. Your file is judged against that same copy, even if the worker edits the live project.",
         ]
       : [
           "- Set existingBehavior: false. You are in an empty temporary directory. Do not inspect the implementation, run `visp`, or load project or personal skills.",
@@ -924,10 +970,10 @@ async function runBaseline(
   root: string,
   command: string[],
   extra: Record<string, string> = {},
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; redact?: (text: string) => string } = {},
 ) {
   const [file, ...args] = command as [string, ...string[]];
-  const redact = await outputRedactor(root);
+  const redact = options.redact ?? (await outputRedactor(root));
   const env = await resolvedProductExecutionEnvironment();
   const result = await run(file, args, {
     cwd: root,

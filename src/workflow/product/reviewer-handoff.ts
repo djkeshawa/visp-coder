@@ -59,6 +59,7 @@ export function productReviewerContext(bundle: ProductReviewBundle) {
       provenance: "Reviewer context is agent-reported, not authenticated independence.",
     },
     originalRequest: bundle.originalRequest,
+    ...(bundle.ambiguities?.length ? { ambiguities: bundle.ambiguities } : {}),
     feedbackPlan: bundle.feedbackPlan,
     sources: bundle.sources,
     outcomes: bundle.outcomes,
@@ -95,6 +96,7 @@ export function independentReviewerContext(bundle: ReturnType<typeof productRevi
     task: bundle.task,
     subjectDigest: bundle.subjectDigest,
     originalRequest: bundle.originalRequest,
+    ...(bundle.ambiguities?.length ? { ambiguities: bundle.ambiguities } : {}),
     instructions: bundle.instructions,
     outcomes: bundle.outcomes,
     examples: bundle.agenda.examples,
@@ -132,7 +134,9 @@ export function independentReviewGaps(gaps: readonly string[]) {
 
 /** Follow-up questions retain failures without replaying approval history or the actor's diagnosis. */
 function repairQuestions(bundle: ReturnType<typeof productReviewerContext>) {
-  const pending = bundle.feedbackPlan.findings.filter((finding) => finding.phase === "product");
+  const pending = bundle.feedbackPlan.findings.filter(
+    (finding) => finding.required && finding.phase === "product",
+  );
   if (!pending.length) return {};
   return {
     repairQuestions: pending.map(

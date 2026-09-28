@@ -25,6 +25,7 @@ import {
 import { runProductReport } from "../../../../src/workflow/product/index.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
+import { compactProductReply } from "../../../../src/workflow/product-compact-text.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
@@ -103,6 +104,53 @@ it("pins tests written from the original request when they fail before implement
   // Authorization follows the pin, so the slice contract already includes the tests.
   expect(record.value.state.slices.T001?.status).toBe("in-progress");
 });
+
+it.each([true, false])(
+  "preserves ambiguity notes in records and both work reply channels (file: %s)",
+  async (hasFile) => {
+    const fixture = await testerWorkspace();
+    const ambiguity = {
+      quote: "Return two from the public module",
+      readings: ["Export the number directly", "Return a promise of the number"],
+      conventionalReading: "Export the number directly",
+    };
+    const work = await runProductWork(
+      await fixture.workspace.state(),
+      { task: "T001" },
+      inlineTests(async (request) => {
+        expect(request.prompt).toContain("ambiguities");
+        expect(request.prompt).toContain("Do not write tests for ambiguous cases");
+        expect(request.schema).toMatchObject({ required: expect.arrayContaining(["ambiguities"]) });
+        return {
+          file: hasFile ? { name: "value.mjs", content: FAILS_FIRST } : null,
+          tests: [],
+          ambiguities: [ambiguity],
+          notes: "",
+        };
+      }),
+    );
+    expect(work.ok, JSON.stringify(work)).toBe(true);
+    if (!work.ok) return;
+    const record = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+    expect(record.ok && record.value).toMatchObject({
+      ambiguities: [ambiguity],
+      status: hasFile ? "pinned" : "declined",
+    });
+    expect(work.value.independentTests).toMatchObject({ ambiguities: [ambiguity] });
+    for (const channel of ["cli", "mcp"] as const) {
+      const text = compactProductReply(
+        channel === "cli" ? "work" : "visp_work",
+        work.value,
+        channel,
+      );
+      expect(text).toContain("Decide explicitly");
+      expect(text).toContain(ambiguity.quote);
+      expect(text).toContain(ambiguity.conventionalReading);
+    }
+    const later = await runProductWork(await fixture.workspace.state(), { task: "T001" });
+    expect(later.ok && later.value.independentTests).toMatchObject({ ambiguities: [ambiguity] });
+  },
+);
 
 it("rejects tests that already pass, removes them and still authorizes the slice", async () => {
   const fixture = await testerWorkspace();
@@ -183,7 +231,20 @@ assert.equal(value, 2);
   }
 });
 
-it("declines a baseline when the worker changes source during testing", async () => {
+it("redacts baseline output using the real project's env files when running in a copy", async () => {
+  const fixture = await testerWorkspace();
+  await fixture.workspace.write(".env", "PRIVATE_TOKEN=launch-private-value\n");
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.mjs", content: `console.log("launch-private-value");\n${FAILS_FIRST}` }),
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(result.ok && result.value.baseline?.output).toContain("[REDACTED]");
+  expect(result.ok && result.value.baseline?.output).not.toContain("launch-private-value");
+});
+
+it("pins against launch-time source even when the worker implements it while tests are written", async () => {
   const fixture = await testerWorkspace();
   const result = await writeIndependentTests(
     await fixture.workspace.state(),
@@ -198,8 +259,124 @@ it("declines a baseline when the worker changes source during testing", async ()
       };
     },
   );
-  expect(result.ok && result.value.status).toBe("declined");
-  expect(result.ok && result.value.reason).toContain("changed while the tester");
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(result.ok && result.value.baseline?.exitCode).toBe(1);
+  expect(await readFile(join(fixture.workspace.root, "src/value.mjs"), "utf8")).toContain(
+    "value = 2",
+  );
+});
+
+it("rejects tests that passed at launch even when later worker edits would make them fail", async () => {
+  const fixture = await testerWorkspace();
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async () => {
+      await fixture.workspace.write("src/value.mjs", "export const value = 2;\n");
+      return {
+        file: { name: "value.mjs", content: FAILS_FIRST.replace("value, 2", "value, 1") },
+        tests: [],
+        notes: "",
+      };
+    },
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("rejected");
+  expect(result.ok && result.value.reason).toContain("pass before any implementation");
+});
+
+it("isolates each baseline and repair attempt and cleans up the launch copy", async () => {
+  const fixture = await testerWorkspace();
+  let sourceRoot = "";
+  let calls = 0;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async (request) => {
+      sourceRoot = request.sourceRoot ?? "";
+      calls += 1;
+      return {
+        file: {
+          name: "value.mjs",
+          content:
+            calls === 1
+              ? `import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+assert.ok(true); assert.ok(true); assert.ok(true);
+writeFileSync("src/value.mjs", "export const value = 2;\\n");
+`
+              : FAILS_FIRST,
+        },
+        tests: [],
+        notes: "",
+      };
+    },
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(calls).toBe(2);
+  expect(sourceRoot).not.toBe("");
+  expect(sourceRoot).not.toBe(fixture.workspace.root);
+  await expect(readFile(join(sourceRoot, "src/value.mjs"))).rejects.toThrow();
+  expect(await readFile(join(fixture.workspace.root, "src/value.mjs"), "utf8")).toContain(
+    "value = 1",
+  );
+});
+
+it("checks existing behavior on a fresh launch copy even after a full baseline writes source", async () => {
+  const fixture = await testerWorkspace();
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async () => {
+      await fixture.workspace.write("src/value.mjs", "export const value = 2;\n");
+      return {
+        existingBehavior: true,
+        file: {
+          name: "value.mjs",
+          content: `import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { value } from "../../src/value.mjs";
+assert.equal(typeof value, "number");
+assert.ok(Number.isInteger(value));
+if (process.env.VISP_TEST_SCOPE === "existing") assert.equal(value, 1);
+else {
+  writeFileSync("src/value.mjs", "export const value = 2;\\n");
+  assert.equal(value, 2);
+}
+`,
+        },
+        tests: [],
+        notes: "",
+      };
+    },
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+});
+
+it("removes launch copies when the tester declines or throws", async () => {
+  const fixture = await testerWorkspace();
+  let root = "";
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async (request) => {
+      root = request.sourceRoot ?? "";
+      throw new Error("tester unavailable");
+    },
+  );
+  expect(result.ok && result.value.status).toBe("failed");
+  expect(root).not.toBe("");
+  await expect(readFile(join(root, "src/value.mjs"))).rejects.toThrow();
+  const retried = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async (request) => {
+      root = request.sourceRoot ?? "";
+      return { file: null, tests: [], notes: "" };
+    },
+    true,
+  );
+  expect(retried.ok && retried.value.status).toBe("declined");
+  await expect(readFile(join(root, "src/value.mjs"))).rejects.toThrow();
 });
 
 it("captures source before launching a detached tester", async () => {

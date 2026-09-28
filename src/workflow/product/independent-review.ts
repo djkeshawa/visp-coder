@@ -33,7 +33,11 @@ export const independentReviewSchema = z
             nextCheck: text,
             evidence,
             outcomes: z.array(text.describe("Exact supplied outcome ID, without its description.")),
-            required: z.boolean(),
+            required: z
+              .boolean()
+              .describe(
+                "True only for a stated-rule violation. Unstated extremes, limits and out-of-grammar inputs are advisory (false).",
+              ),
           })
           .strict(),
       )

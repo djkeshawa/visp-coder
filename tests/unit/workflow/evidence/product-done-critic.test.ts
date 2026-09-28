@@ -16,6 +16,7 @@ import {
 } from "../../../../src/workflow/product/done-review.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
+import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { legacyReview } from "../../support/legacy-critic.js";
 import { moduleFeedback } from "../../support/product-feedback.js";
@@ -89,6 +90,41 @@ it("turns critic findings into the next repair step", async () => {
   if (!done.ok) return;
   expect(done.value.critic?.reviewed).toBe(true);
   expect(done.value.next?.action).toBe("fix");
+});
+
+it("reports advisory findings without reopening, repair routing or blocking acceptance", async () => {
+  await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
+  const host = launcher((packet) => {
+    const response = review("satisfied")(packet);
+    response.review.feedback.findings = [
+      {
+        dimension: "functional",
+        problem: "Unstated extreme input limit",
+        nextCheck: "Consider a huge number",
+        outcomes: ["O001"],
+        required: false,
+        evidence: ["C001"],
+      },
+    ];
+    return response;
+  });
+  const done = await runProductDoneReviewed(
+    await setup.workspace.state(),
+    { task: "T001" },
+    inlineReview(host),
+  );
+  expect(done.ok, JSON.stringify(done)).toBe(true);
+  if (!done.ok) return;
+  expect(done.value.critic?.findings).toEqual([expect.objectContaining({ required: false })]);
+  expect(done.value.next?.action).not.toBe("fix");
+  const accepted = await runProductAcceptReviewed(
+    await setup.workspace.state(),
+    {},
+    inlineReview(host),
+  );
+  expect(accepted.ok && accepted.value.passed, JSON.stringify(accepted)).toBe(true);
+  const saved = await readProductRecord(await setup.workspace.state(), {});
+  expect(saved.ok && saved.value.state.slices.T001?.status).toBe("closed");
 });
 
 it("does not launch the critic while checks fail", async () => {

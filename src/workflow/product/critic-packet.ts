@@ -53,7 +53,10 @@ function packetInstructions(
 function openFindingsFor(selected: CriticSelection) {
   return outstandingFeedback(selected.record)
     .filter(
-      (finding) => finding.phase === "product" && findingAppliesToSlice(finding, selected.slice),
+      (finding) =>
+        finding.required &&
+        finding.phase === "product" &&
+        findingAppliesToSlice(finding, selected.slice),
     )
     .slice(0, 6)
     .map((finding) => ({ id: finding.id, problem: finding.problem, nextCheck: finding.nextCheck }));

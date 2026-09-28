@@ -14,6 +14,7 @@ import type { experimentReviewContext } from "./experiments.js";
 import type { productFeedbackPlan } from "./feedback.js";
 import { productReviewImageGroups } from "./image-groups.js";
 import type { DeliveredProductImageGroup } from "./images.js";
+import { readTestsRecord } from "./independent-tests.js";
 import {
   closedSlice,
   type PRODUCT_REVIEW_POLICY,
@@ -64,6 +65,7 @@ export interface ProductReviewOptions extends ProductSelection {
   readonly experimentResolutions?: unknown;
 }
 export interface ProductReviewBundle {
+  readonly ambiguities?: readonly import("./request-ambiguities.js").RequestAmbiguity[];
   readonly observationSequence?: ReturnType<typeof observationSequence>;
   readonly policyVersion: typeof PRODUCT_REVIEW_POLICY;
   readonly feedbackPlan: ReturnType<typeof productFeedbackPlan>;
@@ -217,8 +219,10 @@ async function review(
     ];
   }
   const rules = await rulesForRequest(workspace, record.brief.feature);
-  return ok(
-    assembleReviewBundle({
+  const tests = await readTestsRecord(workspace, record.brief.feature);
+  if (!tests.ok) return tests;
+  return ok({
+    ...assembleReviewBundle({
       workspace,
       rules,
       record,
@@ -236,7 +240,8 @@ async function review(
       coverage,
       reviewer: reviewer.data,
     }),
-  );
+    ...(tests.value?.ambiguities?.length ? { ambiguities: tests.value.ambiguities } : {}),
+  });
 }
 
 function reviewerInput(options: ProductReviewOptions, previous?: ProductReviewerContext) {
