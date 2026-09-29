@@ -98,6 +98,9 @@ export async function readSession(state: WorkspaceState): Promise<Result<Session
   );
 }
 
+/** The session file is rewritten whole on every record, so its history is bounded. */
+const MAX_ACTIVITY = 1000;
+
 /**
  * Appends one line of history. Best effort: recording that a command ran must
  * never be the reason a command fails.
@@ -119,7 +122,7 @@ export async function recordActivity(
         activity: [
           ...session.value.activity,
           { ...entry, skills: [...(entry.skills ?? [])], runtime: runtimeIdentity(), at: now() },
-        ],
+        ].slice(-MAX_ACTIVITY),
       };
 
       const store = await readStore(state);
