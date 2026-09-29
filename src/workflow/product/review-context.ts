@@ -3,8 +3,14 @@ import { productBehaviorProbes } from "./behavior-probes.js";
 import { evidenceApplies, productCaptureRunSchema } from "./evidence-references.js";
 import { checksFor, type ProductSlice } from "./model.js";
 import { summarizeLayout, summarizeObservation } from "./observation-summary.js";
+import { experiencePromises } from "./request-promises.js";
 import type { ProductRecord } from "./store.js";
 import { productContractDigest } from "./subject.js";
+
+const AGENDA_GUIDANCE =
+  "Use these retained examples and uncertainties to select meaningful observations. Check whether the evidence demonstrates each promise; a declared check mapping is not proof of coverage. Challenge the most consequential plausible false positive with a focused countercheck as well as a legitimate success. Do not change success conditions or disable behavior merely to make a chosen journey pass. A miss or different valid input is not automatically a product defect. Unspecified viewports and recovery behavior are questions, not additional mandatory requirements.";
+export const REQUEST_PROMISES_GUIDANCE =
+  "requestPromises are sentences quoted from the original request about look, feel, preview or guides; judge the images against them; they add no requirement beyond the request.";
 
 /** A read-only agenda from the one brief; it does not create another authored contract. */
 export function productReviewAgenda(record: ProductRecord, slice?: ProductSlice) {
@@ -20,6 +26,7 @@ export function productReviewAgenda(record: ProductRecord, slice?: ProductSlice)
     (outcome) => relevant.has(outcome.id) && outcome.kind === "experience",
   );
   const design = record.brief.design;
+  const requestPromises = experiencePromises(record.brief.originalRequest);
   const visualPrompts = visualOutcomes.slice(0, 4).map((outcome) => ({
     outcome: outcome.id,
     prompt: `For “${outcome.statement.slice(0, 360)}”, compare the primary activity's usable area with surrounding chrome at each observed viewport. Can the player or user see the activity, its status and essential controls together without losing context through scrolling? Inspect actual input, intermediate feedback, settled result and recovery. Assess composition, visual hierarchy, proportions/aspect ratio and material or character treatment; a visible canvas and coherent palette alone do not establish aesthetic quality. Check target size at the rendered scale; a large helper button does not demonstrate that the primary drag/touch target is usable. Identify at most three consequential mismatches with the retained design, supported by an image or measurement. Judge only observed inputs and viewports; desktop pixels do not establish mobile quality.`,
@@ -38,6 +45,7 @@ export function productReviewAgenda(record: ProductRecord, slice?: ProductSlice)
       : {}),
     behavioralProbes: productBehaviorProbes(record, slice),
     visualPrompts,
+    ...(requestPromises.length ? { requestPromises } : {}),
     examples: examples.slice(0, 6),
     decisions: decisions
       .slice(0, 4)
@@ -61,8 +69,9 @@ export function productReviewAgenda(record: ProductRecord, slice?: ProductSlice)
       designReferences: Math.max(0, (design?.references.length ?? 0) - 6),
       visualPrompts: Math.max(0, visualOutcomes.length - 4),
     },
-    guidance:
-      "Use these retained examples and uncertainties to select meaningful observations. Check whether the evidence demonstrates each promise; a declared check mapping is not proof of coverage. Challenge the most consequential plausible false positive with a focused countercheck as well as a legitimate success. Do not change success conditions or disable behavior merely to make a chosen journey pass. A miss or different valid input is not automatically a product defect. Unspecified viewports and recovery behavior are questions, not additional mandatory requirements.",
+    guidance: requestPromises.length
+      ? `${AGENDA_GUIDANCE} ${REQUEST_PROMISES_GUIDANCE}`
+      : AGENDA_GUIDANCE,
   };
 }
 
