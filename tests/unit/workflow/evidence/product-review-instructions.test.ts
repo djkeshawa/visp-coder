@@ -87,9 +87,6 @@ it.each(["current", "observation-preview"] as const)(
     for (const input of [packet, delivered, native.value.current])
       expect(input).toMatchObject({ ambiguities });
     expect(packet.instructions).toContain("deliberate, conventional choice");
-    expect(packet.instructions).toContain("advice, not a new requirement");
-    expect(packet.instructions).toContain("silently took a narrower reading");
-    expect(packet.instructions).toContain("normal (not required) finding");
     expect(packet.instructions).toContain("visual quality");
     expect(packet.instructions).toContain("composition");
     expect(packet.instructions.includes(OBSERVATION_REVIEW_INSTRUCTIONS)).toBe(

@@ -115,11 +115,11 @@ function ambiguityText(tests: unknown): string {
   const short = (text: unknown) =>
     String(text ?? "")
       .replace(/\s+/g, " ")
-      .slice(0, 400);
+      .slice(0, 240);
   return ambiguities
     .map((entry) => {
       const ambiguity = object(entry);
-      return `\nAmbiguity: "${short(ambiguity.quote)}" — implement the usual reading (${short(ambiguity.conventionalReading)}) unless the request, project rules or existing behavior rule it out, or it would add behavior the request does not ask for; add a test for the reading you implement; record a different choice only with a reason. Alternatives are in the full result.`;
+      return `\nDecide explicitly: "${short(ambiguity.quote)}" — usual reading: ${short(ambiguity.conventionalReading)}. Record your choice; alternatives are in the full result.`;
     })
     .join("");
 }
