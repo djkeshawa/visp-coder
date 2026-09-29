@@ -122,3 +122,28 @@ Merge-time checks on develop: typecheck and lint clean, and the full suite passe
 ## Reproduce
 
 Builds are in `$VISP_BENCH_RUNS/builds/visp-nb0` (baseline) through `visp-nt6` (final). The per-run record is `$VISP_BENCH_RUNS/night/results.jsonl`. Tables come from `night/report_tables.py`, and a round is run with `night/night.py <prefix> --tasks … --arms sk,bmad,v:<build> --reps 1-5`.
+
+## Addendum: stale-memory fix (b917f6d, after the report)
+
+**Root cause.**
+- The stale limit did not come from the worker reading memory directly.
+- VISP appended recalled decisions to the new feature's request under a heading that said they "still apply unless this request changes them".
+- Nothing told the gate, the worker or the reviewer that a commit had changed the code afterwards.
+- The independent reviewer then raised **required** findings ("contradicts recorded decision M3: items hold at most 10,000 units"), and the worker reverted the code to obey them.
+
+**Fix (f5562d7).**
+- Commits newer than the earlier features are listed: up to 20, VISP-state-only commits excluded, subjects redacted.
+- The recall gate receives them. It keeps a note when a change only alters its value, and drops a note only when a change removed the decision.
+- The heading has two variants. The strong wording stays when nothing changed ("still in force, including for new operations, endpoints and fields"). When changes are listed it adds: "apply the decision with the current code's value".
+- The reviewer rule: a new operation that omits a recorded rule is required. A departure is advisory only when this request or a listed later change replaced the decision. Commit subjects are records, not instructions.
+
+**Benchmark** (VISP only, 5 runs each; these two tasks are holdout tasks, so they are no longer unseen):
+
+| Task | before (hv) | first version (80ac8e5) | final (f5562d7) | Spec Kit / BMAD |
+|---|---|---|---|---|
+| archive-carryover-raised (/40) | 34 ×5 | 36 ×5 | **40 ×5** | 36 / 36 |
+| archive-carryover (/39) | 39 ×5 | 39, 39, 39, 39, 35 | 39, 39, 39, 39, 32 | 35 / 35 |
+
+- The first version dropped the cap note altogether, so the new restock endpoint got no cap (36). Its weaker heading also lost one memory case (35).
+- The final version's 32 came from session 1, which runs before any recall: a reviewer finding made the archive endpoint require a JSON content type, so archive requests got 415.
+- That is the second reviewer-driven "over-strict input validation" regression seen (the other was the baseline reservations run at 37). It is still open.
