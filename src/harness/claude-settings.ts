@@ -118,6 +118,8 @@ function entryFor(hookPath: string): HookEntry {
 export interface PlannedClaudeRegistration {
   readonly status: RegistrationStatus;
   readonly content?: string;
+  /** The rewrite dropped structure the file had (unparseable text or a malformed hooks value). */
+  readonly discarded?: true;
 }
 
 export type UnregistrationStatus = "absent" | "removed" | "customized" | "malformed";
@@ -149,6 +151,7 @@ export function planPreToolUseRegistration(
           content: formatSettings(
             withPromptHook({ hooks: { PreToolUse: [entryFor(hookPath)] } }, hookPath),
           ),
+          discarded: true,
         })
       : ok({ status: "malformed" });
   }
@@ -160,8 +163,15 @@ export function planPreToolUseRegistration(
       ? ok({
           status: "replaced",
           content: formatSettings(
-            withPromptHook({ ...settings, hooks: { PreToolUse: [entryFor(hookPath)] } }, hookPath),
+            withPromptHook(
+              {
+                ...settings,
+                hooks: { ...siblingHooks(settings), PreToolUse: [entryFor(hookPath)] },
+              },
+              hookPath,
+            ),
           ),
+          discarded: true,
         })
       : ok({ status: "malformed" });
   }
@@ -268,6 +278,12 @@ function referencesHook(entry: HookEntry, hookPath: string): boolean {
         (hook) => typeof hook?.command === "string" && hook.command.includes(hookPath),
       )
     : false;
+}
+
+/** The other hook events, when `hooks` is a plain object; anything else holds none to keep. */
+function siblingHooks(settings: ClaudeSettings): Record<string, unknown> {
+  const hooks = settings.hooks;
+  return typeof hooks === "object" && hooks !== null && !Array.isArray(hooks) ? hooks : {};
 }
 
 function preToolUseEntries(settings: ClaudeSettings): HookEntry[] | "malformed" {
