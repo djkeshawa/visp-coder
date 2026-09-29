@@ -106,7 +106,7 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}${skillText(data.skills)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}${skillText(data.skills)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
 }
 
 function ambiguityText(tests: unknown): string {
@@ -124,8 +124,13 @@ function ambiguityText(tests: unknown): string {
     .join("");
 }
 
-function memoryText(memories: unknown): string {
-  const text = Array.isArray(memories) ? projectMemoryText(memories.map(String)) : "";
+function memoryText(memories: unknown, laterChanges?: unknown): string {
+  const text = Array.isArray(memories)
+    ? projectMemoryText(
+        memories.map(String),
+        Array.isArray(laterChanges) ? laterChanges.map(String) : [],
+      )
+    : "";
   return text ? `\n${text}` : "";
 }
 
@@ -345,7 +350,7 @@ function compactBriefText(name: string, value: unknown, channel: ReplyChannel = 
       : name.endsWith("feature")
         ? wording.template(feature)
         : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}${warning}${rulesText(data.projectRules)}${memoryText(data.projectMemory)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  return `${name}: ${JSON.stringify(summary)}${warning}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {

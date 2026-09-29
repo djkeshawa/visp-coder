@@ -124,7 +124,7 @@ export async function buildProductContext(
   const skills = await productSkills(workspace, slice, remaining, excerptPaths);
   if (!skills.ok) return skills;
   const rules = await readProjectRules(workspace);
-  const memories = await featureMemories(workspace, brief.feature);
+  const recalled = await featureMemories(workspace, brief.feature);
   notes.push(...skills.value.notes);
   return ok(
     fitProductContext(
@@ -136,7 +136,7 @@ export async function buildProductContext(
         task: slice.id,
         ...(slice.taskClass === undefined ? {} : { taskClass: slice.taskClass }),
         originalRequest: brief.originalRequest,
-        ...standingContext(rules, memories),
+        ...standingContext(rules, recalled),
         objective: slice.goal,
         outcomes: brief.outcomes.filter((outcome) => slice.outcomes.includes(outcome.id)),
         examples: brief.examples.filter((example) =>
@@ -339,10 +339,17 @@ function priorReviewFeedback(
  */
 function standingContext(
   rules: Result<{ rules: ProjectRule[] }>,
-  memories: readonly string[],
-): { projectRules?: readonly ProjectRule[]; projectMemory?: readonly string[] } {
+  memory: { memories: readonly string[]; laterChanges: readonly string[] },
+): {
+  projectRules?: readonly ProjectRule[];
+  projectMemory?: readonly string[];
+  projectMemoryLaterChanges?: readonly string[];
+} {
   return {
     ...(rules.ok && rules.value.rules.length ? { projectRules: rules.value.rules } : {}),
-    ...(memories.length ? { projectMemory: memories } : {}),
+    ...(memory.memories.length ? { projectMemory: memory.memories } : {}),
+    ...(memory.memories.length && memory.laterChanges.length
+      ? { projectMemoryLaterChanges: memory.laterChanges }
+      : {}),
   };
 }
