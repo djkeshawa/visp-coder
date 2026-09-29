@@ -162,6 +162,46 @@ export async function headCommit(cwd: string): Promise<Result<string>> {
   return ok(result.value.stdout.trim());
 }
 
+export interface CommitSummary {
+  readonly hash: string;
+  readonly subject: string;
+  /** Committer time, whole seconds since the epoch. */
+  readonly committedAt: number;
+}
+
+/**
+ * The newest non-merge commits reachable from HEAD, newest first, leaving out commits that
+ * touch only VISP's own state (`.visp`); an unborn HEAD is an error.
+ */
+export async function recentCommits(cwd: string, limit: number): Promise<Result<CommitSummary[]>> {
+  const result = await run(
+    "git",
+    [
+      "log",
+      "--no-merges",
+      "-n",
+      String(limit),
+      "--format=%ct%x09%h%x09%s",
+      "--",
+      ".",
+      ":(exclude).visp",
+    ],
+    { cwd, env: GIT_ENV, timeoutMs: 10_000 },
+  );
+  if (!result.ok) return result;
+  if (result.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not list recent commits"));
+  return ok(
+    result.value.stdout.split("\n").flatMap((line) => {
+      const [time, hash, ...subject] = line.split("\t");
+      const committedAt = Number(time);
+      return hash && Number.isFinite(committedAt) && time !== ""
+        ? [{ hash, subject: subject.join("\t"), committedAt }]
+        : [];
+    }),
+  );
+}
+
 /** Committed changes since authorization whose working content still equals HEAD. */
 export async function committedChangesSince(
   cwd: string,

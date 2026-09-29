@@ -91,7 +91,12 @@ it("carries only the notes the reviewer's model chooses", async () => {
   gate.mockResolvedValue([NOTES[1]]);
   await feature("Archive items", "Add archiving.");
   const second = await feature("Restock", "Add restocking.");
-  expect(gate).toHaveBeenCalledWith(expect.stringContaining("Add restocking."), NOTES, []);
+  expect(gate).toHaveBeenCalledWith(
+    expect.stringContaining("Add restocking."),
+    NOTES,
+    [],
+    expect.any(Array),
+  );
   expect(second.projectMemory).toEqual([NOTES[1]]);
 });
 
@@ -170,6 +175,7 @@ describe("without Visp Memory", () => {
       // "Add archiving." is too short to record as a decision.
       ["1. An archived item cannot be reserved: 409 item_archived."],
       [],
+      expect.any(Array),
     );
     expect(second.projectMemory).toEqual([
       "1. An archived item cannot be reserved: 409 item_archived.",
@@ -196,5 +202,80 @@ describe("without Visp Memory", () => {
     await feature("Archive items", ARCHIVING);
     expect((await feature("Restock", "Add restocking.")).projectMemory).toBeUndefined();
     expect(gate).not.toHaveBeenCalled();
+  });
+});
+
+describe("code changed after the decisions were recorded", () => {
+  const LIMIT = "1. Items hold at most 10,000 units.";
+  const CREATION = "Add item creation.\n\n1. Items hold at most 10,000 units.";
+
+  /** An outside commit lands between the sessions, as when a person raises the limit by hand. */
+  async function raiseLimit() {
+    if (!workspace) throw new Error("no workspace");
+    await workspace.write("src/items.ts", "export const items = 50000;\n");
+    workspace.commit("Raise the item limit to 50000 units");
+  }
+
+  it("gives the gate the commits and lists them under the carried notes", async () => {
+    await project({}, REVIEWER, false);
+    gate.mockResolvedValue([LIMIT]);
+    await feature("Create items", CREATION);
+    await raiseLimit();
+    const second = await feature("Restock", "Add restocking.");
+    const later = gate.mock.calls.at(-1)?.[3] as string[];
+    expect(
+      later.some((line) => /^[0-9a-f]{7,} Raise the item limit to 50000 units$/.test(line)),
+    ).toBe(true);
+    expect(second.projectMemory).toEqual([LIMIT]);
+    expect(second.projectMemoryLaterChanges).toEqual(later);
+    expect(second.brief.originalRequest).toContain(`M1 ${LIMIT}`);
+    expect(second.brief.originalRequest).toContain(
+      "Later changes to the code since these were recorded (newest first):",
+    );
+    expect(second.brief.originalRequest).toContain("Raise the item limit to 50000 units");
+    expect(second.brief.originalRequest).toContain(
+      "apply the decision with the current code's value",
+    );
+    // The work replies carry the same list, not only the fixed request.
+    const stored = JSON.parse(
+      await readFile(
+        join(workspace?.root ?? "", `.visp/features/${second.brief.feature}/project-memory.json`),
+        "utf8",
+      ),
+    );
+    expect(stored.laterChanges).toEqual(later);
+  });
+
+  it("lists nothing when the gate drops every note the later change replaced", async () => {
+    await project({}, REVIEWER, false);
+    gate.mockResolvedValue([]);
+    await feature("Create items", CREATION);
+    await raiseLimit();
+    const second = await feature("Restock", "Add restocking.");
+    expect(gate.mock.calls.at(-1)?.[3]).toEqual(
+      expect.arrayContaining([expect.stringContaining("Raise the item limit")]),
+    );
+    expect(second.projectMemory).toBeUndefined();
+    expect(second.projectMemoryLaterChanges).toBeUndefined();
+    expect(second.brief.originalRequest).not.toContain("Later changes");
+  });
+
+  it("does not affect the first feature, which has no earlier request", async () => {
+    await project({}, REVIEWER, false);
+    gate.mockResolvedValue([]);
+    const first = await feature("Create items", CREATION);
+    expect(first.projectMemory).toBeUndefined();
+    expect(first.projectMemoryLaterChanges).toBeUndefined();
+    expect(first.brief.originalRequest).not.toContain("Later changes");
+  });
+
+  it("gives Visp Memory's selection the same later changes", async () => {
+    await project({}, REVIEWER);
+    gate.mockResolvedValue([NOTES[1]]);
+    await feature("Create items", CREATION);
+    await raiseLimit();
+    const second = await feature("Restock", "Add restocking.");
+    expect(second.projectMemory).toEqual([NOTES[1]]);
+    expect(second.projectMemoryLaterChanges?.join("\n")).toContain("Raise the item limit");
   });
 });

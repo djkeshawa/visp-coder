@@ -25,6 +25,8 @@ export interface ProductContextContent {
   readonly projectRules?: readonly import("./project-rules.js").ProjectRule[];
   /** Recorded decisions from earlier features that Visp Memory selected for this request. */
   readonly projectMemory?: readonly string[];
+  /** Commits made after those decisions were recorded; the code wins where they differ. */
+  readonly projectMemoryLaterChanges?: readonly string[];
   readonly objective: string;
   readonly outcomes: ProductBrief["outcomes"];
   readonly examples: ProductBrief["examples"];

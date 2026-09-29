@@ -10,6 +10,7 @@ import { createBranch, currentBranch } from "../../core/git.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { redactRequest } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { laterChanges } from "../../memory/later-changes.js";
 import {
   type EarlierFeature,
   memoryBriefFor,
@@ -77,6 +78,8 @@ export interface ProductFeatureOutcome {
   readonly intent: Intent;
   readonly projectRules?: readonly ProjectRule[];
   readonly projectMemory?: readonly string[];
+  /** Commits made after the recalled requests were given, listed with the memory. */
+  readonly projectMemoryLaterChanges?: readonly string[];
   readonly branchCreated?: string;
   readonly branchWarning?: string;
   readonly redactionNotice?: string;
@@ -201,16 +204,7 @@ async function createProductFeatureLocked(
     ...(host?.mutation ? [host.mutation] : []),
     ...rules.value.mutations,
     ...memory.mutations,
-    ...(memory.memories.length
-      ? [
-          {
-            kind: "write" as const,
-            path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
-            content: json({ version: 1, memories: memory.memories }),
-            expectedBefore: { existed: false as const },
-          },
-        ]
-      : []),
+    ...memoryFileMutations(workspace, feature, memory),
   ]);
   return saved.ok
     ? ok({
@@ -279,6 +273,7 @@ async function selectMemories(
   command: string,
   request: string,
   rules: readonly string[],
+  later: readonly string[],
 ): Promise<string[]> {
   const model =
     workspace.config.memory.service?.select === "keyword"
@@ -287,7 +282,7 @@ async function selectMemories(
   if (!model) return memoryBriefFor(workspace, command, request);
   const candidates = await memoryBriefFor(workspace, command, request, GATE_CANDIDATE_TOKENS);
   try {
-    return await codexMemoryGate({ model })(request, candidates, rules);
+    return await codexMemoryGate({ model })(request, candidates, rules, later);
   } catch {
     return memoryBriefFor(workspace, command, request);
   }
@@ -300,10 +295,11 @@ async function serviceMemories(
   earlier: readonly EarlierFeature[],
   request: string,
   rules: readonly string[],
+  later: readonly string[],
 ): Promise<Result<{ memories: string[]; mutation?: FileMutation }>> {
   const recorded = await recordEarlierRequests(workspace, command, earlier);
   if (!recorded.ok) return recorded;
-  const memories = await selectMemories(workspace, command, request, rules);
+  const memories = await selectMemories(workspace, command, request, rules, later);
   return ok({ memories, ...(recorded.value ? { mutation: recorded.value } : {}) });
 }
 
@@ -314,6 +310,7 @@ async function recallMemories(
   earlier: readonly EarlierFeature[],
   request: string,
   rules: readonly string[],
+  later: readonly string[],
 ): Promise<Result<{ memories: string[]; mutation?: FileMutation }>> {
   const history = await recordRequestHistory(workspace, earlier);
   if (!history.ok) return history;
@@ -323,6 +320,7 @@ async function recallMemories(
       request,
       notInRequest(request, history.value.notes),
       rules,
+      later,
     );
   } catch {
     // Without its model, nothing is selected: every note unfiltered would be noise.
@@ -361,10 +359,28 @@ async function featureRequest(workspace: WorkspaceState, options: ProductFeature
     host: host.value,
     stated,
     memory: memory.value,
-    originalRequest: [request, projectMemoryText(memory.value.memories)]
+    originalRequest: [request, projectMemoryText(memory.value.memories, memory.value.laterChanges)]
       .filter(Boolean)
       .join("\n\n"),
   });
+}
+
+/** The decisions a feature carries, and the code changes listed with them, for its `work` replies. */
+function memoryFileMutations(
+  workspace: WorkspaceState,
+  feature: string,
+  memory: { memories: readonly string[]; laterChanges: readonly string[] },
+): FileMutation[] {
+  if (memory.memories.length === 0) return [];
+  const { memories, laterChanges: later } = memory;
+  return [
+    {
+      kind: "write",
+      path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
+      content: json({ version: 1, memories, ...(later.length ? { laterChanges: later } : {}) }),
+      expectedBefore: { existed: false },
+    },
+  ];
 }
 
 /**
@@ -379,11 +395,12 @@ async function featureMemory(
 ): Promise<
   Result<{
     memories: string[];
+    laterChanges: string[];
     mutations: FileMutation[];
-    reported: { projectMemory?: string[] };
+    reported: { projectMemory?: string[]; projectMemoryLaterChanges?: string[] };
   }>
 > {
-  const none = ok({ memories: [], mutations: [], reported: {} });
+  const none = ok({ memories: [], laterChanges: [], mutations: [], reported: {} });
   // memory.enabled switches off every memory path, the long-term store included.
   if (!workspace.config.memory.enabled) return none;
   const command = workspace.config.memory.service?.command;
@@ -392,13 +409,25 @@ async function featureMemory(
   if (!command && !model) return none;
   const earlier = await earlierFeatures(workspace);
   if (!earlier.ok) return earlier;
+  // Code can change after a decision was recorded; the gate, the worker and the reviewer are told.
+  const later = await laterChanges(workspace, earlier.value);
   const chosen = command
-    ? await serviceMemories(workspace, command, earlier.value, request, rules)
-    : await recallMemories(workspace, model as string, earlier.value, request, rules);
+    ? await serviceMemories(workspace, command, earlier.value, request, rules, later)
+    : await recallMemories(workspace, model as string, earlier.value, request, rules, later);
   if (!chosen.ok) return chosen;
   const { memories } = chosen.value;
   const mutations: FileMutation[] = chosen.value.mutation ? [chosen.value.mutation] : [];
-  return ok({ memories, mutations, reported: memories.length ? { projectMemory: memories } : {} });
+  // Nothing is listed without a note to weigh against it.
+  const listed = memories.length ? later : [];
+  return ok({
+    memories,
+    laterChanges: listed,
+    mutations,
+    reported: {
+      ...(memories.length ? { projectMemory: memories } : {}),
+      ...(listed.length ? { projectMemoryLaterChanges: listed } : {}),
+    },
+  });
 }
 
 async function earlierFeatures(workspace: WorkspaceState): Promise<Result<EarlierFeature[]>> {
@@ -412,6 +441,7 @@ async function earlierFeatures(workspace: WorkspaceState): Promise<Result<Earlie
         feature: id,
         goal: intent.value.goal,
         originalRequest: intent.value.sourceBrief,
+        createdAt: intent.value.createdAt,
       });
   }
   return ok(earlier);
