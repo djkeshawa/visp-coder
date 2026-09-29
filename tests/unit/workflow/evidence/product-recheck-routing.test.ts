@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { parse, stringify } from "yaml";
 import { hashValue } from "../../../../src/core/hash.js";
 import { registerWorkflowTools } from "../../../../src/mcp/tools/workflow.js";
 import { productJourneyKey } from "../../../../src/workflow/evidence/product-journey.js";
@@ -706,3 +707,25 @@ it.each([
     expect(closedSlice(after.value.state.slices.T001?.status)).toBe(false);
   },
 );
+
+it("carries the keep-the-normal-call-passing line on the reviewer-finding fix step", async () => {
+  await arrange();
+  const workspace = await setup.workspace.state();
+  const loaded = await readProductRecord(workspace, { task: "T001" });
+  if (!loaded.ok) throw new Error(loaded.error.message);
+  const saved = await saveProductState(workspace, loaded.value, {
+    ...loaded.value.state,
+    captureRuns: [],
+  });
+  if (!saved.ok) throw new Error(saved.error.message);
+  const config = parse(await readFile(join(setup.workspace.root, "visp.yml"), "utf8"));
+  config.critic = { ...config.critic, harness: "codex", launch: "codex-exec", mode: "auto" };
+  await setup.workspace.write("visp.yml", stringify(config));
+  const next = await nextAcrossInterfaces(await setup.workspace.state(), { task: "T001" });
+  expect(next.value.action).toBe("fix");
+  expect(next.value.objective).toContain("the independent reviewer re-checks these findings");
+  expect(next.value.objective).toContain(
+    "first add a test that the request's normal call still succeeds",
+  );
+  expect(next.value.objective).toContain("do not apply it; say so in your done note");
+});

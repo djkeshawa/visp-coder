@@ -490,19 +490,23 @@ function unreproducedFindings(
   );
 }
 
-function repairObjective(
+/** Repairs that add rejection are where a normal call most often breaks; the finding names only what to reject. No final period: the stop hook appends its own text. */
+const REJECTION_REPAIR =
+  "If a fix rejects inputs, first add a test that the request's normal call still succeeds and keep it passing; reject only what the finding names. If a finding would break that call, do not apply it; say so in your done note";
+
+export function repairObjective(
   record: ProductRecord,
   slice: ProductSlice,
   missingReproduction: boolean,
   reviewerRechecks = false,
 ) {
   if (reviewerRechecks)
-    return "Fix each reported problem and extend your slice check to exercise it, then run visp done; the independent reviewer re-checks these findings";
+    return `Fix each reported problem and extend your slice check to exercise it, then run visp done; the independent reviewer re-checks these findings. ${REJECTION_REPAIR}`;
   if (missingReproduction)
     return "Record a failing reproduction of the reported behavior, or fresh executed counterevidence for separate assessment, before claiming a repair";
   return productRefinement(record, slice).exhausted
     ? "Review budget exhausted; choose a different repair hypothesis. Required outcomes remain unresolved."
-    : "Correct the observed product mismatch, then recheck the affected behavior";
+    : `Correct the observed product mismatch, then recheck the affected behavior. ${REJECTION_REPAIR}`;
 }
 
 function currentReviewFailure(record: ProductRecord, subject: string, slice: ProductSlice) {

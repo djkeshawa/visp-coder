@@ -6,6 +6,7 @@ import {
   SOURCE_ADVICE_INSTRUCTIONS,
   UNDERSTANDING_CRITIC_INSTRUCTIONS,
 } from "../../../../src/workflow/product/review-instructions.js";
+import { repairObjective } from "../../../../src/workflow/product/status-next.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 
 function record(
@@ -100,4 +101,49 @@ it("lets only a fresh reviewer close a finding with current passing executions o
   expect(reviewerVerifiedRepair(finding, ["EX-1"], catalogue, current)).toBe(false);
   expect(reviewerVerifiedRepair(finding, ["EX-2"], catalogue, fresh)).toBe(false);
   expect(reviewerVerifiedRepair(finding, ["SRC-1"], catalogue, fresh)).toBe(false);
+});
+
+// Reviewer findings that asked for new rejection broke the request's own normal call in two
+// benchmark runs; findings need a named source sentence and a keep-succeeding recheck.
+it("requires a stated rule and a keep-succeeding nextCheck for findings that add rejection", () => {
+  for (const text of [
+    CRITIC_INSTRUCTIONS,
+    SOURCE_ADVICE_INSTRUCTIONS,
+    UNDERSTANDING_CRITIC_INSTRUCTIONS,
+  ]) {
+    expect(text).toContain("asks for NEW rejection of inputs");
+    expect(text).toContain("or a recorded decision (M#)");
+    expect(text).toContain("name that sentence in the finding");
+    expect(text).toContain("A natural variant of a stated rejection rule counts as stated");
+    expect(text).toContain("crash or 5xx");
+    expect(text).toContain("path traversal out of the stated directory");
+    expect(text).toContain("A rule covers an operation only if");
+    expect(text).toContain("does not cover an operation whose normal call has none");
+    expect(text).toContain("at most advisory");
+    expect(text).toContain("the normal call wins");
+    expect(text).toContain(
+      "Its nextCheck also confirms that the request's normal call, as described, still succeeds.",
+    );
+  }
+});
+
+const WORKER_LINE =
+  "If a fix rejects inputs, first add a test that the request's normal call still succeeds and keep it passing; reject only what the finding names. If a finding would break that call, do not apply it; say so in your done note";
+
+it("tells the worker to keep the request's normal call passing, on repair routes only", () => {
+  const record = (cycles?: number) =>
+    ({
+      brief: {
+        outcomes: [],
+        ...(cycles === undefined ? {} : { design: { refinementCycles: cycles } }),
+      },
+      state: { reviews: [] },
+    }) as unknown as ProductRecord;
+  const slice = { id: "T001", outcomes: [] } as unknown as Parameters<typeof repairObjective>[1];
+  expect(repairObjective(record(), slice, false, true)).toContain(WORKER_LINE);
+  expect(repairObjective(record(), slice, false, false)).toContain(WORKER_LINE);
+  // No trailing period: the stop hook appends its own text after the objective.
+  expect(repairObjective(record(), slice, false, true).endsWith("done note")).toBe(true);
+  expect(repairObjective(record(0), slice, false, false)).not.toContain("normal call");
+  expect(repairObjective(record(), slice, true, false)).not.toContain("normal call");
 });
