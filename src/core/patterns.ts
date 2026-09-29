@@ -70,11 +70,26 @@ function starToken(pattern: string, index: number): Token {
 }
 
 function classToken(pattern: string, index: number): Token {
+  // `[[...slug]]`: the outer bracket is literal, the inner one is read as a token.
+  if (pattern[index + 1] === "[") return { source: "\\[", length: 1 };
   const close = pattern.indexOf("]", index + 1);
   if (close === -1) return { source: "\\[", length: 1 };
 
+  // Framework route directories (`app/[id]/page.tsx`, `[...all]`) are literal names, so a
+  // bracket group matches its own text as well as being a character class.
+  const literal = [...pattern.slice(index, close + 1)].map(escapeAny).join("");
   const body = pattern.slice(index + 1, close).replace(/^!/, "^");
-  return { source: `[${body}]`, length: close - index + 1 };
+  const length = close - index + 1;
+  try {
+    new RegExp(`[${body}]`);
+  } catch {
+    return { source: literal, length };
+  }
+  return { source: `(?:${literal}|[${body}])`, length };
+}
+
+function escapeAny(char: string): string {
+  return /[.*+?^${}()|[\]\\]/.test(char) ? `\\${char}` : char;
 }
 
 function escapeLiteral(char: string): string {
