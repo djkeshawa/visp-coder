@@ -1,6 +1,7 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { TestProject } from "../../functional/support/project.js";
 
 /**
@@ -157,7 +158,12 @@ describe("the pull request check", () => {
     expect(workflow).toContain("github.head_ref");
     expect(workflow).toMatch(/env:\n\s+HEAD_REF: \$\{\{ github\.head_ref \}\}/u);
     expect(workflow).toContain('--branch "$HEAD_REF"');
-    expect(workflow).toContain("permissions: contents: read");
+    const parsed = parse(workflow);
+    expect(parsed.permissions).toEqual({ contents: "read" });
+    const steps = parsed.jobs["scope-and-evidence"].steps;
+    expect(steps).toHaveLength(4);
+    expect(steps.at(-1).env.HEAD_REF).toMatch(/^\$\{\{ github\.head_ref \}\}$/u);
+    expect(steps.at(-1).run).toContain('--branch "$HEAD_REF"');
   });
 
   it("rejects a scope source it does not have", () => {
