@@ -244,18 +244,26 @@ async function connect(
     if (response.error) request.reject(new BrowserRuntimeError(response.error.message));
     else request.resolve(response.result ?? {});
   });
+  // Once the socket is gone (Chrome killed, crashed, or closed by us) a send would wait its
+  // whole timeout for a reply that cannot come, and report a timeout rather than a lost browser.
+  let closed = false;
   const rejectPending = () => {
     for (const request of pending.values())
       request.reject(new BrowserRuntimeError("browser disconnected"));
     pending.clear();
   };
-  socket.addEventListener("close", rejectPending);
+  socket.addEventListener("close", () => {
+    closed = true;
+    rejectPending();
+  });
   return {
     onEvent(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     send(method, params = {}, sessionId) {
+      if (closed || socket.readyState !== WebSocket.OPEN)
+        return Promise.reject(new BrowserRuntimeError("browser disconnected"));
       const id = ++sequence;
       return new Promise<Record<string, unknown>>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -282,6 +290,7 @@ async function connect(
       });
     },
     async close() {
+      closed = true;
       listeners.clear();
       rejectPending();
       socket.close();
