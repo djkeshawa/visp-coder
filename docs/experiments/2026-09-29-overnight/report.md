@@ -117,7 +117,7 @@ Merge-time checks on develop: typecheck and lint clean, and the full suite passe
 7. **Process notes.**
    - The first batch's session-2 prompts named the wrong directory; this was caught within an hour, and those runs were discarded and rerun.
    - Agent worktrees were created from `main`, not `develop`; this was caught and rebased.
-   - A stale worktree from an earlier session (`…/2cf25670…/scratchpad/release`, Sep 27) still has `develop` checked out with staged release edits. It was left untouched, but don't commit from it: its index predates tonight's work.
+   - A stale local worktree from an earlier session (Sep 27) still has `develop` checked out with staged release edits. It was left untouched, but don't commit from it: its index predates tonight's work.
 
 ## Reproduce
 
