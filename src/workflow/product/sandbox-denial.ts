@@ -2,7 +2,11 @@ import { isAbsolute, relative, sep } from "node:path";
 
 const socketDenial =
   /socket\.py[\s\S]*PermissionError: \[Errno 1\] Operation not permitted|\b(?:listen|connect|bind)\b[^\n]{0,160}\bEPERM\b/;
-const spawnDenial = /\b(?:spawn|spawnSync|fork|exec|execSync)\b[^\n]*(?:EPERM|EACCES)\b/;
+// Node's own message for a refused process start: `Error: spawnSync /usr/bin/node EPERM`, or
+// `Error: spawn EPERM` (Node names the file only for EACCES, ENOENT, EMFILE, ENFILE, EAGAIN);
+// the file may contain spaces. EACCES is not here: `spawn ./run.sh EACCES` is an unexecutable
+// file in the product.
+const spawnDenial = /\b(?:spawn|spawnSync|fork|exec|execSync)(?: +[^\n]{1,200}?)? +EPERM\b/;
 const permissionDenial = /\b(?:EPERM|EACCES|EROFS)\b|Operation not permitted|Permission denied/i;
 
 export function sandboxDenial(text: string, root: string): "denied" | "possible" | undefined {
@@ -12,7 +16,10 @@ export function sandboxDenial(text: string, root: string): "denied" | "possible"
     process.env.CODEX_SANDBOX_NETWORK_DISABLED ||
     process.env.CODEX_PERMISSION_PROFILE;
   if (!sandbox || !permissionDenial.test(text)) return undefined;
-  const paths = [...text.matchAll(/\b(?:EACCES|EROFS)\b[^\n]*?['"]([^'"\n]+)['"]/g)];
+  const paths = [
+    ...text.matchAll(/\b(?:EACCES|EROFS)\b[^\n]*?['"]([^'"\n]+)['"]/g),
+    ...text.matchAll(/\b(?:spawn|spawnSync|fork|exec|execSync) +([^\n]{1,200}?) +EACCES\b/g),
+  ];
   if (
     paths.some((match) => {
       const path = match[1];

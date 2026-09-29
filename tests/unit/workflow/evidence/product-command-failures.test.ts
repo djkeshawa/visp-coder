@@ -39,7 +39,8 @@ it("records a per-check timeout separately from a product assertion failure", as
 
 it.each([
   "Error: spawnSync /usr/bin/node EPERM",
-  "Error: spawn /usr/bin/node EACCES",
+  "Error: spawn EPERM",
+  "Error: spawnSync /Users/Jane Doe/bin/node EPERM",
   "Error: execSync /usr/bin/node EPERM",
   "Error: fork /usr/bin/node EPERM",
 ])("recognizes the real spawn denial: %s", async (message) => {
@@ -49,6 +50,27 @@ it.each([
     output: expect.stringContaining("sandbox"),
   });
 });
+
+it("keeps a non-executable product script a product failure outside a sandbox", async () => {
+  for (const name of [
+    "CODEX_SANDBOX",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+    "CODEX_PERMISSION_PROFILE",
+  ])
+    vi.stubEnv(name, "");
+  const result = await execute("Error: spawn ./run.sh EACCES");
+  expect(result.execution).toMatchObject({ status: "failed" });
+  expect(result.execution.output).not.toContain("sandbox");
+});
+
+it.each(["Error: spawn /usr/bin/node EACCES", "Error: spawn /opt/Some Tool/bin/node EACCES"])(
+  "recognizes a denied spawn of an outside-root executable inside a sandbox: %s",
+  async (message) => {
+    vi.stubEnv("CODEX_SANDBOX", "workspace-write");
+    const result = await execute(message);
+    expect(result.execution).toMatchObject({ status: "environment-failed" });
+  },
+);
 
 it("recognizes an outside-root filesystem denial in a sandbox", async () => {
   vi.stubEnv("CODEX_SANDBOX", "workspace-write");
