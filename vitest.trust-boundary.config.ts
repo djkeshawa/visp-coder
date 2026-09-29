@@ -320,6 +320,7 @@ export default defineConfig({
   define: runtimeDefines,
   test: {
     include: trustBoundaryTests,
+    globalSetup: ["tests/global-setup.ts"],
     setupFiles: ["tests/host-isolation.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,
