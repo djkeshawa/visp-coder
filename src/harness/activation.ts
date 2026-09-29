@@ -2,6 +2,7 @@ import type { Harness } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { sha256 } from "../core/hash.js";
 import { err, ok, type Result } from "../core/result.js";
+import { lineEndingsNormalized } from "./asset-inspection.js";
 import { commandMap } from "./command-guide.js";
 import { TOOL_ACCESS_GUIDANCE } from "./instructions.js";
 
@@ -76,7 +77,7 @@ export function planAgentActivation(
   }
 
   const end = endMarker + ACTIVATION_END.length;
-  const installed = source.slice(start, end);
+  const installed = lineEndingsNormalized(source.slice(start, end));
   if (installed === ACTIVATION_BODY) return ok({ status: "current" });
 
   if (!force && !ownedActivationBlock(installed)) {
@@ -118,7 +119,7 @@ export function planAgentDeactivation(current: string | undefined): {
   if (
     start < 0 ||
     end < ACTIVATION_END.length ||
-    !ownedActivationBlock(current.slice(start, end))
+    !ownedActivationBlock(lineEndingsNormalized(current.slice(start, end)))
   ) {
     return { status: "edited" };
   }

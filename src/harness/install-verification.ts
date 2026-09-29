@@ -6,7 +6,7 @@ import type { ProjectPaths } from "../core/paths.js";
 import { err, ok, type Result } from "../core/result.js";
 import { pinnedRange, runtimeIdentity } from "../core/version.js";
 import { agentActivationFile, planAgentActivation, requiresAgentActivation } from "./activation.js";
-import { assetFingerprint } from "./asset-inspection.js";
+import { assetFingerprint, sameAssetContent } from "./asset-inspection.js";
 import {
   CLAUDE_PRE_TOOL_USE_HOOK,
   CLAUDE_SETTINGS_FILE,
@@ -199,7 +199,8 @@ async function verifyGeneratedAsset(
 ): Promise<Result<void>> {
   const current = await fs.readTextIfExists(asset.path);
   if (!current.ok) return current;
-  if (current.value !== asset.content) return installMismatch("generated asset", displayPath);
+  if (current.value === undefined || !sameAssetContent(current.value, asset))
+    return installMismatch("generated asset", displayPath);
   if (!asset.executable) return ok(undefined);
 
   const metadata = await fs.metadata(asset.path);

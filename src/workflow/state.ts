@@ -23,6 +23,7 @@ import {
   planAgentActivation,
   requiresAgentActivation,
 } from "../harness/activation.js";
+import { sameAssetContent } from "../harness/asset-inspection.js";
 import { preToolUseRegistration } from "../harness/claude-settings.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
@@ -245,7 +246,12 @@ async function hasHarnessAssets(state: WorkspaceState): Promise<Result<boolean>>
   const current = await Promise.all(
     assets.map(async (asset) => {
       const installed = await state.files.readTextIfExists(asset.path);
-      if (!installed.ok || installed.value !== asset.content) return false;
+      if (
+        !installed.ok ||
+        installed.value === undefined ||
+        !sameAssetContent(installed.value, asset)
+      )
+        return false;
       if (asset.executable !== true) return true;
 
       const metadata = await state.files.metadata(asset.path);

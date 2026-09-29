@@ -28,6 +28,7 @@ import {
   mcpRegistrationLabel,
   parseAssetManifestText,
   readAssetManifest,
+  sameAssetContent,
 } from "./asset-inspection.js";
 import {
   CLAUDE_PRE_TOOL_USE_HOOK,
@@ -426,7 +427,7 @@ async function planAsset(
   const metadata = await fs.metadata(asset.path);
   if (!metadata.ok) return metadata;
 
-  if (current.value === asset.content) {
+  if (current.value !== undefined && sameAssetContent(current.value, asset)) {
     const executableDrift = asset.executable && !isExecutableMode(metadata.value?.mode);
     plan.assets.push({ path: asset.path, status: executableDrift ? "written" : "unchanged" });
     plan.fingerprints[asset.path] = assetFingerprint(asset.content);
