@@ -107,8 +107,62 @@ export function redactStrings<T>(value: T, root: string): T {
   return value;
 }
 
+/**
+ * Settings whose values are ordinary words that appear in test names and output
+ * (`NODE_ENV=production`, `COLORTERM=truecolor`, `LANG=en_US.UTF-8`). Masking them turned
+ * `FAIL: production build works` into `FAIL: [REDACTED] build works`, which no declared test
+ * name matches. Names are listed explicitly (no wildcard families), identity data such as
+ * USER stays masked, and a name that also looks secret (`API_TOKEN`) or a value that looks
+ * like a credential is still masked.
+ */
+const PLAIN_SETTING = new RegExp(
+  `^(?:${[
+    "NODE_ENV",
+    "LANGUAGE",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "LC_COLLATE",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_MONETARY",
+    "SHELL",
+    "TERM",
+    "COLORTERM",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "TZ",
+    "EDITOR",
+    "VISUAL",
+    "PAGER",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "DESKTOP_SESSION",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "XDG_DATA_DIRS",
+    "XDG_CONFIG_DIRS",
+    "XDG_SESSION_TYPE",
+    "XDG_CURRENT_DESKTOP",
+    "PWD",
+    "OLDPWD",
+  ].join("|")})$`,
+);
+
+/** A URL with credentials, an address with a user part, or one long unbroken token. */
+function credentialShaped(value: string): boolean {
+  return value.includes("://") || value.includes("@") || /^[A-Za-z0-9_\-+/=]{20,}$/.test(value);
+}
+
 function sensitiveValue(name: string, value: string | undefined): boolean {
-  return !!value && (value.length >= 8 || SECRET_NAME.test(name));
+  if (!value) return false;
+  if (SECRET_NAME.test(name)) return true;
+  if (value.length < 8) return false;
+  return !PLAIN_SETTING.test(name) || credentialShaped(value);
 }
 
 function envValues(text: string): string[] {

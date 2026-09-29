@@ -1,6 +1,12 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { expect, it } from "vitest";
-import { redactRequest, redactStrings, redactText } from "../../../src/core/redaction.js";
+import {
+  outputRedactor,
+  redactRequest,
+  redactStrings,
+  redactText,
+} from "../../../src/core/redaction.js";
 
 it("masks long environment values, short credentials, token patterns and local paths", () => {
   const root = `${tmpdir()}/redaction-project`;
@@ -12,6 +18,83 @@ it("masks long environment values, short credentials, token patterns and local p
   expect(safe).toBe(
     "[REDACTED] [REDACTED] [REDACTED] /local <project>/app.ts ~/.agents/skill.md <tmp>/test",
   );
+});
+
+it("keeps ordinary settings readable so test names survive redaction", () => {
+  const environment = {
+    NODE_ENV: "production",
+    COLORTERM: "truecolor",
+    SHELL: "/bin/bash",
+    LANG: "en_US.UTF-8",
+    LC_ALL: "en_GB.UTF-8",
+    XDG_SESSION_TYPE: "wayland-session",
+  };
+  const text =
+    "FAIL: production build works (truecolor, en_US.UTF-8, en_GB.UTF-8, wayland-session)";
+  expect(redactText(text, { environment })).toBe(text);
+});
+
+it("masks identity data and names outside the explicit allowlist", () => {
+  const environment = {
+    USER: "developer1",
+    LOGNAME: "developer2",
+    HOSTNAME: "build-host-7",
+    LC_MY: "custom-value-1",
+    XDG_TOKENISH: "abc",
+    XDG_UNLISTED_DIR: "unlisted-value",
+  };
+  const safe = redactText(
+    "developer1 developer2 build-host-7 custom-value-1 abc unlisted-value stays",
+    { environment },
+  );
+  expect(safe).toBe("[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] stays");
+});
+
+it("masks a credential-shaped value even under an allowlisted name", () => {
+  const environment = {
+    LANG: "postgres://app:hunter22@db.internal/app",
+    EDITOR: "operator@example.com",
+    TERM: "abcdefghijklmnopqrstuvwxyz0123456789",
+    NODE_ENV: "production",
+  };
+  const safe = redactText(
+    "postgres://app:hunter22@db.internal/app operator@example.com abcdefghijklmnopqrstuvwxyz0123456789 production",
+    { environment },
+  );
+  expect(safe).toBe("[REDACTED] [REDACTED] [REDACTED] production");
+});
+
+it("still masks secrets whatever their name or length", () => {
+  const environment = {
+    API_TOKEN: "abc",
+    DATABASE_URL: "postgres://app:hunter22@db.internal/app",
+    STRIPE_KEY: "sk_live_0123456789abcdef",
+    NODE_ENV: "production",
+  };
+  const safe = redactText(
+    "token abc url postgres://app:hunter22@db.internal/app key sk_live_0123456789abcdef in production",
+    { environment },
+  );
+  expect(safe).toBe("token [REDACTED] url [REDACTED] key [REDACTED] in production");
+  expect(redactText("value abc", { environment: { NODE_ENV_SECRET: "abc" } })).toBe(
+    "value [REDACTED]",
+  );
+});
+
+it("applies the same allowlist to values read from a project .env file", async () => {
+  const root = await mkdtemp(`${tmpdir()}/visp-redact-`);
+  try {
+    await writeFile(
+      `${root}/.env`,
+      "NODE_ENV=production\nAPI_TOKEN=abc\nDATABASE_URL=postgres://app:hunter22@db/app\n",
+    );
+    const redact = await outputRedactor(root);
+    expect(redact("FAIL: production build works; abc; postgres://app:hunter22@db/app")).toBe(
+      "FAIL: production build works; [REDACTED]; [REDACTED]",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it("masks high entropy credentials while preserving readable diagnostics", () => {
