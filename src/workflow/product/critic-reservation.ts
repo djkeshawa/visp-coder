@@ -22,6 +22,7 @@ import { criticSelection, readCriticState, saveCriticState } from "./critic-stor
 import { phaseReviewGap } from "./critic-understanding.js";
 import { productFailureSignature } from "./failures.js";
 import { executionSchema, type ProductSlice } from "./model.js";
+import { disputeSetKey, disputeState } from "./pinned-disputes.js";
 import { runProductReviewerHandoff } from "./reviewer-handoff.js";
 import type { ProductRecord } from "./store.js";
 import { productImplementationDigest } from "./subject.js";
@@ -90,6 +91,10 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
         selection: packet.value.selection,
         requiresImages: packetHasImages(packet.value),
         ...(request.sourceOnly ? { sourceOnly: true } : {}),
+        // Rulings count only for the disputes the reviewer was asked about here.
+        ...(packet.value.disputes?.length
+          ? { disputes: packet.value.disputes.map((dispute) => dispute.test) }
+          : {}),
         startedAt,
         status: "pending",
         ...(request.retryAfter
@@ -135,11 +140,16 @@ async function prepareReviewEvidence(
     return err(vispError("EVIDENCE_FAILED", "Source changed while preparing critic context"));
   const implementation = productImplementationDigest(workspace, prepared.value.snapshot);
   const evidenceScope = selected.phase === "product" ? selected.slice : undefined;
+  // A review of other disputes is a new review even when the source and checks are the same.
+  const disputes = disputeSetKey(
+    (await disputeState(workspace, selected.record.brief.feature)).pending,
+  );
   const evidenceDigest = reviewEvidenceDigest(
     selected.record,
     handoff.subjectDigest,
     evidenceScope,
     handoff,
+    disputes,
   );
   const unique = await requireNewReview(
     workspace,
@@ -166,6 +176,7 @@ function reviewEvidenceDigest(
       readonly measurement?: unknown;
     }[];
   },
+  disputes?: string,
 ) {
   return hashValue({
     checks: [
@@ -175,6 +186,7 @@ function reviewEvidenceDigest(
     observations: handoff.evidence
       .filter((entry) => ["operation", "control"].includes(entry.kind))
       .map(({ kind, status, summary, measurement }) => ({ kind, status, summary, measurement })),
+    ...(disputes ? { disputes } : {}),
   });
 }
 

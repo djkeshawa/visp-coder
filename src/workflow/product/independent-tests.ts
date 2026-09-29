@@ -37,6 +37,12 @@ import {
 } from "./brief.js";
 import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
 import { hostRequest } from "./host-prompts.js";
+import {
+  disputeSchema,
+  TESTS_RECORD,
+  WAIVED_TESTS_ENV,
+  waivedTestsEnv,
+} from "./pinned-dispute-model.js";
 import { rulesForRequest, withRules } from "./project-rules.js";
 import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
@@ -55,7 +61,7 @@ import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./
  * signal a worker cannot quietly weaken (see docs/research-summary.md).
  */
 
-const RECORD = "acceptance-tests.json";
+const RECORD = TESTS_RECORD;
 const START_SOURCE = "tester-source-digest";
 const TESTER_TIMEOUT_MS = 720_000;
 const BASELINE_TIMEOUT_MS = 120_000;
@@ -130,6 +136,8 @@ const independentTestsRecordSchema = z
     command: z.array(z.string()).optional(),
     tests: z.array(z.object({ name: z.string(), quote: z.string() })).optional(),
     ambiguities: z.array(requestAmbiguitySchema).optional(),
+    /** Failing tests the worker disputed, and the independent reviewer's rulings. */
+    disputes: z.array(disputeSchema).optional(),
     notes: z.string().optional(),
     content: z.string().optional(),
     sourceDigest: z.string().optional(),
@@ -500,7 +508,7 @@ function summary(record: IndependentTestsRecord): IndependentTestsSummary {
     ...(record.status === "pinned"
       ? {
           instructions:
-            "These acceptance tests were written from the original request by an independent tester and are pinned: do not edit them. Run them while you work; `done` on the last slice and `accept` run them. If one contradicts the request, record an intent change that quotes the request instead of weakening it.",
+            "These acceptance tests were written from the original request by an independent tester and are pinned: do not edit them. Run them while you work; `done` on the last slice and `accept` run them.",
         }
       : {}),
   };
@@ -733,7 +741,7 @@ function repairPrompt(prompt: string, content: string, reason: string): string {
     "Previous file:",
     content,
     "",
-    "Read the repository and the failure again, then return the whole corrected file. Keep only assertions the request or the repository supports.",
+    "Read the repository and the failure again, then return the whole corrected file. Keep only assertions the request or the repository supports. If the run timed out, cut search iteration counts and stop each search at the first interface error.",
   ].join("\n");
 }
 
@@ -919,16 +927,25 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "Write ONE self-contained executable test file that checks the observable behavior the request specifies.",
     "Rules:",
     "- Test only behavior the request states. Quote the sentence each test relies on in `tests[].quote`. Do not invent requirements, messages or formats the request leaves open.",
-    "- A wrong test is worse than a missing one: the implementer must satisfy it. Leave out any case where a careful reader could expect a different result (for example extra fields or an empty body when the request does not say).",
-    "- Surface those cases in `ambiguities`: quote the exact rule in `quote`, list its reasonable `readings`, and give the reading most implementations/users expect in `conventionalReading`. Consider common natural variants, such as whitespace-only lines for 'blank lines'. Do not write tests for ambiguous cases. Return ambiguities even when file is null; use [] when none exist. These notes ask the worker to decide explicitly, not to satisfy an invented requirement.",
+    "- A wrong test is worse than a missing one: the implementer must satisfy it. Leave out any case where a careful reader could expect a different expected result (for example extra fields or an empty body when the request does not say). This is about what an assertion claims, not about outcomes whose setup the request leaves open: those follow the coverage and search rules below.",
+    "- Surface those cases in `ambiguities`: quote the exact rule in `quote`, list its reasonable `readings`, and give the reading most implementations/users expect in `conventionalReading`. Consider common natural variants, such as whitespace-only lines for 'blank lines'. Do not write tests for ambiguous cases. Return ambiguities even when file is null; use [] when none exist. These notes tell the worker the usual reading to implement; they are not new requirements.",
+    "- Rule interactions: when two stated rules can both decide the same case (a general rule and its exception; a structural condition and an ordering or precedence rule), test the combination only if one rule's own text covers that case (for example it says every, always or regardless, or an exception names the case). Quote both rules in `tests[].quote`. If deciding would need a tie-break the request does not state, put it in `ambiguities` with the usual reading; do not assert it.",
+    "- Input classes in every position: when the request normalizes or validates a class of input (case-insensitive names, a valid range of identifiers), test the class in each position where the request states the rule applies there or states it generally (for example a command argument, an operand inside an expression, a range endpoint), not only the first. Where the request states the rule for one position only, put the other positions in `ambiguities`. Assert only what the request states for that class.",
+    "- Coverage priority: where the request describes them, the suite must cover the request's central outcomes, not only setup, formats and interface shapes. Central outcomes are the effects the product exists to produce (for example what an action scores or charges, a quota or retry limit taking effect, a status transition, a goal being reached or lost), each numeric rule for the trigger and amount the request gives, and every stated state transition together with what follows it, as far as the request states it. If a trigger, rounding or boundary is unclear, list it in `ambiguities` instead of asserting it. A suite that checks only setup, data shapes and interface plumbing is incomplete. When trimming to the size limit, drop shape and format checks before central outcomes.",
+    "- Reaching outcomes without assuming open details: when producing an outcome depends on details the request leaves to the implementer (positions, layouts, data, timing), do not assume those details and do not skip the outcome. Reach it through the stated interfaces by a bounded search over allowed inputs (a grid over the input parameters, or sequences of actions), then assert the stated consequences once the effect is observed (for example the exact stated amount changed, the stated state appeared). Assert only what the request states about the consequence, not how the effect was reached. A goal the request defines (completing, winning, finishing a flow) must be reachable through allowed inputs: when the search covers the whole stated input domain (every stated range, at a resolution fine enough that a reasonable implementation cannot fall between samples, and sequences as long as the request allows), finding no way to reach it is a failure. If the input domain is open or unbounded, do not assert that the goal is unreachable; list it in `ambiguities`.",
+    "- Equivalent input paths: when the request states that two input paths (for example real user input and a programmatic or test interface) produce the same behavior, test each path against the same expected result derived from the request, never from what an implementation does. For directions, coordinates or other geometry, use non-degenerate inputs with a non-zero component on every axis (not only axis-aligned cases), so a flipped sign or swapped axis fails. Assert the direction (sign or quadrant) the request's stated convention implies, not exact magnitudes unless the request gives the formula; if the request states no convention, do not assert one and list it in `ambiguities`.",
+    "- When the request names deterministic controls (a clock, a step function, a seed, a reset), drive time and setup through them instead of real-time waits.",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
     "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
     "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
     "- Start and stop anything the tests need, the way the request says, with timeouts on every wait. Use a free port where one is needed.",
-    "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why.",
+    "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why, one line per failing test: `FAIL: <exact name from tests[].name>: <reason>`.",
+    "- Only the checks' own assertions may fail the run. Errors while cleaning up after the tests (closing a browser or server, killing a child process, removing temporary directories or browser profiles) must be caught and ignored, and must never change the exit status: wrap every teardown step in try/catch (or `ignore_errors=True` / `force: true` with retries) and exit from the assertion results alone.",
+    "- Assertions must not depend on incidental ordering the request does not state: object key order, Set or dict iteration order, the order of unordered results, or timing. Compare parsed values, sort before comparing, or check membership.",
+    `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
     "- The project is not implemented yet, so the file must fail now and pass once the request is met.",
     "- Before answering, check every case against the request and trace it through your own helpers (for example, how a missing body, None or null is actually sent). Remove any case you cannot justify from the quoted text.",
-    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines.",
+    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines. Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
     ...(existing
       ? [
           "- This request changes an existing codebase, and you are in a disposable copy of it where you may run the existing program and its tests. Before asserting anything about existing behavior (routes, status codes, body shapes, error formats, the requests your setup makes), run the program and observe it; base every such assertion on what you observed, not on assumptions.",
@@ -1064,7 +1081,7 @@ export async function readTestsRecord(
   }
 }
 
-async function saveTestsRecord(
+export async function saveTestsRecord(
   workspace: WorkspaceState,
   feature: string,
   record: IndependentTestsRecord,
@@ -1151,7 +1168,7 @@ export async function acceptanceProgress(
     const outcome = await runBaseline(
       workspace.paths.root,
       command,
-      {},
+      await waivedTestsEnv(workspace, feature),
       {
         signal: options.signal,
         timeoutMs: Math.max(
@@ -1167,7 +1184,7 @@ export async function acceptanceProgress(
       ...(passing ? {} : { failure: outcome.output.slice(-1200) }),
       note: passing
         ? "Pinned acceptance tests pass."
-        : "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one. If a test contradicts the request or that documentation, keep the product and record the disagreement with an intent change.",
+        : "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one.",
     });
   }
   return results;

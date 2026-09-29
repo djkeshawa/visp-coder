@@ -8,6 +8,7 @@ export const TOOL_ACCESS_GUIDANCE =
 const COMPACT_RULES = `- Keep request with --source-brief; preserve outcomes, expectations and scope.allowed.
 - Before editing run visp work; build runnable behavior. Functional outcomes need tests or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
 - Stateful: act, settle, repeat; test failure and restart.
+- If the request has a UI, show status, counts, errors as word-labeled text (\`Score: 1500\`), not only canvas/icons.
 - visp done may start review; visp next waits. Fix findings; rerun done. An accepted critic response records the review; otherwise visp review --prepare, then --session <id> --from -.
 - Run done/verify/accept/next with the host's maximum shell timeout.
 - Sandbox denied access? Rerun with escalation.

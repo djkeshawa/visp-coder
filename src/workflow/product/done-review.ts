@@ -15,6 +15,22 @@ import { type ProductVerification, runProductAccept, runProductDone } from "./ev
 import { outstandingFeedback } from "./findings.js";
 import { type AcceptanceProgress, acceptanceProgress } from "./independent-tests.js";
 import { closedSlice } from "./model.js";
+import type { PinnedDispute } from "./pinned-dispute-model.js";
+import {
+  type DisputeInput,
+  type DisputeOutcome,
+  type DisputeState,
+  disputedFailure,
+  disputeInput,
+  disputeState,
+  failingPinned,
+  fileDisputes,
+  type PinnedTestsReport,
+  pinnedTestsReport,
+  ranPinned,
+  refreshDisputes,
+  rulingCurrent,
+} from "./pinned-disputes.js";
 import type { ProductNext } from "./status.js";
 import { runProductNext } from "./status.js";
 import { type ProductRecord, type ProductSelection, readProductRecord } from "./store.js";
@@ -31,6 +47,8 @@ export interface DoneCriticSummary {
 }
 export type ProductDoneReviewed = ProductVerification & {
   readonly acceptanceTests?: readonly AcceptanceProgress[];
+  /** Disputes of failing pinned tests: what was filed, the rulings, how to dispute. */
+  readonly pinnedTests?: PinnedTestsReport;
   readonly critic?: DoneCriticSummary;
   readonly next?: ProductNext;
 };
@@ -56,41 +74,44 @@ export async function runProductDoneReviewed(
   startReview?: ReviewStarter,
   waitMs = 0,
 ): Promise<Result<ProductDoneReviewed>> {
+  const dispute = disputeInput(options);
+  if (!dispute.ok) return dispute;
   const deadline = callDeadline(options, waitMs);
   const checked = await runProductDone(workspace, options);
   if (!checked.ok) return checked;
+  const { feature } = checked.value;
   const progress = await acceptanceProgress(
     workspace,
-    checked.value.feature,
+    feature,
     checked.value.executions.map((execution) => execution.check),
     { ...options, deadline },
   );
   if (options.signal?.aborted) return cancelledExecution();
-  const done = ok(
-    progress.length ? { ...checked.value, acceptanceTests: progress } : checked.value,
-  );
-  if (!startReview || !checksPassed(done.value)) return done;
-  const skipped = await reviewNotNeeded(workspace, done.value.feature, done.value.task);
-  if (skipped) return ok({ ...done.value, critic: skipped });
-  const { feature } = done.value;
-  await options.onProgress?.({
-    check: "review",
-    status: "starting; run visp next if still pending",
+  const pinned = await pinnedView(workspace, "done", dispute.value, checked.value);
+  if (!pinned.ok) return pinned;
+  const { state } = pinned.value;
+  const done = ok({
+    ...(progress.length ? { ...checked.value, acceptanceTests: progress } : checked.value),
+    ...pinned.value.initial,
   });
-  let critic = await startReview(workspace, {
-    signal: options.signal,
-    deadline,
+  if (!startReview || !checksPassed(done.value, state)) return done;
+  const skipped = await reviewNotNeeded(
+    workspace,
+    feature,
+    done.value.task,
+    done.value.subjectDigest,
+    state.pending,
+  );
+  if (skipped) return ok({ ...done.value, critic: skipped });
+  const critic = await launchReview(workspace, options, deadline, startReview, {
     feature,
     ...(done.value.closed || !done.value.task ? {} : { task: done.value.task }),
   });
-  // Weak workers kept editing while a review ran, and the changed source discarded it.
-  // Holding `done` until the review returns delivers findings in the same step.
-  if (critic.running && !(await pendingReview(workspace, feature, deadline ?? Date.now(), options)))
-    critic = summarize(await runProductCritic(workspace, { operation: "status", feature }));
   if (options.signal?.aborted) return cancelledExecution();
   const next = critic.running ? waitingNext(feature) : await runProductNext(workspace, { feature });
   return ok({
     ...done.value,
+    ...(await pinned.value.refreshed()),
     critic,
     ...(next.ok ? { next: next.value, nextCommand: next.value.command } : {}),
   });
@@ -106,24 +127,103 @@ export async function runProductAcceptReviewed(
   options: ProductSelection,
   startReview?: ReviewStarter,
   waitMs = 0,
-): Promise<Result<ProductVerification & { readonly critic?: DoneCriticSummary }>> {
+): Promise<
+  Result<
+    ProductVerification & { readonly critic?: DoneCriticSummary; pinnedTests?: PinnedTestsReport }
+  >
+> {
+  const dispute = disputeInput(options);
+  if (!dispute.ok) return dispute;
   const deadline = callDeadline(options, waitMs);
   const accepted = await runProductAccept(workspace, options);
-  if (!accepted.ok || accepted.value.passed || !startReview || !checksPassed(accepted.value))
-    return accepted;
+  if (!accepted.ok) return accepted;
   const { feature } = accepted.value;
+  const pinned = await pinnedView(workspace, "accept", dispute.value, accepted.value);
+  if (!pinned.ok) return pinned;
+  const initial = { ...accepted.value, ...pinned.value.initial };
+  if (accepted.value.passed || !startReview || !checksPassed(accepted.value, pinned.value.state))
+    return ok(initial);
   if (options.signal?.aborted) return cancelledExecution();
+  const critic = await launchReview(workspace, options, deadline, startReview, { feature });
+  if (critic.running || !critic.reviewed) return ok({ ...initial, critic });
+  if (options.signal?.aborted) return cancelledExecution();
+  const again = await runProductAccept(workspace, { ...options, reusePassed: true });
+  if (!again.ok) return again;
+  return ok({ ...again.value, critic, ...(await pinned.value.refreshed()) });
+}
+
+interface PinnedView {
+  /** Where the disputes stand; pending ones do not stop the reviewer from launching. */
+  readonly state: DisputeState;
+  readonly initial: { pinnedTests?: PinnedTestsReport };
+  /** After a review: this call's filing outcomes with where each dispute stands now. */
+  refreshed(): Promise<{ pinnedTests?: PinnedTestsReport }>;
+}
+
+/**
+ * Brings open disputes up to the failing run just observed, files this call's disputes
+ * against it, and reports on them. Only the pinned suite run as a blocking check counts:
+ * on earlier slices it is informational and nothing can be disputed.
+ */
+async function pinnedView(
+  workspace: WorkspaceState,
+  command: "done" | "accept",
+  dispute: DisputeInput | undefined,
+  verification: ProductVerification,
+): Promise<Result<PinnedView>> {
+  const { feature } = verification;
+  const failing = failingPinned(verification.executions);
+  if (ranPinned(verification.executions)) {
+    const refreshed = await refreshDisputes(
+      workspace,
+      feature,
+      failing,
+      verification.subjectDigest,
+    );
+    if (!refreshed.ok) return refreshed;
+  }
+  const filed = dispute
+    ? await fileDisputes(workspace, feature, dispute, failing, verification.subjectDigest)
+    : undefined;
+  if (filed && !filed.ok) return filed;
+  const report = (outcomes?: readonly DisputeOutcome[]) =>
+    pinnedTestsReport(workspace, feature, {
+      ...(outcomes ? { filed: outcomes } : {}),
+      failing: failing.length > 0,
+      command,
+    });
+  const wrap = (pinnedTests: PinnedTestsReport | undefined) => (pinnedTests ? { pinnedTests } : {});
+  const initial = wrap(await report(filed?.value));
+  return ok({
+    state: await disputeState(workspace, feature),
+    initial,
+    refreshed: async () => wrap(await report(filed?.value)),
+  });
+}
+
+/** Starts the review and, when it is still running, holds the call for its result. */
+async function launchReview(
+  workspace: WorkspaceState,
+  options: ProductSelection,
+  deadline: number | undefined,
+  startReview: ReviewStarter,
+  selection: { feature: string; task?: string },
+): Promise<DoneCriticSummary> {
   await options.onProgress?.({
     check: "review",
     status: "starting; run visp next if still pending",
   });
-  let critic = await startReview(workspace, { feature, signal: options.signal, deadline });
-  if (critic.running && !(await pendingReview(workspace, feature, deadline ?? Date.now(), options)))
-    critic = summarize(await runProductCritic(workspace, { operation: "status", feature }));
-  if (critic.running || !critic.reviewed) return ok({ ...accepted.value, critic });
-  if (options.signal?.aborted) return cancelledExecution();
-  const again = await runProductAccept(workspace, { ...options, reusePassed: true });
-  return again.ok ? ok({ ...again.value, critic }) : again;
+  const critic = await startReview(workspace, { signal: options.signal, deadline, ...selection });
+  // Weak workers kept editing while a review ran, and the changed source discarded it.
+  // Holding `done` until the review returns delivers findings in the same step.
+  if (
+    critic.running &&
+    !(await pendingReview(workspace, selection.feature, deadline ?? Date.now(), options))
+  )
+    return summarize(
+      await runProductCritic(workspace, { operation: "status", feature: selection.feature }),
+    );
+  return critic;
 }
 
 function callDeadline(options: ProductSelection, waitMs: number) {
@@ -139,7 +239,18 @@ async function reviewNotNeeded(
   workspace: WorkspaceState,
   feature: string,
   task: string | undefined,
+  subject: string,
+  pending: readonly PinnedDispute[],
 ): Promise<DoneCriticSummary | undefined> {
+  // A dispute is decided only by a review; once it has ruled on this exact source, another
+  // review of it would find nothing new.
+  if (pending.length) return undefined;
+  if (await rulingCurrent(workspace, feature, subject))
+    return {
+      reviewed: false,
+      findings: [],
+      reason: "The independent review already ruled on this exact source",
+    };
   const loaded = await readProductRecord(workspace, { feature });
   if (!loaded.ok || !task) return undefined;
   if (!skippableReview(loaded.value, task)) return undefined;
@@ -336,8 +447,13 @@ async function pendingReview(
  * Failing checks are cheaper to fix than to review. `done` may execute nothing new when
  * `verify` already passed the current source; a passed result still warrants review.
  */
-function checksPassed(result: ProductVerification): boolean {
-  if (result.executions.some((execution) => execution.status !== "passed")) return false;
+function checksPassed(result: ProductVerification, disputes?: DisputeState): boolean {
+  // A pinned failure the worker has disputed in full must not keep the reviewer from ruling.
+  const blocking = result.executions.filter(
+    (execution) =>
+      execution.status !== "passed" && !(disputes && disputedFailure(execution, disputes)),
+  );
+  if (blocking.length) return false;
   return result.executions.length > 0 || result.passed;
 }
 

@@ -1,6 +1,7 @@
 import { ok, type Result } from "../../core/result.js";
 import { recordedReplayRuns, replayCommand } from "../evidence/capture-replay.js";
 import type { WorkspaceState } from "../state.js";
+import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import {
   applicableExecutions,
   applicableReviews,
@@ -28,6 +29,7 @@ import { findingAppliesToSlice, outstandingFeedback, productFeedbackGaps } from 
 import { functionalRegressionRequirement } from "./functional-regression.js";
 import { findFunctionalRepair } from "./functional-resolution.js";
 import { checksFor, closedSlice, type ProductSlice } from "./model.js";
+import { type PinnedRoute, pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
 import { repairRecheck } from "./repair-recheck.js";
 import { readProductAuthorization, selectProductSlice } from "./scopes.js";
@@ -178,11 +180,15 @@ async function nextClosedProduct(
     if (environmentJourney) return ok(environmentJourney);
   }
   const journeys = currentJourneyFailures(record, subject);
+  const route = await pinnedRoute(workspace, record.brief.feature, undefined, failures, "accept");
   const gaps = [
+    ...route.evidence,
     ...(await productEvidenceGaps(workspace, record, subject)),
     ...failures.map((execution) => `${execution.check}: ${execution.status}: ${execution.output}`),
   ];
   const assessmentGaps = finalProductAssessmentGaps(record, subject);
+  if (route.override)
+    return ok(pinnedStep(record.brief.feature, undefined, route, [...gaps, ...assessmentGaps]));
   const correction =
     record.brief.slices.find((slice) =>
       currentFailedJourneys(record, subject).some(
@@ -273,7 +279,7 @@ async function nextOpenSlice(
       evidence: [],
       mayEdit: false,
     });
-  const checks = sliceExecutionCheckIds(workspace, record, slice, subject);
+  const checks = openSliceChecks(workspace, record, slice, subject);
   const executions = applicableExecutions(record, subject).filter(
     (execution) =>
       checks.has(execution.check) &&
@@ -305,16 +311,7 @@ async function nextOpenSlice(
           ).objective
         : "Continue the authorized slice while recovering the failed check's execution environment or correcting its command; required checks remain unresolved",
     });
-  if (failures.length)
-    return ok({
-      ...base,
-      action: "fix",
-      objective:
-        "Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check",
-      command: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
-      evidence: failures.map((entry) => `${entry.check}: ${entry.status}: ${entry.output}`),
-      mayEdit: true,
-    });
+  if (failures.length) return ok(await failedSliceNext(workspace, record, slice, failures));
   const journeyNext = failedJourneyNext(record, subject, slice);
   if (journeyNext) return journeyNext;
   const statuses = outcomeStatuses(record, subject, slice);
@@ -382,6 +379,63 @@ async function nextOpenSlice(
     evidence: await productEvidenceGaps(workspace, record, subject, slice),
     mayEdit: true,
   });
+}
+
+/** The last open slice must also pass the pinned tests, whichever slice's scope owns their file. */
+function openSliceChecks(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice,
+  subject: string,
+): Set<string> {
+  const checks = sliceExecutionCheckIds(workspace, record, slice, subject);
+  const completes = record.brief.slices.every(
+    (entry) => entry.id === slice.id || closedSlice(record.state.slices[entry.id]?.status),
+  );
+  if (completes) for (const pinned of pinnedAcceptanceChecks(record.brief)) checks.add(pinned.id);
+  return checks;
+}
+
+/** A failing check sends the worker to fix; a settled or handed-off pinned failure does not. */
+async function failedSliceNext(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice,
+  failures: readonly { check: string; status: string; output: string }[],
+): Promise<ProductNext> {
+  const feature = record.brief.feature;
+  const route = await pinnedRoute(workspace, feature, slice.id, failures, "done");
+  const evidence = [
+    ...route.evidence,
+    ...failures.map((entry) => `${entry.check}: ${entry.status}: ${entry.output}`),
+  ];
+  if (route.override) return pinnedStep(feature, slice.id, route, evidence);
+  return {
+    feature,
+    task: slice.id,
+    action: "fix",
+    objective:
+      "Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check",
+    command: `visp work --feature ${feature} --task ${slice.id}`,
+    evidence,
+    mayEdit: true,
+  };
+}
+
+/** A settled or handed-off pinned failure replaces the fix step. */
+function pinnedStep(
+  feature: string,
+  task: string | undefined,
+  route: PinnedRoute,
+  evidence: string[],
+): ProductNext {
+  return {
+    feature,
+    ...(task ? { task } : {}),
+    ...(route.override as NonNullable<PinnedRoute["override"]>),
+    evidence,
+    mayEdit: route.override?.action === "implement",
+  };
 }
 
 async function repairRoute(

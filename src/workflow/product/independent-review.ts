@@ -9,6 +9,20 @@ const evidence = z.array(
   text.describe("Exact supplied evidence ID; put explanations in the surrounding judgment text."),
 );
 const status = z.enum(["satisfied", "failed", "unclear", "unavailable"]);
+/** The reviewer's ruling on one pinned test the worker disputed. */
+export const disputeRulingSchema = z
+  .object({
+    test: text.describe("Exact disputed test name from the supplied disputes."),
+    ruling: z
+      .enum(["upheld", "rejected"])
+      .describe(
+        "upheld: the original request contradicts the test. rejected: the product must satisfy it.",
+      ),
+    reasoning: text.describe("Quote the request sentence that decides it and say why."),
+  })
+  .strict();
+export type DisputeRuling = z.infer<typeof disputeRulingSchema>;
+
 /** Shared judgment contract; historical resolutions may omit their repair disposition. */
 export const independentReviewSchema = z
   .object({
@@ -44,6 +58,7 @@ export const independentReviewSchema = z
       .max(3),
     limitations: z.array(text),
     resolutions: z.array(feedbackResolutionSchema),
+    disputes: z.array(disputeRulingSchema).max(5).optional(),
   })
   .strict();
 export type IndependentReview = z.infer<typeof independentReviewSchema>;
@@ -51,6 +66,7 @@ export type IndependentReview = z.infer<typeof independentReviewSchema>;
 export function independentReviewJsonSchema(
   evidenceIds?: readonly string[],
   outcomeIds?: readonly string[],
+  disputedTests: readonly string[] = [],
 ) {
   const root = toJsonSchemaCompat(independentReviewSchema);
   function expand(value: unknown, ancestors = new Set<string>()): unknown {
@@ -67,7 +83,7 @@ export function independentReviewJsonSchema(
     const expandedObject = Object.fromEntries(
       Object.entries(object).map(([key, entry]) => {
         const expanded = expand(entry, ancestors);
-        return [key, referenceField(key, expanded, evidenceIds, outcomeIds)];
+        return [key, referenceField(key, expanded, evidenceIds, outcomeIds, disputedTests)];
       }),
     );
     // Structured-output providers require all properties. New responses make the
@@ -83,7 +99,9 @@ function referenceField(
   field: unknown,
   evidenceIds?: readonly string[],
   outcomeIds?: readonly string[],
+  disputedTests: readonly string[] = [],
 ) {
+  if (key === "disputes") return disputeArray(field, disputedTests);
   if (key === "evidence") return referenceArray(field, evidenceIds);
   if (key === "outcomes") return referenceArray(field, outcomeIds);
   if (!outcomeIds || !field || typeof field !== "object") return field;
@@ -91,6 +109,21 @@ function referenceField(
   if (key === "assessments" && !outcomeIds.length) return { ...field, maxItems: 0 };
   return field;
 }
+/** Rulings exist only for the supplied disputes, one per test. */
+function disputeArray(field: unknown, tests: readonly string[]) {
+  if (!field || typeof field !== "object") return field;
+  if (!tests.length) return { ...field, maxItems: 0 };
+  const items = (field as { items?: { properties?: Record<string, unknown> } }).items;
+  return {
+    ...field,
+    maxItems: tests.length,
+    items: {
+      ...items,
+      properties: { ...items?.properties, test: { type: "string", enum: [...new Set(tests)] } },
+    },
+  };
+}
+
 /** Constrain reference selection, not the reviewer's conclusions or length. */
 function referenceArray(field: unknown, evidenceIds?: readonly string[]) {
   if (
@@ -130,6 +163,7 @@ export function independentReviewTemplate() {
     findings: [],
     limitations: [],
     resolutions: [],
+    disputes: [],
   };
 }
 

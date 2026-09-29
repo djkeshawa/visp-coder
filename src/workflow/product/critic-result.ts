@@ -22,6 +22,7 @@ import {
   saveCriticState,
 } from "./critic-store.js";
 import { independentJudgments, independentReviewSchema } from "./independent-review.js";
+import { applyDisputeRulings } from "./pinned-disputes.js";
 import { runProductReviewRequest } from "./review-request.js";
 import { productSourceDigest } from "./subject.js";
 
@@ -64,9 +65,21 @@ export async function finishReview(
     state,
     validated,
   );
-  const gaps = result
-    ? await reviewGaps(workspace, current, subject.value, result, pending.sourceOnly)
-    : [];
+  const disputes = await recordDisputeRulings(
+    workspace,
+    current,
+    state,
+    pending,
+    request,
+    response,
+    result,
+  );
+  const gaps = [
+    ...(result
+      ? await reviewGaps(workspace, current, subject.value, result, pending.sourceOnly)
+      : []),
+    ...disputes.gaps,
+  ];
   const advisoryResponse = lateUnderstandingAdvice(
     state,
     pending,
@@ -75,12 +88,16 @@ export async function finishReview(
     response,
     failure,
   );
-  const completion: Pick<Attempt, "status" | "message" | "response" | "gaps" | "failureKind"> = {
+  const completion: Pick<
+    Attempt,
+    "status" | "message" | "response" | "gaps" | "failureKind" | "disputeRulings"
+  > = {
     status: result ? "reviewed" : "unavailable",
     failureKind: result ? undefined : rejectedResponseKind(request, response),
     message,
     response: result,
     gaps,
+    ...disputes.completion,
   };
   const next: CriticState = {
     ...state,
@@ -126,6 +143,55 @@ export async function finishReview(
         }
       : {}),
   });
+}
+
+/**
+ * The reviewer's rulings on disputed pinned tests. Only a review VISP itself launched and
+ * observed (an attached adapter's `review`, never a native or host-submitted result) may
+ * rule, and only on the disputes recorded on the attempt at reservation. A review without
+ * rulings still uses up one of each dispute's reviews. If the disputes cannot be saved they
+ * stay open and the gap says so.
+ */
+async function recordDisputeRulings(
+  workspace: WorkspaceState,
+  selected: CriticSelection,
+  state: CriticState,
+  pending: Attempt,
+  request: CriticRequest,
+  response: HostResponse | undefined,
+  accepted: CriticResponse | undefined,
+): Promise<{ completion: Pick<Attempt, "disputeRulings">; gaps: string[] }> {
+  const asked = pending.disputes ?? [];
+  if (
+    !accepted ||
+    pending.sourceOnly ||
+    (pending.phase ?? "product") !== "product" ||
+    !asked.length
+  )
+    return { completion: {}, gaps: [] };
+  const independent =
+    request.operation === "review" &&
+    pending.execution?.provenance === "adapter-observed" &&
+    pending.execution.claimed === true;
+  const parsed = independentReviewSchema.safeParse(response?.response);
+  const rulings = independent && parsed.success ? (parsed.data.disputes ?? []) : [];
+  const applied = await applyDisputeRulings(workspace, selected.record.brief.feature, {
+    attempt: pending.id,
+    ...(selected.selection.task ? { task: selected.selection.task } : {}),
+    subject: pending.subject,
+    evidence: pending.evidenceDigest,
+    model: state.config.model,
+    asked,
+    rulings,
+  });
+  return applied.ok
+    ? { completion: rulings.length ? { disputeRulings: rulings } : {}, gaps: [] }
+    : {
+        completion: {},
+        gaps: [
+          `Pinned-test dispute rulings could not be recorded (${applied.error.message}); the disputes stay open. Run visp pr to hand them to the human reviewer`,
+        ],
+      };
 }
 
 async function applyValidatedReview(
@@ -282,7 +348,7 @@ function validateResult(
       `Critic returned invalid review JSON: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`,
     );
   const result = parsed.data;
-  const phaseGap = resultPhaseGap(pending, result);
+  const phaseGap = resultPhaseGap(pending, result, response.response);
   if (phaseGap) return reject(phaseGap);
   if (new Set(result.comparison.map((d) => d.dimension)).size !== result.comparison.length)
     return reject("Duplicate comparison dimensions");
@@ -318,6 +384,16 @@ function sourceAdvice(result: CriticResponse): CriticResponse {
   };
 }
 
+/** The response format allows rulings only for the disputes asked about, once each. */
+function disputeRulingGap(pending: Attempt, response: unknown): string | undefined {
+  const rulings = independentReviewSchema.safeParse(response).data?.disputes ?? [];
+  const tests = rulings.map((entry) => entry.test);
+  const asked = pending.disputes ?? [];
+  return tests.some((test, index) => !asked.includes(test) || tests.indexOf(test) !== index)
+    ? "Critic ruled on a pinned test that was not disputed, or ruled twice on one"
+    : undefined;
+}
+
 function normalizedResponse(response: unknown, pending: Attempt, selected: CriticSelection) {
   const independent = independentReviewSchema.safeParse(response);
   return independent.success && pending.selection
@@ -340,7 +416,9 @@ function outsideDeadline(state: CriticState, attempt: Attempt, receivedAt = Date
   return receivedAt < attempt.startedAt || receivedAt > attempt.startedAt + state.config.timeoutMs;
 }
 
-function resultPhaseGap(pending: Attempt, result: CriticResponse) {
+function resultPhaseGap(pending: Attempt, result: CriticResponse, raw?: unknown) {
+  const rulingGap = disputeRulingGap(pending, raw);
+  if (rulingGap) return rulingGap;
   const phase = pending.phase ?? "product";
   if (phase === "product" && !result.review.feedback) return undefined;
   if (result.review.feedback?.phase !== phase)

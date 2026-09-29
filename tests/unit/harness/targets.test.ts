@@ -181,7 +181,8 @@ describe("the minimal profile", () => {
     const guide = planFor("generic", "minimal").assets[0]?.content ?? "";
 
     // chars/4 as a coarse token proxy; the point is an enforced ceiling.
-    expect(guide.length / 4).toBeLessThanOrEqual(300);
+    // 300 -> 329: room for the one-line labeled-text UI rule, with no other rule shortened.
+    expect(guide.length / 4).toBeLessThanOrEqual(329);
     expect(guide).toContain("done/verify/accept/next with the host's maximum shell timeout");
     expect(guide).toContain("scope.allowed");
     expect(guide).toContain("runnable");
@@ -189,7 +190,19 @@ describe("the minimal profile", () => {
     expect(guide).toContain("Source strings and screenshots alone do not prove behavior");
     expect(guide).toContain("Missing product evidence stays unresolved");
     expect(guide).toContain("Before the final answer");
+    expect(guide).toContain("word-labeled text");
+    expect(guide).toContain("not only canvas/icons");
   });
+
+  it.each(["codex", "claude-code"] as const)(
+    "installs the labeled-text rule in the resident %s minimal guide",
+    (harness) => {
+      const guide = planFor(harness, "minimal").assets.find(
+        (asset) => asset.path === "AGENTS.visp.md",
+      )?.content;
+      expect(guide).toContain("word-labeled text (`Score: 1500`)");
+    },
+  );
 
   it("defaults to the minimal profile", () => {
     expect(planFor("claude-code")).toEqual(planFor("claude-code", "minimal"));

@@ -17,6 +17,12 @@ import {
   validateProductCheckCommand,
 } from "./check-command.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
+import {
+  pinnedWaivers,
+  WAIVED_TESTS_ENV,
+  type Waivers,
+  waivedFailure,
+} from "./pinned-dispute-model.js";
 import { SANDBOX_NOTE, sandboxDenial } from "./sandbox-denial.js";
 import type { ProductRecord } from "./store.js";
 import { productComparisonEnvironmentDigest, productContractDigest } from "./subject.js";
@@ -80,7 +86,17 @@ export async function executeProductCheck(
     ...envFiles,
     ...Object.keys(verifierSnapshot).filter((path) => privatePath(path)),
   ]);
-  const output = await executeCommand(workspace, check, !!base.verifierDigest, signal);
+  // Tests the independent reviewer found contradicting the request are skipped by the suite.
+  const waivers = check.id.startsWith("PINNED_")
+    ? await pinnedWaivers(workspace, record.brief.feature)
+    : undefined;
+  const output = await executeCommand(
+    workspace,
+    check,
+    !!base.verifierDigest,
+    signal,
+    waiverEnvironment(waivers),
+  );
   const raw = output.ok ? `${output.value.stdout}\n${output.value.stderr}` : output.error.message;
   const commandVerifier =
     base.verifierDigest && output.ok && output.value.executableDigest
@@ -90,16 +106,22 @@ export async function executeProductCheck(
           executable: output.value.executableDigest,
         }
       : undefined;
+  const { status, note } = waivedResult(output, raw, workspace.paths.root, waivers);
   return {
     execution: {
       ...base,
       ...(commandVerifier ? { commandVerifier } : {}),
       verifierDigest: commandVerifier ? hashValue(commandVerifier) : undefined,
       assertions: "agent-reported",
-      status: commandStatus(output, workspace.paths.root),
+      status,
       exitCode: output.ok ? output.value.exitCode : -1,
       durationMs: output.ok ? output.value.durationMs : Date.now() - started,
-      output: commandEvidenceOutput(output, !!base.verifierDigest, workspace.paths.root, redact),
+      output: [
+        note,
+        commandEvidenceOutput(output, !!base.verifierDigest, workspace.paths.root, redact),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     },
     state: record.state,
     mutations: [
@@ -112,6 +134,27 @@ export async function executeProductCheck(
       },
     ],
   };
+}
+
+function waiverEnvironment(waivers: Waivers | undefined): Record<string, string> {
+  return waivers?.names.length ? { [WAIVED_TESTS_ENV]: JSON.stringify(waivers.names) } : {};
+}
+
+/** A suite that cannot skip tests fails on waived ones; VISP counts only that failure as passed. */
+function waivedResult(
+  output: Result<CommandOutput & { executableDigest?: string }>,
+  raw: string,
+  root: string,
+  waivers: Waivers | undefined,
+): { status: ProductExecution["status"]; note: string } {
+  const status = commandStatus(output, root);
+  return waivers && status === "failed" && waivedFailure(raw, waivers)
+    ? { status: "passed", note: waivedNote(waivers.names) }
+    : { status, note: "" };
+}
+
+function waivedNote(names: readonly string[]): string {
+  return `VISP: every failing test was waived by the independent review (${names.join("; ")}); the suite cannot skip tests, so its exit status is not counted. Original output follows.`;
 }
 
 function commandEvidenceOutput(
@@ -182,6 +225,7 @@ async function executeCommand(
   check: ProductCheck,
   identifyExecutable: boolean,
   signal?: AbortSignal,
+  extraEnvironment: Record<string, string> = {},
 ): Promise<Result<CommandOutput & { executableDigest?: string }>> {
   const valid = validateProductCheckCommand(check);
   if (!valid.ok) return valid;
@@ -196,7 +240,7 @@ async function executeCommand(
       async (environment) => {
         const binary = argv.value[0] ?? "";
         const checkEnvironment = check.id.startsWith("PINNED_")
-          ? acceptanceEnvironment(environment)
+          ? { ...acceptanceEnvironment(environment), ...extraEnvironment }
           : environment;
         const before = identifyExecutable
           ? await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment)
