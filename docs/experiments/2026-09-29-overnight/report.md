@@ -147,3 +147,41 @@ Builds are in `$VISP_BENCH_RUNS/builds/visp-nb0` (baseline) through `visp-nt6` (
 - The first version dropped the cap note altogether, so the new restock endpoint got no cap (36). Its weaker heading also lost one memory case (35).
 - The final version's 32 came from session 1, which runs before any recall: a reviewer finding made the archive endpoint require a JSON content type, so archive requests got 415.
 - That is the second reviewer-driven "over-strict input validation" regression seen (the other was the baseline reservations run at 37). It is still open.
+
+## Addendum: over-strict input validation (e1ae818)
+
+**Problem.**
+- The reviewer extended body and media-type rules, written for endpoints that take JSON bodies, to operations the request defines without input: archive, confirm, release. It marked those findings required.
+- The worker's fixes then rejected the normal call. A bodyless archive returned 415, and confirm rejected `{}`.
+- Across successive reviews one control run escalated from "check the media type" to "validate the JSON" to "reject any JSON".
+
+**Fix (279cb2f).**
+- **Reviewer:**
+  - A required finding that asks for new input rejection must name the request sentence, contract rule or recorded decision (M#) it relies on.
+  - A rule covers an operation only if it names that operation or its class, and the rule's condition holds for the request's normal call. A body rule does not cover an operation whose normal call has no body. If a rule and the described normal call conflict, the normal call wins.
+  - Crashes, 5xx, state corruption and scope escapes stay required.
+  - Natural variants of stated rules count as stated.
+- **Worker (the `fix` objective):**
+  - Add a test that the request's normal call still succeeds, and reject only what the finding names.
+  - Don't apply a finding that would break the normal call; say so in the done note.
+
+**Benchmark** (gpt-6-luna medium, 5 runs each, fix vs current develop):
+
+| Task | control | fix |
+|---|---|---|
+| reservations-api (/44) | 44, 44, **37**, 44, 44 | 44 ×5 |
+| archive-carryover (/39) | 39, **32**, 39, 39, 39 | 39 ×5 |
+| archive-carryover-raised (/40) | 40 ×5 | 40 ×5 |
+| spreadsheet-cli (/38) | 37.6 | 37.8 |
+| slingshot-game (/28) | 27.6 (32.6 min) | 28.0 (42.0 min; one run hit the 60 min cap at 28/28) |
+
+**Blind audit.** A separate agent labelled every reviewer finding that asked for new input rejection against the request text, without knowing the arm.
+
+| | control (25 runs) | fix (25 runs) |
+|---|---|---|
+| Required, stated by the request | 13 | 11 |
+| Required, extended or invented | 9 | 3 |
+
+Unwarranted required findings fell by two-thirds, and legitimate ones were mostly kept. Neither arm lost any checks to the three that remained: the worker kept the normal call working.
+
+**Game time:** the difference is within this task's run-to-run noise. The same code ran 9–54 min in the control and 27–54 min in iteration 6, and review and critic counts were similar between arms.
