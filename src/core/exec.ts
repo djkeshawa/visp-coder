@@ -119,10 +119,36 @@ export function run(
 function killCommandGroup(child: ChildProcess, signal: NodeJS.Signals) {
   if (!child.pid) return;
   try {
-    if (process.platform === "win32") child.kill(signal);
+    if (process.platform === "win32") killWindowsTree(child, signal);
     else process.kill(-child.pid, signal);
   } catch {
     /* The process group has already exited. */
+  }
+}
+
+/**
+ * Windows has no process groups: `child.kill()` ends only the shim (cmd.exe, npm.cmd) and
+ * leaves the real command running. taskkill /T walks the tree while its root is alive; after
+ * the root exited its pid may belong to someone else, so nothing is killed then.
+ */
+function killWindowsTree(child: ChildProcess, signal: NodeJS.Signals) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  // taskkill failing to start, or exiting non-zero while the root still runs, leaves the shim
+  // killable at least.
+  const fallback = () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+  };
+  try {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.once("error", fallback);
+    killer.once("exit", (code) => {
+      if (code !== 0) fallback();
+    });
+  } catch {
+    fallback();
   }
 }
 
