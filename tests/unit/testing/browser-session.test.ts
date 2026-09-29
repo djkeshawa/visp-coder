@@ -175,6 +175,26 @@ describe("browser session ownership", () => {
     expect(session.operations.map((entry) => entry.description)).toEqual([description]);
     await session.close();
   });
+  it("ignores an application exception event arriving after close began", async () => {
+    const listeners = new Set<(event: Record<string, unknown>) => void>();
+    transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as never);
+    const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
+    const exception = {
+      method: "Runtime.exceptionThrown",
+      sessionId: "session",
+      params: { exceptionDetails: { text: "Uncaught" } },
+    };
+    const closing = session.close();
+    expect(() => {
+      for (const listener of listeners) listener(exception);
+    }).not.toThrow();
+    await closing;
+    expect(session.operations).toEqual([]);
+    expect(() => session.assertHealthy?.()).not.toThrow();
+  });
   it("does not record a successful click when browser input fails", async () => {
     const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
     transport.send.mockRejectedValueOnce(new Error("browser disconnected"));

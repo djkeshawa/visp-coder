@@ -118,7 +118,13 @@ export async function openBrowserSession(options: {
     };
     const errors: string[] = [];
     const unsubscribeErrors = transport.onEvent((event) => {
-      if (event.sessionId !== send.sessionId || event.method !== "Runtime.exceptionThrown") return;
+      // close() is flagged before it unsubscribes; a late event must not throw from record().
+      if (
+        closed ||
+        event.sessionId !== send.sessionId ||
+        event.method !== "Runtime.exceptionThrown"
+      )
+        return;
       const message = redactText(applicationException(event.params), { root: options.fileRoot });
       if (errors.length < 5) {
         errors.push(message);
