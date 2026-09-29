@@ -1,0 +1,190 @@
+{
+  "inputs": [
+    {
+      "file": "game.js",
+      "sha256": "a27477a90470e48006ef03b4b549d3bd7c8ae8098016fd824730e48c4abb3af1"
+    },
+    {
+      "file": "index.html",
+      "sha256": "102f777ddaf1496a2c8d145da42fb0ccad2e2310af9f05fdad8b5e01a5489788"
+    }
+  ],
+  "operations": [
+    {
+      "id": "2b4b0b1c-0f0d-4537-9158-b9513d3cb061",
+      "kind": "navigate",
+      "description": "Navigate file:///tmp/visp-freeze-LW1CGL/index.html",
+      "completedAt": "2026-09-30T06:44:15.915Z"
+    },
+    {
+      "id": "124bb8ab-a0c2-4c59-b271-c709670c137a",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:15.923Z",
+      "resultDigest": "ac5ec153db39bfaa04529144691af2f286b0197b15708eb539e2c5cddb4bff81",
+      "measurement": {
+        "json": "{\"box\":{\"left\":0,\"top\":40,\"scale\":1.3333333333333333},\"bird\":{\"x\":145,\"y\":360,\"vx\":0,\"vy\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "5a928734-4939-423e-a544-4703fa9520f7",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:15.929Z",
+      "resultDigest": "01e957bd87c2789c33b5d55b3b453e6507227da8a5eabfdf57adbe9bc354becf",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-LW1CGL/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "4f871cfe-23d2-4098-ad16-057c97c39680",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:15.932Z",
+      "resultDigest": "84ad8a106fa379cc154de63fb5c8fdbbfcf071d74c80902da085965506188848",
+      "captureId": "CAP-e646b631-55cb-4467-bc1a-ed8bb9f769ed",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-e646b631-55cb-4467-bc1a-ed8bb9f769ed\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#game\",\"viewportAreaFraction\":0.9,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":1280,\"height\":720},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":98.6875,\"height\":37,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "b8e97e35-7882-4e14-a898-8e4d3c526911",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-LW1CGL/index.html",
+      "completedAt": "2026-09-30T06:44:16.057Z",
+      "resultDigest": "5f808871da03f798d86407670647091612ce1274585ef01cf452bfdc590e400e",
+      "captureId": "CAP-e646b631-55cb-4467-bc1a-ed8bb9f769ed"
+    },
+    {
+      "id": "309758ae-86f8-46ef-95ff-ebbdc0293140",
+      "kind": "pointer",
+      "description": "Move pointer to 193,520",
+      "completedAt": "2026-09-30T06:44:16.314Z",
+      "resultDigest": "b51be7792fab7fc4dd26f1432f55e9e52783adcc20628097885c978def010e7f",
+      "measurement": {
+        "json": "{\"from\":{\"x\":193,\"y\":520},\"to\":{\"x\":193,\"y\":520},\"path\":[{\"x\":16.083333333333332,\"y\":43.333333333333336},{\"x\":32.166666666666664,\"y\":86.66666666666667},{\"x\":48.25,\"y\":130},{\"x\":64.33333333333333,\"y\":173.33333333333334},{\"x\":80.41666666666667,\"y\":216.66666666666666},{\"x\":96.5,\"y\":260},{\"x\":112.58333333333333,\"y\":303.3333333333333},{\"x\":128.66666666666666,\"y\":346.6666666666667},{\"x\":144.75,\"y\":390},{\"x\":160.83333333333334,\"y\":433.3333333333333},{\"x\":176.91666666666666,\"y\":476.6666666666667},{\"x\":193,\"y\":520}],\"durationMs\":100}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "e32dd8ac-eb46-4231-b29b-9c17da9186bf",
+      "kind": "pointer",
+      "description": "Begin pointer drag 193,520 to 97,563",
+      "completedAt": "2026-09-30T06:44:16.333Z"
+    },
+    {
+      "id": "fb09c1df-0d38-4249-b8fc-7b9465b8bf63",
+      "kind": "pointer",
+      "description": "Move pointer to 97,563",
+      "completedAt": "2026-09-30T06:44:16.691Z",
+      "resultDigest": "d089b38cc0179953ac482bdf12ac486534ef49368ac26fe304d500f3a7a34079",
+      "measurement": {
+        "json": "{\"from\":{\"x\":97,\"y\":563},\"to\":{\"x\":97,\"y\":563},\"path\":[{\"x\":185,\"y\":523.5833333333334},{\"x\":177,\"y\":527.1666666666666},{\"x\":169,\"y\":530.75},{\"x\":161,\"y\":534.3333333333334},{\"x\":153,\"y\":537.9166666666666},{\"x\":145,\"y\":541.5},{\"x\":137,\"y\":545.0833333333334},{\"x\":129,\"y\":548.6666666666666},{\"x\":121,\"y\":552.25},{\"x\":113,\"y\":555.8333333333334},{\"x\":105,\"y\":559.4166666666666},{\"x\":97,\"y\":563}],\"durationMs\":100}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "22064f92-8f66-4fa6-b455-d5b55446cba6",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:16.815Z",
+      "resultDigest": "01e957bd87c2789c33b5d55b3b453e6507227da8a5eabfdf57adbe9bc354becf",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-LW1CGL/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "03ee070d-2bea-4a43-bbbc-252da871a92e",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:16.819Z",
+      "resultDigest": "4876d0663eea03b38023a1a21bc4f6a48e5405e27a044d8945c603e52b611842",
+      "captureId": "CAP-a691dd67-bca5-4a51-929d-c1a95034d42d",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-a691dd67-bca5-4a51-929d-c1a95034d42d\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#game\",\"viewportAreaFraction\":0.9,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":1280,\"height\":720},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":98.6875,\"height\":37,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "46b60d92-23a7-4741-a7cd-309c3bff6d3a",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-LW1CGL/index.html",
+      "completedAt": "2026-09-30T06:44:16.936Z",
+      "resultDigest": "0108cce5ab9ff2690e7471909645aa07942c405ec57eecc1854814bdda59b190",
+      "captureId": "CAP-a691dd67-bca5-4a51-929d-c1a95034d42d"
+    },
+    {
+      "id": "b829ba46-693e-4398-b73e-a382d2ac4d4d",
+      "kind": "pointer",
+      "description": "Finish pointer drag at 97,563",
+      "completedAt": "2026-09-30T06:44:17.133Z"
+    },
+    {
+      "id": "e3a0ffcb-f02e-42fb-971c-1e5882e33885",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:17.284Z",
+      "resultDigest": "01e957bd87c2789c33b5d55b3b453e6507227da8a5eabfdf57adbe9bc354becf",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-LW1CGL/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "c9b722a5-809d-4411-bdec-924026862bbd",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:17.285Z",
+      "resultDigest": "80170614c5010082aa06c3f004d09ebe9cf73500442f0e624f0b17ddc9bca415",
+      "captureId": "CAP-de715fc8-20c1-48cb-8bcf-3f2a110d0437",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-de715fc8-20c1-48cb-8bcf-3f2a110d0437\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#game\",\"viewportAreaFraction\":0.9,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":1280,\"height\":720},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":98.6875,\"height\":37,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "38110118-6746-40e8-b127-82a83316eb00",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-LW1CGL/index.html",
+      "completedAt": "2026-09-30T06:44:17.373Z",
+      "resultDigest": "861ef4c71254cfca5ba0280775fc99b03da9ce74d805cf1e6219e14aa9eefb3e",
+      "captureId": "CAP-de715fc8-20c1-48cb-8bcf-3f2a110d0437"
+    },
+    {
+      "id": "11f2231b-eed9-4b70-bea4-aabb6b051e91",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:17.484Z",
+      "resultDigest": "01e957bd87c2789c33b5d55b3b453e6507227da8a5eabfdf57adbe9bc354becf",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-LW1CGL/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "1c4cee4e-feda-4777-81c7-785b6badbd80",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:17.486Z",
+      "resultDigest": "f55532aa72c89934fcbacee5577924ede2ae80b0d6968a59b3b3ac73ab8494cc",
+      "captureId": "CAP-7f37abf4-2743-488e-899a-a838c7d44116",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-7f37abf4-2743-488e-899a-a838c7d44116\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#game\",\"viewportAreaFraction\":0.9,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":1280,\"height\":720},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":98.6875,\"height\":37,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "c25edacd-8b60-4ab3-ac1e-b88fc8de4ec3",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-LW1CGL/index.html",
+      "completedAt": "2026-09-30T06:44:17.595Z",
+      "resultDigest": "6f0d18c66f4c6acea0b1a9f517b30a3fbd72d50c2fd9ff39b215904a94df305b",
+      "captureId": "CAP-7f37abf4-2743-488e-899a-a838c7d44116"
+    }
+  ],
+  "provenance": "runner-observed"
+}

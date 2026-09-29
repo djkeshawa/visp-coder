@@ -1,0 +1,10 @@
+{
+  "variant": "control",
+  "expectedDefects": [],
+  "expectedAdvisory": [],
+  "counterevidence": {
+    "level-1": "A multi-story wood, metal and stone tower with grain, rivets, cracks and a banner.",
+    "level-3": "A tall mixed-material tower with many bodies, wood grain, rivets, cracks, several banners and a named level chip."
+  },
+  "evaluationScope": "Finish and content of the two initial frames only. Any finish finding here counts against the budget of one in three; a required finding is a false rejection."
+}

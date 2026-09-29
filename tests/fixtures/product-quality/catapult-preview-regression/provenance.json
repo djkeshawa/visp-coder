@@ -1,0 +1,9 @@
+{
+  "source": "Siege catapult benchmark run, VISP arm, 2026-09-29",
+  "files": {
+    "index.html": "07cb62bbe43703134dab4619b78359f8113db51324fbfe58d0973812304c663a",
+    "game.js": "1fd79181aa5c3dc24f479a83305aebaab669ec8aa2fdded696d80b6e412b8e83",
+    "styles.css": "256f24507b87f676e93b45aa3a47646a6d8c1ba1a94bfe84dd214914656702b2"
+  },
+  "scope": "Product source only; no conversation, credentials, or VISP history copied"
+}

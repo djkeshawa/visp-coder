@@ -1,0 +1,18 @@
+{
+  "variant": "defective",
+  "expectedDefects": [
+    "preview-direction-mismatch"
+  ],
+  "caughtIf": [
+    [
+      "\\b(?:preview|dotted|dashed|aim(?:ing)?\\s+(?:line|guide)|trajectory|guide|arc)\\b",
+      "\\b(?:origin|starts?|begins?|offset|mismatch(?:es|ed)?|contradict\\w*|(?:does|do)\\s+not\\s+match|differs?|disagree\\w*|gap|away\\s+from|diverg\\w*)\\b",
+      "\\b(?:launch\\w*|release\\w*|flights?|flies|held|hold|pull\\w*|fired)\\b"
+    ]
+  ],
+  "counterevidence": {
+    "held": "The dashed preview leaves the sling and falls steeply to the lower right, although the pull sends the bird up and right.",
+    "released": "The released bird flies up and to the right in an arc that the drawn preview does not follow."
+  },
+  "evaluationScope": "Preview versus launch only, from one recorded pull. This is a natural pair of two independently written games, not a patched pair; do not score differences in art, layout or level content."
+}

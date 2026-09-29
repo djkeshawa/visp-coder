@@ -337,23 +337,21 @@ describe("quality-first comparison preparation", () => {
   });
 });
 
-it("pins isolated reviewer calibration inputs with three repetitions and no live budget", async () => {
-  const { root, spec, output } = await setup();
-  await prepareComparison(spec, output);
+async function calibrationCases(root: string, scenarios: string[]) {
   const cases = [];
-  for (const scenario of ["flockshot", "booking", "checkout"]) {
-    const promptFile = join(root, scenario + "-prompt.md");
+  for (const scenario of scenarios) {
+    const promptFile = join(root, `${scenario}-prompt.md`);
     await writeFile(
       promptFile,
-      "Review the visible behavior against the supplied goal " + scenario,
+      `Review the visible behavior against the supplied goal ${scenario}`,
     );
     for (const variant of ["defective", "control"]) {
-      const asset = join(root, scenario + "-" + variant + ".png");
-      const oracleFile = join(root, scenario + "-" + variant + "-oracle.json");
-      await writeFile(asset, "fixture pixels " + scenario + variant);
-      await writeFile(oracleFile, "Evaluator-only expectations " + scenario + variant);
+      const asset = join(root, `${scenario}-${variant}.png`);
+      const oracleFile = join(root, `${scenario}-${variant}-oracle.json`);
+      await writeFile(asset, `fixture pixels ${scenario}${variant}`);
+      await writeFile(oracleFile, `Evaluator-only expectations ${scenario}${variant}`);
       cases.push({
-        id: scenario + "-" + variant,
+        id: `${scenario}-${variant}`,
         scenario,
         variant,
         promptFile,
@@ -362,6 +360,13 @@ it("pins isolated reviewer calibration inputs with three repetitions and no live
       });
     }
   }
+  return cases;
+}
+
+it("pins isolated reviewer calibration inputs with three repetitions and no live budget", async () => {
+  const { root, spec, output } = await setup();
+  await prepareComparison(spec, output);
+  const cases = await calibrationCases(root, ["flockshot", "booking", "checkout"]);
   const reviewer = balancedCritic("codex");
   const result = await prepareReviewCalibration(output, { reviewer, cases });
   expect(result).toMatchObject({
@@ -380,4 +385,52 @@ it("pins isolated reviewer calibration inputs with three repetitions and no live
       ),
     }),
   ).rejects.toThrow("Evaluator");
+});
+
+it("accepts up to sixteen calibration cases across seven scenarios", async () => {
+  const { root, spec, output } = await setup();
+  await prepareComparison(spec, output);
+  const cases = await calibrationCases(root, [
+    "fowl-play",
+    "flockshot",
+    "booking",
+    "checkout",
+    "catapult-preview",
+    "slingshot-preview",
+    "catapult-finish",
+  ]);
+  const result = await prepareReviewCalibration(output, {
+    reviewer: balancedCritic("codex"),
+    cases,
+  });
+  expect(result.cases).toHaveLength(14);
+  expect(result.assignments).toHaveLength(84);
+});
+
+it("rejects calibration sets with fewer than three scenarios or more than sixteen cases", async () => {
+  const { root, spec, output } = await setup();
+  await prepareComparison(spec, output);
+  const reviewer = balancedCritic("codex");
+  const two = await calibrationCases(root, ["booking", "checkout"]);
+  await expect(prepareReviewCalibration(output, { reviewer, cases: two })).rejects.toThrow();
+  const nine = await calibrationCases(
+    root,
+    Array.from({ length: 9 }, (_, index) => `scene${index}`),
+  );
+  await expect(prepareReviewCalibration(output, { reviewer, cases: nine })).rejects.toThrow();
+  const unpaired = (
+    await calibrationCases(root, ["booking", "checkout", "flockshot", "fowl-play"])
+  ).filter((entry) => entry.id !== "flockshot-control");
+  await expect(prepareReviewCalibration(output, { reviewer, cases: unpaired })).rejects.toThrow(
+    "one defective and one control",
+  );
+  const [first, ...others] = await calibrationCases(root, ["booking", "checkout", "flockshot"]);
+  const doubled = [
+    ...others,
+    first,
+    { ...(first as NonNullable<typeof first>), id: "booking-extra" },
+  ];
+  await expect(prepareReviewCalibration(output, { reviewer, cases: doubled })).rejects.toThrow(
+    "one defective and one control",
+  );
 });
