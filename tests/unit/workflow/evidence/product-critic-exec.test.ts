@@ -1,5 +1,12 @@
-import { expect, it } from "vitest";
-import { codexExecCriticHost } from "../../../../src/workflow/product/critic-exec.js";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import {
+  codexExecCriticHost,
+  runCodexStructured,
+} from "../../../../src/workflow/product/critic-exec.js";
 
 const config = {
   harness: "codex" as const,
@@ -125,4 +132,152 @@ writeFileSync(args[args.indexOf("--output-last-message") + 1], JSON.stringify({ 
     expect.objectContaining({ task: "T001", webSearches: [], commands: ["rg confirm"] }),
     expect.objectContaining({ webSearches: ["RFC 9110 405 Allow header"] }),
   ]);
+});
+
+// Each test gets its own temporary directory, so leftovers are visible and other runs'
+// directories are never touched.
+const sandboxes: string[] = [];
+let previousTmpdir: string | undefined;
+
+beforeEach(async () => {
+  previousTmpdir = process.env.TMPDIR;
+  const sandbox = await mkdtemp(join(tmpdir(), "visp-critic-test-"));
+  sandboxes.push(sandbox);
+  process.env.TMPDIR = sandbox;
+});
+
+afterEach(async () => {
+  if (previousTmpdir === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = previousTmpdir;
+  await Promise.all(sandboxes.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+});
+
+const emptyPacket = { current: { images: [] }, responseSchema: {} } as unknown as Parameters<
+  ReturnType<typeof codexExecCriticHost>["review"]
+>[0];
+
+async function fakeCodex(body: string): Promise<{ fake: string; work: string }> {
+  const work = await mkdtemp(join(tmpdir(), "fake-codex-"));
+  const fake = join(work, "fake-codex.mjs");
+  await writeFile(
+    fake,
+    `#!${process.execPath}
+import { writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("codex-cli test"); process.exit(0); }
+${body}`,
+  );
+  await chmod(fake, 0o755);
+  return { fake, work };
+}
+
+async function untilExists(path: string) {
+  for (let attempt = 0; attempt < 200 && !existsSync(path); attempt += 1)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(existsSync(path)).toBe(true);
+}
+
+async function heartbeatStops(path: string) {
+  let last = await readFile(path, "utf8");
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const now = await readFile(path, "utf8");
+    if (now === last) return true;
+    last = now;
+  }
+  return false;
+}
+
+it("ends Codex's descendants and removes its sign-in copy when the review is aborted", async () => {
+  const { fake, work } = await fakeCodex(`
+import { spawn } from "node:child_process";
+const dir = process.env.VISP_FAKE_DIR;
+writeFileSync(dir + "/home", process.env.CODEX_HOME);
+// A grandchild that keeps writing; only a group kill stops it.
+spawn(process.execPath, ["-e", "const {writeFileSync}=require('node:fs');let n=0;setInterval(()=>writeFileSync(process.argv[1],String(n++)),50)", dir + "/heartbeat"], { stdio: "ignore" });
+setInterval(() => undefined, 1000);
+`);
+  process.env.VISP_FAKE_DIR = work;
+  try {
+    const host = codexExecCriticHost({
+      root: process.cwd(),
+      executable: fake,
+      lookup: async () => undefined,
+    });
+    const controller = new AbortController();
+    const review = host.review(emptyPacket, { ...config, signal: controller.signal });
+    const settled = review.then(
+      () => "resolved",
+      () => "rejected",
+    );
+    await untilExists(join(work, "heartbeat"));
+    const home = await readFile(join(work, "home"), "utf8");
+    expect(existsSync(home)).toBe(true);
+    controller.abort();
+    expect(await settled).toBe("rejected");
+    expect(await heartbeatStops(join(work, "heartbeat"))).toBe(true);
+    expect(existsSync(home)).toBe(false);
+    expect(existsSync(join(home, ".."))).toBe(false);
+  } finally {
+    delete process.env.VISP_FAKE_DIR;
+  }
+}, 30_000);
+
+// The tester's directory lives for the whole session, so the sign-in copy must go as soon
+// as Codex has ended, not when the caller removes its directory.
+it("removes the sign-in copy but not the caller's directory when Codex exits non-zero", async () => {
+  const { fake, work } = await fakeCodex(`
+writeFileSync(process.env.VISP_FAKE_DIR + "/home", process.env.CODEX_HOME);
+console.error("boom");
+process.exit(3);
+`);
+  const directory = await mkdtemp(join(tmpdir(), "visp-caller-"));
+  process.env.VISP_FAKE_DIR = work;
+  try {
+    await expect(
+      runCodexStructured({
+        executable: fake,
+        root: process.cwd(),
+        directory,
+        model: "gpt-5.6-sol",
+        schema: {},
+        prompt: "hello",
+      }),
+    ).rejects.toThrow(/exited 3.*boom/);
+    const home = await readFile(join(work, "home"), "utf8");
+    expect(home).toBe(join(directory, "codex-home"));
+    expect(existsSync(home)).toBe(false);
+    expect(existsSync(directory)).toBe(true);
+  } finally {
+    delete process.env.VISP_FAKE_DIR;
+  }
+});
+
+it("removes abandoned reviewer directories at the start of a review and keeps fresh ones", async () => {
+  const old = new Date(Date.now() - 2 * 60 * 60_000);
+  const stale = ["visp-critic-aB3dE9", "visp-review-Zy81xQ"];
+  for (const name of stale) {
+    await mkdir(join(tmpdir(), name, "codex-home"), { recursive: true });
+    await writeFile(join(tmpdir(), name, "codex-home", "auth.json"), "{}");
+    await utimes(join(tmpdir(), name), old, old);
+  }
+  await mkdir(join(tmpdir(), "visp-critic-fReSh1"));
+  // Named directories that only share a prefix are not review temp dirs.
+  const named = ["visp-review-calibration-inputs", "visp-critic-home-x"];
+  for (const name of named) {
+    await mkdir(join(tmpdir(), name));
+    await utimes(join(tmpdir(), name), old, old);
+  }
+  const { fake } = await fakeCodex(
+    'writeFileSync(args[args.indexOf("--output-last-message") + 1], "{}");',
+  );
+  const host = codexExecCriticHost({
+    root: process.cwd(),
+    executable: fake,
+    lookup: async () => undefined,
+  });
+  await host.review(emptyPacket, config);
+  for (const name of stale) expect(existsSync(join(tmpdir(), name))).toBe(false);
+  expect(existsSync(join(tmpdir(), "visp-critic-fReSh1"))).toBe(true);
+  for (const name of named) expect(existsSync(join(tmpdir(), name))).toBe(true);
 });
