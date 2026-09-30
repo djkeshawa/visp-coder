@@ -628,7 +628,8 @@ export function renderCiWorkflow(version: string): string {
 on:
   pull_request:
 
-permissions: contents: read
+permissions:
+  contents: read
 
 jobs:
   scope-and-evidence:
