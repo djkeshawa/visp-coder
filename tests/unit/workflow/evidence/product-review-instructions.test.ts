@@ -94,6 +94,7 @@ it.each(["current", "observation-preview"] as const)(
       "consecutive images of the same action can show a contradiction",
     );
     expect(packet.instructions).toContain("preview's origin and direction");
+    expect(packet.instructions).toContain("Finish findings are always required: false");
     expect(packet.instructions.includes(OBSERVATION_REVIEW_INSTRUCTIONS)).toBe(
       reviewMode === "observation-preview",
     );
@@ -126,6 +127,7 @@ it("does not give source-only or design consultations rendered-product instructi
     if (!packet.ok) throw new Error(packet.error.message);
     expect(packet.value.instructions).not.toContain("visual quality");
     expect(packet.value.instructions).not.toContain("preview's origin");
+    expect(packet.value.instructions).not.toContain("judge finish once");
     expect(packet.value.instructions).toContain("assessments:[]");
     expect(packet.value.instructions).toContain("resolutions:[]");
     expect(packet.value.current).not.toHaveProperty("instructions");
@@ -143,6 +145,7 @@ it("keeps UI-specific advice out of a nonvisual module review", async () => {
   expect(packet.instructions).toEqual(expect.any(String));
   expect(packet.instructions).not.toContain("visual quality");
   expect(packet.instructions).not.toContain("preview's origin");
+  expect(packet.instructions).not.toContain("judge finish once");
 });
 
 it("asks for a preview to be compared across consecutive images and required only on a promise", () => {
@@ -154,4 +157,19 @@ it("asks for a preview to be compared across consecutive images and required onl
   );
   expect(visual).toContain("list the missing observation instead of inferring a mismatch");
   expect(productReviewInstructions()).not.toContain("preview's origin");
+});
+
+it("asks for one optional finish finding that can never fail an outcome", () => {
+  const visual = productReviewInstructions({ visual: true });
+  expect(visual).toContain(
+    "also judge finish once, as at most one finding after any required ones",
+  );
+  expect(visual).toContain("When requestPromises mention a game, play or a rich look");
+  expect(visual).toContain("omit it when three findings are already required");
+  expect(visual).toContain("compare the units");
+  expect(visual).toContain("Name the image and two concrete visible improvements");
+  expect(visual).toContain(
+    "Finish findings are always required: false; never mark one required and never let one fail an outcome.",
+  );
+  expect(productReviewInstructions()).not.toContain("judge finish once");
 });
