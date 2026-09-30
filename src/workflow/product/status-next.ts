@@ -19,7 +19,8 @@ import {
   sliceExecutionCheckIds,
 } from "./corrections.js";
 import { type ReviewerCapacity, reviewerCapacity, reviewerHandoff } from "./critic-capacity.js";
-import { browserEnvironmentIdentity, environmentNext, needsBrowser } from "./environment.js";
+import { environmentNext, needsBrowser } from "./environment.js";
+import { browserCapabilityApplies } from "./environment-model.js";
 import {
   currentFailedJourneys,
   currentJourneyFailures,
@@ -134,7 +135,7 @@ async function unavailableEnvironmentNext(
   if (
     !needsBrowser(record.brief, slice) ||
     capability?.status !== "unavailable" ||
-    capability.environment !== (await browserEnvironmentIdentity(workspace.paths.root))
+    !(await browserCapabilityApplies(workspace.paths.root, capability))
   )
     return undefined;
   const rerun =
@@ -413,7 +414,9 @@ async function sliceEnvironmentNext(
     ),
     mayEdit: true,
     objective: environmentFailures.some((entry) =>
-      /app-unreachable:|check-authoring:|missing-command:|VISP: check timed out/.test(entry.output),
+      /app-unreachable:|browser-disconnected:|check-authoring:|missing-command:|VISP: check timed out/.test(
+        entry.output,
+      ),
     )
       ? environmentNext(
           record.brief.feature,
@@ -817,6 +820,7 @@ function environmentJourneyNext(
   const recovery = browserFailureRecovery(
     run?.failure?.message ?? "",
     run?.journey?.url ?? "the configured URL",
+    run?.failure?.kind,
   );
   return {
     feature: record.brief.feature,

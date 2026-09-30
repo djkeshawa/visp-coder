@@ -401,7 +401,7 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
     const settings = await state.files.readTextIfExists(CLAUDE_SETTINGS_FILE);
     if (!settings.ok || !hasClaudeSessionHooks(settings.value, hookPath))
       return { inactive: "prompt, Stop or Bash hook (settings registration is missing)" };
-    const command = hookCommand(hookPath);
+    const command = hookCommand(hookPath, true);
     const check = spawnSync(
       process.platform === "win32" ? "cmd.exe" : "/bin/sh",
       process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command],

@@ -216,7 +216,7 @@ function browserExecution(
       durationMs,
       output: [
         browserCheckSummary(result),
-        browserFailureRecovery(result.failure?.message ?? "", url),
+        browserFailureRecovery(result.failure?.message ?? "", url, result.failure?.kind),
       ]
         .filter(Boolean)
         .join("\n")

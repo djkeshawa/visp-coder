@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import type { VispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses, type ProductOutcomeStatus } from "./assessment.js";
 import { criticNext } from "./critic-guidance.js";
+import { isStopHookObserver } from "./environment-model.js";
 import { hasUntakenPrompts } from "./host-prompts.js";
 import { productInputWarnings } from "./input-warnings.js";
 import type { ProductBrief, ProductState } from "./model.js";
@@ -42,6 +44,8 @@ export interface ProductNext {
   /** `handoff`: the review budget is spent; the open findings go to a human reviewer. */
   readonly completion?: "unresolved-environment" | "unresolved-product" | "handoff";
   readonly recovery?: string;
+  /** Only for the Stop hook (`VISP_OBSERVER=stop-hook`): changes when the feature's state or source does. */
+  readonly progress?: string;
   readonly criticAdvice?: {
     status: "suggested" | "unavailable" | "feedback";
     command?: string;
@@ -72,9 +76,27 @@ export async function runProductNext(
   if (!loaded.ok) return unavailableNext(loaded.error, workspace, options);
   const untaken = await newSessionRequestNext(workspace, loaded.value, options);
   if (!untaken.ok || untaken.value) return untaken.ok ? ok(untaken.value as ProductNext) : untaken;
-  const next = await nextFromRecord(workspace, loaded.value, options, () =>
-    currentProductIdentity(workspace, loaded.value.brief),
-  );
+  // The Stop hook needs the subject twice: for the plan and for its progress token.
+  const observer = isStopHookObserver();
+  let snapshot: Promise<Result<ProductIdentity>> | undefined;
+  const getIdentity = () => {
+    if (!observer) return currentProductIdentity(workspace, loaded.value.brief);
+    snapshot ??= currentProductIdentity(workspace, loaded.value.brief);
+    return snapshot;
+  };
+  const observed = async (result: Result<ProductNext>): Promise<Result<ProductNext>> => {
+    if (!observer || !result.ok) return result;
+    const identity = await getIdentity();
+    return identity.ok
+      ? ok({
+          ...result.value,
+          progress: createHash("sha256")
+            .update(`${loaded.value.stateText}\0${identity.value.subject}`)
+            .digest("hex"),
+        })
+      : result;
+  };
+  const next = await nextFromRecord(workspace, loaded.value, options, getIdentity);
   if (!next.ok) return next;
   const warnings = await productInputWarnings(workspace, loaded.value.brief);
   const result = await criticNext(workspace, {
@@ -82,14 +104,16 @@ export async function runProductNext(
     evidence: [...next.value.evidence, ...warnings, ...staleTaskNote(workspace, loaded.value)],
   });
   if (!result.ok || (!loaded.value.state.criticManual && !loaded.value.state.userFeedback?.length))
-    return result;
+    return observed(result);
   const subject = await productSourceDigest(workspace, loaded.value.brief);
   if (!subject.ok) return subject;
   const slice = loaded.value.brief.slices.find((entry) => entry.id === next.value.task);
-  return ok({
-    ...result.value,
-    userFeedback: userFeedbackPlan(workspace, loaded.value, slice, subject.value),
-  });
+  return observed(
+    ok({
+      ...result.value,
+      userFeedback: userFeedbackPlan(workspace, loaded.value, slice, subject.value),
+    }),
+  );
 }
 
 export interface ProductStatus {

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GUARD_PROTOCOL_VERSION } from "../../../src/core/constants.js";
@@ -121,9 +121,11 @@ describe("generated hooks", () => {
     await rm(join(project.root, ".visp/session/user-prompts.jsonl"));
   });
 
-  // Weak workers stopped with slices open; the Stop hook sends them back a few times.
-  it("sends a stopping worker back to an unfinished feature at most three times", async () => {
-    const stop = (session = "first") =>
+  // Weak workers stopped with slices open; the Stop hook nudges them back to the next
+  // step, at most twice per identical step and only again once something changed.
+  describe("Stop hook", () => {
+    const blocks = join(".visp", "session", "stop-blocks.json");
+    const stop = (session = "first"): string =>
       execFileSync(process.execPath, [join(project.root, ".visp/hooks/claude-pretooluse.mjs")], {
         cwd: project.root,
         input: JSON.stringify({
@@ -134,14 +136,75 @@ describe("generated hooks", () => {
         env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
         encoding: "utf8",
       });
-    const first = JSON.parse(stop());
-    expect(first).toMatchObject({ decision: "block", reason: expect.stringContaining("visp") });
-    stop();
-    stop();
-    expect(stop()).toBe("");
-    expect(JSON.parse(stop("second"))).toMatchObject({ decision: "block" });
-    const { rm } = await import("node:fs/promises");
-    await rm(join(project.root, ".visp/session/stop-blocks.json"));
+
+    afterAll(async () => {
+      await rm(join(project.root, blocks), { recursive: true, force: true });
+    });
+
+    it("blocks the same step twice, names it, then stays silent", () => {
+      const first = JSON.parse(stop());
+      expect(first).toMatchObject({ decision: "block" });
+      expect(first.reason).toContain(
+        "VISP's next step for 001-scoped-work: Change the auth module. Run: visp done",
+      );
+      expect(first.reason).toContain(
+        "If your own `visp next` shows a different step, follow that one.",
+      );
+      expect(first.reason).not.toContain("Continue until");
+      expect(JSON.parse(stop())).toMatchObject({ decision: "block" });
+      expect(stop()).toBe("");
+    });
+
+    it("does not block the same step a third time even after the feature changed", () => {
+      expect(project.run("verify", "--task", "T001").exitCode).toBe(0);
+      expect(stop()).toBe("");
+    });
+
+    it("counts each session separately", () => {
+      expect(JSON.parse(stop("second"))).toMatchObject({ decision: "block" });
+      expect(JSON.parse(stop("second"))).toMatchObject({ decision: "block" });
+      expect(stop("second")).toBe("");
+    });
+
+    it("ignores counters written in the old flat format", async () => {
+      await writeFile(
+        join(project.root, blocks),
+        JSON.stringify({ "third:001-scoped-work:work": 3 }),
+      );
+      expect(JSON.parse(stop("third"))).toMatchObject({ decision: "block" });
+      await rm(join(project.root, blocks));
+    });
+
+    it("does not block when the counter cannot be written", async () => {
+      // A directory in the counter's place cannot be renamed over.
+      await rm(join(project.root, blocks), { recursive: true, force: true });
+      await mkdir(join(project.root, blocks, "keep"), { recursive: true });
+      expect(stop("fourth")).toBe("");
+      await rm(join(project.root, blocks), { recursive: true });
+    });
+
+    it("skips a feature whose state has not moved for an hour, and keys recency on the state file", async () => {
+      const { readFile } = await import("node:fs/promises");
+      const statusFile = join(project.root, ".visp/status.json");
+      const stateFile = join(project.root, ".visp/features/001-scoped-work/product-state.json");
+      const original = await readFile(statusFile, "utf8");
+      const stateTimes = await stat(stateFile);
+      const old = new Date(Date.now() - 61 * 60_000);
+      try {
+        await writeFile(
+          statusFile,
+          JSON.stringify({ ...JSON.parse(original), updatedAt: old.toISOString() }),
+        );
+        // A fresh state file keeps an hour-old status.json current.
+        expect(JSON.parse(stop("fifth"))).toMatchObject({ decision: "block" });
+        await utimes(stateFile, old, old);
+        expect(stop("sixth")).toBe("");
+      } finally {
+        await writeFile(statusFile, original);
+        await utimes(stateFile, stateTimes.atime, stateTimes.mtime);
+        await rm(join(project.root, blocks), { force: true });
+      }
+    });
   });
 
   // A worker hand-edited the brief, left it unreadable and abandoned the workflow.
@@ -161,6 +224,16 @@ describe("generated hooks", () => {
       });
     expect(decision(JSON.parse(shell("rm -rf .visp acceptance")))).toBe("deny");
     expect(decision(JSON.parse(shell("git clean -fd")))).toBe("deny");
+    expect(decision(JSON.parse(shell("git clean -f")))).toBe("deny");
+    // A dry run deletes nothing: it is how a worker looks before it decides.
+    for (const dry of [
+      "git clean -n",
+      "git clean -nd",
+      "git clean -fdn",
+      "git clean -fd --dry-run",
+      "git clean --dry-run",
+    ])
+      expect(shell(dry), dry).toBe("");
     expect(shell("python3 acceptance/x/test.py")).toBe("");
     expect(shell("git stash")).toBe("");
     expect(shell("node --test acceptance/ && rm -rf dist")).toBe("");

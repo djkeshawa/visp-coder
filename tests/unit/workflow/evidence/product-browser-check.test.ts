@@ -327,6 +327,25 @@ describe("runner-owned browser product checks", () => {
     });
   });
 
+  it("names a browser that closed mid-journey, with a rerun-once recovery", async () => {
+    const workspace = await fixture();
+    browser.open.mockRejectedValueOnce(new Error("browser disconnected"));
+    const result = await runProductVerify(await workspace.state());
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        executions: [
+          {
+            status: "environment-failed",
+            output: expect.stringContaining("browser-disconnected: The browser closed"),
+          },
+        ],
+        recovery: expect.stringContaining("Rerun the same journey once"),
+        next: { objective: expect.stringContaining("Rerun the same journey once") },
+      },
+    });
+  });
+
   it("keeps browser startup failures separate from behavior failures", async () => {
     const workspace = await fixture();
     browser.open.mockRejectedValueOnce(new BrowserUnavailableError("No installed browser"));
