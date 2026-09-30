@@ -413,7 +413,7 @@ async function sliceEnvironmentNext(
     ),
     mayEdit: true,
     objective: environmentFailures.some((entry) =>
-      /app-unreachable:|check-authoring:|VISP: check timed out/.test(entry.output),
+      /app-unreachable:|check-authoring:|missing-command:|VISP: check timed out/.test(entry.output),
     )
       ? environmentNext(
           record.brief.feature,
