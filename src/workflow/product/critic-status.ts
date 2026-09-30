@@ -182,7 +182,10 @@ function criticSummary(
     config: { ...state.config, maxCalls: capacity.limit },
     callsUsed: capacity.callsUsed,
     lifecycle: criticLifecycle(last),
-    recovery: criticRecovery(state, phase, capacity.reservableCalls),
+    recovery: launchedRecovery(
+      criticRecovery(state, phase, capacity.reservableCalls),
+      reviewerRules(workspace),
+    ),
     callsRemaining: capacity.callsRemaining,
     reviewCapacity: reviewCapacity(capacity),
     assessmentCurrent: !!current && current.status === "reviewed" && !current.sourceOnly,
@@ -216,6 +219,14 @@ function criticSummary(
     limitation:
       "Critic judgments are advisory evidence, not automatic acceptance or proof of the best candidate.",
   };
+}
+
+/** A VISP-launched reviewer retries itself; the host `--capabilities` command is not for the worker. */
+function launchedRecovery<T extends { command?: string }>(
+  recovery: T | undefined,
+  launched: boolean,
+) {
+  return recovery && launched ? { ...recovery, command: undefined } : recovery;
 }
 
 function criticAdvice(last: CriticState["attempts"][number] | undefined, current: boolean) {
