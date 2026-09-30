@@ -414,7 +414,9 @@ async function sliceEnvironmentNext(
     ),
     mayEdit: true,
     objective: environmentFailures.some((entry) =>
-      /app-unreachable:|check-authoring:|missing-command:|VISP: check timed out/.test(entry.output),
+      /app-unreachable:|browser-disconnected:|check-authoring:|missing-command:|VISP: check timed out/.test(
+        entry.output,
+      ),
     )
       ? environmentNext(
           record.brief.feature,
@@ -818,6 +820,7 @@ function environmentJourneyNext(
   const recovery = browserFailureRecovery(
     run?.failure?.message ?? "",
     run?.journey?.url ?? "the configured URL",
+    run?.failure?.kind,
   );
   return {
     feature: record.brief.feature,

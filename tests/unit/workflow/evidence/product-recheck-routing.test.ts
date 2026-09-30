@@ -476,7 +476,9 @@ it.each([true, false])(
     expect(next.ok && next.value.command).toContain(
       intactReplay ? "--replay=RUN-environment" : "--from -",
     );
-    expect(next.ok && next.value.objective).toContain("Recover");
+    // A browser that closed mid-capture gets its own recovery: rerun once, then treat as a crash.
+    expect(next.ok && next.value.objective).toContain("browser-disconnected:");
+    expect(next.ok && next.value.objective).toContain("Rerun the same journey once");
     expect(next.ok && next.value.evidence.join("\n")).toContain("Browser disconnected");
     if (!intactReplay)
       expect(next.ok && next.value.evidence.join("\n")).toContain("No intact saved replay");
