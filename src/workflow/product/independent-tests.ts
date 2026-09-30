@@ -254,6 +254,7 @@ export function codexTester(
       throw new Error("The tester cannot reach its model from this process");
     await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
     const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
+    const started = Date.now();
     try {
       const root = request.explore
         ? await repositoryCopy(
@@ -277,6 +278,13 @@ export function codexTester(
         signal: AbortSignal.timeout(TESTER_TIMEOUT_MS),
         ...(request.onActivity ? { onActivity: request.onActivity } : {}),
       });
+    } catch (cause) {
+      // An abort here is the tester's own time limit; "The operation was aborted" hid that.
+      if (Date.now() - started >= TESTER_TIMEOUT_MS)
+        throw new Error(
+          `The tester did not answer within ${TESTER_TIMEOUT_MS / 60_000} minutes (${message(cause)})`,
+        );
+      throw cause;
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
