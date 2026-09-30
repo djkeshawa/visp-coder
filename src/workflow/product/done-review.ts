@@ -15,7 +15,7 @@ import { hasPendingCriticReview } from "./critic-policy.js";
 import { type ProductVerification, runProductAccept, runProductDone } from "./evidence.js";
 import { outstandingFeedback } from "./findings.js";
 import { type AcceptanceProgress, acceptanceProgress } from "./independent-tests.js";
-import { closedSlice } from "./model.js";
+import { closedSlice, latestExecutionsByOwner } from "./model.js";
 import type { PinnedDispute } from "./pinned-dispute-model.js";
 import {
   type DisputeInput,
@@ -131,10 +131,34 @@ export async function runProductDoneReviewed(
     ...(done.value.closed || !done.value.task ? {} : { task: done.value.task }),
   });
   if (options.signal?.aborted) return cancelledExecution();
+  return doneAfterReview(workspace, options, done.value, critic, pinned.value);
+}
+
+/** Close against the saved review without launching another review or rerunning passed checks. */
+async function doneAfterReview(
+  workspace: WorkspaceState,
+  options: ProductSelection,
+  done: ProductDoneReviewed,
+  critic: DoneCriticSummary,
+  pinned: PinnedView,
+): Promise<Result<ProductDoneReviewed>> {
+  const { feature } = done;
+  const refreshed =
+    critic.reviewed && !critic.running
+      ? await runProductDone(workspace, { ...options, feature, task: done.task })
+      : ok(done);
+  if (!refreshed.ok) return refreshed;
   const next = critic.running ? waitingNext(feature) : await runProductNext(workspace, { feature });
   return ok({
-    ...done.value,
-    ...(await pinned.value.refreshed()),
+    ...done,
+    ...refreshed.value,
+    // Preserve executed receipts, replacing any superseded by a post-review rerun (e.g. a waiver).
+    executions: latestExecutionsByOwner([...done.executions, ...refreshed.value.executions]),
+    behaviorChanges: refreshed.value.executions.length
+      ? refreshed.value.behaviorChanges
+      : done.behaviorChanges,
+    committedChanges: done.committedChanges,
+    ...(await pinned.refreshed()),
     critic,
     ...(next.ok ? { next: next.value, nextCommand: next.value.command } : {}),
   });
