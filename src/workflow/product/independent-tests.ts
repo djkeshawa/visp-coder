@@ -51,7 +51,11 @@ import { rulesForRequest, withRules } from "./project-rules.js";
 import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
 import { productSourceSnapshot } from "./subject.js";
-import { testerBrowserKitLines } from "./tester-browser-kit.js";
+import {
+  testerBrowserKitLines,
+  testerOwnContent,
+  withTesterBrowserKit,
+} from "./tester-browser-kit.js";
 import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./tester-snapshot.js";
 
 /**
@@ -696,7 +700,7 @@ async function testsFromSnapshot(
       onActivity: (activity) =>
         recordTesterActivity(workspace, feature, setup.model, existingCodebase, activity),
     };
-    return await testOutcome(workspace, feature, tester, request, snapshot);
+    return await testOutcome(workspace, feature, tester, request, snapshot, brief.originalRequest);
   } catch (cause) {
     return { status: "failed", reason: message(cause) };
   } finally {
@@ -748,8 +752,9 @@ async function testOutcome(
   tester: IndependentTester,
   request: TesterRequest,
   snapshot: TesterSnapshot,
+  originalRequest: string,
 ): Promise<TestFields> {
-  const first = await attemptTests(workspace, feature, tester, request, snapshot);
+  const first = await attemptTests(workspace, feature, tester, request, snapshot, originalRequest);
   if (first.status !== "rejected" || !first.content) return first;
   if (
     first.baseline &&
@@ -767,6 +772,7 @@ async function testOutcome(
       prompt: repairPrompt(request.prompt, first.content, first.reason ?? ""),
     },
     snapshot,
+    originalRequest,
   );
 }
 
@@ -776,6 +782,7 @@ async function attemptTests(
   tester: IndependentTester,
   request: TesterRequest,
   snapshot: TesterSnapshot,
+  originalRequest: string,
 ): Promise<TestFields> {
   let response: TesterResponse;
   try {
@@ -791,8 +798,12 @@ async function attemptTests(
   if (!response.file)
     return { status: "declined", reason: declineReason(response.notes), ...described };
   // The rejected file stays in the record so a person can see what the tester wrote.
-  const content = response.file.content.slice(0, MAX_FILE_BYTES);
-  const invalid = invalidFile(response.file);
+  let content = response.file.content.slice(0, MAX_FILE_BYTES);
+  let invalid = invalidFile(response.file);
+  if (invalid) return { status: "rejected", reason: invalid, content, ...described };
+  const file = await withTesterBrowserKit(originalRequest, response.file);
+  content = file.content.slice(0, MAX_FILE_BYTES);
+  invalid = invalidFile(file);
   if (invalid) return { status: "rejected", reason: invalid, content, ...described };
   if (onlyStructuralChecks(response))
     return {
@@ -803,7 +814,7 @@ async function attemptTests(
   const kept = await keepFailingTests(
     workspace,
     feature,
-    response.file,
+    file,
     response.existingBehavior,
     response.tests.map((test) => test.name),
     snapshot,
@@ -842,8 +853,8 @@ function repairPrompt(prompt: string, content: string, reason: string): string {
     "Your previous file was rejected when VISP ran it against the launch-time repository copy:",
     reason,
     "",
-    "Previous file:",
-    content,
+    "Previous file (your own content; VISP supplies the browser kit):",
+    testerOwnContent(content),
     "",
     "Read the repository and the failure again, then return the whole corrected file. Keep only assertions the request or the repository supports. If the run timed out, cut search iteration counts and stop each search at the first interface error.",
     ...(reason.startsWith(NO_NAMED_FAILURE) || reason.startsWith(UNDECLARED_FAILURE)
@@ -1140,7 +1151,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
     "- The project is not implemented yet, so the file must fail now and pass once the request is met.",
     "- Before answering, check every case against the request and trace it through your own helpers (for example, how a missing body, None or null is actually sent). Remove any case you cannot justify from the quoted text.",
-    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines of your own code (a pasted browser kit does not count). Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
+    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines of your own code (the browser kit VISP inserts does not count). Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
     ...(existing
       ? [
           "- This request changes an existing codebase, and you are in a disposable copy of it where you may run the existing program and its tests. Before asserting anything about existing behavior (routes, status codes, body shapes, error formats, the requests your setup makes), run the program and observe it; base every such assertion on what you observed, not on assumptions.",

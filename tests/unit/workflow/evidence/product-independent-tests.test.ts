@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
+import { sha256 } from "../../../../src/core/hash.js";
 import { processIdentity } from "../../../../src/core/process-identity.js";
 import { ok } from "../../../../src/core/result.js";
 import { withStateLock } from "../../../../src/core/state-lock.js";
@@ -27,6 +28,7 @@ import {
 } from "../../../../src/workflow/product/independent-tests.js";
 import { runProductReport } from "../../../../src/workflow/product/index.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
+import { TESTER_BROWSER_KIT } from "../../../../src/workflow/product/tester-browser-kit.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { compactProductReply } from "../../../../src/workflow/product-compact-text.js";
 import { productWorkspace } from "../../support/product-workspace.js";
@@ -1497,7 +1499,7 @@ ${FAILS_FIRST}`;
 });
 
 // Evidence: hand-rolled `--dump-dom` tester files crashed or checked nothing. A request that
-// describes a browser UI gets the native-input kit in the prompt; other requests never do.
+// describes a browser UI gets the native-input kit API in the prompt; other requests never do.
 it.each([
   [
     "a browser game",
@@ -1506,7 +1508,7 @@ it.each([
   ],
   ["a plain module", "Return two from the public module", false],
 ])(
-  "puts the browser kit into the tester prompt only for a UI request (%s)",
+  "puts the browser kit API into the tester prompt only for a UI request (%s)",
   async (_name, request, kit) => {
     const created = await TestWorkspace.create(
       { "src/value.mjs": "export const value = 1;\n" },
@@ -1527,14 +1529,131 @@ it.each([
     expect(feature.ok, JSON.stringify(feature)).toBe(true);
     expect(prompts).toHaveLength(1);
     const prompt = prompts[0] as string;
-    expect(prompt.includes("export async function openPage")).toBe(kit);
+    expect(prompt).not.toContain(TESTER_BROWSER_KIT.trim());
+    expect(prompt.includes("openPage(url,")).toBe(kit);
     expect(prompt.includes("BrowserUnavailable")).toBe(kit);
+    expect(prompt.includes("Cover the request's screen flow through the visible controls")).toBe(
+      kit,
+    );
+    if (kit) {
+      expect(prompt).toContain(
+        "each stated effect over time (damage, burning, timers) at least once",
+      );
+      expect(prompt).toContain("assert the vertical direction as well as the horizontal one");
+    }
     // The kit sits after the rules and before the save-path line and the request.
     if (kit) {
-      expect(prompt.indexOf("export async function openPage")).toBeLessThan(
+      expect(prompt.indexOf("openPage(url,")).toBeLessThan(
         prompt.indexOf("The file will be saved as"),
       );
     }
     expect(prompt.endsWith(request)).toBe(true);
   },
 );
+
+const UI_REQUEST = "Build a browser UI that displays the public module value as two.";
+const USES_KIT = selfReporting(`
+  assert.equal(typeof openPage, "function");
+  const server = await serveDir(process.cwd());
+  try {
+    assert.equal((await fetch(server.url + "/src/value.mjs")).status, 200);
+    process.env.CHROME_BIN = "/visp-no-such-chrome";
+    await assert.rejects(openPage(server.url), BrowserUnavailable);
+  } finally { server.close(); }
+  const { value } = await import("../../src/value.mjs");
+  assert.equal(value, 2);`);
+
+async function createKitFeature(request: string, run: IndependentTester) {
+  const created = await TestWorkspace.create(
+    { "src/value.mjs": "export const value = 1;\n" },
+    { critic: true },
+  );
+  workspace = created;
+  const config = parse(await readFile(join(created.root, "visp.yml"), "utf8"));
+  config.critic = { ...config.critic, harness: "codex", launch: "codex-exec", mode: "auto" };
+  await created.write("visp.yml", stringify(config));
+  await created.installFoundation();
+  created.commit("install foundation");
+  const feature = await createProductFeatureWithTests(
+    await created.state(),
+    { goal: "Feature", sourceBrief: request },
+    inlineTests(run),
+  );
+  if (!feature.ok) throw new Error(feature.error.message);
+  const state = await created.state();
+  const record = await readTestsRecord(state, feature.value.brief.feature);
+  if (!record.ok || !record.value) throw new Error("Missing tests record");
+  return { created, state, feature: feature.value.brief.feature, record: record.value };
+}
+
+it.each([false, true])(
+  "runs and pins a UI suite with one browser kit (already present: %s)",
+  async (alreadyPresent) => {
+    const content = (alreadyPresent ? TESTER_BROWSER_KIT : "") + USES_KIT;
+    const result = await createKitFeature(UI_REQUEST, tester({ name: "value.mjs", content }));
+    expect(result.record.status, result.record.reason).toBe("pinned");
+    expect(result.record.baseline?.output).toContain("FAIL: value: Expected values");
+    const file = result.record.file as string;
+    const saved = await readFile(join(result.created.root, file), "utf8");
+    expect(saved).toContain(TESTER_BROWSER_KIT);
+    expect(saved.split("export async function openPage")).toHaveLength(2);
+    expect(saved.endsWith(USES_KIT)).toBe(true);
+    if (alreadyPresent) expect(saved).toBe(content);
+    const product = await readProductRecord(result.state, { feature: result.feature });
+    expect(product.ok && product.value.brief.acceptanceBaseline[0]?.files).toEqual([
+      { path: file, sha256: sha256(saved) },
+    ]);
+    await result.created.write("src/value.mjs", "export const value = 2;\n");
+    const later = await acceptanceProgress(await result.created.state(), result.feature, []);
+    expect(later).toMatchObject([{ passing: true }]);
+    expect(await readFile(join(result.created.root, file), "utf8")).toBe(saved);
+  },
+);
+
+it("leaves a non-UI tester file unchanged even when it mentions kit names", async () => {
+  const content = selfReporting(`
+  const label = "openPage serveDir BrowserUnavailable";
+  assert.equal(typeof label, "string");
+  const { value } = await import("../../src/value.mjs");
+  assert.ok(value);
+  assert.equal(value, 2);`);
+  const result = await createKitFeature(
+    "Return two from the public module",
+    tester({ name: "value.mjs", content }),
+  );
+  expect(result.record.status).toBe("pinned");
+  expect(await readFile(join(result.created.root, result.record.file as string), "utf8")).toBe(
+    content,
+  );
+});
+
+it("rejects a UI tester file when the combined kit and own content exceed 64 KB", async () => {
+  const content = `${USES_KIT}//${"x".repeat(64 * 1024 - Buffer.byteLength(USES_KIT) - 2)}`;
+  const result = await createKitFeature(UI_REQUEST, tester({ name: "value.mjs", content }));
+  expect(Buffer.byteLength(content)).toBe(64 * 1024);
+  expect(result.record).toMatchObject({ status: "rejected", reason: "The test file is too large" });
+  expect(result.record.baseline).toBeUndefined();
+});
+
+it("inserts the kit again for a repair without adding its source to repair feedback", async () => {
+  const prompts: string[] = [];
+  const result = await createKitFeature(UI_REQUEST, async (request) => {
+    prompts.push(request.prompt);
+    return {
+      file: {
+        name: "value.mjs",
+        content:
+          prompts.length === 1
+            ? USES_KIT.replace("assert.equal(value, 2)", "assert.equal(value, 1)")
+            : USES_KIT,
+      },
+      tests: [{ name: "value", quote: UI_REQUEST }],
+      notes: "",
+    };
+  });
+  expect(result.record.status, result.record.reason).toBe("pinned");
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain("pass before any implementation");
+  expect(prompts[1]).not.toContain(TESTER_BROWSER_KIT.trim());
+  expect(prompts[1]).toContain("assert.equal(value, 1)");
+});
