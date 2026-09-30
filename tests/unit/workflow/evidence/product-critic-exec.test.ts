@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   codexExecCriticHost,
   runCodexStructured,
@@ -280,4 +280,156 @@ it("removes abandoned reviewer directories at the start of a review and keeps fr
   for (const name of stale) expect(existsSync(join(tmpdir(), name))).toBe(false);
   expect(existsSync(join(tmpdir(), "visp-critic-fReSh1"))).toBe(true);
   for (const name of named) expect(existsSync(join(tmpdir(), name))).toBe(true);
+});
+
+// A background `visp critic --dispatch` has no abort handler; a SIGTERM must reach Codex and
+// then still end the process, unless another handler already owns the signal.
+describe("termination signals", () => {
+  // Each fake writes into its own directory: where its sign-in copy is, and waits for `finish`.
+  const slowCodex = `
+import { existsSync } from "node:fs";
+const dir = import.meta.dirname;
+writeFileSync(dir + "/home", process.env.CODEX_HOME);
+const out = args[args.indexOf("--output-last-message") + 1];
+setInterval(() => {
+  if (!existsSync(dir + "/finish")) return;
+  writeFileSync(out, "{}");
+  process.exit(0);
+}, 20);
+`;
+
+  interface Slow {
+    work: string;
+    settled: Promise<"resolved" | "rejected">;
+    home: () => Promise<string>;
+  }
+
+  async function startSlowReview(): Promise<Slow> {
+    const { fake, work } = await fakeCodex(slowCodex);
+    const host = codexExecCriticHost({
+      root: process.cwd(),
+      executable: fake,
+      lookup: async () => undefined,
+    });
+    const settled = host.review(emptyPacket, config).then(
+      () => "resolved" as const,
+      () => "rejected" as const,
+    );
+    await untilExists(join(work, "home"));
+    return { work, settled, home: () => readFile(join(work, "home"), "utf8") };
+  }
+
+  /** Runs `body` with process.kill stubbed for the process itself and no other SIGTERM handler. */
+  async function withSigtermHarness<T>(
+    handled: boolean,
+    body: (own: { kills: () => number; homesAtKill: string[][] }) => Promise<T>,
+    homes: () => string[],
+  ): Promise<T> {
+    const saved = process.listeners("SIGTERM");
+    process.removeAllListeners("SIGTERM");
+    if (handled) process.on("SIGTERM", () => undefined);
+    const real = process.kill.bind(process);
+    const homesAtKill: string[][] = [];
+    let kills = 0;
+    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid !== process.pid) return real(pid, signal);
+      kills += 1;
+      homesAtKill.push(homes().filter((home) => existsSync(home)));
+      return true;
+    });
+    try {
+      return await body({ kills: () => kills, homesAtKill });
+    } finally {
+      kill.mockRestore();
+      process.removeAllListeners("SIGTERM");
+      for (const listener of saved) process.on("SIGTERM", listener);
+    }
+  }
+
+  async function until(condition: () => boolean, ms = 4000) {
+    for (let waited = 0; waited < ms && !condition(); waited += 50)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  it("aborts Codex, cleans up, then delivers the signal again", async () => {
+    const known: string[] = [];
+    await withSigtermHarness(
+      false,
+      async (own) => {
+        const run = await startSlowReview();
+        known.push(await run.home());
+        process.emit("SIGTERM");
+        expect(await run.settled).toBe("rejected");
+        expect(existsSync(known[0] ?? "")).toBe(false);
+        await until(() => own.kills() > 0);
+        expect(own.kills()).toBe(1);
+        expect(own.homesAtKill).toEqual([[]]);
+        expect(process.listenerCount("SIGTERM")).toBe(0);
+      },
+      () => known,
+    );
+  }, 15_000);
+
+  it("leaves the signal to a handler that already owns it", async () => {
+    const known: string[] = [];
+    await withSigtermHarness(
+      true,
+      async (own) => {
+        const run = await startSlowReview();
+        known.push(await run.home());
+        process.emit("SIGTERM");
+        expect(await run.settled).toBe("rejected");
+        expect(existsSync(known[0] ?? "")).toBe(false);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        expect(own.kills()).toBe(0);
+        expect(process.listenerCount("SIGTERM")).toBe(1);
+      },
+      () => known,
+    );
+  }, 15_000);
+
+  // Another run's listener is ours, not someone else's handler: a signal that arrives after
+  // the first run ended must still be delivered again once the second has cleaned up.
+  it("delivers the signal again when an overlapping run finished before it arrived", async () => {
+    const known: string[] = [];
+    await withSigtermHarness(
+      false,
+      async (own) => {
+        const first = await startSlowReview();
+        const second = await startSlowReview();
+        known.push(await second.home());
+        await writeFile(join(first.work, "finish"), "");
+        expect(await first.settled).toBe("resolved");
+        process.emit("SIGTERM");
+        expect(await second.settled).toBe("rejected");
+        await until(() => own.kills() > 0);
+        expect(own.kills()).toBe(1);
+        expect(own.homesAtKill).toEqual([[]]);
+      },
+      () => known,
+    );
+  }, 15_000);
+
+  it("delivers the signal once, after every overlapping run has cleaned up", async () => {
+    const known: string[] = [];
+    await withSigtermHarness(
+      false,
+      async (own) => {
+        const first = await startSlowReview();
+        const second = await startSlowReview();
+        known.push(await first.home(), await second.home());
+        process.emit("SIGTERM");
+        expect(await Promise.all([first.settled, second.settled])).toEqual([
+          "rejected",
+          "rejected",
+        ]);
+        await until(() => own.kills() > 0);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(own.kills()).toBe(1);
+        expect(own.homesAtKill).toEqual([[]]);
+        expect(process.listenerCount("SIGTERM")).toBe(0);
+      },
+      () => known,
+    );
+  }, 15_000);
 });

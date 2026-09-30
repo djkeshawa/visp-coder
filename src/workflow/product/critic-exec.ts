@@ -148,10 +148,11 @@ export async function runCodexStructured(options: {
     "-",
   ];
   const codexHome = await privateCodexHome(options.directory);
+  const termination = forwardTermination(options.signal);
   let result: RunResult;
   try {
     result = await run(options.executable ?? "codex", args, {
-      signal: options.signal,
+      signal: termination.signal,
       stdin: options.prompt,
       env: { CODEX_HOME: codexHome },
     });
@@ -159,6 +160,7 @@ export async function runCodexStructured(options: {
     // The sign-in copy goes as soon as the process group is gone, not when the caller's
     // directory is removed: the tester's directory lives for the whole session.
     await rm(codexHome, REMOVE_TEMPORARY).catch(() => undefined);
+    termination.release();
   }
   // Awaited so a CLI that exits right after still has the log; a logging failure is ignored.
   await Promise.resolve()
@@ -170,6 +172,61 @@ export async function runCodexStructured(options: {
     );
   return JSON.parse(await readFile(responsePath, "utf8"));
 }
+
+/**
+ * A background reviewer or tester process has no abort handler of its own, so an external
+ * SIGTERM/SIGINT would leave Codex running. This aborts the run on either signal and, once
+ * the runs have had time to clean up, delivers the signal again so the process still ends
+ * as it would have. When something else already handles the signal, that handler decides.
+ * Listeners of other concurrent runs are ours, not a sign that someone else handles it.
+ */
+function forwardTermination(signal?: AbortSignal): { signal: AbortSignal; release: () => void } {
+  const controller = new AbortController();
+  let received: TerminationSignal | undefined;
+  const handled = new Set<TerminationSignal>();
+  const attached = new Set<TerminationSignal>();
+  const listeners = TERMINATION_SIGNALS.map((name) => {
+    if (process.listenerCount(name) > ownListeners[name]) handled.add(name);
+    const listener = () => {
+      received ??= name;
+      // A `once` listener is gone after it fires.
+      if (attached.delete(name)) ownListeners[name] -= 1;
+      controller.abort();
+    };
+    process.once(name, listener);
+    attached.add(name);
+    ownListeners[name] += 1;
+    return [name, listener] as const;
+  });
+  return {
+    signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+    release() {
+      for (const [name, listener] of listeners) {
+        process.removeListener(name, listener);
+        if (attached.delete(name)) ownListeners[name] -= 1;
+      }
+      if (received && !handled.has(received)) reraiseLater(received);
+    },
+  };
+}
+
+type TerminationSignal = "SIGTERM" | "SIGINT";
+const TERMINATION_SIGNALS: readonly TerminationSignal[] = ["SIGTERM", "SIGINT"];
+/** Listeners forwardTermination has attached for runs that are still active. */
+const ownListeners: Record<TerminationSignal, number> = { SIGTERM: 0, SIGINT: 0 };
+const pendingReraise = new Set<TerminationSignal>();
+
+/** Delayed so concurrent runs and their callers' `finally` blocks finish first; once per signal. */
+function reraiseLater(name: TerminationSignal): void {
+  if (pendingReraise.has(name)) return;
+  pendingReraise.add(name);
+  setTimeout(() => {
+    pendingReraise.delete(name);
+    process.kill(process.pid, name);
+  }, RERAISE_DELAY_MS).unref();
+}
+
+const RERAISE_DELAY_MS = 1000;
 
 /**
  * Codex without network retries for over a minute before failing, after the call is
