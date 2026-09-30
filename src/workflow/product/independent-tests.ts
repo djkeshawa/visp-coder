@@ -1032,7 +1032,6 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "- When the request names deterministic controls (a clock, a step function, a seed, a reset), drive time and setup through them instead of real-time waits.",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
     "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
-    ...testerBrowserKitLines(request),
     "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
     "- Start and stop anything the tests need, the way the request says, with timeouts on every wait. Use a free port where one is needed.",
     "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why, one line per failing test: `FAIL: <exact name from tests[].name>: <reason>`.",
@@ -1053,6 +1052,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
       : [
           "- Set existingBehavior: false. You are in an empty temporary directory. Do not inspect the implementation, run `visp`, or load project or personal skills.",
         ]),
+    ...testerBrowserKitLines(request),
     `The file will be saved as acceptance/${feature}/<name> and run from the repository root. Do not modify the repository.`,
     "",
     "Request:",
