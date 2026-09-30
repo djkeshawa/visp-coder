@@ -31,7 +31,7 @@ export const VISP_COMMANDS = [
     command: "feature",
     when: "New request",
     example: 'visp feature "<goal>" --source-brief -',
-    next: "Pass the request with a quoted heredoc, then run work --check for one slice; use brief --template for several usable slices.",
+    next: "Pass the request with a quoted heredoc, then run work --check for one slice; use brief --template for several usable slices. It can take minutes: wait for it to return; do not start a second one while it runs.",
   },
   {
     command: "brief",
@@ -59,27 +59,27 @@ export const VISP_COMMANDS = [
   },
   {
     command: "critic",
-    when: "Independent product feedback",
+    when: "Only when `visp next` prints a critic command",
     example: "visp critic --preflight",
-    next: "Setup-needed means inspect capabilities; ready means prepare/delegate/submit, or dispatch through an attached adapter.",
+    next: "Host-delegated review only (with VISP's own reviewer `visp done` runs it). Setup-needed: inspect capabilities; ready: prepare, delegate, submit, or dispatch through an attached adapter.",
   },
   {
     command: "critic feedback",
-    when: "Manual feedback enabled; first usable slice or consequential design uncertainty",
+    when: "Only when `visp next` shows a manual-feedback request",
     example: 'visp critic feedback --ask "What should I improve in this version?"',
-    next: "Use the host user-question popup; submit the user's words. Defer without approval; continue unrelated work.",
+    next: "Ask the user with the host's question tool only if it exists and questions are allowed; otherwise `--id <request-id> --defer`. Continue unrelated work.",
   },
   {
     command: "review",
-    when: "Host review requested by next or critic is off",
+    when: "Only when `visp next` prints a review command",
     example: "visp review --task <id> --prepare",
-    next: "Pause actor edits while reviewing. Read packetPath and images; submit judgments with --session <id> --from -.",
+    next: "Pause edits until it returns. Read packetPath and images; submit with --session <id> --from -.",
   },
   {
     command: "done",
     when: "The slice is usable",
     example: "visp done --task <id>",
-    next: "Follow its returned fix/critic/accept action; no duplicate worker approval.",
+    next: "Follow its returned action. It may run VISP's reviewer (about 1-2 min): wait, then `visp next`.",
   },
   {
     command: "accept",
@@ -151,7 +151,7 @@ For a legacy feature or current product history needing upgrade, use the install
 in the migration transaction. Stop old writers before applying and restart MCP with the upgraded
 executable afterward. \`visp next\` and \`visp status\` only read state; they never migrate it.
 
-For UI work, recover the browser and capture the usable interaction before spending a product critic call. Source advice is optional for a concrete code question: \`visp critic --source-only --preflight\`. It spends the same call budget and cannot assess visuals; keep capacity for rendered feedback. Continue the same build–observe–fix loop when the critic is unavailable.
+For UI work, recover the browser and capture the usable interaction before spending a product critic call. Continue the same build–observe–fix loop when the critic is unavailable.
 
 For a browser capture, pipe YAML/JSON to \`visp capture --task <id> --from -\`:
 

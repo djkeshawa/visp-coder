@@ -28,3 +28,23 @@ it("tells every guide to show user-readable information as labeled text", () => 
     expect(guide).toContain("not only canvas/icons");
   }
 });
+
+it("routes review through visp next and polls long commands in every guide", () => {
+  for (const guide of [renderAgentGuide(), renderMinimalGuide()]) {
+    expect(guide).toContain(
+      "If visp done runs VISP's reviewer, run or delegate no review; visp next waits.",
+    );
+    expect(guide).toContain("Run visp critic/review only when visp next prints it.");
+    expect(guide).toContain(
+      "Run feature/done/verify/accept/next with the host's maximum shell timeout. If it keeps running, poll it; never start feature, done or accept again until that call ends (after a kill or error, rerun once).",
+    );
+    expect(guide).not.toContain("delegate nothing");
+  }
+  expect(renderAgentGuide()).toContain(
+    "Use at least 10 minutes for feature/done/verify/accept/next",
+  );
+  expect(renderAgentGuide()).toContain(
+    "When visp next hands you a\n  review, pause scoped edits until it returns.",
+  );
+  expect(renderAgentGuide()).not.toContain("feedbackLoop");
+});
