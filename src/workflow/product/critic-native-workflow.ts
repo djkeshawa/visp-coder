@@ -17,6 +17,7 @@ import { finishReview } from "./critic-result.js";
 import { observedProduct, stopReason } from "./critic-status.js";
 import { criticSelection, readCriticState, saveCriticState } from "./critic-store.js";
 import { phaseReviewGap } from "./critic-understanding.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { runProductReviewerHandoff } from "./reviewer-handoff.js";
 import { withProductMutation } from "./runtime.js";
 
@@ -209,11 +210,12 @@ export async function nativePreflight(workspace: WorkspaceState, request: Critic
     request.sourceOnly,
   );
   if (!packet.ok) return packet;
-  const gaps = nativeCapabilityGaps(
-    state.config,
-    request.capabilities,
-    packetHasImages(packet.value),
-  );
+  const launched = reviewerRules(workspace);
+  // A VISP-launched reviewer needs no host report; a supplied one is still checked (dispatch).
+  const gaps =
+    launched && !request.capabilities
+      ? []
+      : nativeCapabilityGaps(state.config, request.capabilities, packetHasImages(packet.value));
   const stop = stopReason(
     state,
     handoff.value.subjectDigest,
@@ -221,6 +223,7 @@ export async function nativePreflight(workspace: WorkspaceState, request: Critic
     selected.value.intent,
     selected.value.phase,
     request.retryAfter,
+    { relaunch: launched },
   );
   gaps.push(
     ...[
@@ -248,7 +251,14 @@ export async function nativePreflight(workspace: WorkspaceState, request: Critic
   );
   if (phaseGap && !request.sourceOnly) gaps.push(phaseGap);
   return ok({
-    ...preflightSummary(selected.value, state, request, gaps, packetHasImages(packet.value)),
+    ...preflightSummary(
+      selected.value,
+      state,
+      request,
+      gaps,
+      packetHasImages(packet.value),
+      launched,
+    ),
     config: { ...state.config, maxCalls: capacity.limit },
     callsUsed: capacity.callsUsed,
     callsRemaining: capacity.callsRemaining,
@@ -289,7 +299,23 @@ function preflightSummary(
   request: CriticRequest,
   gaps: string[],
   hasImages: boolean,
+  launched: boolean,
 ) {
+  if (launched)
+    return {
+      status: gaps.length ? "unavailable" : "ready",
+      ready: gaps.length === 0,
+      launcher: "visp",
+      phase: selected.phase,
+      sourceOnly: request.sourceOnly === true,
+      config: state.config,
+      gaps,
+      capabilityProvenance: request.capabilities
+        ? "host-reported; not independently verified"
+        : "not checked here; visp done verifies the reviewer when it runs",
+      requiresImages: hasImages,
+      next: launchedNext(selected, request, gaps),
+    };
   return {
     status: !request.capabilities ? "setup-needed" : gaps.length ? "unavailable" : "ready",
     ready: gaps.length === 0,
@@ -307,6 +333,21 @@ function preflightSummary(
         ? "Resolve the capability/evidence gap; do not reserve or launch a critic"
         : "prepare, delegate once, submit unchanged result",
   };
+}
+
+/** VISP starts its reviewer only for a slice's product review, inside `visp done`. */
+function launchedNext(
+  selected: import("./critic-store.js").CriticSelection,
+  request: CriticRequest,
+  gaps: readonly string[],
+) {
+  if (gaps.includes("review-in-progress"))
+    return "VISP's reviewer is still running. Wait: run visp next.";
+  if (gaps.length)
+    return `Resolve the gap: ${gaps.join(" ")} VISP starts no review until it is resolved.`;
+  if (selected.phase !== "product" || request.sourceOnly)
+    return "VISP's reviewer runs only inside visp done, for the product review of a slice; it starts no consultation or source-only review.";
+  return "VISP runs the reviewer itself: run visp done. Nothing to prepare or delegate.";
 }
 
 function nativeHostSetup(

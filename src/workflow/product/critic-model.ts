@@ -148,6 +148,8 @@ const attemptSchema = z
     selection: productReviewSubmissionSchema.shape.selection,
     comparisonCandidate: z.string().optional(),
     transport: z.enum(["sampling", "native"]).optional(),
+    /** VISP started this review itself; only then may a failure be retried automatically. */
+    launcher: z.literal("visp").optional(),
     hostReport: nativeCapabilitySchema.optional(),
     requiresImages: z.boolean().optional(),
     sourceOnly: z.boolean().optional(),
