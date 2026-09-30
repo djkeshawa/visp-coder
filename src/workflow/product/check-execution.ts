@@ -106,7 +106,15 @@ export async function executeProductCheck(
           executable: output.value.executableDigest,
         }
       : undefined;
-  const { status, note } = waivedResult(output, raw, workspace.paths.root, waivers);
+  // The recorded text is for reading and may leave lines out; waivers and disputes are decided
+  // on the whole redacted output.
+  const evidence = commandEvidenceOutput(
+    output,
+    !!base.verifierDigest,
+    workspace.paths.root,
+    redact,
+  );
+  const { status, note } = waivedResult(output, redact(raw), workspace.paths.root, waivers);
   return {
     execution: {
       ...base,
@@ -116,12 +124,7 @@ export async function executeProductCheck(
       status,
       exitCode: output.ok ? output.value.exitCode : -1,
       durationMs: output.ok ? output.value.durationMs : Date.now() - started,
-      output: [
-        note,
-        commandEvidenceOutput(output, !!base.verifierDigest, workspace.paths.root, redact),
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      output: [note, evidence].filter(Boolean).join("\n"),
     },
     state: record.state,
     mutations: [
@@ -141,14 +144,14 @@ function waiverEnvironment(waivers: Waivers | undefined): Record<string, string>
 }
 
 /** A suite that cannot skip tests fails on waived ones; VISP counts only that failure as passed. */
-function waivedResult(
+export function waivedResult(
   output: Result<CommandOutput & { executableDigest?: string }>,
-  raw: string,
+  fullOutput: string,
   root: string,
   waivers: Waivers | undefined,
 ): { status: ProductExecution["status"]; note: string } {
   const status = commandStatus(output, root);
-  return waivers && status === "failed" && waivedFailure(raw, waivers)
+  return waivers && status === "failed" && waivedFailure(fullOutput, waivers)
     ? { status: "passed", note: waivedNote(waivers.names) }
     : { status, note: "" };
 }
@@ -181,10 +184,57 @@ function commandEvidenceOutput(
   const timeout = output.value.timedOut
     ? "VISP: check timed out; increase this check's timeoutMs or fix a stalled check before retrying. No passing product result was established."
     : "";
-  return [text.slice(-(8000 - sandbox.length - timeout.length - 2)), limitation, timeout, sandbox]
+  const room = EVIDENCE_LIMIT - sandbox.length - timeout.length - 2;
+  let budget = room;
+  let block = text.length > room ? earlierFailLines(text, room) : "";
+  if (block) {
+    // Leave space for the largest block and the notes so the final slice never cuts into it.
+    budget = room - FAIL_BLOCK_LIMIT - limitation.length - 4;
+    block = earlierFailLines(text, budget);
+  }
+  return [block, text.slice(-budget), limitation, timeout, sandbox]
     .filter(Boolean)
     .join("\n")
-    .slice(-8000);
+    .slice(-EVIDENCE_LIMIT);
+}
+
+const EVIDENCE_LIMIT = 8000;
+const FAIL_BLOCK_LIMIT = 3000;
+const FAIL_LINE_LIMIT = 300;
+const FAIL_LINES_KEPT = 60;
+const OMITTED_NOTE_ROOM = 200;
+
+/**
+ * Output is kept from its end, which drops `FAIL:` lines printed early in a long run; the
+ * pinned-test view of a run (which tests failed, what may be disputed) needs every one.
+ * Returns a block that repeats the dropped lines, or "" when none were dropped.
+ */
+function earlierFailLines(text: string, room: number): string {
+  const cut = text.length - room;
+  const end = text.indexOf("\n", cut);
+  const kept = new Set(text.slice(end < 0 ? text.length : end).split(/\r?\n/));
+  const dropped = [
+    ...new Set(
+      text
+        .slice(0, end < 0 ? text.length : end)
+        .split(/\r?\n/)
+        .filter((line) => /^\s*FAIL:/i.test(line) && !kept.has(line))
+        .map((line) => line.trim().slice(0, FAIL_LINE_LIMIT)),
+    ),
+  ];
+  if (!dropped.length) return "";
+  const block = ["VISP: FAIL lines from earlier in the output:"];
+  for (const line of dropped.slice(0, FAIL_LINES_KEPT)) {
+    if ([...block, line].join("\n").length > FAIL_BLOCK_LIMIT - OMITTED_NOTE_ROOM) break;
+    block.push(line);
+  }
+  if (block.length === 1) return "";
+  const omitted = dropped.length - (block.length - 1);
+  if (omitted > 0)
+    block.push(
+      `VISP: ${omitted} more FAIL line${omitted === 1 ? " is" : "s are"} left out here; waiver and dispute decisions use the full output.`,
+    );
+  return block.join("\n");
 }
 
 function unavailableVerifier(
