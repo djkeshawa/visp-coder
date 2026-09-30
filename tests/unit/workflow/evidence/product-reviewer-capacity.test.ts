@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
+import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import {
   type CriticPacket,
   type ProductCriticHost,
@@ -9,9 +10,11 @@ import {
 } from "../../../../src/workflow/product/critic.js";
 import { reviewerCapacity } from "../../../../src/workflow/product/critic-capacity.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
+import { outstandingFeedback } from "../../../../src/workflow/product/feedback.js";
 import type { ProductFeedback } from "../../../../src/workflow/product/feedback-model.js";
 import { runProductNext } from "../../../../src/workflow/product/index.js";
 import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
+import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { legacyReview } from "../../support/legacy-critic.js";
 import { moduleFeedback } from "../../support/product-feedback.js";
@@ -221,18 +224,136 @@ describe("VISP's reviewer capacity", () => {
       return result.value;
     };
 
-    it("hands open findings to the human reviewer when the calls are spent", async () => {
+    it("requires repair before handing open findings to the human reviewer when calls are spent", async () => {
       await launch("codex-exec");
       await ready({ ...config, maxCalls: 1 });
       await run({ operation: "review" }, working(true));
       const step = await next();
       expect(step).toMatchObject({
         action: "fix",
-        completion: "handoff",
-        command: expect.stringContaining("visp pr"),
+        completion: "unresolved-product",
+        command: `visp work --feature ${setup.brief.feature} --task T001`,
+        mayEdit: true,
       });
       expect(step.objective).toContain("review budget is spent");
-      expect(step.objective).toContain("remaining findings");
+      expect(step.objective).toContain("cannot run again");
+      expect(step.objective).toContain("still open");
+      expect(step.objective).toContain("Fix each");
+      expect(step.objective).toContain("extend");
+      expect(step.objective).toContain("visp done");
+      expect(step.evidence.join(" ")).toContain(FINDING);
+      // Re-running checks on unchanged source cannot establish repair.
+      await subject();
+      expect((await next()).completion).toBe("unresolved-product");
+      await setup.workspace.write("src/value.mjs", "export const value = 2; // repaired\n");
+      // A source change alone cannot establish passing current checks.
+      expect((await next()).completion).toBe("unresolved-product");
+      await subject();
+      const handoff = await next();
+      expect(handoff).toMatchObject({
+        action: "fix",
+        completion: "handoff",
+        command: `visp pr --feature ${setup.brief.feature}`,
+      });
+      expect(handoff.objective).toContain("remaining findings go to a human reviewer");
+      expect(handoff.objective).not.toContain("Fix what you can");
+      const record = await readProductRecord(await setup.workspace.state(), {
+        feature: setup.brief.feature,
+      });
+      if (!record.ok) throw new Error(record.error.message);
+      expect(record.value.state.status).not.toBe("accepted");
+      expect(record.value.state.acceptedSubject).toBeUndefined();
+      expect(outstandingFeedback(record.value)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ problem: FINDING, required: true })]),
+      );
+    });
+
+    it("requires a new repair when the latest completed review repeats an older finding", async () => {
+      await launch("codex-exec");
+      await ready({ ...config, maxCalls: 2 });
+      await run({ operation: "review" }, working(true));
+      await edit("first repair");
+      await run({ operation: "review" }, working(true));
+      const step = await next();
+      expect(step).toMatchObject({
+        action: "fix",
+        completion: "unresolved-product",
+        mayEdit: true,
+        command: `visp work --feature ${setup.brief.feature} --task T001`,
+      });
+      await edit("second repair");
+      expect((await next()).completion).toBe("handoff");
+    });
+
+    it("repairs untouched findings in another slice before a feature handoff", async () => {
+      await launch("codex-exec");
+      const workspace = await setup.workspace.state();
+      expect(
+        (
+          await updateProductBrief(workspace, {
+            brief: {
+              ...setup.brief,
+              slices: [...setup.brief.slices, { ...setup.brief.slices[0], id: "T002" }],
+            },
+            reason: "Two reviewed slices share a feature handoff",
+          })
+        ).ok,
+      ).toBe(true);
+      await ready({ ...config, maxCalls: 2 });
+      expect(
+        (
+          await runProductCritic(await setup.workspace.state(), {
+            task: "T002",
+            operation: "configure",
+            config: { ...config, maxCalls: 2 },
+          })
+        ).ok,
+      ).toBe(true);
+      await run({ operation: "review" }, working(true));
+      await edit("first slice repaired");
+      expect((await runProductWork(await setup.workspace.state(), { task: "T002" })).ok).toBe(true);
+      expect((await runProductVerify(await setup.workspace.state(), { task: "T002" })).ok).toBe(
+        true,
+      );
+      expect(
+        await runProductCritic(
+          await setup.workspace.state(),
+          {
+            task: "T002",
+            operation: "review",
+          },
+          working(true),
+        ),
+      ).toMatchObject({ ok: true, value: { callsUsed: 2 } });
+      expect((await runProductWork(await setup.workspace.state(), { task: "T001" })).ok).toBe(true);
+      expect(await next()).toMatchObject({
+        action: "fix",
+        completion: "unresolved-product",
+        command: `visp work --feature ${setup.brief.feature} --task T002`,
+      });
+      await edit("second slice repaired");
+      // The first slice's passing check does not cover the second slice's current check.
+      expect((await next()).completion).toBe("unresolved-product");
+      expect((await runProductWork(await setup.workspace.state(), { task: "T002" })).ok).toBe(true);
+      expect((await runProductVerify(await setup.workspace.state(), { task: "T002" })).ok).toBe(
+        true,
+      );
+      expect((await runProductWork(await setup.workspace.state(), { task: "T001" })).ok).toBe(true);
+      expect((await next()).completion).toBe("handoff");
+    });
+
+    it("keeps a changed product on repair when its checks fail", async () => {
+      await launch("codex-exec");
+      await ready({ ...config, maxCalls: 1 });
+      await run({ operation: "review" }, working(true));
+      await setup.workspace.write("src/value.mjs", "export const value = 3;\n");
+      const verified = await runProductVerify(await setup.workspace.state(), { task: "T001" });
+      expect(verified).toMatchObject({ ok: true, value: { passed: false } });
+      expect(await next()).toMatchObject({
+        action: "fix",
+        command: `visp work --feature ${setup.brief.feature} --task T001`,
+      });
+      expect((await next()).completion).not.toBe("handoff");
     });
 
     it("hands open findings over when the reviewer failed twice on this source, not after a change", async () => {
@@ -279,6 +400,31 @@ describe("VISP's reviewer capacity", () => {
       const step = await next();
       expect(step.completion).not.toBe("handoff");
       expect(step.command).not.toContain("visp pr");
+    });
+
+    it("requires repair of findings from a completed review even after the slice closed", async () => {
+      await launch("codex-exec");
+      await ready({ ...config, maxCalls: 1 });
+      expect(await runProductDone(await setup.workspace.state(), { task: "T001" })).toMatchObject({
+        ok: true,
+        value: { closed: true },
+      });
+      expect(await run({ operation: "review" }, working(true))).toMatchObject({
+        ok: true,
+        value: { callsUsed: 1 },
+      });
+      expect(await next()).toMatchObject({
+        action: "fix",
+        completion: "unresolved-product",
+        mayEdit: true,
+        command: `visp work --feature ${setup.brief.feature} --task T001`,
+      });
+      await edit("repair after closure");
+      expect(await next()).toMatchObject({
+        action: "fix",
+        completion: "handoff",
+        command: `visp pr --feature ${setup.brief.feature}`,
+      });
     });
 
     it("hands the assembled product's assessment over instead of asking for a review it cannot get", async () => {

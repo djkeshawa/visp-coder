@@ -70,7 +70,7 @@ export function reviewerHandoff(
     action: "fix" as const,
     completion: "handoff" as const,
     command: `visp pr --feature ${feature}`,
-    objective: `${capacity.reason ?? "VISP's independent reviewer cannot run again."} Fix what you can and rerun your checks, then run visp pr to hand the remaining ${remaining} to a human reviewer`,
+    objective: `${capacity.reason ?? "VISP's independent reviewer cannot run again."} Run visp pr; the remaining ${remaining} go to a human reviewer`,
   };
 }
 
