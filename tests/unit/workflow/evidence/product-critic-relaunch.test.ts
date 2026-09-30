@@ -214,23 +214,30 @@ describe("VISP-launched reviewer relaunch", () => {
     expect(host.review).not.toHaveBeenCalled();
   });
 
-  it("blocks after two expired pending attempts on the same source", async () => {
+  it("relaunches after interrupted or cut-off attempts: a slow reviewer is not a broken one", async () => {
     await launch("codex-exec");
     await ready();
     await run({ operation: "review" }, failing());
     await run({ operation: "review" }, failing());
     await rewrite((state) => {
-      for (const attempt of state.attempts) {
-        attempt.status = "pending";
-        attempt.startedAt = 0;
-      }
+      const [first, second] = state.attempts;
+      if (!first || !second) throw new Error("attempts");
+      // One reviewer process died without a result; the other was cut off by a deadline.
+      first.status = "pending";
+      first.startedAt = 0;
+      second.execution = {
+        provenance: "adapter-observed",
+        claimed: true,
+        returned: false,
+        adapterCall: { startedAt: 1, finishedAt: 2, outcome: "cancelled" },
+      };
     });
     const host = working();
     expect(await run({ operation: "review" }, host)).toMatchObject({
-      ok: false,
-      error: { message: expect.stringContaining("interrupted-review") },
+      ok: true,
+      value: { callsUsed: 3 },
     });
-    expect(host.review).not.toHaveBeenCalled();
+    expect(host.review).toHaveBeenCalledTimes(1);
   });
 
   it("does not let a failure the host reported (native transport) disable VISP's reviewer", async () => {

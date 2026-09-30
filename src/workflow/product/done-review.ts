@@ -418,26 +418,22 @@ export function configuredReviewStarter(
     : inlineReview(codexExecCriticHost({ root: workspace.paths.root }));
 }
 
-/** Run the review in this process; used where the caller outlives the reviewer. */
+/**
+ * Run the review in this process; used where the caller outlives the reviewer. The review is
+ * bounded by the critic's own timeout, not by this command's wait budget: Codex keeps a shell
+ * command running after its tool call yields, and reviews took 95-190 s on slow API days, so a
+ * 100 s cut spent every call without a result.
+ */
 export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
-  return async (workspace, selection) => {
-    const left = selection.deadline === undefined ? undefined : selection.deadline - Date.now();
-    // A review that the deadline would abort still spends a call. Start it on the next run.
-    if (selection.rerunnable && left !== undefined && left < MIN_INLINE_REVIEW_MS)
-      return {
-        reviewed: false,
-        findings: [],
-        reason: `Only ${Math.max(0, Math.round(left / 1000))} s of this command remain and VISP's reviewer needs about ${MIN_INLINE_REVIEW_MS / 1000} s, so it was not started and no review call was spent. Run the same command again: it starts the reviewer first.`,
-      };
-    return summarize(
+  return async (workspace, selection) =>
+    summarize(
       await runProductCritic(
         workspace,
         { operation: "review", feature: selection.feature, task: selection.task },
         launcher,
-        deadlineSignal(selection.deadline, selection.signal),
+        selection.signal,
       ),
     );
-  };
 }
 
 /** The caller's signal, also aborted at `deadline` (epoch ms, possibly fractional). */

@@ -301,6 +301,18 @@ const failedAttempt = (state: CriticState, attempt: CriticAttempt, now: number) 
   attempt.status === "unavailable" || expiredPending(state, attempt, now);
 
 /**
+ * A reviewer that was cut off by a deadline or by its caller, or whose process died before
+ * returning, was slow, not broken: Codex review latency ranged 45-190 s across benchmark days,
+ * and two such cutoffs on one source used to hand a half-built product off. Only a failure the
+ * reviewer itself returned counts toward blocking; the call and time budget still bound retries.
+ */
+const hardFailure = (state: CriticState, attempt: CriticAttempt, now: number) => {
+  if (!failedAttempt(state, attempt, now) || expiredPending(state, attempt, now)) return false;
+  const outcome = attempt.execution?.adapterCall?.outcome;
+  return outcome !== "cancelled" && outcome !== "timed-out";
+};
+
+/**
  * An attempt the host reported (native prepare/submit) rather than one VISP launched. A worker
  * can submit a failure of that kind with one call, so it never counts against VISP's own
  * reviewer. Builds before the `launcher` stamp left none, but they did record adapter-observed
@@ -332,7 +344,7 @@ export function relaunchBlocked(
   const last = own.at(-1);
   if (!last || !failedAttempt(state, last, now)) return false;
   const failures = own.filter(
-    (attempt) => attempt.subject === subject && failedAttempt(state, attempt, now),
+    (attempt) => attempt.subject === subject && hardFailure(state, attempt, now),
   ).length;
   return last.subject === subject && failures >= 2;
 }

@@ -238,31 +238,24 @@ async function callsUsed() {
   return status.ok ? (status.value as { callsUsed?: number }).callsUsed : undefined;
 }
 
-it("does not start an inline review that the call deadline would abort", async () => {
+it("lets an inline review outlast the command's wait budget", async () => {
   await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
-  const host = launcher(review("satisfied"));
+  const respond = review("satisfied");
+  const slow: ProductCriticHost = {
+    review: vi.fn(async (packet) => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return { model: config.model, response: respond(packet) };
+    }),
+  };
+  // The wait budget ends long before the reviewer answers; the review still completes.
   const done = await runProductDoneReviewed(
     await setup.workspace.state(),
-    { task: "T001", deadline: Date.now() + 10_000 },
-    inlineReview(host),
+    { task: "T001", deadline: Date.now() + 200 },
+    inlineReview(slow),
   );
   expect(done.ok, JSON.stringify(done)).toBe(true);
-  if (!done.ok) return;
-  expect(host.review).not.toHaveBeenCalled();
-  expect(done.value.critic).toMatchObject({
-    reviewed: false,
-    reason: expect.stringContaining("no review call was spent"),
-  });
-  expect(done.value.critic?.reason).toContain("Run the same command again");
-  expect(await callsUsed()).toBe(0);
-  // Run again with time left: the reviewer starts first (done reuses the passed checks).
-  const again = await runProductDoneReviewed(
-    await setup.workspace.state(),
-    { task: "T001", deadline: Date.now() + 100_000 },
-    inlineReview(host),
-  );
-  expect(again.ok && again.value.critic).toMatchObject({ reviewed: true });
-  expect(host.review).toHaveBeenCalledTimes(1);
+  expect(done.ok && done.value.critic).toMatchObject({ reviewed: true });
+  expect(slow.review).toHaveBeenCalledTimes(1);
   expect(await callsUsed()).toBe(1);
 });
 
