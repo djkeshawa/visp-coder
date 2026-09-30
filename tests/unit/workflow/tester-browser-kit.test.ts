@@ -91,6 +91,13 @@ describe("tester browser kit gating", () => {
     expect(prompt[2]).toMatch(/^- When you use the kit: /);
   });
 
+  it("requires visible screen flow, effects over time and both drag axes", () => {
+    const prompt = testerBrowserKitLines(catapult).join("\n");
+    expect(prompt).toContain(
+      "- Cover the request's screen flow through the visible controls (for example win → next level/next screen, loss → retry, restart) and each stated effect over time (damage, burning, timers) at least once; and for drag input assert the vertical direction as well as the horizontal one.",
+    );
+  });
+
   it("tells the tester to let BrowserUnavailable escape the per-test catch", () => {
     const prompt = testerBrowserKitLines(catapult).join("\n");
     expect(prompt).toContain("`!(err instanceof BrowserUnavailable)`");

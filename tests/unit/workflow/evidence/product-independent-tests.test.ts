@@ -1532,6 +1532,15 @@ it.each([
     expect(prompt).not.toContain(TESTER_BROWSER_KIT.trim());
     expect(prompt.includes("openPage(url,")).toBe(kit);
     expect(prompt.includes("BrowserUnavailable")).toBe(kit);
+    expect(prompt.includes("Cover the request's screen flow through the visible controls")).toBe(
+      kit,
+    );
+    if (kit) {
+      expect(prompt).toContain(
+        "each stated effect over time (damage, burning, timers) at least once",
+      );
+      expect(prompt).toContain("assert the vertical direction as well as the horizontal one");
+    }
     // The kit sits after the rules and before the save-path line and the request.
     if (kit) {
       expect(prompt.indexOf("openPage(url,")).toBeLessThan(
