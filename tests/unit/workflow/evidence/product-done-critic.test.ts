@@ -220,3 +220,58 @@ it("does not execute acceptance checks twice after an inline review", async () =
   );
   expect(progress.filter((check) => check === "C001")).toHaveLength(1);
 });
+
+async function callsUsed() {
+  const status = await runProductCritic(await setup.workspace.state(), {
+    task: "T001",
+    operation: "status",
+  });
+  return status.ok ? (status.value as { callsUsed?: number }).callsUsed : undefined;
+}
+
+it("does not start an inline review that the call deadline would abort", async () => {
+  await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
+  const host = launcher(review("satisfied"));
+  const done = await runProductDoneReviewed(
+    await setup.workspace.state(),
+    { task: "T001", deadline: Date.now() + 10_000 },
+    inlineReview(host),
+  );
+  expect(done.ok, JSON.stringify(done)).toBe(true);
+  if (!done.ok) return;
+  expect(host.review).not.toHaveBeenCalled();
+  expect(done.value.critic).toMatchObject({
+    reviewed: false,
+    reason: expect.stringContaining("no review call was spent"),
+  });
+  expect(done.value.critic?.reason).toContain("Run the same command again");
+  expect(await callsUsed()).toBe(0);
+  // Run again with time left: the reviewer starts first (done reuses the passed checks).
+  const again = await runProductDoneReviewed(
+    await setup.workspace.state(),
+    { task: "T001", deadline: Date.now() + 100_000 },
+    inlineReview(host),
+  );
+  expect(again.ok && again.value.critic).toMatchObject({ reviewed: true });
+  expect(host.review).toHaveBeenCalledTimes(1);
+  expect(await callsUsed()).toBe(1);
+});
+
+it("starts a review without a deadline, and accept never skips one", async () => {
+  await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
+  const host = launcher(review("satisfied"));
+  await runProductDone(await setup.workspace.state());
+  const accepted = await runProductAcceptReviewed(
+    await setup.workspace.state(),
+    { deadline: Date.now() + 10_000 },
+    inlineReview(host),
+  );
+  expect(accepted.ok, JSON.stringify(accepted)).toBe(true);
+  // Accept re-runs every check, so "run it again" is no cheaper: it starts the reviewer.
+  expect(host.review).toHaveBeenCalledTimes(1);
+  const direct = await inlineReview(launcher(review("satisfied")))(await setup.workspace.state(), {
+    feature: setup.brief.feature,
+    task: "T001",
+  });
+  expect(direct.reason ?? "").not.toContain("was not started");
+});

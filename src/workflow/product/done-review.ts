@@ -56,7 +56,14 @@ export type ProductDoneReviewed = ProductVerification & {
 interface ReviewSelection extends ProductSelection {
   readonly feature: string;
   readonly task?: string;
+  /** Running the same command again is cheap and safe: an inline review may wait for it. */
+  readonly rerunnable?: boolean;
 }
+
+/** Returned reviews took 48 s at the median and 75 s at p90; a review with less left is cut off. */
+const MIN_INLINE_REVIEW_MS = 75_000;
+/** Slack so a suite cut off at its reserved deadline still leaves a full review window. */
+const INFORMATIONAL_MARGIN_MS = 2000;
 /** Starts an independent review of the selection and reports what happened so far. */
 export type ReviewStarter = (
   workspace: WorkspaceState,
@@ -80,11 +87,13 @@ export async function runProductDoneReviewed(
   const checked = await runProductDone(workspace, options);
   if (!checked.ok) return checked;
   const { feature } = checked.value;
+  const rerunnable = rerunnableReview(waitMs);
+  const progressDeadline = informationalDeadline(deadline, !!startReview && rerunnable);
   const progress = await acceptanceProgress(
     workspace,
     feature,
     checked.value.executions.map((execution) => execution.check),
-    { ...options, deadline },
+    { ...options, deadline: progressDeadline },
   );
   if (options.signal?.aborted) return cancelledExecution();
   const pinned = await pinnedView(workspace, "done", dispute.value, checked.value);
@@ -105,6 +114,8 @@ export async function runProductDoneReviewed(
   if (skipped) return ok({ ...done.value, critic: skipped });
   const critic = await launchReview(workspace, options, deadline, startReview, {
     feature,
+    // `done` reuses passed checks, so running it again costs little; `accept` re-runs them all.
+    rerunnable,
     ...(done.value.closed || !done.value.task ? {} : { task: done.value.task }),
   });
   if (options.signal?.aborted) return cancelledExecution();
@@ -208,7 +219,7 @@ async function launchReview(
   options: ProductSelection,
   deadline: number | undefined,
   startReview: ReviewStarter,
-  selection: { feature: string; task?: string },
+  selection: { feature: string; task?: string; rerunnable?: boolean },
 ): Promise<DoneCriticSummary> {
   await options.onProgress?.({
     check: "review",
@@ -225,6 +236,21 @@ async function launchReview(
       await runProductCritic(workspace, { operation: "status", feature: selection.feature }),
     );
   return critic;
+}
+
+/**
+ * Running `done` again is cheap only where a review can ever fit in the call: the MCP wait is
+ * shorter than a review, so there it starts with whatever time is left.
+ */
+function rerunnableReview(waitMs: number): boolean {
+  return waitMs === 0 || waitMs >= MIN_INLINE_REVIEW_MS;
+}
+
+/** The informational pinned suite of a middle slice must not eat the time the review needs. */
+function informationalDeadline(deadline: number | undefined, reserve: boolean) {
+  return reserve && deadline !== undefined
+    ? deadline - MIN_INLINE_REVIEW_MS - INFORMATIONAL_MARGIN_MS
+    : deadline;
 }
 
 function callDeadline(options: ProductSelection, waitMs: number) {
@@ -333,8 +359,16 @@ export function configuredReviewStarter(
 
 /** Run the review in this process; used where the caller outlives the reviewer. */
 export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
-  return async (workspace, selection) =>
-    summarize(
+  return async (workspace, selection) => {
+    const left = selection.deadline === undefined ? undefined : selection.deadline - Date.now();
+    // A review that the deadline would abort still spends a call. Start it on the next run.
+    if (selection.rerunnable && left !== undefined && left < MIN_INLINE_REVIEW_MS)
+      return {
+        reviewed: false,
+        findings: [],
+        reason: `Only ${Math.max(0, Math.round(left / 1000))} s of this command remain and VISP's reviewer needs about ${MIN_INLINE_REVIEW_MS / 1000} s, so it was not started and no review call was spent. Run the same command again: it starts the reviewer first.`,
+      };
+    return summarize(
       await runProductCritic(
         workspace,
         { operation: "review", feature: selection.feature, task: selection.task },
@@ -342,6 +376,7 @@ export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
         deadlineSignal(selection.deadline, selection.signal),
       ),
     );
+  };
 }
 
 /** The caller's signal, also aborted at `deadline` (epoch ms, possibly fractional). */
