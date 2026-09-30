@@ -1454,3 +1454,46 @@ ${FAILS_FIRST}`;
   })();
   expect(alive).toBe(false);
 });
+
+// Evidence: hand-rolled `--dump-dom` tester files crashed or checked nothing. A request that
+// describes a browser UI gets the native-input kit in the prompt; other requests never do.
+it.each([
+  [
+    "a browser game",
+    "Build a small browser game where you drag the ball back and release it.",
+    true,
+  ],
+  ["a plain module", "Return two from the public module", false],
+])(
+  "puts the browser kit into the tester prompt only for a UI request (%s)",
+  async (_name, request, kit) => {
+    const created = await TestWorkspace.create(
+      { "src/value.mjs": "export const value = 1;\n" },
+      { critic: true },
+    );
+    workspace = created;
+    const config = parse(await readFile(join(created.root, "visp.yml"), "utf8"));
+    config.critic = { ...config.critic, harness: "codex", launch: "codex-exec", mode: "auto" };
+    await created.write("visp.yml", stringify(config));
+    await created.installFoundation();
+    created.commit("install foundation");
+    const prompts: string[] = [];
+    const feature = await createProductFeatureWithTests(
+      await created.state(),
+      { goal: "Feature", sourceBrief: request },
+      inlineTests(tester({ name: "value.test.mjs", content: FAILS_FIRST }, prompts)),
+    );
+    expect(feature.ok, JSON.stringify(feature)).toBe(true);
+    expect(prompts).toHaveLength(1);
+    const prompt = prompts[0] as string;
+    expect(prompt.includes("export async function openPage")).toBe(kit);
+    expect(prompt.includes("BrowserUnavailable")).toBe(kit);
+    // The kit sits after the rules and before the save-path line and the request.
+    if (kit) {
+      expect(prompt.indexOf("export async function openPage")).toBeLessThan(
+        prompt.indexOf("The file will be saved as"),
+      );
+    }
+    expect(prompt.endsWith(request)).toBe(true);
+  },
+);
