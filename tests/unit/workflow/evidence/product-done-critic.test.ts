@@ -275,3 +275,22 @@ it("starts a review without a deadline, and accept never skips one", async () =>
   });
   expect(direct.reason ?? "").not.toContain("was not started");
 });
+
+it("shows why a review attempt ended when the reviewer fails, not a bare 'did not review'", async () => {
+  await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
+  const crashed: ProductCriticHost = {
+    review: vi.fn(async () => {
+      throw new Error("codex exec crashed before it answered");
+    }),
+  };
+  const done = await runProductDoneReviewed(
+    await setup.workspace.state(),
+    { task: "T001" },
+    inlineReview(crashed),
+  );
+  expect(done.ok, JSON.stringify(done)).toBe(true);
+  if (!done.ok) return;
+  expect(done.value.critic?.reviewed).toBe(false);
+  expect(done.value.critic?.reason).toContain("codex exec crashed before it answered");
+  expect(done.value.critic?.reason).not.toBe("The critic did not review");
+});

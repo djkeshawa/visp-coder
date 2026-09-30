@@ -580,6 +580,8 @@ function summarize(result: Result<unknown>): DoneCriticSummary {
     findings?: { problem: string; nextCheck?: string; required?: boolean }[];
     callsRemaining?: number;
     gaps?: string[];
+    /** Why an attempt ended without a review, as the critic recorded it. */
+    reason?: string;
   };
   const reviewed = value.lifecycle?.acceptedReview === true;
   return {
@@ -591,6 +593,12 @@ function summarize(result: Result<unknown>): DoneCriticSummary {
       ...(required !== undefined ? { required } : {}),
     })),
     ...(value.callsRemaining !== undefined ? { callsRemaining: value.callsRemaining } : {}),
-    ...(reviewed ? {} : { reason: value.gaps?.join("; ") || "The critic did not review" }),
+    ...(reviewed
+      ? {}
+      : {
+          reason:
+            [value.reason, ...(value.gaps ?? [])].filter(Boolean).join("; ") ||
+            "The critic did not review",
+        }),
   };
 }

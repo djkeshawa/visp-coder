@@ -128,7 +128,10 @@ describe("final product assessment", () => {
     expect(reviewed.assessments[0]?.status).toBe("unavailable");
     expect(await runProductAccept(await project.workspace.state())).toMatchObject({
       ok: false,
-      error: { message: "Close the active slices before final product acceptance" },
+      error: {
+        message: "Close the active slices before final product acceptance: T001",
+        recovery: expect.stringMatching(/^visp next --feature \S+$/),
+      },
     });
   });
 

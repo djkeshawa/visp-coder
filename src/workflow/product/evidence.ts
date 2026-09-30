@@ -338,12 +338,16 @@ async function prepareExecution(
   if (!selection.ok) return selection;
   const slice = accept ? undefined : selection.value;
   if (close && !slice) return err(vispError("NO_ACTIVE_TASK", "No slice selected for closure"));
-  if (
-    accept &&
-    record.brief.slices.some((entry) => !closedSlice(record.state.slices[entry.id]?.status))
-  )
+  const open = record.brief.slices.filter(
+    (entry) => !closedSlice(record.state.slices[entry.id]?.status),
+  );
+  if (accept && open.length)
     return err(
-      vispError("STAGE_BLOCKED", "Close the active slices before final product acceptance"),
+      vispError(
+        "STAGE_BLOCKED",
+        `Close the active slices before final product acceptance: ${open.map((entry) => entry.id).join(", ")}`,
+        { recovery: `visp next --feature ${record.brief.feature}` },
+      ),
     );
   let committedChanges: string[] = [];
   if (slice && !closedSlice(record.state.slices[slice.id]?.status)) {
