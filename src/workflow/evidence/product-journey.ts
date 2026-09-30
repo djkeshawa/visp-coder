@@ -4,10 +4,33 @@ import { DRAG_DEFAULTS, POINTER_TRAVEL_DEFAULTS } from "../../testing/browser-ge
 import type { BrowserJourney } from "../../testing/browser-journey.js";
 import type { ProductReviewCapture } from "./product-review.js";
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** A restarted local server on another port or loopback name is the same journey; other URLs are unchanged. */
+function journeyUrlIdentity(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (["http:", "https:"].includes(url.protocol) && LOOPBACK_HOSTS.has(url.hostname))
+      return `loopback:${url.protocol}//${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    // Not a URL: the raw text stays the identity.
+  }
+  return raw;
+}
+
 /** Capture bookkeeping and deadlines may vary; gesture timing is part of the behavior. */
 export function productJourneyKey(journey: BrowserJourney, task?: string): string {
+  return journeyKey(journey, task, journeyUrlIdentity(journey.url));
+}
+
+/** The key builds before loopback normalisation stored; read only to recognise retained history. */
+export function rawUrlJourneyKey(journey: BrowserJourney, task?: string): string {
+  return journeyKey(journey, task, journey.url);
+}
+
+function journeyKey(journey: BrowserJourney, task: string | undefined, url: string): string {
   return `journey-v3:${hashValue({
-    url: journey.url,
+    url,
     viewport: journey.viewport ?? { width: 1280, height: 720 },
     task,
     actions: journey.actions.map(journeyActionIdentity),
