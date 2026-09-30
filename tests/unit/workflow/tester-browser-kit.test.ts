@@ -9,6 +9,8 @@ import { environmentOnly } from "../../../src/workflow/product/pinned-dispute-mo
 import {
   TESTER_BROWSER_KIT,
   testerBrowserKitLines,
+  testerOwnContent,
+  withTesterBrowserKit,
 } from "../../../src/workflow/product/tester-browser-kit.js";
 
 const run = promisify(execFile);
@@ -45,12 +47,31 @@ describe("tester browser kit gating", () => {
     expect(testerBrowserKitLines("")).toEqual([]);
   });
 
-  it("adds the rules and the kit for slingshot and catapult requests", () => {
+  it("adds the rules and compact API for slingshot and catapult requests", () => {
     for (const request of [text("bench/tasks/slingshot-game/task.md"), catapult]) {
       const lines = testerBrowserKitLines(request);
       const prompt = lines.join("\n");
       expect(lines.length).toBeGreaterThan(3);
-      expect(prompt).toContain(TESTER_BROWSER_KIT.trim());
+      expect(prompt).not.toContain(TESTER_BROWSER_KIT.trim());
+      expect(prompt).toContain(
+        "VISP inserts the kit at the top of your file; do not paste or redeclare it",
+      );
+      for (const signature of [
+        "openPage(url,",
+        "serveDir(dir,",
+        "BrowserUnavailable(message)",
+        "page.evaluate(code,",
+        "page.waitFor(fn,",
+        "page.rect(selector)",
+        "page.point(selector,",
+        "page.drag(from,",
+        "page.click(point)",
+        "page.sleep(ms)",
+        "page.screenshot(path?)",
+        "page.close()",
+      ])
+        expect(prompt).toContain(signature);
+      expect(prompt.length).toBeLessThan(6500);
       expect(prompt).toContain("openPage");
       expect(prompt).toContain("Never write your own Chrome, DevTools or `--dump-dom` code");
       expect(prompt).not.toMatch(/dispatchEvent\(/);
@@ -149,5 +170,69 @@ if (failed) process.exit(1);
     expect(environmentOnly(result.output, ["opens the page", "never reached"])).toBe(true);
     const after = readdirSync(tmpdir()).filter((name) => name.startsWith("acceptance-chrome-"));
     expect(after.filter((name) => !before.includes(name))).toEqual([]);
+  });
+});
+
+describe("VISP browser kit insertion", () => {
+  const request = "Build a browser UI.";
+  it.each(["openPage", "serveDir", "BrowserUnavailable"])(
+    "supplies an undefined %s",
+    async (name) => {
+      const file = { name: "ui.acceptance.mjs", content: `console.log(typeof ${name});\n` };
+      const prepared = await withTesterBrowserKit(request, file);
+      expect(prepared.content).toContain(`// VISP inserted browser kit\n${TESTER_BROWSER_KIT}`);
+      expect(testerOwnContent(prepared.content)).toBe(file.content);
+      expect(await withTesterBrowserKit(request, prepared)).toEqual(prepared);
+    },
+  );
+
+  it.each([
+    "async function openPage() {}",
+    "export async function openPage() {}",
+    "class BrowserUnavailable extends Error {}",
+    "const serveDir = () => {};",
+    "let openPage;",
+    "var BrowserUnavailable;",
+    "const { openPage } = helpers;",
+    "const { open: openPage } = helpers;",
+    "const [serveDir] = helpers;",
+    "import { openPage } from './helpers.mjs';",
+    "import { open as openPage } from './helpers.mjs';",
+    "import openPage from './helpers.mjs';",
+    "import * as serveDir from './helpers.mjs';",
+  ])("preserves tester-defined bindings: %s", async (definition) => {
+    const file = { name: "ui.mjs", content: `${definition}\nconsole.log(openPage);\n` };
+    expect(await withTesterBrowserKit(request, file)).toEqual(file);
+  });
+
+  it.each([
+    "console.log('openPage serveDir BrowserUnavailable');",
+    "// openPage serveDir BrowserUnavailable\nconsole.log(1);",
+    "const helpers = { openPage: () => {} }; helpers.openPage();",
+  ])("does not insert the kit for comments, strings or property names: %s", async (content) => {
+    const file = { name: "ui.mjs", content };
+    expect(await withTesterBrowserKit(request, file)).toEqual(file);
+  });
+
+  it("only supplies kit bindings to UI JavaScript files", async () => {
+    const file = { name: "cli.mjs", content: "openPage();\n" };
+    expect(await withTesterBrowserKit("Build a CLI", file)).toEqual(file);
+    const python = { name: "ui.py", content: "openPage()\n" };
+    expect(await withTesterBrowserKit(request, python)).toEqual(python);
+  });
+
+  it("keeps the interpreter directive first and removes only VISP's inserted source from feedback", async () => {
+    const file = {
+      name: "ui.mjs",
+      content: "#!/usr/bin/env node\nawait openPage('http://localhost');\n",
+    };
+    const prepared = await withTesterBrowserKit(request, file);
+    expect(prepared.content).toMatch(/^#![^\n]+\n\/\/ VISP inserted browser kit/);
+    expect(testerOwnContent(prepared.content)).toBe(file.content);
+    expect(testerOwnContent(TESTER_BROWSER_KIT + file.content)).toBe(
+      TESTER_BROWSER_KIT + file.content,
+    );
+    await writeFile(join(dir, file.name), prepared.content);
+    await run(process.execPath, ["--check", join(dir, file.name)]);
   });
 });
