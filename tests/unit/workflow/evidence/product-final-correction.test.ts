@@ -733,7 +733,7 @@ describe("final executable correction", () => {
   });
 });
 
-it("attributes pinned failures only through concrete permitted paths and preserves correction freshness", async () => {
+it("attributes pinned failures through concrete permitted paths, else to the last slice, and preserves correction freshness", async () => {
   const setup = await closedProduct();
   const record = value(await readProductRecord(await setup.workspace.state()));
   const slice = required(record.brief.slices[0]);
@@ -793,6 +793,7 @@ it("attributes pinned failures only through concrete permitted paths and preserv
   };
   expect(correctionChecks(repaired, slice, execution.subjectDigest)).toEqual([]);
   expect(failedCheckOwners(pinned, { ...execution, check: "PINNED_99" })).toEqual([]);
+  const finalSlice = required(brief.slices.at(-1)).id;
   for (const path of ["**/*.mjs", "outside.mjs"]) {
     const unowned: typeof pinned = {
       ...pinned,
@@ -803,7 +804,8 @@ it("attributes pinned failures only through concrete permitted paths and preserv
         ],
       },
     };
-    expect(failedCheckOwners(unowned, execution)).toEqual([]);
+    // No slice claims it by path: the slice that completes the feature owns a pinned failure.
+    expect(failedCheckOwners(unowned, execution).map((owner) => owner.id)).toEqual([finalSlice]);
   }
   const forbidden = {
     ...pinned,
@@ -815,7 +817,7 @@ it("attributes pinned failures only through concrete permitted paths and preserv
       })),
     },
   };
-  expect(failedCheckOwners(forbidden, execution)).toEqual([]);
+  expect(failedCheckOwners(forbidden, execution).map((owner) => owner.id)).toEqual([finalSlice]);
   expect(
     correctionChecks(
       {

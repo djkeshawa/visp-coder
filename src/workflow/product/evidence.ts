@@ -402,9 +402,11 @@ function executionCommands(
       ),
     ).values(),
   ];
-  // The last open slice completes the product, so the pinned tests should pass there too.
+  // The last open slice completes the product, so the pinned tests should pass there too. A
+  // failed pinned run also selects the suite as a correction check of that slice: run it once.
   if (accept || !slice || lastOpenSlice(record, slice))
-    commands.push(...pinnedAcceptanceChecks(brief));
+    for (const pinned of pinnedAcceptanceChecks(brief))
+      if (!commands.some((command) => command.id === pinned.id)) commands.push(pinned);
   for (const [index, command] of workspace.config.workflow.validationCommands.entries())
     commands.push({
       id: `CONFIG_${index + 1}`,

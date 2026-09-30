@@ -16,11 +16,23 @@ export function currentProductFailures(record: ProductRecord, subject: string): 
   ].filter((entry) => entry.status !== "passed");
 }
 
-/** Explicit check ownership is strongest; outcome and concrete input paths narrow assembled checks. */
+/**
+ * Explicit check ownership is strongest; outcome and concrete input paths narrow assembled checks.
+ * A pinned suite no slice claims belongs to the slice that completes the feature, the one that
+ * runs it as a blocking check.
+ */
 export function failedCheckOwners(
   record: ProductRecord,
   execution: ProductExecution,
 ): ProductSlice[] {
+  const owners = claimedCheckOwners(record, execution);
+  if (owners.length || execution.status !== "failed") return owners;
+  const pinned = pinnedAcceptanceChecks(record.brief).some((entry) => entry.id === execution.check);
+  const last = record.brief.slices.at(-1);
+  return pinned && last ? [last] : [];
+}
+
+function claimedCheckOwners(record: ProductRecord, execution: ProductExecution): ProductSlice[] {
   if (execution.status !== "failed") return [];
   const check = [...record.brief.checks, ...pinnedAcceptanceChecks(record.brief)].find(
     (entry) => entry.id === execution.check,

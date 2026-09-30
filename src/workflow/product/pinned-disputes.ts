@@ -10,6 +10,7 @@ import {
 } from "./independent-tests.js";
 import {
   allFailuresIn,
+  crashLine,
   type DisputeRulingRecord,
   disputeHint,
   failingTests,
@@ -18,8 +19,11 @@ import {
   MAX_REVIEWS_PER_FILING,
   MIN_REASON_LENGTH,
   type PinnedDispute,
+  type PinnedRun,
+  persistentPinnedFailure,
   pinnedWaivers,
   reviewerRules,
+  suiteCrashed,
   WAIVED_TESTS_ENV,
 } from "./pinned-dispute-model.js";
 import { readProductRecord } from "./store.js";
@@ -255,7 +259,7 @@ function disputable(
   const check = failing.find((entry) =>
     failingTests(entry.output, declared).names.includes(name),
   )?.check;
-  if (check === undefined) return { refusal: notFailing(requested, name, failing) };
+  if (check === undefined) return { refusal: notFailing(requested, name, failing, declared) };
   const refusal = priorDispute(disputes, verified, name, subject);
   return refusal ? { refusal } : { name, check };
 }
@@ -277,7 +281,17 @@ function unknownTest(record: IndependentTestsRecord, requested: string): string 
   return `${JSON.stringify(requested)} matches no declared test. Use the exact name; declared: ${names.join(", ")}`;
 }
 
-function notFailing(requested: string, name: string, failing: readonly FailingPinned[]): string {
+function notFailing(
+  requested: string,
+  name: string,
+  failing: readonly FailingPinned[],
+  declared: readonly string[],
+): string {
+  if (
+    failing.length &&
+    failing.every((entry) => suiteCrashed({ ...entry, status: "failed" }, declared))
+  )
+    return "The pinned suite crashed before reporting any test, so no test can be disputed";
   return failing.length
     ? `${JSON.stringify(name)} is not on a "FAIL: <test name>" line of the failing run, so only failing tests can be disputed (asked: ${JSON.stringify(requested)})`
     : "The pinned suite did not fail as a blocking check in this run (it passed, or only runs for information until the last slice); only failing tests can be disputed";
@@ -476,6 +490,8 @@ export async function pinnedTestsReport(
     /** The pinned suite failed as a blocking check in this call. */
     readonly failing: boolean;
     readonly command: "done" | "accept";
+    /** Those failing runs, so a suite that crashed gets the crash hint, not the dispute one. */
+    readonly failures?: readonly FailingPinned[];
   },
 ): Promise<PinnedTestsReport | undefined> {
   const state = await disputeState(workspace, feature);
@@ -495,9 +511,24 @@ export async function pinnedTestsReport(
   const report: PinnedTestsReport = {
     ...(context.filed?.length ? { filed: context.filed } : {}),
     ...(disputes.length ? { disputes } : {}),
-    ...(context.failing ? { hint: disputeHint(workspace, context.command) } : {}),
+    ...(context.failing ? { hint: failureHint(workspace, context, state.declared) } : {}),
   };
   return Object.keys(report).length ? report : undefined;
+}
+
+/** The hint under a failing pinned suite: a crash has no test to dispute. */
+function failureHint(
+  workspace: WorkspaceState,
+  context: { readonly command: "done" | "accept"; readonly failures?: readonly FailingPinned[] },
+  declared: readonly string[],
+): string {
+  const failures = context.failures ?? [];
+  const crashed =
+    failures.length > 0 &&
+    failures.every((entry) => suiteCrashed({ ...entry, status: "failed" }, declared));
+  if (!crashed) return disputeHint(workspace, context.command);
+  const line = crashLine(failures[0]?.output ?? "");
+  return `The pinned suite crashed before it reported any declared test as failing${line ? ` (${line})` : ""}, so there is nothing to dispute. If that error names something your product must provide (a file, module, server or output), provide it. Never edit or debug the suite under acceptance/.`;
 }
 
 function disputeNote(
@@ -522,6 +553,8 @@ function disputeNote(
 
 export interface PinnedRoute {
   readonly evidence: string[];
+  /** What to do about a pinned crash that is not yet handed off; replaces the generic fix text. */
+  readonly objective?: string;
   /** Replaces the fix routing when the pinned failure is settled or must be handed off. */
   readonly override?: {
     readonly action: "implement" | "accept" | "fix";
@@ -538,52 +571,107 @@ export async function pinnedRoute(
   task: string | undefined,
   failures: readonly { check: string; status: string; output: string }[],
   command: "done" | "accept",
+  history: readonly PinnedHistoryRun[] = [],
 ): Promise<PinnedRoute> {
   const pinned = failures.filter((entry) => entry.check.startsWith("PINNED_"));
   if (!pinned.length) return { evidence: [] };
   const state = await disputeState(workspace, feature);
   const waivers = await pinnedWaivers(workspace, feature);
-  const report = await pinnedTestsReport(workspace, feature, { failing: true, command });
+  const report = await pinnedTestsReport(workspace, feature, {
+    failing: true,
+    command,
+    failures: pinned.map(({ check, output }) => ({ check, output })),
+  });
   const evidence = [
     ...(report?.hint ? [report.hint] : []),
     ...(report?.disputes ?? []).map(
       (entry) => `Pinned test ${JSON.stringify(entry.test)} dispute ${entry.status}: ${entry.note}`,
     ),
   ];
+  const only = failures.length === pinned.length;
   const settled =
-    failures.length === pinned.length &&
-    pinned.every((entry) => allFailuresIn(entry.output, state.declared, waivers.names));
-  if (settled)
-    return {
-      evidence,
-      override:
-        command === "done"
-          ? {
-              action: "implement",
-              objective:
-                "The independent reviewer upheld the disputed pinned test(s). Run visp done again: the suite skips them",
-              command: `visp done --feature ${feature}${task ? ` --task ${task}` : ""}`,
-            }
-          : {
-              action: "accept",
-              objective:
-                "The independent reviewer upheld the disputed pinned test(s). Run visp accept again: they are waived",
-              command: `visp accept --feature ${feature}`,
-            },
-    };
+    only && pinned.every((entry) => allFailuresIn(entry.output, state.declared, waivers.names));
+  if (settled) return { evidence, override: upheldOverride(command, feature, task) };
   const covered = [...state.handedOff.map((entry) => entry.test), ...waivers.names];
   const allSettled =
-    failures.length === pinned.length &&
-    pinned.every((entry) => allFailuresIn(entry.output, state.declared, covered));
+    only && pinned.every((entry) => allFailuresIn(entry.output, state.declared, covered));
   if (state.handedOff.length && allSettled)
-    return {
-      evidence,
-      override: {
-        action: "fix",
-        objective: `The independent reviewer left the dispute of ${state.handedOff.map((entry) => JSON.stringify(entry.test)).join(", ")} unruled twice. Hand it to the human reviewer: run visp pr, which lists it`,
-        command: `visp pr --feature ${feature}`,
-        completion: "handoff",
-      },
-    };
-  return { evidence };
+    return { evidence, override: handedOffOverride(feature, state.handedOff) };
+  const stuck = await pinnedHandoff(workspace, feature, failures, history);
+  if (stuck) return { evidence, override: stuck };
+  const crashed =
+    only && pinned.every((entry) => suiteCrashed({ ...entry, status: "failed" }, state.declared));
+  return { evidence, ...(crashed ? { objective: CRASH_OBJECTIVE } : {}) };
+}
+
+function upheldOverride(
+  command: "done" | "accept",
+  feature: string,
+  task: string | undefined,
+): NonNullable<PinnedRoute["override"]> {
+  return command === "done"
+    ? {
+        action: "implement",
+        objective:
+          "The independent reviewer upheld the disputed pinned test(s). Run visp done again: the suite skips them",
+        command: `visp done --feature ${feature}${task ? ` --task ${task}` : ""}`,
+      }
+    : {
+        action: "accept",
+        objective:
+          "The independent reviewer upheld the disputed pinned test(s). Run visp accept again: they are waived",
+        command: `visp accept --feature ${feature}`,
+      };
+}
+
+function handedOffOverride(
+  feature: string,
+  handedOff: readonly PinnedDispute[],
+): NonNullable<PinnedRoute["override"]> {
+  return {
+    action: "fix",
+    objective: `The independent reviewer left the dispute of ${handedOff.map((entry) => JSON.stringify(entry.test)).join(", ")} unruled twice. Hand it to the human reviewer: run visp pr, which lists it`,
+    command: `visp pr --feature ${feature}`,
+    completion: "handoff",
+  };
+}
+
+const CRASH_OBJECTIVE =
+  "The pinned suite crashed before it reported any declared test. Read the error in the evidence: if it names something your product must provide (a file, module, server or output) provide it; otherwise change nothing under acceptance/. Then rerun visp done";
+
+/** An execution of a pinned check as the persistence rule reads it (state.executions). */
+export type PinnedHistoryRun = PinnedRun & { readonly task?: string };
+
+/**
+ * Hands the pinned suite to the human reviewer when it keeps failing the same unattributed way
+ * (crash, environment failure, timeout) across at least two source states: the fault is in the
+ * suite or its environment, and more runs cannot fix it. Only when every current non-passed
+ * failure is such a pinned check. This is disclosure, not acceptance: accept still fails on it.
+ */
+export async function pinnedHandoff(
+  workspace: WorkspaceState,
+  feature: string,
+  failures: readonly { check: string; status: string }[],
+  history: readonly PinnedHistoryRun[],
+): Promise<NonNullable<PinnedRoute["override"]> | undefined> {
+  const open = failures.filter((entry) => entry.status !== "passed");
+  if (!open.length || !open.every((entry) => entry.check.startsWith("PINNED_"))) return undefined;
+  const { declared } = await disputeState(workspace, feature);
+  const stuck = [...new Set(open.map((entry) => entry.check))].map((check) => ({
+    check,
+    ...persistentPinnedFailure(
+      history.filter((run) => run.check === check),
+      declared,
+      workspace.paths.root,
+    ),
+  }));
+  const first = stuck[0];
+  if (!first || stuck.some((entry) => entry.count === undefined)) return undefined;
+  const what = first.status === "crash" ? "crashed" : "could not run";
+  return {
+    action: "fix",
+    completion: "handoff",
+    command: `visp pr --feature ${feature}`,
+    objective: `The pinned suite ${first.check} ${what} the same way in ${first.count} runs while the product changed${first.line ? ` (${first.line})` : ""}. More runs will not change it; if the error names something your product should provide, provide it first. Then run visp pr: it hands the suite to the human reviewer`,
+  };
 }

@@ -191,6 +191,7 @@ async function pinnedView(
       ...(outcomes ? { filed: outcomes } : {}),
       failing: failing.length > 0,
       command,
+      failures: failing,
     });
   const wrap = (pinnedTests: PinnedTestsReport | undefined) => (pinnedTests ? { pinnedTests } : {});
   const initial = wrap(await report(filed?.value));

@@ -1,7 +1,10 @@
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { isAbsolute, join, normalize, relative } from "node:path";
 import { z } from "zod";
 import { hashValue } from "../../core/hash.js";
 import type { WorkspaceState } from "../state.js";
+import { productFailureSignature } from "./failures.js";
+import type { ProductExecution } from "./model.js";
 
 /**
  * Disputes of pinned acceptance tests. The worker cannot edit the pinned suite, and a suite
@@ -159,6 +162,164 @@ export function environmentOnly(output: string, declared: readonly string[]): bo
   if (environmentErrorLine(output) === undefined) return false;
   const failing = failingTests(output, declared);
   return failing.names.length === 0 && failing.unattributed === 0;
+}
+
+/** A pinned run as the persistence rule reads it. */
+export interface PinnedRun {
+  readonly check: string;
+  readonly status: ProductExecution["status"];
+  readonly exitCode: number;
+  readonly output: string;
+  readonly subjectDigest: string;
+}
+
+/**
+ * The suite failed and reported no declared test as failing: it crashed (an import error, a
+ * missing script, a refused connection outside any test) rather than found a product fault.
+ * Only a suite with declared tests can be judged so: a project-pinned suite has no declared
+ * names, its failures cannot be told from a crash, and none of them is ever called one.
+ */
+export function suiteCrashed(
+  run: Pick<PinnedRun, "status" | "output">,
+  declared: readonly string[],
+): boolean {
+  return (
+    declared.length > 0 &&
+    run.status === "failed" &&
+    failingTests(run.output, declared).names.length === 0
+  );
+}
+
+const ERROR_LINE = /^[\w.$]*(?:Error|Exception)(?:\s*\[[^\]]*\])?:/;
+const CRASH_FRAME =
+  /File "([^"]+)", line (\d+)|\(([^()\s]+):(\d+):\d+\)|\bat\s+([^()\s]+):(\d+):\d+\s*$/;
+
+/** What a crashed run says went wrong: its last error or FAIL line, else its last line. */
+export function crashLine(output: string): string | undefined {
+  const lines = output
+    .split(OUTPUT_LINES)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const line = lines.findLast((entry) => ERROR_LINE.test(entry) || /^FAIL:/i.test(entry));
+  const text = (line ?? lines.at(-1) ?? "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 200) : undefined;
+}
+
+/** Where a crash happened: the last `File "x", line N` or `(path:N:M)` frame, as `file:line`. */
+function crashFrame(output: string): string | undefined {
+  let frame: string | undefined;
+  for (const line of output.split(OUTPUT_LINES)) {
+    const match = CRASH_FRAME.exec(line);
+    if (match)
+      frame = `${(match[1] ?? match[3] ?? match[5] ?? "").split(/[\\/]/).pop()}:${match[2] ?? match[4] ?? match[6]}`;
+  }
+  return frame;
+}
+
+/** The same crash again: its error line without numbers, and the frame it came from. */
+export function crashSignature(run: PinnedRun): string {
+  const line = crashLine(run.output);
+  return line
+    ? hashValue({ line: line.replace(/\d+/g, "#"), frame: crashFrame(run.output) })
+    : productFailureSignature(run);
+}
+
+type PersistentKind = "crash" | "environment-failed" | "timed-out";
+
+/** The run printed a `FAIL:` line or names a declared failing test: a failure, not a stop. */
+function namesFailure(run: PinnedRun, declared: readonly string[]): boolean {
+  return /^\s*FAIL:/im.test(run.output) || failingTests(run.output, declared).names.length > 0;
+}
+
+const MISSING_ERROR =
+  /ERR_MODULE_NOT_FOUND|Cannot find module|\bENOENT\b|No such file or directory|FileNotFoundError/;
+
+const NO_MODULE = /ModuleNotFoundError: No module named '([^']+)'/;
+const NO_NAME = /ImportError: cannot import name '[^']+' from '([^']+)'/;
+
+/** The Python module is a file or package of the project, at its root or under `src/`. */
+function projectModule(root: string, module: string): boolean {
+  const name = module.split(".")[0] ?? "";
+  return (
+    /^\w+$/.test(name) &&
+    [`${name}.py`, name, join("src", `${name}.py`), join("src", name)].some((path) =>
+      existsSync(join(root, path)),
+    )
+  );
+}
+
+/**
+ * The crash's error asks the product for something it does not provide: a file missing inside
+ * the project and outside `acceptance/` (`Cannot find module '/p/src/server.mjs'`,
+ * `spawn ./start.sh ENOENT`), a Python module that cannot be imported at all (`No module named
+ * 'app'`: the product should provide it), or a name missing from a module of the project
+ * (`cannot import name 'x' from 'app'`, where app.py or app/ exists). That is the product's job,
+ * not a fault of the suite. Bare names, dependencies, paths outside the project and a name
+ * missing from a standard or installed module are not.
+ */
+export function crashNamesProductPath(output: string, root: string): boolean {
+  for (const line of output.split(OUTPUT_LINES)) {
+    if (NO_MODULE.test(line)) return true;
+    const imported = NO_NAME.exec(line)?.[1];
+    if (imported !== undefined && projectModule(root, imported)) return true;
+    if (!MISSING_ERROR.test(line)) continue;
+    const named = [...line.matchAll(/'([^']+)'|"([^"]+)"|\bspawn\s+(\S*[\\/]\S*)/g)]
+      .map((match) => match[1] ?? match[2] ?? match[3] ?? "")
+      .filter((path) => /[\\/]|\.[A-Za-z0-9]+$/.test(path));
+    const project = named.find((path) => {
+      const inside = isAbsolute(path) ? relative(root, path) : normalize(path);
+      return (
+        inside !== "" &&
+        !inside.startsWith("..") &&
+        !isAbsolute(inside) &&
+        !inside.split(/[\\/]/).includes("node_modules") &&
+        inside.split(/[\\/]/)[0] !== "acceptance"
+      );
+    });
+    if (project) return true;
+  }
+  return false;
+}
+
+function persistentKind(
+  run: PinnedRun,
+  declared: readonly string[],
+  root: string | undefined,
+): PersistentKind | undefined {
+  if (run.status === "environment-failed" || run.status === "timed-out")
+    return namesFailure(run, declared) ? undefined : run.status;
+  if (!suiteCrashed(run, declared)) return undefined;
+  return root !== undefined && crashNamesProductPath(run.output, root) ? undefined : "crash";
+}
+
+/**
+ * A pinned suite that keeps failing the same unattributed way while the product changes. `runs`
+ * are the executions of ONE check, oldest first. Only crashes, environment failures and timeouts
+ * qualify, and a crash only when it does not ask the product for a missing file (`root` set);
+ * a run that names a failing test or prints a `FAIL:` line, and a pass, break the streak. It takes three
+ * identical runs across at least two source states, so a worker that changes nothing never
+ * gets here, and a real product fault (a different error once the product changes) resets it.
+ */
+export function persistentPinnedFailure(
+  runs: readonly PinnedRun[],
+  declared: readonly string[],
+  root?: string,
+): { count: number; status: string; line?: string } | undefined {
+  const last = runs.at(-1);
+  const kind = last && persistentKind(last, declared, root);
+  if (!last || !kind) return undefined;
+  const signature = (run: PinnedRun) =>
+    kind === "crash" ? crashSignature(run) : productFailureSignature(run);
+  const wanted = signature(last);
+  const streak: PinnedRun[] = [];
+  for (const run of runs.toReversed()) {
+    if (persistentKind(run, declared, root) !== kind || signature(run) !== wanted) break;
+    streak.push(run);
+  }
+  if (streak.length < 3 || new Set(streak.map((run) => run.subjectDigest)).size < 2)
+    return undefined;
+  const line = crashLine(last.output);
+  return { count: streak.length, status: kind, ...(line ? { line } : {}) };
 }
 
 /** Every failing test of the run is attributed and in `covered`. */

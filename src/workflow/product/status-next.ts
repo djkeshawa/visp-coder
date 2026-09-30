@@ -29,7 +29,7 @@ import { findingAppliesToSlice, outstandingFeedback, productFeedbackGaps } from 
 import { functionalRegressionRequirement } from "./functional-regression.js";
 import { findFunctionalRepair } from "./functional-resolution.js";
 import { checksFor, closedSlice, type ProductSlice } from "./model.js";
-import { type PinnedRoute, pinnedRoute } from "./pinned-disputes.js";
+import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
 import { repairRecheck } from "./repair-recheck.js";
 import { readProductAuthorization, selectProductSlice } from "./scopes.js";
@@ -162,7 +162,9 @@ async function nextClosedProduct(
   const environmentFailures = failures.filter(
     (entry) => entry.status === "environment-failed" || entry.status === "timed-out",
   );
-  if (environmentFailures.length)
+  if (environmentFailures.length) {
+    const stuck = await stuckPinnedStep(workspace, record, undefined, failures);
+    if (stuck) return ok(stuck);
     return ok(
       environmentNext(
         record.brief.feature,
@@ -171,6 +173,7 @@ async function nextClosedProduct(
         "verify",
       ),
     );
+  }
   if (!failures.length) {
     const environmentJourney = environmentJourneyNext(
       record,
@@ -180,7 +183,14 @@ async function nextClosedProduct(
     if (environmentJourney) return ok(environmentJourney);
   }
   const journeys = currentJourneyFailures(record, subject);
-  const route = await pinnedRoute(workspace, record.brief.feature, undefined, failures, "accept");
+  const route = await pinnedRoute(
+    workspace,
+    record.brief.feature,
+    undefined,
+    failures,
+    "accept",
+    record.state.executions,
+  );
   const gaps = [
     ...route.evidence,
     ...(await productEvidenceGaps(workspace, record, subject)),
@@ -211,6 +221,7 @@ async function nextClosedProduct(
       task: correction.id,
       action: "fix",
       objective:
+        route.objective ??
         "Reopen the implicated slice and correct the current product finding or failed assembled check",
       command: `visp work --feature ${record.brief.feature} --task ${correction.id}`,
       evidence: [...gaps, ...assessmentGaps],
@@ -221,6 +232,7 @@ async function nextClosedProduct(
       feature: record.brief.feature,
       action: "understand",
       objective:
+        route.objective ??
         "Resolve the current execution failure and select its focused correction scope. If no existing slice owns the failed check, link its outcome or code paths in the brief before reauthorizing.",
       command: `visp brief --feature ${record.brief.feature}`,
       evidence: [...gaps, ...assessmentGaps],
@@ -288,29 +300,8 @@ async function nextOpenSlice(
   const failures = [
     ...new Map(executions.map((execution) => [execution.check, execution])).values(),
   ].filter((execution) => execution.status !== "passed");
-  const environmentFailures = failures.filter(
-    (entry) => entry.status === "environment-failed" || entry.status === "timed-out",
-  );
-  if (environmentFailures.length)
-    return ok({
-      ...environmentNext(
-        record.brief.feature,
-        slice.id,
-        environmentFailures.map((entry) => `${entry.check}: ${entry.output}`),
-        "verify",
-      ),
-      mayEdit: true,
-      objective: environmentFailures.some((entry) =>
-        /app-unreachable:|check-authoring:|VISP: check timed out/.test(entry.output),
-      )
-        ? environmentNext(
-            record.brief.feature,
-            slice.id,
-            environmentFailures.map((entry) => entry.output),
-            "verify",
-          ).objective
-        : "Continue the authorized slice while recovering the failed check's execution environment or correcting its command; required checks remain unresolved",
-    });
+  const environment = await sliceEnvironmentNext(workspace, record, slice, failures);
+  if (environment) return ok(environment);
   if (failures.length) return ok(await failedSliceNext(workspace, record, slice, failures));
   const journeyNext = failedJourneyNext(record, subject, slice);
   if (journeyNext) return journeyNext;
@@ -381,6 +372,40 @@ async function nextOpenSlice(
   });
 }
 
+/** A failed check's environment: recover it, or hand a pinned suite that never runs to the human. */
+async function sliceEnvironmentNext(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice,
+  failures: readonly { check: string; status: string; output: string }[],
+): Promise<ProductNext | undefined> {
+  const environmentFailures = failures.filter(
+    (entry) => entry.status === "environment-failed" || entry.status === "timed-out",
+  );
+  if (!environmentFailures.length) return undefined;
+  const stuck = await stuckPinnedStep(workspace, record, slice.id, failures);
+  if (stuck) return stuck;
+  return {
+    ...environmentNext(
+      record.brief.feature,
+      slice.id,
+      environmentFailures.map((entry) => `${entry.check}: ${entry.output}`),
+      "verify",
+    ),
+    mayEdit: true,
+    objective: environmentFailures.some((entry) =>
+      /app-unreachable:|check-authoring:|VISP: check timed out/.test(entry.output),
+    )
+      ? environmentNext(
+          record.brief.feature,
+          slice.id,
+          environmentFailures.map((entry) => entry.output),
+          "verify",
+        ).objective
+      : "Continue the authorized slice while recovering the failed check's execution environment or correcting its command; required checks remain unresolved",
+  };
+}
+
 /** The last open slice must also pass the pinned tests, whichever slice's scope owns their file. */
 function openSliceChecks(
   workspace: WorkspaceState,
@@ -404,7 +429,14 @@ async function failedSliceNext(
   failures: readonly { check: string; status: string; output: string }[],
 ): Promise<ProductNext> {
   const feature = record.brief.feature;
-  const route = await pinnedRoute(workspace, feature, slice.id, failures, "done");
+  const route = await pinnedRoute(
+    workspace,
+    feature,
+    slice.id,
+    failures,
+    "done",
+    record.state.executions,
+  );
   const evidence = [
     ...route.evidence,
     ...failures.map((entry) => `${entry.check}: ${entry.status}: ${entry.output}`),
@@ -415,11 +447,38 @@ async function failedSliceNext(
     task: slice.id,
     action: "fix",
     objective:
+      route.objective ??
       "Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check",
     command: `visp work --feature ${feature} --task ${slice.id}`,
     evidence,
     mayEdit: true,
   };
+}
+
+/**
+ * The same pinned suite crashed, timed out or could not run three times across two source
+ * states, and nothing else fails: more environment retries cannot help, so it goes to the human
+ * reviewer. Any other failing check keeps the environment step.
+ */
+async function stuckPinnedStep(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  task: string | undefined,
+  failures: readonly { check: string; status: string; output: string }[],
+): Promise<ProductNext | undefined> {
+  const override = await pinnedHandoff(
+    workspace,
+    record.brief.feature,
+    failures,
+    record.state.executions,
+  );
+  if (!override) return undefined;
+  return pinnedStep(
+    record.brief.feature,
+    task,
+    { evidence: [], override },
+    failures.map((entry) => `${entry.check}: ${entry.status}: ${entry.output}`),
+  );
 }
 
 /** A settled or handed-off pinned failure replaces the fix step. */
