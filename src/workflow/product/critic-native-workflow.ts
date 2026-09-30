@@ -12,7 +12,7 @@ import { criticDelegation, criticDispatchSetup, nativeCapabilityGaps } from "./c
 import { criticPacket, currentReviewGap, packetHasImages } from "./critic-packet.js";
 import { CRITIC_SETUP_GAP, missingCriticSetup } from "./critic-policy.js";
 import { criticRecoveryAuthorizationGap, criticRetryError } from "./critic-recovery.js";
-import { reserveReview } from "./critic-reservation.js";
+import { relaunchesReview, reserveReview } from "./critic-reservation.js";
 import { finishReview } from "./critic-result.js";
 import { observedProduct, stopReason } from "./critic-status.js";
 import { criticSelection, readCriticState, saveCriticState } from "./critic-store.js";
@@ -221,6 +221,7 @@ export async function nativePreflight(workspace: WorkspaceState, request: Critic
     selected.value.intent,
     selected.value.phase,
     request.retryAfter,
+    { relaunch: relaunchesReview(workspace, request) },
   );
   gaps.push(
     ...[

@@ -12,7 +12,7 @@ import {
   featureCriticCapacity,
   readFeatureCriticBudget,
 } from "./critic-budget.js";
-import type { CriticRequest, CriticState } from "./critic-model.js";
+import type { CriticPhase, CriticRequest, CriticState } from "./critic-model.js";
 import { nativeCapabilityGaps, nativePacket } from "./critic-native.js";
 import { criticPacket, currentReviewGap, packetHasImages } from "./critic-packet.js";
 import { CRITIC_SETUP_GAP, missingCriticSetup } from "./critic-policy.js";
@@ -22,6 +22,7 @@ import { criticSelection, readCriticState, saveCriticState } from "./critic-stor
 import { phaseReviewGap } from "./critic-understanding.js";
 import { productFailureSignature } from "./failures.js";
 import { executionSchema, type ProductSlice } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { disputeSetKey, disputeState } from "./pinned-disputes.js";
 import { runProductReviewerHandoff } from "./reviewer-handoff.js";
 import type { ProductRecord } from "./store.js";
@@ -77,7 +78,12 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
     ...state,
     contract: selected.value.contract,
     attempts: [
-      ...state.attempts,
+      ...endedWithoutResult(
+        state,
+        relaunchesReview(workspace, request),
+        selected.value.phase,
+        startedAt,
+      ),
       {
         id,
         phase: selected.value.phase,
@@ -107,6 +113,8 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
             }
           : {}),
         transport: request.operation === "prepare" || request.capabilities ? "native" : "sampling",
+        // The attached launcher reports capabilities too, so transport alone cannot tell who ran it.
+        ...(relaunchesReview(workspace, request) ? { launcher: "visp" as const } : {}),
         ...(request.capabilities ? { hostReport: request.capabilities } : {}),
       },
     ],
@@ -125,6 +133,36 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
         expiresAt: startedAt + state.config.timeoutMs,
       })
     : saved;
+}
+
+/** VISP launches the reviewer only for a review it runs itself; a host `--preflight` stays strict. */
+export function relaunchesReview(workspace: WorkspaceState, request: CriticRequest) {
+  return reviewerRules(workspace) && request.operation === "review";
+}
+
+/**
+ * A reviewer process that ended without a result before its deadline never returns one. Marking it
+ * unavailable in the save that reserves the fresh review spends no call (its reservation already counted).
+ */
+function endedWithoutResult(
+  state: CriticState,
+  relaunch: boolean,
+  phase: CriticPhase,
+  now: number,
+) {
+  return state.attempts.map((attempt) =>
+    relaunch &&
+    (attempt.phase ?? "product") === phase &&
+    attempt.status === "pending" &&
+    now > attempt.startedAt + state.config.timeoutMs
+      ? {
+          ...attempt,
+          status: "unavailable" as const,
+          failureKind: "invocation-failed" as const,
+          message: "The reviewer process ended without a result before its deadline",
+        }
+      : attempt,
+  );
 }
 
 async function prepareReviewEvidence(
@@ -277,6 +315,7 @@ async function reviewContext(workspace: WorkspaceState, request: CriticRequest) 
     selected.value.intent,
     selected.value.phase,
     request.retryAfter,
+    { relaunch: relaunchesReview(workspace, request) },
   );
   if (reason) return err(vispError("STAGE_BLOCKED", reason));
   const capacity = await reservationCapacity(
