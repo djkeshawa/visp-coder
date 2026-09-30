@@ -202,7 +202,7 @@ function reviewEvidence(
     (entry) =>
       linked.has(entry.id) ||
       (entry.status !== "stale" &&
-        (entry.kind !== "execution" || latest.has(entry.id)) &&
+        (entry.kind !== "execution" || latest.has(catalogue.aliases.get(entry.id) ?? entry.id)) &&
         (!entry.outcomes.length ||
           entry.outcomes.some((id) => outcomes.some((outcome) => outcome.id === id)))),
   );

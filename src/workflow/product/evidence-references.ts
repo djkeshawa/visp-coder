@@ -142,8 +142,20 @@ export async function productEvidenceCatalogue(
   operationReferences(record, subject, entries, selectedSlice);
   controlReferences(record, subject, entries, selectedSlice);
   const { sources, claims } = await productSources(workspace, record);
-  sources.push(...(codeSources ?? (await reviewCodeSources(workspace, record))));
-  for (const source of sources)
+  sources.push(
+    ...(codeSources ??
+      (await reviewCodeSources(workspace, record, undefined, subject, selectedSlice))),
+  );
+  for (const source of sources) {
+    const execution =
+      source.kind === "executed-check"
+        ? entries.find((entry) => entry.kind === "execution" && source.id === `CHECK-${entry.id}`)
+        : undefined;
+    if (execution) {
+      aliases.set(source.id, execution.id);
+      entries.push({ ...execution, id: source.id });
+      continue;
+    }
     entries.push({
       id: source.id,
       kind: "source",
@@ -151,6 +163,7 @@ export async function productEvidenceCatalogue(
       status: source.available ? "available" : "unavailable",
       summary: `${source.reference}: ${source.sha256}`,
     });
+  }
   const ambiguous = ambiguousEvidenceIds(entries);
   for (const [index, entry] of entries.entries())
     if (ambiguous.has(entry.id))

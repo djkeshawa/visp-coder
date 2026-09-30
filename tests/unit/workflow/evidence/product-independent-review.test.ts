@@ -932,10 +932,14 @@ it("delivers scoped stylesheet bytes alongside implementation without changing g
   const sources = await reviewCodeSources(state, record.value);
   const delivered = await independentSources(state, sources);
   if (!delivered.ok) throw new Error(delivered.error.message);
+  const stylesheet = sources.find((source) => source.reference === "styles.css");
+  expect(stylesheet?.available).toBe(true);
+  expect(stylesheet?.excerpt.length).toBeLessThanOrEqual(6000);
   expect(delivered.value.find((source) => source.reference === "styles.css")).toMatchObject({
     available: true,
-    excerpt: css,
-    truncated: false,
+    excerpt: stylesheet?.excerpt,
+    truncated: stylesheet?.truncated,
+    omittedRegions: stylesheet?.omittedRegions,
   });
   expect(delivered.value.some((source) => source.reference === "outside.css")).toBe(false);
   expect(delivered.value.find((source) => source.reference === "src/main.mjs")).toMatchObject({

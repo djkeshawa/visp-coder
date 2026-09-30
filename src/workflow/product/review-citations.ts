@@ -9,7 +9,7 @@ export function normalizeIndependentEvidence(review: IndependentReview): Indepen
     for (const value of values) {
       // Only an explicit leading ID is a citation. Never infer evidence from prose or paths.
       const leading =
-        /^(CODE-[a-f0-9]+|BRIEF-[a-f0-9]+|CAP-[a-f0-9-]+|SRC-REQUEST|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})(?=\s|:|$)/.exec(
+        /^(CHECK-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|CODE-[a-f0-9]+|BRIEF-[a-f0-9]+|CAP-[a-f0-9-]+|SRC-REQUEST|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})(?=\s|:|$)/.exec(
           value,
         );
       const id = leading?.[1];

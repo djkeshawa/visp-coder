@@ -97,3 +97,22 @@ describe("behavior-focused source delivery", () => {
     ).toBeGreaterThan(0);
   });
 });
+
+it("selects relevant regions of a 100,000-line document within bounded preparation time", async () => {
+  const lines = Array.from(
+    { length: 100000 },
+    (_, index) => `Unrelated documentation paragraph ${index}.`,
+  );
+  lines[99990] = "Retirement response contract: retired resources return 410.";
+  const start = performance.now();
+  const result = await reviewExcerpt(
+    "README.md",
+    lines.join("\n"),
+    "retirement response contract",
+    4000,
+  );
+  expect(performance.now() - start).toBeLessThan(2000);
+  expect(result.excerpt).toContain("retired resources return 410");
+  expect(result.excerpt.length).toBeLessThanOrEqual(4000);
+  expect(result.omitted.length).toBeGreaterThan(0);
+}, 20000);

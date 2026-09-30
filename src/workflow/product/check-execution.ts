@@ -28,11 +28,13 @@ import type {
 } from "./model.js";
 import {
   environmentOnly,
+  failingTests,
   pinnedWaivers,
   WAIVED_TESTS_ENV,
   type Waivers,
   waivedFailure,
 } from "./pinned-dispute-model.js";
+import { earlierAssertionResults } from "./review-check-output.js";
 import { SANDBOX_NOTE, sandboxDenial } from "./sandbox-denial.js";
 import type { ProductRecord } from "./store.js";
 import { productComparisonEnvironmentDigest, productContractDigest } from "./subject.js";
@@ -157,6 +159,7 @@ export async function executeProductCheck(
       exitCode: output.ok ? output.value.exitCode : -1,
       durationMs: output.ok ? output.value.durationMs : Date.now() - started,
       output: [note, evidence].filter(Boolean).join("\n"),
+      ...(waivers ? { pinnedFailures: failingTests(full, waivers.declared) } : {}),
     },
     state: record.state,
     mutations: [
@@ -242,13 +245,21 @@ function commandEvidenceOutput(
     : "";
   const room = EVIDENCE_LIMIT - sandbox.length - timeout.length - 2;
   let budget = room;
-  let block = text.length > room ? earlierFailLines(text, room) : "";
+  let block = text.length > room && /^\s*FAIL:/im.test(text) ? earlierFailLines(text, 0) : "";
   if (block) {
     // Leave space for the largest block and the notes so the final slice never cuts into it.
     budget = room - FAIL_BLOCK_LIMIT - limitation.length - 4;
-    block = earlierFailLines(text, budget);
   }
-  return [block, text.slice(-budget), limitation, timeout, sandbox]
+  const results = earlierAssertionResults(text, Math.max(0, budget - 2000), 2000, !!block);
+  if (results) budget -= results.length + 1;
+  const cutoff =
+    !results && text.length > budget
+      ? "VISP: earlier output omitted by the check evidence budget; inspect the local check-output log before judging unshown assertions."
+      : "";
+  budget -= cutoff.length + Number(cutoff.length > 0);
+  // Named results and cutoff notes move the retained tail; failures must use that final cut.
+  if (block) block = earlierFailLines(text, budget);
+  return [block, results, cutoff, text.slice(-budget), limitation, timeout, sandbox]
     .filter(Boolean)
     .join("\n")
     .slice(-EVIDENCE_LIMIT);

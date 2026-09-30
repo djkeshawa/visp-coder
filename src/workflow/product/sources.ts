@@ -5,11 +5,17 @@ import type { ProductRecord } from "./store.js";
 
 export interface ProductSource {
   readonly id: string;
-  readonly kind: "preserved-request" | "pinned-file" | "implementation-file" | "authored-brief";
+  readonly kind:
+    | "preserved-request"
+    | "pinned-file"
+    | "implementation-file"
+    | "authored-brief"
+    | "executed-check";
   readonly reference: string;
   readonly sha256: string;
   readonly available: boolean;
   readonly excerpt: string;
+  readonly truncated?: boolean;
   readonly omittedRegions?: readonly string[];
   readonly nextRead?: string;
 }

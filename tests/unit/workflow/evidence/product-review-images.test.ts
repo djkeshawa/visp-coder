@@ -154,3 +154,105 @@ describe("product image delivery", () => {
     expect(result.images[0]?.mimeType).toBe("image/gif");
   });
 });
+
+it("reserves a current image for each ungrouped viewport despite desktop preferences", async () => {
+  const workspace = {
+    files: { readBytesIfExists: async () => ok(bytes) },
+  } as unknown as WorkspaceState;
+  const desktop = Array.from({ length: 6 }, (_, index) => ({ ...capture, id: `desktop-${index}` }));
+  const phone = { ...capture, id: "phone", viewport: { width: 390, height: 844 } };
+  const result = await inspectProductImages(
+    workspace,
+    digest,
+    [...desktop, phone],
+    desktop.map((item) => item.id),
+  );
+  expect(result.images).toHaveLength(6);
+  expect(result.images.some((image) => image.id === "phone")).toBe(true);
+  expect(result.gaps.join()).toContain("omitted");
+});
+
+it("reports declared viewports without available current captures", async () => {
+  const { productBriefSchema, initialProductState } = await import(
+    "../../../../src/workflow/product/model.js"
+  );
+  const { inspectSelectedImages } = await import(
+    "../../../../src/workflow/product/review-selection.js"
+  );
+  const brief = productBriefSchema.parse({
+    version: 2,
+    feature: "001-viewports",
+    goal: "Responsive UI",
+    originalRequest: "Responsive UI",
+    outcomes: [
+      {
+        id: "O001",
+        kind: "experience",
+        statement: "Readable on phones",
+        expectations: [
+          { id: "E001", statement: "Phone screen", viewport: { width: 390, height: 844 } },
+        ],
+      },
+    ],
+  });
+  const record = { brief, briefText: "", stateText: "", state: initialProductState(brief, "now") };
+  const workspace = {
+    config: { workflow: { reviewMode: "current" } },
+    files: { readBytesIfExists: async () => ok(bytes) },
+  } as unknown as WorkspaceState;
+  const result = await inspectSelectedImages(
+    workspace,
+    record,
+    {},
+    digest,
+    undefined,
+    [capture],
+    [],
+  );
+  expect(result.ok).toBe(true);
+  if (result.ok)
+    expect(result.value.gaps.join()).toContain(
+      "Viewport 390x844: no current representative capture available",
+    );
+});
+
+it("keeps declared viewport gaps in packets for functional browser checks", async () => {
+  const { productBriefSchema, initialProductState } = await import(
+    "../../../../src/workflow/product/model.js"
+  );
+  const { inspectSelectedImages, reviewImageGaps } = await import(
+    "../../../../src/workflow/product/review-selection.js"
+  );
+  const brief = productBriefSchema.parse({
+    version: 2,
+    feature: "001-functional-viewport",
+    goal: "Browser action",
+    originalRequest: "Browser action",
+    outcomes: [{ id: "O001", kind: "functional", statement: "The browser action succeeds" }],
+    checks: [
+      {
+        id: "C001",
+        outcomes: ["O001"],
+        command: {
+          kind: "browser-journey",
+          journey: {
+            url: "project:/index.html",
+            viewport: { width: 390, height: 844 },
+            actions: [{ kind: "wait", durationMs: 1 }],
+          },
+        },
+      },
+    ],
+  });
+  const record = { brief, briefText: "", stateText: "", state: initialProductState(brief, "now") };
+  const workspace = {
+    config: { workflow: { reviewMode: "current" } },
+    files: { readBytesIfExists: async () => ok(undefined) },
+  } as unknown as WorkspaceState;
+  const result = await inspectSelectedImages(workspace, record, {}, digest, undefined, [], []);
+  expect(result.ok).toBe(true);
+  if (result.ok)
+    expect(reviewImageGaps(brief.outcomes, result.value.gaps, false).join()).toContain(
+      "Viewport 390x844: no current representative capture available",
+    );
+});
