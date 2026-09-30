@@ -5,7 +5,7 @@ import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses, type ProductOutcomeStatus } from "./assessment.js";
 import { criticNext } from "./critic-guidance.js";
 import { isStopHookObserver } from "./environment-model.js";
-import { hasUntakenPrompts } from "./host-prompts.js";
+import { featureStartingAge, hasUntakenPrompts } from "./host-prompts.js";
 import { productInputWarnings } from "./input-warnings.js";
 import type { ProductBrief, ProductState } from "./model.js";
 import { productReviewDocument } from "./review-document.js";
@@ -72,6 +72,8 @@ export async function runProductNext(
   workspace: WorkspaceState,
   options: ProductSelection = {},
 ): Promise<Result<ProductNext>> {
+  const starting = await featureStartingNext(workspace, options);
+  if (starting) return ok(starting);
   const loaded = await readProductRecord(workspace, options);
   if (!loaded.ok) return unavailableNext(loaded.error, workspace, options);
   const untaken = await newSessionRequestNext(workspace, loaded.value, options);
@@ -190,6 +192,27 @@ export async function runProductReport(
   return status.ok
     ? ok({ feature: status.value.feature, markdown: status.value.report, next: status.value.next })
     : status;
+}
+
+/**
+ * While `visp feature` is still recording a request, the answer is to wait. Workers whose
+ * tool returned before `feature` printed asked `next`, were told to start a feature, and
+ * started a second one (23 of 27 such runs).
+ */
+export async function featureStartingNext(
+  workspace: WorkspaceState,
+  options: ProductSelection,
+): Promise<ProductNext | undefined> {
+  if (options.feature || options.task) return undefined;
+  const age = await featureStartingAge(workspace);
+  if (age === undefined) return undefined;
+  return {
+    action: "wait",
+    objective: `visp feature is still recording the request (running ${Math.round(age / 1000)} s). Wait for it to print its result; do not run it again`,
+    command: "visp next",
+    evidence: [],
+    mayEdit: false,
+  };
 }
 
 /**

@@ -31,7 +31,13 @@ import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
 import { planCriticRevision } from "./critic-revision.js";
 import { allocateFeatureId } from "./feature-id.js";
-import { codexHooksWarning, type HostRequest, hostRequest } from "./host-prompts.js";
+import {
+  beginFeatureStart,
+  codexHooksWarning,
+  endFeatureStart,
+  type HostRequest,
+  hostRequest,
+} from "./host-prompts.js";
 import {
   captureInheritedChanges,
   inheritedChangesContent,
@@ -102,6 +108,20 @@ export async function createProductFeature(
 ): Promise<Result<ProductFeatureOutcome>> {
   if (!options.goal.trim())
     return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
+  // Rule and memory checks take up to 30 s; a worker whose tool returned early asked `next`,
+  // was told to start a feature, and started a second one.
+  await beginFeatureStart(workspace);
+  try {
+    return await startProductFeature(workspace, options);
+  } finally {
+    await endFeatureStart(workspace);
+  }
+}
+
+async function startProductFeature(
+  workspace: WorkspaceState,
+  options: ProductFeatureOptions,
+): Promise<Result<ProductFeatureOutcome>> {
   // Before the cleanliness check: the earlier feature's tester may have written its files.
   const host = await hostRequest(workspace, options.sourceBrief);
   if (!host.ok) return host;

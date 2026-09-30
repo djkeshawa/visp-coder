@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { FileMutation } from "../../core/file-transaction.js";
@@ -10,6 +10,40 @@ import type { WorkspaceState } from "../state.js";
 export const HOST_PROMPTS_FILE = "user-prompts.jsonl";
 /** The host session of the latest user prompt, written beside the prompts; never consumed. */
 export const HOST_SESSION_FILE = "host-session.json";
+
+/** Written while `visp feature` records a request; its age tells `next` and `work` to wait. */
+export const FEATURE_STARTING_FILE = "feature-starting.json";
+/** Older markers are left by a killed `visp feature`; a later command ignores them. */
+const FEATURE_STARTING_MS = 120_000;
+
+/** Mark that `visp feature` is recording a request. A failed write only loses the hint. */
+export async function beginFeatureStart(workspace: WorkspaceState): Promise<void> {
+  try {
+    await mkdir(workspace.paths.sessionDir, { recursive: true });
+    await writeFile(
+      join(workspace.paths.sessionDir, FEATURE_STARTING_FILE),
+      `${JSON.stringify({ at: Date.now() })}\n`,
+    );
+  } catch {}
+}
+
+export async function endFeatureStart(workspace: WorkspaceState): Promise<void> {
+  await rm(join(workspace.paths.sessionDir, FEATURE_STARTING_FILE), { force: true }).catch(
+    () => undefined,
+  );
+}
+
+/** How long a `visp feature` has been recording a request, when one started recently. */
+export async function featureStartingAge(workspace: WorkspaceState): Promise<number | undefined> {
+  try {
+    const text = await readFile(join(workspace.paths.sessionDir, FEATURE_STARTING_FILE), "utf8");
+    const at = Number(JSON.parse(text).at);
+    const age = Date.now() - at;
+    return Number.isFinite(age) && age >= 0 && age < FEATURE_STARTING_MS ? age : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface HostRequest {
   /** The request to preserve: a verbatim excerpt the worker quoted, or the latest prompt. */

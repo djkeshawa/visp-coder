@@ -33,7 +33,7 @@ import {
   selectProductSlice,
   staleTaskNote,
 } from "./scopes.js";
-import { newSessionRequestNext, runProductNext } from "./status.js";
+import { featureStartingNext, newSessionRequestNext, runProductNext } from "./status.js";
 import {
   authorizationPath,
   json,
@@ -87,6 +87,8 @@ export async function runProductWork(
   testsWaitMs = 0,
 ): Promise<Result<ProductWorkContext>> {
   if (!options.feature && !options.task) {
+    const starting = await featureStartingNext(workspace, options);
+    if (starting) return err(vispError("STAGE_BLOCKED", starting.objective));
     const routing = await withProductMutation(workspace, async () => {
       const record = await readProductRecord(workspace, options);
       if (!record.ok) return record;
