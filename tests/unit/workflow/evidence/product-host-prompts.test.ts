@@ -94,3 +94,47 @@ it("reads the user messages of the Codex session running the command", async () 
   expect(await codexSessionPrompts({ CODEX_THREAD_ID: "other", CODEX_HOME: home })).toEqual([]);
   expect(await codexSessionPrompts({ CODEX_HOME: home })).toEqual([]);
 });
+
+// Codex Desktop records `event_msg/user_message {message}` instead of the item form.
+it("falls back to the string user_message shape and never reads response_item messages", async () => {
+  const home = await mkdtemp(join(tmpdir(), "visp-codex-session-"));
+  const thread = "01a0e3cf-0000-71d3-9b4d-dc086a0db889";
+  const day = join(home, "sessions", "2026", "09", "29");
+  await mkdir(day, { recursive: true });
+  const message = (text: unknown) =>
+    JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: text } });
+  const item = (type: string, text: string) =>
+    JSON.stringify({
+      type: "event_msg",
+      payload: { type: "item_completed", item: { type, content: [{ type: "text", text }] } },
+    });
+  const injected = JSON.stringify({
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "# AGENTS.md instructions for /project" }],
+    },
+  });
+  const rollout = async (lines: string[]) => {
+    await writeFile(join(day, `rollout-2026-09-29T10-00-00-${thread}.jsonl`), lines.join("\n"));
+    return codexSessionPrompts({ CODEX_THREAD_ID: thread, CODEX_HOME: home });
+  };
+  expect(
+    await rollout([
+      injected,
+      message("Build the game.\nMake the birds fly."),
+      message("   "),
+      message(7),
+      message("continue"),
+    ]),
+  ).toEqual(["Build the game.\nMake the birds fly.", "continue"]);
+  // The item form wins when both exist; its type may be written user_message.
+  expect(
+    await rollout([message("Desktop text"), item("user_message", "Item text"), injected]),
+  ).toEqual(["Item text"]);
+  expect(await rollout([injected])).toEqual([]);
+  expect(await codexSessionPrompts({ CODEX_THREAD_ID: "other-thread", CODEX_HOME: home })).toEqual(
+    [],
+  );
+});

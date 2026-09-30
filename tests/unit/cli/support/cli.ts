@@ -124,7 +124,7 @@ function captureStreams(stdout: string[], stderr: string[]): () => void {
   const originalOut = process.stdout.write;
   const originalErr = process.stderr.write;
 
-  process.stdout.write = intercept(stdout);
+  process.stdout.write = intercept(stdout, true);
   process.stderr.write = intercept(stderr);
 
   return () => {
@@ -133,9 +133,21 @@ function captureStreams(stdout: string[], stderr: string[]): () => void {
   };
 }
 
-function intercept(sink: string[]): typeof process.stdout.write {
+let stdoutWatcher: ((text: string) => void) | undefined;
+
+/** Reports each stdout write of the next runs as it happens, until the returned stop is called. */
+export function watchStdout(watcher: (text: string) => void): () => void {
+  stdoutWatcher = watcher;
+  return () => {
+    stdoutWatcher = undefined;
+  };
+}
+
+function intercept(sink: string[], watch = false): typeof process.stdout.write {
   return ((chunk: unknown, encoding?: unknown, callback?: unknown): boolean => {
-    sink.push(typeof chunk === "string" ? chunk : String(chunk));
+    const text = typeof chunk === "string" ? chunk : String(chunk);
+    sink.push(text);
+    if (watch && text) stdoutWatcher?.(text);
 
     // `write(chunk, cb)` and `write(chunk, encoding, cb)` are both legal; a
     // caller that passed one is entitled to have it run.

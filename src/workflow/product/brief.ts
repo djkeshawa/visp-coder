@@ -13,6 +13,8 @@ import { err, ok, type Result } from "../../core/result.js";
 import { laterChanges } from "../../memory/later-changes.js";
 import {
   type EarlierFeature,
+  MEMORY_HEADING,
+  MEMORY_HEADING_WITH_LATER_CHANGES,
   memoryBriefFor,
   notInRequest,
   PROJECT_MEMORY_FILE,
@@ -87,6 +89,11 @@ export interface ProductFeatureOutcome {
   /** Uncommitted files the feature started from because Git cannot be written here. */
   readonly inheritedChanges?: readonly string[];
   readonly inheritedChangesNote?: string;
+  /** The earlier feature that already records this request; no second feature was created. */
+  readonly duplicateOf?: string;
+  readonly duplicateNote?: string;
+  /** Set by `visp feature` when its tester is writing tests in the same process. */
+  readonly testsNote?: string;
 }
 
 export async function createProductFeature(
@@ -95,6 +102,14 @@ export async function createProductFeature(
 ): Promise<Result<ProductFeatureOutcome>> {
   if (!options.goal.trim())
     return err(vispError("ARTIFACT_INVALID", "Feature goal cannot be empty"));
+  // Before the cleanliness check: the earlier feature's tester may have written its files.
+  const host = await hostRequest(workspace, options.sourceBrief);
+  if (!host.ok) return host;
+  const raw = host.value?.request ?? options.sourceBrief ?? options.goal;
+  const text = redactRequest(raw, workspace.paths.root);
+  const earlier = await recentDuplicate(workspace, text, duplicateTerms(workspace, options));
+  if (!earlier.ok) return earlier;
+  if (earlier.value) return ok(earlier.value);
   const start = await withProductMutation(workspace, async () => {
     const foundation = await requireFeatureFoundation(workspace, "visp feature <goal>");
     if (!foundation.ok) return foundation;
@@ -104,7 +119,7 @@ export async function createProductFeature(
     return inherited.ok ? ok({ baseline: baseline.value, inherited: inherited.value }) : inherited;
   });
   if (!start.ok) return start;
-  const request = await featureRequest(workspace, options);
+  const request = await featureRequest(workspace, host.value, raw, text);
   if (!request.ok) return request;
   return withProductMutation(workspace, () =>
     createProductFeatureLocked(workspace, options, request.value, start.value),
@@ -155,7 +170,7 @@ function inheritedNote(paths: readonly string[]): string {
 async function createProductFeatureLocked(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
-  request: Extract<Awaited<ReturnType<typeof featureRequest>>, { ok: true }>["value"],
+  request: FeatureRequest,
   start: FeatureStart,
 ): Promise<Result<ProductFeatureOutcome>> {
   const { baseline, inherited } = start;
@@ -164,12 +179,16 @@ async function createProductFeatureLocked(
   // Cleanliness was checked before model/service calls, which may write their own logs.
   const foundation = await requireImplementationFoundation(workspace, "visp feature <goal>");
   if (!foundation.ok) return foundation;
-  const listed = await workspace.store.listFeatures();
-  if (!listed.ok) return listed;
   const goal = redactRequest(options.goal, workspace.paths.root);
-  const allocated = await allocateFeatureId(workspace.paths.root, listed.value, goal);
+  const allocated = await newFeatureId(
+    workspace,
+    request.request,
+    goal,
+    duplicateTerms(workspace, options),
+  );
   if (!allocated.ok) return allocated;
-  const feature = allocated.value;
+  if ("duplicate" in allocated.value) return ok(allocated.value.duplicate);
+  const feature = allocated.value.feature;
   const timestamp = new Date().toISOString();
   const { host, memory } = request;
   const rules = await featureProjectRules(workspace, request.stated, feature, timestamp);
@@ -219,6 +238,23 @@ async function createProductFeatureLocked(
         ...hooksWarning(workspace, host),
       })
     : saved;
+}
+
+/** A new feature id, or the earlier feature a concurrent create of this request already made. */
+async function newFeatureId(
+  workspace: WorkspaceState,
+  request: string,
+  goal: string,
+  terms: DuplicateTerms | undefined,
+): Promise<Result<{ feature: string } | { duplicate: ProductFeatureOutcome }>> {
+  const listed = await workspace.store.listFeatures();
+  if (!listed.ok) return listed;
+  // Authoritative under the lock: the check before it could not see a create in flight.
+  const duplicate = await recentDuplicate(workspace, request, terms, listed.value);
+  if (!duplicate.ok) return duplicate;
+  if (duplicate.value) return ok({ duplicate: duplicate.value });
+  const allocated = await allocateFeatureId(workspace.paths.root, listed.value, goal);
+  return allocated.ok ? ok({ feature: allocated.value }) : allocated;
 }
 
 /**
@@ -331,21 +367,39 @@ async function recallMemories(
   });
 }
 
+interface FeatureMemory {
+  readonly memories: string[];
+  readonly laterChanges: string[];
+  readonly mutations: FileMutation[];
+  readonly reported: { projectMemory?: string[]; projectMemoryLaterChanges?: string[] };
+}
+
+interface FeatureRequest {
+  /** The redacted request text a duplicate is recognized by. */
+  readonly request: string;
+  readonly redacted: boolean;
+  readonly host: HostRequest | undefined;
+  readonly stated: readonly string[];
+  readonly memory: FeatureMemory;
+  readonly originalRequest: string;
+}
+
 /** The user's recorded request, with the decisions Visp Memory selects for it; rules are captured on the way. */
-async function featureRequest(workspace: WorkspaceState, options: ProductFeatureOptions) {
-  const host = await hostRequest(workspace, options.sourceBrief);
-  if (!host.ok) return host;
+async function featureRequest(
+  workspace: WorkspaceState,
+  host: HostRequest | undefined,
+  raw: string,
+  request: string,
+): Promise<Result<FeatureRequest>> {
   const recorded = await readProjectRules(workspace);
   if (!recorded.ok) return recorded;
-  const stated = await statedRules(host.value?.prompts ?? [], await ruleReader(workspace));
+  const stated = await statedRules(host?.prompts ?? [], await ruleReader(workspace));
   const rules = mergeProjectRules(
     recorded.value.rules,
     stated,
     "pending",
     new Date().toISOString(),
   );
-  const raw = host.value?.request ?? options.sourceBrief ?? options.goal;
-  const request = redactRequest(raw, workspace.paths.root);
   const memory = await featureMemory(
     workspace,
     request,
@@ -355,14 +409,103 @@ async function featureRequest(workspace: WorkspaceState, options: ProductFeature
   // Earlier rules are not copied into the fixed request: work replies, the reviewer and the
   // tester read the current rules, so a removed rule stops applying at once.
   return ok({
+    request,
     redacted: raw !== request,
-    host: host.value,
+    host,
     stated,
     memory: memory.value,
     originalRequest: [request, projectMemoryText(memory.value.memories, memory.value.laterChanges)]
       .filter(Boolean)
       .join("\n\n"),
   });
+}
+
+/** A request repeated within this window, before any work on it, is the same feature. */
+const DUPLICATE_WINDOW_MS = 10 * 60_000;
+const DUPLICATE_MIN_REQUEST = 20;
+
+/**
+ * A worker that runs `visp feature` twice for one request (a host that returned early, a
+ * retry) got two feature directories. The earlier one is returned when it records this
+ * request, is under ten minutes old and has neither an execution nor a started slice; a
+ * worked or accepted feature is never merged into. The tester is not started here.
+ */
+async function recentDuplicate(
+  workspace: WorkspaceState,
+  request: string,
+  terms: DuplicateTerms | undefined,
+  known?: readonly string[],
+): Promise<Result<ProductFeatureOutcome | undefined>> {
+  const wanted = whitespaceNormalized(request);
+  if (!terms || wanted.length < DUPLICATE_MIN_REQUEST) return ok(undefined);
+  const listed = known ? ok(known) : await workspace.store.listFeatures();
+  if (!listed.ok) return listed;
+  for (const id of listed.value) {
+    const intent = await workspace.store.readIntent(id);
+    if (!intent.ok) continue;
+    const age = Date.now() - Date.parse(intent.value.createdAt);
+    // Newest first: everything after this is older too.
+    if (!(age <= DUPLICATE_WINDOW_MS)) break;
+    if (!recordsRequest(intent.value, wanted, terms)) continue;
+    const record = await readProductRecord(workspace, { feature: id });
+    if (!record.ok || !untouchedFeature(record.value.state)) continue;
+    return ok({
+      brief: record.value.brief,
+      intent: intent.value,
+      duplicateOf: id,
+      duplicateNote: `Feature ${id} already records this request (${Math.max(0, Math.round(age / 1000))} s ago); no second feature was started. Continue: visp work --feature ${id} --check "<test command>"`,
+    });
+  }
+  return ok(undefined);
+}
+
+/** What else a repeat must match: a different goal or risk, or a branch, is a new feature. */
+interface DuplicateTerms {
+  readonly goal: string;
+  readonly riskLevel: RiskLevel;
+}
+
+function duplicateTerms(
+  workspace: WorkspaceState,
+  options: ProductFeatureOptions,
+): DuplicateTerms | undefined {
+  return options.branch
+    ? undefined
+    : {
+        goal: redactRequest(options.goal, workspace.paths.root),
+        riskLevel: options.riskLevel ?? "low",
+      };
+}
+
+/**
+ * The request is the stored one, whole: what follows it may only be the memory block VISP
+ * appended. A request that is a mere prefix of a longer one (a mid-word cut, a narrower
+ * ask) is a different request.
+ */
+function recordsRequest(intent: Intent, wanted: string, terms: DuplicateTerms): boolean {
+  if (intent.goal !== terms.goal || intent.riskLevel !== terms.riskLevel) return false;
+  const stored = whitespaceNormalized(intent.sourceBrief ?? "");
+  if (!stored.startsWith(wanted)) return false;
+  const rest = stored.slice(wanted.length).trim();
+  return (
+    rest === "" ||
+    (stored[wanted.length] === " " &&
+      [MEMORY_HEADING, MEMORY_HEADING_WITH_LATER_CHANGES].some((heading) =>
+        rest.startsWith(whitespaceNormalized(heading)),
+      ))
+  );
+}
+
+function untouchedFeature(state: ProductState): boolean {
+  return (
+    state.status === "active" &&
+    state.executions.length === 0 &&
+    Object.values(state.slices).every((slice) => slice.status === "pending")
+  );
+}
+
+function whitespaceNormalized(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /** The decisions a feature carries, and the code changes listed with them, for its `work` replies. */
@@ -392,14 +535,7 @@ async function featureMemory(
   workspace: WorkspaceState,
   request: string,
   rules: readonly string[],
-): Promise<
-  Result<{
-    memories: string[];
-    laterChanges: string[];
-    mutations: FileMutation[];
-    reported: { projectMemory?: string[]; projectMemoryLaterChanges?: string[] };
-  }>
-> {
+): Promise<Result<FeatureMemory>> {
   const none = ok({ memories: [], laterChanges: [], mutations: [], reported: {} });
   // memory.enabled switches off every memory path, the long-term store included.
   if (!workspace.config.memory.enabled) return none;

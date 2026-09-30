@@ -47,6 +47,7 @@ export function compactProductReply(
 }
 
 const SCALAR_FIELDS = [
+  "notice",
   "feature",
   "task",
   "taskClass",
@@ -260,6 +261,8 @@ function compactVerificationText(
   const unresolved = rows(data.outcomes)
     .filter((outcome) => outcome.satisfied !== true)
     .map((outcome) => `${outcome.id}: behavior ${outcome.behavior}; review ${outcome.review}`);
+  // The hint is an instruction, not data: JSON escapes its quotes and bounding cuts it.
+  const { hint, ...pinned } = object(data.pinnedTests) as { hint?: unknown };
   const summary = {
     feature: data.feature,
     task: data.task,
@@ -280,14 +283,15 @@ function compactVerificationText(
     findings:
       Array.isArray(plan.findings) && plan.findings.length ? bounded(plan.findings) : undefined,
     acceptanceTests: data.acceptanceTests ? bounded(data.acceptanceTests) : undefined,
-    pinnedTests: data.pinnedTests ? bounded(data.pinnedTests) : undefined,
+    pinnedTests: Object.keys(pinned).length ? bounded(pinned) : undefined,
     critic: data.critic ? bounded(data.critic) : undefined,
     nextProbe: plan.nextProbe ? bounded(object(plan.nextProbe).question) : undefined,
     next: data.next
       ? { action: next.action, objective: next.objective, command: next.command }
       : undefined,
   };
-  return `${name}: ${JSON.stringify(summary)}\n${WORDING[channel].detail} Tool success does not imply product acceptance.`;
+  const hintLine = typeof hint === "string" && hint ? `\n${hint}` : "";
+  return `${name}: ${JSON.stringify(summary)}${hintLine}\n${WORDING[channel].detail} Tool success does not imply product acceptance.`;
 }
 
 /** Gaps repeat outcome statuses first; the actionable environment or scope reason comes last. */
@@ -341,6 +345,10 @@ function compactBriefText(name: string, value: unknown, channel: ReplyChannel = 
     .filter((text): text is string => typeof text === "string")
     .map((text) => `\nWarning: ${text}`)
     .join("");
+  const notes = [data.duplicateNote, data.testsNote]
+    .filter((text): text is string => typeof text === "string")
+    .map((text) => `\nNote: ${text}`)
+    .join("");
   // The adapter does not choose the next slice; visp_next owns that decision.
   const wording = WORDING[channel];
   const feature = String(brief.feature);
@@ -350,7 +358,7 @@ function compactBriefText(name: string, value: unknown, channel: ReplyChannel = 
       : name.endsWith("feature")
         ? wording.template(feature)
         : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}${warning}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  return `${name}: ${JSON.stringify(summary)}${warning}${notes}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {

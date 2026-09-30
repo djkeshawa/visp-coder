@@ -845,23 +845,32 @@ it("uses the host-recorded prompt unless the worker quotes it verbatim", async (
     "Return two from the public module. Keep the module name.",
   );
   await expect(readFile(join(created.root, ".visp/session/user-prompts.jsonl"))).rejects.toThrow();
-  await created.write(".visp/session/user-prompts.jsonl", `${prompts[0]}\n`);
+  // A repeat of one request within ten minutes returns the first feature, so each case differs.
+  const other = JSON.stringify({
+    at: "2026-09-24T00:00:00Z",
+    prompt: "Return three from the public module.\nKeep the module name.",
+  });
+  await created.write(".visp/session/user-prompts.jsonl", `${other}\n`);
   const truncated = await createProductFeatureWithTests(
     await created.state(),
     { goal: "Four", sourceBrief: "Keep the module name." },
     undefined,
   );
   expect(truncated.ok && truncated.value.brief.originalRequest).toBe(
-    "Return two from the public module.\nKeep the module name.",
+    "Return three from the public module.\nKeep the module name.",
   );
-  await created.write(".visp/session/user-prompts.jsonl", `${prompts[0]}\n`);
+  const another = JSON.stringify({
+    at: "2026-09-24T00:00:00Z",
+    prompt: "Return four from the public module.\nKeep the module name.",
+  });
+  await created.write(".visp/session/user-prompts.jsonl", `${another}\n`);
   const paraphrased = await createProductFeatureWithTests(
     await created.state(),
     { goal: "Three", sourceBrief: "Make the module return 2" },
     undefined,
   );
   expect(paraphrased.ok && paraphrased.value.brief.originalRequest).toBe(
-    "Return two from the public module.\nKeep the module name.",
+    "Return four from the public module.\nKeep the module name.",
   );
 });
 

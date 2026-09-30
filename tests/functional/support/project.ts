@@ -140,6 +140,9 @@ export class TestProject {
         cwd: this.root,
         encoding: "utf8",
         input,
+        // A command that never exits fails the test instead of hanging the run.
+        timeout: 180_000,
+        killSignal: "SIGKILL",
         stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         // Same PATH the hooks get, so `doctor` sees the shim a user would have.
         env: this.env(),
