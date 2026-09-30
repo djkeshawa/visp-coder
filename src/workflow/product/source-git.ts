@@ -18,8 +18,8 @@ export function repositorySourceIdentity(
     : workingSourceIdentity(workspace, path, algorithm);
 }
 
-/** Only declared inputs need byte snapshots; other files use Git's content identity. */
-async function workingSourceIdentity(
+/** Hash actual worktree bytes and Git modes without trusting the index. */
+export async function workingSourceIdentity(
   workspace: WorkspaceState,
   path: string,
   algorithm: "sha1" | "sha256",
