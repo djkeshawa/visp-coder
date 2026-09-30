@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runBrowserJourney } from "../../src/testing/browser-journey.js";
+import { pngPixel } from "./support/png-pixel.js";
 
 let root: string;
 beforeEach(async () => {
@@ -268,3 +269,55 @@ describe("drag position and by on a scaled canvas", () => {
     },
   );
 });
+
+// A frame-driven pull indicator: the swatch is red only once the pointer has travelled the full
+// 200 px, blue after release, and green 700 ms after release.
+const pullHtml = `<!doctype html><style>body{margin:0;background:#fff}#pad{width:300px;height:200px;background:#ddd;touch-action:none}#swatch{position:absolute;left:330px;top:230px;width:40px;height:40px}</style><div id="pad"></div><div id="swatch"></div><script src="pull.js"></script>`;
+const pullScript = `const pad=document.querySelector('#pad'),swatch=document.querySelector('#swatch');let state='idle',startX=0,pull=0;const paint=()=>{swatch.style.background=state==='idle'?'rgb(128,128,128)':state==='pulling'?(pull>=0.99?'rgb(255,0,0)':'rgb(255,165,0)'):state==='released'?'rgb(0,0,255)':'rgb(0,200,0)';requestAnimationFrame(paint)};paint();pad.addEventListener('pointerdown',e=>{if(!e.isTrusted)return;pad.setPointerCapture(e.pointerId);startX=e.clientX;pull=0;state='pulling'});pad.addEventListener('pointermove',e=>{if(state==='pulling'&&e.isTrusted)pull=Math.min(1,(e.clientX-startX)/200)});pad.addEventListener('pointerup',e=>{if(state!=='pulling'||!e.isTrusted)return;state='released';setTimeout(()=>{state='settled'},700)});`;
+const near = (actual: readonly number[], expected: readonly number[]) =>
+  actual.every((channel, index) => Math.abs(channel - (expected[index] ?? 0)) <= 12);
+it.each(["pointer", "touch"] as const)(
+  "captures the fully pulled state, then two frames after %s release",
+  async (input) => {
+    await writeFile(join(root, "index.html"), pullHtml);
+    await writeFile(join(root, "pull.js"), pullScript);
+    const result = await runBrowserJourney({
+      projectRoot: root,
+      directory: join(root, "captures"),
+      subjectDigest: "a".repeat(64),
+      journey: {
+        url: pathToFileURL(join(root, "index.html")).href,
+        viewport: { width: 400, height: 300 },
+        actions: [
+          {
+            kind: "drag",
+            selector: "#pad",
+            from: { x: 50, y: 50 },
+            to: { x: 250, y: 50 },
+            input,
+            steps: 5,
+            durationMs: 100,
+            captureDuring: true,
+            captureAfterMs: [100, 1200],
+            capture: false,
+          },
+        ],
+      },
+    });
+    expect(result.status).toBe("completed");
+    // initial, held, +100 ms, +1200 ms, final
+    expect(result.captures).toHaveLength(5);
+    expect(new Set(result.captures.map((entry) => entry.sha256)).size).toBeGreaterThanOrEqual(4);
+    const swatches = await Promise.all(
+      result.captures.map((entry) => pngPixel(entry.path, 350, 250)),
+    );
+    expect(swatches.map((pixel, index) => [index, near(pixel, [128, 128, 128])])[0]).toEqual([
+      0,
+      true,
+    ]);
+    expect(near(swatches[1] ?? [], [255, 0, 0])).toBe(true);
+    expect(near(swatches[2] ?? [], [0, 0, 255])).toBe(true);
+    expect(near(swatches[3] ?? [], [0, 200, 0])).toBe(true);
+    expect(result.captures[1]?.steps.some((step) => step.startsWith("Finish"))).toBe(false);
+  },
+);

@@ -143,6 +143,27 @@ describe("required experience journey evidence", () => {
       expect(productJourneyKey(changed as BrowserJourney, "T001")).not.toBe(key);
     expect(productJourneyKey(journey, "T002")).not.toBe(key);
   });
+  it("ignores post-release capture offsets but keys on fractional drag start and travel", () => {
+    const drag = {
+      kind: "drag" as const,
+      selector: "canvas",
+      position: { x: 0.5, y: 0.5 },
+      by: { x: -0.25, y: 0.1 },
+    };
+    const journey = (action: object) =>
+      browserJourneySchema.parse({ url: "https://example.test", actions: [action] });
+    const key = productJourneyKey(journey(drag), "T001");
+    expect(productJourneyKey(journey({ ...drag, captureAfterMs: [100, 400] }), "T001")).toBe(key);
+    expect(
+      productJourneyKey(journey({ ...drag, captureAfterMs: [50], captureDuring: true }), "T001"),
+    ).toBe(key);
+    for (const changed of [
+      { ...drag, position: { x: 0.5, y: 0.6 } },
+      { ...drag, by: { x: -0.25, y: 0.2 } },
+      { ...drag, by: undefined, to: { x: 5, y: 5 } },
+    ])
+      expect(productJourneyKey(journey(changed), "T001")).not.toBe(key);
+  });
   it.each([
     ["localhost:3000", "http://localhost:3000/play?level=2#go"],
     ["127.0.0.1 on another port", "http://127.0.0.1:8123/play?level=2#go"],

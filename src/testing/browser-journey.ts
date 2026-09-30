@@ -113,7 +113,22 @@ export const browserJourneySchema = z
               cancel: z.boolean().optional(),
               steps: z.number().int().min(2).max(60).optional(),
               durationMs: z.number().min(0).max(2000).optional(),
+              /** Capture the held state at full pull, before release. */
               captureDuring: z.boolean().optional(),
+              /**
+               * Capture again this many ms after release (1-3 increasing offsets). Each counts toward
+               * the six captures; `capture: true` is redundant with it.
+               */
+              captureAfterMs: z
+                .array(z.number().int().min(50).max(2000))
+                .min(1)
+                .max(3)
+                .refine(
+                  (offsets) =>
+                    offsets.every((offset, i) => i === 0 || offset > (offsets[i - 1] ?? 0)),
+                  "captureAfterMs offsets must be strictly increasing",
+                )
+                .optional(),
               capture: z.boolean().default(false),
             })
             .strict(),
@@ -146,6 +161,10 @@ export const browserJourneySchema = z
       1 +
       journey.actions.filter((action) => action.capture).length +
       journey.actions.filter((action) => action.kind === "drag" && action.captureDuring).length +
+      journey.actions.reduce(
+        (sum, action) => sum + (action.kind === "drag" ? (action.captureAfterMs?.length ?? 0) : 0),
+        0,
+      ) +
       (journey.actions.length > 0 && !journey.actions.at(-1)?.capture ? 1 : 0);
     if (captures > 6)
       context.addIssue({
@@ -385,7 +404,7 @@ async function performAction(
     await actAtPoint(session, action);
   else if (action.kind === "compare") await compareBrowserValues(session, action);
   else if (action.kind === "key") await session.page.keyboard.press(action.key);
-  else if (action.kind === "drag") await performDrag(session, action, capture);
+  else if (action.kind === "drag") await performDrag(session, action, capture, journeySignal);
   else if (action.kind === "wait-for") await waitForObservation(session, action, journeySignal);
   else if (action.kind === "scroll") await scrollToElement(session, action, journeySignal);
   else if (action.kind === "resize") await session.resize(action.viewport);
@@ -398,6 +417,7 @@ async function performDrag(
   session: BrowserSession,
   action: DragAction,
   capture: () => Promise<void>,
+  journeySignal: AbortSignal,
 ): Promise<void> {
   const { selector } = action;
   const { from, to } = await resolveDragPoints(session, action);
@@ -435,6 +455,12 @@ async function performDrag(
     },
     action.captureDuring ? capture : undefined,
   );
+  const released = performance.now();
+  for (const offset of action.captureAfterMs ?? []) {
+    const wait = offset - (performance.now() - released);
+    if (wait > 0) await delay(wait, undefined, { signal: journeySignal });
+    await capture();
+  }
 }
 
 function roundPoint(point: { x: number; y: number }): string {

@@ -464,6 +464,70 @@ it("requires exactly one of to and by, and at most one of from and position", ()
   expect(parse({ by, position: { x: 2, y: 0 } }).success).toBe(false);
 });
 
+it("captures held state, then each post-release offset in order, counted toward the cap", async () => {
+  const native = await nativeSession();
+  const log: string[] = [];
+  let released = 0;
+  native.drag.mockImplementation(async (_gesture: unknown, intermediate?: () => Promise<void>) => {
+    log.push("drag");
+    await intermediate?.();
+    log.push("release");
+    released = Date.now();
+  });
+  const times: number[] = [];
+  browser.capture.mockImplementation(async () => {
+    log.push("capture");
+    times.push(Date.now() - released);
+    return { id: `CAP-${log.length}`, path: "/tmp/frame.png" };
+  });
+  const result = await runBrowserJourney({
+    ...options,
+    journey: dragJourney({
+      to: { x: 500, y: 300 },
+      captureDuring: true,
+      captureAfterMs: [100, 400],
+    }),
+  });
+  expect(result.status).toBe("completed");
+  // initial, held (before release), +100, +400, then the automatic final capture.
+  expect(log).toEqual(["capture", "drag", "capture", "release", "capture", "capture", "capture"]);
+  expect(result.captures).toHaveLength(5);
+  expect(times[2]).toBeGreaterThanOrEqual(95);
+  expect(times[3]).toBeGreaterThanOrEqual(395);
+  expect(times[3]).toBeLessThan(1500);
+});
+
+it("counts post-release captures toward the six-capture cap and validates the offsets", () => {
+  const journey = (action: Record<string, unknown>) =>
+    browserJourneySchema.safeParse(dragJourney({ to: { x: 5, y: 5 }, ...action }));
+  // 1 initial + held + 3 after + 1 final = 6
+  expect(journey({ captureDuring: true, captureAfterMs: [50, 200, 2000] }).success).toBe(true);
+  // capture: true replaces the automatic final capture, so it stays at six; a second captured action makes seven.
+  expect(
+    journey({ captureDuring: true, capture: true, captureAfterMs: [50, 200, 2000] }).success,
+  ).toBe(true);
+  const over = browserJourneySchema.safeParse({
+    url: options.journey.url,
+    actions: [
+      {
+        kind: "drag",
+        selector: "#range",
+        to: { x: 5, y: 5 },
+        captureDuring: true,
+        captureAfterMs: [50, 200, 2000],
+        capture: true,
+      },
+      { kind: "wait", durationMs: 1, capture: true },
+    ],
+  });
+  expect(over).toMatchObject({
+    success: false,
+    error: { issues: [{ message: "Journey exceeds six representative captures" }] },
+  });
+  for (const captureAfterMs of [[], [49], [2001], [100, 100], [400, 100], [1, 2, 3, 4], [100.5]])
+    expect(journey({ captureAfterMs }).success).toBe(false);
+});
+
 it("retains coordinate/reachability failures without dispatching the rejected input", async () => {
   const native = await nativeSession();
   for (const from of [
