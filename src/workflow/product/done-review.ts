@@ -13,7 +13,7 @@ import { type ReviewerCapacity, reviewerCapacity } from "./critic-capacity.js";
 import { codexExecCriticHost, configuredCriticLauncher } from "./critic-exec.js";
 import { hasPendingCriticReview } from "./critic-policy.js";
 import { type ProductVerification, runProductAccept, runProductDone } from "./evidence.js";
-import { outstandingFeedback } from "./findings.js";
+import { openRequiredFindings, outstandingFeedback } from "./findings.js";
 import { type AcceptanceProgress, acceptanceProgress } from "./independent-tests.js";
 import { closedSlice, latestExecutionsByOwner } from "./model.js";
 import type { PinnedDispute } from "./pinned-dispute-model.js";
@@ -343,6 +343,14 @@ async function reviewNotNeeded(
   // A dispute is decided only by a review; once it has ruled on this exact source, another
   // review of it would find nothing new.
   if (pending.length) return undefined;
+  if (
+    record &&
+    openRequiredFindings(
+      record,
+      record.brief.slices.find((slice) => slice.id === task),
+    ).length
+  )
+    return undefined;
   if (await rulingCurrent(workspace, feature, subject))
     return {
       reviewed: false,
@@ -360,17 +368,19 @@ async function reviewNotNeeded(
 }
 
 /**
- * The slice has a mandatory outcome that needs a review (`reviewRequired`, or an experience
- * outcome) and no satisfied assessment yet. Only the reviewer can supply it, so it is never
- * skipped, and it must be able to launch even when the slice has no check to run.
+ * A required finding needs an explicit disposition, even after outcomes are satisfied.
+ * Mandatory review outcomes also owe a review until assessed. Neither obligation can be
+ * skipped merely because the slice has no new check to run.
  */
 export function reviewOwed(record: ProductRecord, task: string, subject: string): boolean {
   const slice = record.brief.slices.find((entry) => entry.id === task);
   return (
     !!slice &&
-    outcomeStatuses(record, subject, slice).some(
-      (entry) => entry.priority === "must" && entry.requiredReview && entry.review !== "satisfied",
-    )
+    (openRequiredFindings(record, slice).length > 0 ||
+      outcomeStatuses(record, subject, slice).some(
+        (entry) =>
+          entry.priority === "must" && entry.requiredReview && entry.review !== "satisfied",
+      ))
   );
 }
 

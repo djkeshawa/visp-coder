@@ -4,11 +4,13 @@ import type { WorkspaceState } from "../state.js";
 import type { CriticPhase, CriticState } from "./critic-model.js";
 import type { CriticSelection } from "./critic-store.js";
 import { needsBrowser } from "./environment.js";
-import { findingAppliesToSlice, outstandingFeedback } from "./findings.js";
+import { openRequiredFindings } from "./findings.js";
 import { independentReviewJsonSchema, independentReviewTemplate } from "./independent-review.js";
 import { independentSources } from "./independent-sources.js";
 import type { ProductBrief } from "./model.js";
 import { disputePacketEntries, type PacketDispute } from "./pinned-disputes.js";
+import { repairRecheck } from "./repair-recheck.js";
+import { findingReproductions } from "./reproduction-bindings.js";
 import { deliveredReviewEvidenceIds } from "./review-context.js";
 import {
   SOURCE_ADVICE_INSTRUCTIONS,
@@ -32,7 +34,16 @@ export interface CriticPacket {
    * Earlier independent findings for this selection. They are reviewer judgments, not the
    * worker's claims; without their IDs no later review could resolve them.
    */
-  openFindings?: readonly { id: string; problem: string; nextCheck: string }[];
+  openFindings?: readonly {
+    id: string;
+    problem: string;
+    nextCheck: string;
+    subjectDigest: string;
+    evidence: readonly string[];
+    outcomes: readonly string[];
+    reproductions: ReturnType<typeof findingReproductions>;
+    recheck?: ReturnType<typeof repairRecheck>;
+  }[];
   /**
    * Pinned acceptance tests the worker says contradict the request. The reviewer rules on
    * each; the worker never does.
@@ -43,7 +54,7 @@ export interface CriticPacket {
 }
 
 const OPEN_FINDINGS_INSTRUCTIONS =
-  "openFindings lists problems an earlier independent review reported. Re-check each against the current source and evidence. If it is fixed, add a resolutions entry with its id, what changed, and the current passing check evidence IDs that exercise it. If it is not fixed, report it again as a finding.";
+  "openFindings lists every unresolved required problem an earlier independent review reported. Re-check each against the current source and evidence and return one structured resolutions entry per id. Use disposition repaired with evidence of the correction, disproved with executed counterevidence, still-open when the defect remains, or not-reproducible when the supplied evidence cannot establish its status. Explain the specific missing evidence for an unresolved disposition; these may have evidence: [] and do not close the finding. Favorable prose, satisfied outcomes, and inability to reproduce never resolve a finding. A repair requires current passing check evidence that exercises the report and adjacent regression evidence or an explicit not-applicable reason. Do not restore broken code to manufacture a failed receipt: where no reproduction was recorded, independently re-check current source and passing executions.";
 
 export const DISPUTE_INSTRUCTIONS =
   "disputes lists pinned acceptance tests the implementer says contradict the original request. Each has the tester's own quote, the implementer's reason, the failing output and the test source. Rule on every dispute in the disputes response: upheld only when the original request itself contradicts what the test asserts, or the failure comes from the test rather than the product (an assertion about incidental ordering the request does not state, cleanup errors, an impossible case); quote the deciding request sentence in reasoning. Effort, inconvenience or a preferred design is never a reason. Otherwise rejected: the product must satisfy the test. priorRulings holds earlier rulings on the same test: a repeat filing is not new evidence, so keep a prior rejection unless the new reason shows the request contradicts the test. A disputed failing test is the subject of the dispute, not a product finding; report it as a finding only when you reject the dispute and the product violates the request.";
@@ -66,16 +77,17 @@ function packetInstructions(
     .join("\n");
 }
 
-function openFindingsFor(selected: CriticSelection) {
-  return outstandingFeedback(selected.record)
-    .filter(
-      (finding) =>
-        finding.required &&
-        finding.phase === "product" &&
-        findingAppliesToSlice(finding, selected.slice),
-    )
-    .slice(0, 6)
-    .map((finding) => ({ id: finding.id, problem: finding.problem, nextCheck: finding.nextCheck }));
+function openFindingsFor(selected: CriticSelection, subject: string) {
+  return openRequiredFindings(selected.record, selected.slice).map((finding) => ({
+    id: finding.id,
+    problem: finding.problem,
+    nextCheck: finding.nextCheck,
+    subjectDigest: finding.subjectDigest,
+    evidence: finding.evidence,
+    outcomes: finding.outcomes,
+    reproductions: findingReproductions(selected.record, finding),
+    recheck: repairRecheck(selected.record, finding, subject, finding.task ?? selected.slice?.id),
+  }));
 }
 
 /** Independent input: no worker verdicts, approval history, workflow plans or approval forms. */
@@ -99,7 +111,7 @@ export async function criticPacket(
       (!entry.id.startsWith("BRIEF-") || understanding) &&
       (!sourceOnly || entry.kind !== "image"),
   );
-  const open = understanding || sourceOnly ? [] : openFindingsFor(selected);
+  const open = understanding || sourceOnly ? [] : openFindingsFor(selected, current.subjectDigest);
   const disputes =
     understanding || sourceOnly
       ? []

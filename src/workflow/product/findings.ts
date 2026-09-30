@@ -1,6 +1,10 @@
 import { hashValue } from "../../core/hash.js";
 import { productBehaviorProbes } from "./behavior-probes.js";
-import type { ProductFeedback, QUALITY_DIMENSIONS } from "./feedback-model.js";
+import {
+  type ProductFeedback,
+  type QUALITY_DIMENSIONS,
+  resolutionClosesFinding,
+} from "./feedback-model.js";
 import type { ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
 
@@ -41,7 +45,8 @@ export function outstandingFeedback(record: ProductRecord) {
     const feedback = review.feedback;
     if (!feedback) continue;
     for (const resolution of feedback.resolutions)
-      resolveHistoricalFinding(pending, resolution.id, review.task);
+      if (resolutionClosesFinding(resolution))
+        resolveHistoricalFinding(pending, resolution.id, review.task);
     for (const finding of findings) {
       const legacyId = legacyFindingId(finding);
       const collision = collisions.has(legacyId);
@@ -58,6 +63,13 @@ export function outstandingFeedback(record: ProductRecord) {
   }
   return [...pending.values()].sort(
     (a, b) => Number(b.required) - Number(a.required) || b.repeats - a.repeats,
+  );
+}
+
+export function openRequiredFindings(record: ProductRecord, slice?: ProductSlice) {
+  return outstandingFeedback(record).filter(
+    (finding) =>
+      finding.required && finding.phase === "product" && findingAppliesToSlice(finding, slice),
   );
 }
 

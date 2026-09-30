@@ -21,14 +21,21 @@ import { observedProduct, stopReason } from "./critic-status.js";
 import { criticSelection, readCriticState, saveCriticState } from "./critic-store.js";
 import { phaseReviewGap } from "./critic-understanding.js";
 import { productFailureSignature } from "./failures.js";
-import { executionSchema, type ProductSlice } from "./model.js";
+import { openRequiredFindings } from "./findings.js";
+import { executionSchema, type ProductSlice, productStateSchema } from "./model.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
 import { disputeSetKey, disputeState } from "./pinned-disputes.js";
+import { reproductionContextDigest } from "./reproduction-bindings.js";
 import { runProductReviewerHandoff } from "./reviewer-handoff.js";
 import type { ProductRecord } from "./store.js";
 import { productImplementationDigest } from "./subject.js";
 
-const historicalExecutions = z.object({ executions: z.array(executionSchema) }).passthrough();
+const historicalExecutions = z
+  .object({
+    executions: z.array(executionSchema),
+    reproductions: productStateSchema.shape.reproductions,
+  })
+  .passthrough();
 const historicalHandoff = z
   .object({
     images: z.array(z.object({ sha256: z.string() }).passthrough()),
@@ -225,6 +232,7 @@ function reviewEvidenceDigest(
       .filter((entry) => ["operation", "control"].includes(entry.kind))
       .map(({ kind, status, summary, measurement }) => ({ kind, status, summary, measurement })),
     ...(disputes ? { disputes } : {}),
+    reproductions: reproductionContextDigest(record),
   });
 }
 
@@ -236,6 +244,9 @@ async function requireNewReview(
   implementation: string,
   evidenceDigest: string,
 ) {
+  // A saved assessment without a disposition leaves real review work outstanding.
+  // VISP may spend remaining capacity on it; reservation budget and evidence guards still apply.
+  if (owesResolutionReview(workspace, selected, request)) return ok(undefined);
   for (const attempt of state.attempts) {
     if (
       attempt.status !== "reviewed" ||
@@ -252,6 +263,19 @@ async function requireNewReview(
     if (historical.value === evidenceDigest) return duplicateReview();
   }
   return ok(undefined);
+}
+
+function owesResolutionReview(
+  workspace: WorkspaceState,
+  selected: import("./critic-store.js").CriticSelection,
+  request: CriticRequest,
+) {
+  return (
+    selected.phase === "product" &&
+    !request.sourceOnly &&
+    relaunchesReview(workspace, request) &&
+    openRequiredFindings(selected.record, selected.slice).length > 0
+  );
 }
 
 function duplicateReview() {
@@ -284,7 +308,11 @@ async function historicalSelectedEvidenceDigest(
     reviewEvidenceDigest(
       {
         ...selected.record,
-        state: { ...selected.record.state, executions: snapshot.data.executions },
+        state: {
+          ...selected.record.state,
+          executions: snapshot.data.executions,
+          reproductions: snapshot.data.reproductions,
+        },
       },
       attempt.subject,
       selected.slice,

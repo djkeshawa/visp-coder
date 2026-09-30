@@ -17,7 +17,11 @@ import { findingAppliesToSlice, outstandingFeedback } from "./findings.js";
 
 export { findingAppliesToSlice, outstandingFeedback } from "./findings.js";
 
-import { type ProductFeedback, productFeedbackSchema } from "./feedback-model.js";
+import {
+  type ProductFeedback,
+  productFeedbackSchema,
+  resolutionClosesFinding,
+} from "./feedback-model.js";
 import { functionalRegressionEvidenceGap } from "./functional-regression.js";
 import { findFunctionalRepair, functionalDisproofEvidenceGap } from "./functional-resolution.js";
 import type { ProductBrief, ProductReviewerContext, ProductSlice } from "./model.js";
@@ -378,10 +382,6 @@ function validateResolution(
   record: ProductRecord,
   slice?: ProductSlice,
 ): Result<void> {
-  const resolve = (ids: readonly string[]) =>
-    ids.map((id) =>
-      catalogue.entries.find((entry) => entry.id === (catalogue.aliases.get(id) ?? id)),
-    );
   if (!finding)
     return err(vispError("ARTIFACT_INVALID", `Unknown unresolved feedback ${resolution.id}`));
   if (slice && finding.task && finding.task !== slice.id)
@@ -390,6 +390,22 @@ function validateResolution(
         "EVIDENCE_FAILED",
         `Finding ${finding.id} belongs to ${finding.task}; assess it in its own slice or feature-wide review`,
       ),
+    );
+  if (!resolutionClosesFinding(resolution)) return ok(undefined);
+  return validateClosingResolution(resolution, finding, catalogue, reviewer, record);
+}
+
+/** Successful closure retains the existing counterevidence and functional repair guards. */
+function validateClosingResolution(
+  resolution: ProductFeedback["resolutions"][number],
+  finding: ReturnType<typeof outstandingFeedback>[number],
+  catalogue: ProductEvidenceCatalogue,
+  reviewer: ProductReviewerContext,
+  record: ProductRecord,
+): Result<void> {
+  const resolve = (ids: readonly string[]) =>
+    ids.map((id) =>
+      catalogue.entries.find((entry) => entry.id === (catalogue.aliases.get(id) ?? id)),
     );
   if (
     resolution.environmentChange &&
