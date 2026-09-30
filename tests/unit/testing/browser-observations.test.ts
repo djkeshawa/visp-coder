@@ -249,10 +249,32 @@ it("resolves normalized CSS border-box coordinates and rejects unsupported geome
   });
   for (const selector of ["#missing", "#ambiguous"])
     expect(resolveElementPoint({ ...target, selector }).error).toContain("Expected one control");
-  for (const key of ["transform", "perspective", "rotate", "scale"] as const) {
-    dom.style[key] = "unsupported";
-    expect(resolveElementPoint(target).error).toContain("untransformed");
+  for (const [key, value] of [
+    ["transform", "unsupported"],
+    ["transform", "matrix(0.866, 0.5, -0.5, 0.866, 0, 0)"],
+    ["transform", "matrix(1, 0, 0.5, 1, 0, 0)"],
+    ["transform", "matrix(-1, 0, 0, -1, 0, 0)"],
+    ["transform", "matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)"],
+    ["perspective", "800px"],
+    ["transform", "matrix(0.001, 0.0000005, 0, 0.001, 0, 0)"],
+    ["rotate", "20deg"],
+    ["offsetPath", "path('M 0 0 L 100 100')"],
+    ["scale", "unsupported"],
+    ["scale", "-1"],
+  ] as const) {
+    dom.style[key] = value;
+    expect(resolveElementPoint(target).error).toContain("rotated, skewed or perspective");
     expect(resolveElementPoint({ ...target, exact: false }).error).toBeUndefined();
+    dom.style[key] = "none";
+  }
+  // Fit-to-window canvases scale and translate their box; the measured box is already post-transform.
+  for (const [key, value] of [
+    ["transform", "matrix(0.5, 0, 0, 0.5, 40, 12)"],
+    ["scale", "0.5"],
+    ["scale", "0.5 0.75"],
+  ] as const) {
+    dom.style[key] = value;
+    expect(resolveElementPoint(target)).toMatchObject({ x: 160, y: 140, error: undefined });
     dom.style[key] = "none";
   }
   for (const position of [
@@ -320,7 +342,7 @@ it("accepts harmless hover motion but refuses covered targets", async () => {
   dom.style.transform = "rotate(30deg)";
   await expect(
     actAtPoint(session, { kind: "click", selector: "#range", position: { x: 0.2, y: 0.2 } }),
-  ).rejects.toThrow("untransformed");
+  ).rejects.toThrow("rotated, skewed or perspective");
 });
 
 it("moves to a visible center without requiring the entire surface to fit onscreen", async () => {

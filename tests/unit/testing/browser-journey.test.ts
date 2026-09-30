@@ -320,6 +320,214 @@ it.each([false, true])(
   },
 );
 
+const dragJourney = (action: Record<string, unknown>) =>
+  ({
+    url: options.journey.url,
+    actions: [{ kind: "drag", selector: "#range", capture: false, ...action }],
+  }) as BrowserJourney;
+
+it.each([
+  // [rect, viewport width, position, by, expected from, expected to]
+  [
+    { x: 80, y: 80, width: 400, height: 240 },
+    1280,
+    { x: 0.25, y: 0.5 },
+    { x: 0.5, y: 0.25 },
+    [180, 200],
+    [380, 260],
+  ],
+  [
+    { x: 10, y: 20, width: 300, height: 180 },
+    390,
+    { x: 0.5, y: 0.25 },
+    { x: -0.25, y: 0.5 },
+    [160, 65],
+    [85, 155],
+  ],
+  [
+    { x: 80, y: 80, width: 400, height: 240 },
+    1280,
+    undefined,
+    { x: 0, y: -0.5 },
+    [280, 200],
+    [280, 80],
+  ],
+] as const)(
+  "resolves drag position and by as fractions of the element box (%#)",
+  async (rect, width, position, by, expectedFrom, expectedTo) => {
+    const native = await nativeSession();
+    Object.assign(native.dom.rect, rect);
+    vi.stubGlobal("innerWidth", width);
+    const result = await runBrowserJourney({
+      ...options,
+      journey: dragJourney({ position, by }),
+    });
+    expect(result.status).toBe("completed");
+    expect(native.drag).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: { x: expectedFrom[0], y: expectedFrom[1] },
+        to: { x: expectedTo[0], y: expectedTo[1] },
+      }),
+      undefined,
+    );
+  },
+);
+
+it("accepts a drag inside a scaled canvas box and rejects rotated geometry", async () => {
+  const native = await nativeSession();
+  native.dom.style.transform = "matrix(0.5, 0, 0, 0.5, 40, 12)";
+  const scaled = await runBrowserJourney({
+    ...options,
+    journey: dragJourney({ position: { x: 0.5, y: 0.5 }, by: { x: 0.25, y: 0.5 } }),
+  });
+  expect(scaled.status).toBe("completed");
+  expect(native.drag).toHaveBeenCalledWith(
+    expect.objectContaining({ from: { x: 280, y: 200 }, to: { x: 380, y: 320 } }),
+    undefined,
+  );
+  native.drag.mockClear();
+  native.dom.style.transform = "matrix(0.866, 0.5, -0.5, 0.866, 0, 0)";
+  expect(
+    await runBrowserJourney({
+      ...options,
+      journey: dragJourney({ position: { x: 0.5, y: 0.5 }, by: { x: 0.25, y: 0.5 } }),
+    }),
+  ).toMatchObject({
+    status: "failed",
+    failure: { message: expect.stringContaining("rotated, skewed or perspective") },
+  });
+  expect(native.drag).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["rotated", "matrix(0.966, 0.259, -0.259, 0.966, 0, 0)"],
+  ["skewed", "matrix(1, 0, 0.3, 1, 0, 0)"],
+  ["flipped", "matrix(-1, 0, 0, 1, 0, 0)"],
+  ["3D", "matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)"],
+])("refuses by alone and from with by on %s geometry", async (_name, transform) => {
+  const native = await nativeSession();
+  native.dom.style.transform = transform;
+  for (const action of [
+    { by: { x: 0.25, y: 0.25 } },
+    { from: { x: 100, y: 100 }, by: { x: 0.25, y: 0.25 } },
+  ]) {
+    expect(await runBrowserJourney({ ...options, journey: dragJourney(action) })).toMatchObject({
+      status: "failed",
+      failure: { message: expect.stringContaining("rotated, skewed or perspective") },
+    });
+  }
+  expect(native.drag).not.toHaveBeenCalled();
+});
+
+it("resolves by from an explicit start when the element centre is off screen", async () => {
+  const native = await nativeSession();
+  Object.assign(native.dom.rect, { x: 80, y: 80, width: 400, height: 2000 });
+  const result = await runBrowserJourney({
+    ...options,
+    journey: dragJourney({ from: { x: 100, y: 100 }, by: { x: 0.25, y: 0.05 } }),
+  });
+  expect(result.status).toBe("completed");
+  expect(native.drag).toHaveBeenCalledWith(
+    expect.objectContaining({ from: { x: 100, y: 100 }, to: { x: 200, y: 200 } }),
+    undefined,
+  );
+});
+
+it("names the resolved coordinates when a fractional drag leaves the viewport", async () => {
+  const native = await nativeSession();
+  native.dom.rect.x = 1000;
+  const result = await runBrowserJourney({
+    ...options,
+    journey: dragJourney({ position: { x: 0.5, y: 0.5 }, by: { x: 1, y: 0 } }),
+  });
+  expect(result).toMatchObject({
+    status: "failed",
+    failure: { message: expect.stringContaining("from 1200,200 to 1600,200") },
+  });
+  expect(native.drag).not.toHaveBeenCalled();
+});
+
+it("requires exactly one of to and by, and at most one of from and position", () => {
+  const parse = (action: Record<string, unknown>) =>
+    browserJourneySchema.safeParse(dragJourney(action));
+  const to = { x: 5, y: 5 };
+  const by = { x: 0.1, y: 0.1 };
+  expect(parse({ to }).success).toBe(true);
+  expect(parse({ by, position: { x: 0.5, y: 0.5 } }).success).toBe(true);
+  expect(parse({ to, by })).toMatchObject({
+    success: false,
+    error: { issues: [{ message: expect.stringContaining("not both") }] },
+  });
+  expect(parse({}).success).toBe(false);
+  expect(parse({ to, from: to, position: { x: 0.5, y: 0.5 } }).success).toBe(false);
+  expect(parse({ by: { x: 1.5, y: 0 } }).success).toBe(false);
+  expect(parse({ by, position: { x: 2, y: 0 } }).success).toBe(false);
+});
+
+it("captures held state, then each post-release offset in order, counted toward the cap", async () => {
+  const native = await nativeSession();
+  const log: string[] = [];
+  let released = 0;
+  native.drag.mockImplementation(async (_gesture: unknown, intermediate?: () => Promise<void>) => {
+    log.push("drag");
+    await intermediate?.();
+    log.push("release");
+    released = Date.now();
+  });
+  const times: number[] = [];
+  browser.capture.mockImplementation(async () => {
+    log.push("capture");
+    times.push(Date.now() - released);
+    return { id: `CAP-${log.length}`, path: "/tmp/frame.png" };
+  });
+  const result = await runBrowserJourney({
+    ...options,
+    journey: dragJourney({
+      to: { x: 500, y: 300 },
+      captureDuring: true,
+      captureAfterMs: [100, 400],
+    }),
+  });
+  expect(result.status).toBe("completed");
+  // initial, held (before release), +100, +400, then the automatic final capture.
+  expect(log).toEqual(["capture", "drag", "capture", "release", "capture", "capture", "capture"]);
+  expect(result.captures).toHaveLength(5);
+  expect(times[2]).toBeGreaterThanOrEqual(95);
+  expect(times[3]).toBeGreaterThanOrEqual(395);
+  expect(times[3]).toBeLessThan(1500);
+});
+
+it("counts post-release captures toward the six-capture cap and validates the offsets", () => {
+  const journey = (action: Record<string, unknown>) =>
+    browserJourneySchema.safeParse(dragJourney({ to: { x: 5, y: 5 }, ...action }));
+  // 1 initial + held + 3 after + 1 final = 6
+  expect(journey({ captureDuring: true, captureAfterMs: [50, 200, 2000] }).success).toBe(true);
+  // capture: true replaces the automatic final capture, so it stays at six; a second captured action makes seven.
+  expect(
+    journey({ captureDuring: true, capture: true, captureAfterMs: [50, 200, 2000] }).success,
+  ).toBe(true);
+  const over = browserJourneySchema.safeParse({
+    url: options.journey.url,
+    actions: [
+      {
+        kind: "drag",
+        selector: "#range",
+        to: { x: 5, y: 5 },
+        captureDuring: true,
+        captureAfterMs: [50, 200, 2000],
+        capture: true,
+      },
+      { kind: "wait", durationMs: 1, capture: true },
+    ],
+  });
+  expect(over).toMatchObject({
+    success: false,
+    error: { issues: [{ message: "Journey exceeds six representative captures" }] },
+  });
+  for (const captureAfterMs of [[], [49], [2001], [100, 100], [400, 100], [1, 2, 3, 4], [100.5]])
+    expect(journey({ captureAfterMs }).success).toBe(false);
+});
+
 it("retains coordinate/reachability failures without dispatching the rejected input", async () => {
   const native = await nativeSession();
   for (const from of [

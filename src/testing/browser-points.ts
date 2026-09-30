@@ -53,7 +53,11 @@ export async function actAtPoint(
   if (action.kind === "tap") await session.page.touchscreen.tap(point.x, point.y);
 }
 
-/** Serialized into the page; transforms are rejected rather than misreported as exact coordinates. */
+/**
+ * Serialized into the page. Rotation, skew and perspective are rejected rather than misreported as
+ * exact coordinates; pure scale and translate stay allowed because the border box is measured after
+ * the transform (fit-to-window canvases scale their box).
+ */
 export function resolveElementPoint({
   selector,
   position,
@@ -65,17 +69,30 @@ export function resolveElementPoint({
 }) {
   const elements = document.querySelectorAll(selector);
   const element = elements.length === 1 ? elements[0] : undefined;
-  if (!element) return { x: 0, y: 0, error: `Expected one control; found ${elements.length}` };
+  if (!element)
+    return {
+      x: 0,
+      y: 0,
+      error: `Expected one control; found ${elements.length}`,
+      unsupportedGeometry: false,
+    };
   for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
     const style = getComputedStyle(ancestor);
     if (
       exact &&
-      (style.transform !== "none" ||
-        style.perspective !== "none" ||
+      (style.perspective !== "none" ||
         (style.rotate && style.rotate !== "none") ||
-        (style.scale && style.scale !== "none"))
+        (style.offsetPath && style.offsetPath !== "none") ||
+        !isScaleAndTranslate(style.transform) ||
+        !isPositiveScale(style.scale))
     )
-      return { x: 0, y: 0, error: "Element-relative positions require untransformed CSS geometry" };
+      return {
+        x: 0,
+        y: 0,
+        error:
+          "Element-relative positions cannot follow rotated, skewed or perspective CSS geometry (scale and translate are fine)",
+        unsupportedGeometry: true,
+      };
   }
   const rect = element.getBoundingClientRect();
   const x = rect.left + position.x * rect.width;
@@ -89,7 +106,34 @@ export function resolveElementPoint({
     x,
     y,
     error,
+    unsupportedGeometry: false,
     borderBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     position,
   };
+
+  // Keep browser-side helpers inside the serialized function.
+  function isScaleAndTranslate(transform: string): boolean {
+    if (!transform || transform === "none") return true;
+    const match = /^matrix\(([^)]*)\)$/.exec(transform);
+    if (!match) return false; // matrix3d and anything unparsed
+    const [a, b, c, d] = (match[1] ?? "").split(",").map(Number);
+    if (![a, b, c, d].every(Number.isFinite)) return false;
+    // Zero off-diagonals (relative to the scale terms) exclude rotation and skew; positive scales
+    // exclude flips and a 180 degree turn.
+    const tolerance = 1e-4 * Math.max(Math.abs(a as number), Math.abs(d as number));
+    return (
+      Math.abs(b as number) <= tolerance &&
+      Math.abs(c as number) <= tolerance &&
+      (a as number) > 0 &&
+      (d as number) > 0
+    );
+  }
+
+  function isPositiveScale(scale: string | undefined): boolean {
+    if (!scale || scale === "none") return true;
+    return scale
+      .split(/\s+/)
+      .slice(0, 2)
+      .every((part) => Number.parseFloat(part) > 0);
+  }
 }

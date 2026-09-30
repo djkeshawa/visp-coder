@@ -40,7 +40,7 @@ function journeyKey(journey: BrowserJourney, task: string | undefined, url: stri
 function journeyActionIdentity(action: BrowserJourney["actions"][number]) {
   const identity = Object.fromEntries(
     Object.entries(action).filter(
-      ([key]) => !["capture", "timeoutMs", "captureDuring"].includes(key),
+      ([key]) => !["capture", "timeoutMs", "captureDuring", "captureAfterMs"].includes(key),
     ),
   );
   if (action.kind === "drag")
