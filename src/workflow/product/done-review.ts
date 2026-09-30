@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
+import { outcomeStatuses } from "./assessment.js";
 import { cancelledExecution } from "./check-lifecycle.js";
 import { type ProductCriticHost, runProductCritic } from "./critic.js";
 import { codexExecCriticHost, configuredCriticLauncher } from "./critic-exec.js";
@@ -103,13 +104,21 @@ export async function runProductDoneReviewed(
     ...(progress.length ? { ...checked.value, acceptanceTests: progress } : checked.value),
     ...pinned.value.initial,
   });
-  if (!startReview || !checksPassed(done.value, state)) return done;
+  if (!startReview) return done;
+  const { record, owed } = await readForReview(
+    workspace,
+    feature,
+    done.value.task,
+    done.value.subjectDigest,
+  );
+  if (!checksPassed(done.value, state, owed)) return done;
   const skipped = await reviewNotNeeded(
     workspace,
     feature,
     done.value.task,
     done.value.subjectDigest,
     state.pending,
+    record,
   );
   if (skipped) return ok({ ...done.value, critic: skipped });
   const critic = await launchReview(workspace, options, deadline, startReview, {
@@ -238,6 +247,18 @@ async function launchReview(
   return critic;
 }
 
+/** The record after `done`, and whether the slice owes a required review. */
+async function readForReview(
+  workspace: WorkspaceState,
+  feature: string,
+  task: string | undefined,
+  subject: string,
+) {
+  const loaded = await readProductRecord(workspace, { feature });
+  const record = loaded.ok ? loaded.value : undefined;
+  return { record, owed: !!record && !!task && reviewOwed(record, task, subject) };
+}
+
 /**
  * Running `done` again is cheap only where a review can ever fit in the call: the MCP wait is
  * shorter than a review, so there it starts with whatever time is left.
@@ -268,6 +289,7 @@ async function reviewNotNeeded(
   task: string | undefined,
   subject: string,
   pending: readonly PinnedDispute[],
+  record: ProductRecord | undefined,
 ): Promise<DoneCriticSummary | undefined> {
   // A dispute is decided only by a review; once it has ruled on this exact source, another
   // review of it would find nothing new.
@@ -278,9 +300,8 @@ async function reviewNotNeeded(
       findings: [],
       reason: "The independent review already ruled on this exact source",
     };
-  const loaded = await readProductRecord(workspace, { feature });
-  if (!loaded.ok || !task) return undefined;
-  if (!skippableReview(loaded.value, task)) return undefined;
+  if (!record || !task) return undefined;
+  if (!skippableReview(record, task, subject)) return undefined;
   return {
     reviewed: false,
     findings: [],
@@ -289,8 +310,23 @@ async function reviewNotNeeded(
   };
 }
 
-/** A clean previous review, and a slice that does not complete the feature. */
-export function skippableReview(record: ProductRecord, task: string): boolean {
+/**
+ * The slice has a mandatory outcome that needs a review (`reviewRequired`, or an experience
+ * outcome) and no satisfied assessment yet. Only the reviewer can supply it, so it is never
+ * skipped, and it must be able to launch even when the slice has no check to run.
+ */
+export function reviewOwed(record: ProductRecord, task: string, subject: string): boolean {
+  const slice = record.brief.slices.find((entry) => entry.id === task);
+  return (
+    !!slice &&
+    outcomeStatuses(record, subject, slice).some(
+      (entry) => entry.priority === "must" && entry.requiredReview && entry.review !== "satisfied",
+    )
+  );
+}
+
+/** A clean previous review, a slice that does not complete the feature, and no required review owed. */
+export function skippableReview(record: ProductRecord, task: string, subject: string): boolean {
   const { brief, state } = record;
   const last = state.reviews.at(-1);
   if (!last?.reviewer?.model) return false;
@@ -300,7 +336,7 @@ export function skippableReview(record: ProductRecord, task: string): boolean {
   const completesFeature = brief.slices.every(
     (slice) => slice.id === task || closedSlice(state.slices[slice.id]?.status),
   );
-  return clean && !completesFeature;
+  return clean && !completesFeature && !reviewOwed(record, task, subject);
 }
 
 /**
@@ -483,14 +519,19 @@ async function pendingReview(
  * Failing checks are cheaper to fix than to review. `done` may execute nothing new when
  * `verify` already passed the current source; a passed result still warrants review.
  */
-function checksPassed(result: ProductVerification, disputes?: DisputeState): boolean {
+function checksPassed(
+  result: ProductVerification,
+  disputes?: DisputeState,
+  reviewOwed = false,
+): boolean {
   // A pinned failure the worker has disputed in full must not keep the reviewer from ruling.
   const blocking = result.executions.filter(
     (execution) =>
       execution.status !== "passed" && !(disputes && disputedFailure(execution, disputes)),
   );
   if (blocking.length) return false;
-  return result.executions.length > 0 || result.passed;
+  // A slice whose required review has no check to run still owes that review.
+  return result.executions.length > 0 || result.passed || reviewOwed;
 }
 
 function summarizeEnvelope(text: string): DoneCriticSummary {
