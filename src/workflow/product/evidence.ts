@@ -171,7 +171,10 @@ async function finishExecution(
         .filter((entry) => entry.required && findingAppliesToSlice(entry, slice))
         .map((entry) => `${entry.id}: ${entry.problem}. ${entry.nextCheck}`),
     );
-  if (accept) gaps.push(...finalProductAssessmentGaps(current, after.value));
+  if (accept)
+    gaps.push(
+      ...finalProductAssessmentGaps(current, after.value, undefined, reviewerRules(workspace)),
+    );
   const passed = gaps.length === 0;
   const completion = await completionState(workspace, record, next, {
     slice,

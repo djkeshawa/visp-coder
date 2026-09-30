@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse, stringify } from "yaml";
 import { run } from "../../../../src/core/exec.js";
 import type { Result } from "../../../../src/core/result.js";
 import {
@@ -153,6 +155,26 @@ describe("final product assessment", () => {
     });
     expect(reviewed.images).toEqual([]);
     expect(value(await runProductAccept(await project.workspace.state())).passed).toBe(true);
+  });
+
+  it("words a missing assessment for VISP's own reviewer, and only when it launches one", async () => {
+    await closePassingSlice();
+    const hostMode = value(await runProductAccept(await project.workspace.state()));
+    expect(hostMode.gaps.join("\n")).toContain(
+      "final goal assessment unassessed; review the current product against the original request",
+    );
+    const raw = parse(await readFile(join(project.workspace.root, "visp.yml"), "utf8"));
+    raw.critic = { ...raw.critic, harness: "codex", mode: "auto", launch: "codex-exec" };
+    await project.workspace.write("visp.yml", stringify(raw));
+    project.workspace.commit("VISP launches the reviewer");
+    const launched = value(await runProductAccept(await project.workspace.state()));
+    const text = launched.gaps.join("\n");
+    expect(text).toContain(
+      "final goal assessment unassessed; VISP's reviewer has not assessed it yet: run visp next",
+    );
+    expect(text).not.toContain("review the current product against the original request");
+    // Wording only: the assessment is still missing, so acceptance still fails.
+    expect(launched.passed).toBe(false);
   });
 
   it("honors an explicit functional review requirement without requiring an image", async () => {

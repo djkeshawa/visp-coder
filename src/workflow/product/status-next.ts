@@ -204,7 +204,7 @@ async function nextClosedProduct(
     ...(await productEvidenceGaps(workspace, record, subject)),
     ...failures.map((execution) => `${execution.check}: ${execution.status}: ${execution.output}`),
   ];
-  const assessmentGaps = finalProductAssessmentGaps(record, subject);
+  const assessmentGaps = finalProductAssessmentGaps(record, subject, undefined, reviewer.runs);
   if (route.override)
     return ok(pinnedStep(record.brief.feature, undefined, route, [...gaps, ...assessmentGaps]));
   const correction =

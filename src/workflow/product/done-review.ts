@@ -572,17 +572,38 @@ function summarizeEnvelope(text: string): DoneCriticSummary {
   }
 }
 
+interface CriticResult {
+  advice?: { summary?: string };
+  findings?: { problem: string; nextCheck?: string; required?: boolean }[];
+  callsRemaining?: number;
+  gaps?: string[];
+  /** Why an attempt ended without a review, as the critic recorded it. */
+  reason?: string;
+  stopped?: string;
+  lifecycle?: { acceptedReview?: boolean; status?: string };
+}
+
+/** Why no review came back; a review still running is not a failure and needs no worker action. */
+function unreviewedReason(value: CriticResult): string {
+  const given = [value.reason, ...(value.gaps ?? [])].filter(Boolean).join("; ");
+  if (given) return given;
+  return value.stopped?.startsWith("review-in-progress") || value.lifecycle?.status === "pending"
+    ? RUNNING_REASON
+    : "The critic did not review";
+}
+
+const RUNNING_REASON = "VISP's reviewer is still running. Wait: run visp next.";
+
 function summarize(result: Result<unknown>): DoneCriticSummary {
-  if (!result.ok) return { reviewed: false, findings: [], reason: result.error.message };
-  const value = result.value as {
-    lifecycle?: { acceptedReview?: boolean };
-    advice?: { summary?: string };
-    findings?: { problem: string; nextCheck?: string; required?: boolean }[];
-    callsRemaining?: number;
-    gaps?: string[];
-    /** Why an attempt ended without a review, as the critic recorded it. */
-    reason?: string;
-  };
+  if (!result.ok)
+    return {
+      reviewed: false,
+      findings: [],
+      reason: result.error.message.startsWith("review-in-progress")
+        ? RUNNING_REASON
+        : result.error.message,
+    };
+  const value = result.value as CriticResult;
   const reviewed = value.lifecycle?.acceptedReview === true;
   return {
     reviewed,
@@ -593,12 +614,6 @@ function summarize(result: Result<unknown>): DoneCriticSummary {
       ...(required !== undefined ? { required } : {}),
     })),
     ...(value.callsRemaining !== undefined ? { callsRemaining: value.callsRemaining } : {}),
-    ...(reviewed
-      ? {}
-      : {
-          reason:
-            [value.reason, ...(value.gaps ?? [])].filter(Boolean).join("; ") ||
-            "The critic did not review",
-        }),
+    ...(reviewed ? {} : { reason: unreviewedReason(value) }),
   };
 }

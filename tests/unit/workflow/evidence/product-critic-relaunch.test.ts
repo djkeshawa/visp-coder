@@ -9,6 +9,7 @@ import {
 } from "../../../../src/workflow/product/critic.js";
 import type { CriticState } from "../../../../src/workflow/product/critic-model.js";
 import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
+import { inlineReview } from "../../../../src/workflow/product/done-review.js";
 import { runProductVerify } from "../../../../src/workflow/product/index.js";
 import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
@@ -244,6 +245,28 @@ describe("VISP-launched reviewer relaunch", () => {
     });
     if (retried.ok) throw new Error("expected refusal");
     expect(retried.error.message).toContain("does not retry a failure the host reported");
+    expect(host.review).not.toHaveBeenCalled();
+  });
+
+  it("tells the worker a review in progress is still running, not that the critic failed", async () => {
+    await launch("codex-exec");
+    await ready();
+    await run({ operation: "review" }, failing());
+    await rewrite((state) => {
+      const [attempt] = state.attempts;
+      if (!attempt) throw new Error("attempt");
+      attempt.status = "pending";
+      attempt.startedAt = Date.now();
+    });
+    const host = working();
+    const summary = await inlineReview(host)(await setup.workspace.state(), {
+      feature: setup.brief.feature,
+      task: "T001",
+    });
+    expect(summary).toMatchObject({
+      reviewed: false,
+      reason: "VISP's reviewer is still running. Wait: run visp next.",
+    });
     expect(host.review).not.toHaveBeenCalled();
   });
 
