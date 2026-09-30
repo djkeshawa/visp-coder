@@ -39,6 +39,7 @@ import { reachesModel, runCodexStructured, type SessionActivity } from "./critic
 import { hostRequest } from "./host-prompts.js";
 import {
   disputeSchema,
+  failLineStats,
   TESTS_RECORD,
   WAIVED_TESTS_ENV,
   waivedTestsEnv,
@@ -47,6 +48,7 @@ import { rulesForRequest, withRules } from "./project-rules.js";
 import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
 import { productSourceSnapshot } from "./subject.js";
+import { testerBrowserKitLines } from "./tester-browser-kit.js";
 import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./tester-snapshot.js";
 
 /**
@@ -702,6 +704,7 @@ async function attemptTests(
     feature,
     response.file,
     response.existingBehavior,
+    response.tests.map((test) => test.name),
     snapshot,
   ).catch((cause) => ({ status: "failed" as const, reason: message(cause) }));
   return {
@@ -742,6 +745,11 @@ function repairPrompt(prompt: string, content: string, reason: string): string {
     content,
     "",
     "Read the repository and the failure again, then return the whole corrected file. Keep only assertions the request or the repository supports. If the run timed out, cut search iteration counts and stop each search at the first interface error.",
+    ...(reason.startsWith(NO_NAMED_FAILURE) || reason.startsWith(UNDECLARED_FAILURE)
+      ? [
+          "Print `FAIL: <exact name from tests[].name>: <reason>` for every test that fails, also when nothing is implemented. Import or start the product inside each test, or catch the import, missing-file or connection error per test, so a missing module, script or server is that test's failure and never a crash of the whole file. Do not use unittest's default runner output or any other framework output that prints its own FAIL lines. Exception: when the browser itself cannot start, print `ENVIRONMENT ERROR: <message>` once, close everything, exit non-zero and print no FAIL line.",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -751,6 +759,7 @@ async function keepFailingTests(
   feature: string,
   file: { name: string; content: string },
   existingBehavior: boolean,
+  declared: string[],
   snapshot: TesterSnapshot,
 ): Promise<TestFields> {
   const safeName = file.name.replace(/\.(?:test|spec)\.mjs$/, ".acceptance.mjs");
@@ -764,11 +773,19 @@ async function keepFailingTests(
       await writeFile(join(root, path), file.content, { flag: "wx" });
       return runBaseline(root, command, extra, { redact });
     });
-  const baseline = await execute();
+  const { fullOutput, ...stored } = await execute();
   const existing = existingBehavior ? await execute({ VISP_TEST_SCOPE: "existing" }) : undefined;
-  const kept = { file: path, command, baseline };
-  const rejection = baselineRejection(baseline, existing);
+  const kept = { file: path, command, baseline: stored };
+  const rejection = baselineRejection({ ...stored, fullOutput }, existing, declared, redact);
   if (rejection) return { status: "rejected", reason: rejection, content: file.content, ...kept };
+  // A file with no declared tests skips the name gate, but a failure still needs a FAIL line.
+  if (!declared.length && !/^\s*FAIL:/im.test(fullOutput))
+    return {
+      status: "declined",
+      reason:
+        "The suite declares no tests and reported no failing test before implementation, so a later failure cannot be attributed to a test or disputed",
+      ...kept,
+    };
   const written = await retryBusy(() =>
     applyFileTransaction(workspace.paths.root, "write-acceptance-tests", [
       {
@@ -786,9 +803,17 @@ async function keepFailingTests(
   return { status: "failed", reason: pinned.error.message, ...kept };
 }
 
+const NO_NAMED_FAILURE =
+  "The suite failed before implementation but reported no declared test as failing";
+const MAX_LISTED_LINES = 5;
+const MAX_LISTED_CHARS = 300;
+const UNDECLARED_FAILURE = "The suite printed FAIL lines that name no declared test";
+
 function baselineRejection(
   baseline: Awaited<ReturnType<typeof runBaseline>>,
-  existing?: Awaited<ReturnType<typeof runBaseline>>,
+  existing: Awaited<ReturnType<typeof runBaseline>> | undefined,
+  declared: readonly string[],
+  redact: (text: string) => string,
 ): string | undefined {
   if (existing && (existing.exitCode !== 0 || existing.timedOut || existing.spawnFailed))
     return `Tests of existing behavior fail on the launch-time repository copy, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`;
@@ -797,6 +822,21 @@ function baselineRejection(
   if (baseline.timedOut) return "The tests did not finish on the unimplemented project";
   if (baseline.exitCode === 0)
     return "The tests pass before any implementation, so they check nothing new";
+  // A later failure must be attributable to a test the reviewer can rule on: a crash before
+  // any test ran, or FAIL lines with other names, would pin a suite nobody can dispute.
+  if (declared.length) {
+    const stats = failLineStats(baseline.fullOutput, declared);
+    if (!stats.named.length)
+      return `${NO_NAMED_FAILURE}, so a later failure cannot be attributed to a test or disputed (a crash, an import or syntax error, or FAIL lines with other names). Declared names: ${declared
+        .slice(0, 12)
+        .map((name) => JSON.stringify(name))
+        .join(", ")}. Output tail: ${baseline.output.slice(-600)}`;
+    if (stats.undeclared.length)
+      return `${UNDECLARED_FAILURE} (${stats.undeclared
+        .slice(0, MAX_LISTED_LINES)
+        .map((line) => JSON.stringify(redact(line).slice(0, MAX_LISTED_CHARS)))
+        .join(", ")}). Every FAIL line must be \`FAIL: <exact name from tests[].name>: <reason>\`.`;
+  }
   return undefined;
 }
 
@@ -935,9 +975,12 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "- When the request names deterministic controls (a clock, a step function, a seed, a reset), drive time and setup through them instead of real-time waits.",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
     "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
+    ...testerBrowserKitLines(request),
     "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
     "- Start and stop anything the tests need, the way the request says, with timeouts on every wait. Use a free port where one is needed.",
     "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why, one line per failing test: `FAIL: <exact name from tests[].name>: <reason>`.",
+    "- Print the FAIL lines yourself. Do not rely on unittest's default runner output or any other framework output: it names methods (`FAIL: test_x (Mod.Cls.test_x)`), not your declared tests, and does not count.",
+    "- This holds when nothing is implemented yet: catch a missing module, script or refused connection per test and print that test's FAIL line; never import or start the product at file top level outside a test. Exception: when the browser itself cannot start, print `ENVIRONMENT ERROR: <message>` once, close everything, exit non-zero and print no FAIL line.",
     "- Only the checks' own assertions may fail the run. Errors while cleaning up after the tests (closing a browser or server, killing a child process, removing temporary directories or browser profiles) must be caught and ignored, and must never change the exit status: wrap every teardown step in try/catch (or `ignore_errors=True` / `force: true` with retries) and exit from the assertion results alone.",
     "- Assertions must not depend on incidental ordering the request does not state: object key order, Set or dict iteration order, the order of unordered results, or timing. Compare parsed values, sort before comparing, or check membership.",
     `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
@@ -997,14 +1040,20 @@ async function runBaseline(
     timeoutMs: options.timeoutMs ?? BASELINE_TIMEOUT_MS,
     signal: options.signal,
   });
-  return result.ok
-    ? {
-        exitCode: result.value.exitCode,
-        timedOut: result.value.timedOut,
-        spawnFailed: false,
-        output: redact(`${result.value.stdout}\n${result.value.stderr}`.trim()).slice(-2000),
-      }
-    : { exitCode: -1, timedOut: false, spawnFailed: true, output: redact(result.error.message) };
+  if (!result.ok) {
+    const output = redact(result.error.message);
+    return { exitCode: -1, timedOut: false, spawnFailed: true, output, fullOutput: output };
+  }
+  const full = `${result.value.stdout}\n${result.value.stderr}`.trim();
+  return {
+    exitCode: result.value.exitCode,
+    timedOut: result.value.timedOut,
+    spawnFailed: false,
+    output: redact(full).slice(-2000),
+    // Unredacted so declared test names match what the suite printed; only used to attribute
+    // FAIL lines in memory, never stored or shown (`output` above is what a record keeps).
+    fullOutput: full.slice(-200_000),
+  };
 }
 
 async function pinTests(

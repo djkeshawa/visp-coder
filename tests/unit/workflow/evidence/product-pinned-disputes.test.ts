@@ -22,6 +22,8 @@ import {
 } from "../../../../src/workflow/product/index.js";
 import {
   allFailuresIn,
+  failingTests,
+  failLineStats,
   waivedFailure,
 } from "../../../../src/workflow/product/pinned-dispute-model.js";
 import {
@@ -881,6 +883,37 @@ it("does not count a run with an uncaught error as all-waived or all-disputed", 
   // A reason on a FAIL line may mention an error; a non-zero exit with no FAIL line is no test.
   expect(allFailuresIn("FAIL: a: TypeError: nope", declaredNames, ["a"])).toBe(true);
   expect(allFailuresIn("exit 1, no FAIL line", declaredNames, ["a"])).toBe(false);
+});
+
+it("attributes FAIL lines to declared tests without counting uncaught errors", () => {
+  const declared = ["a", "a longer name", "b"];
+  expect(failLineStats("FAIL: a: nope\nFAIL: a longer name: also\n  FAIL: B", declared)).toEqual({
+    named: ["a", "a longer name", "b"],
+    undeclared: [],
+  });
+  // unittest's own output names methods, not declared tests; stack lines are ignored.
+  expect(
+    failLineStats(
+      "FAIL: test_x (C.test_x)\nTraceback (most recent call last):\n    at file:///x.mjs:1:1\nFAIL: a: bad",
+      declared,
+    ),
+  ).toEqual({ named: ["a"], undeclared: [] });
+  expect(failLineStats("FAIL: test_x (C.test_x): boom", declared).undeclared).toEqual([
+    "test_x (C.test_x): boom",
+  ]);
+  // CRLF output, as Python prints it on Windows.
+  expect(failLineStats("FAIL: a: nope\r\nFAIL: b\r\nFAIL: c: x\r\n", declared)).toEqual({
+    named: ["a", "b"],
+    undeclared: ["c: x"],
+  });
+  expect(failingTests("FAIL: a: nope\r\nFAIL: b\r\n", declared)).toEqual({
+    names: ["a", "b"],
+    unattributed: 0,
+  });
+  expect(failLineStats("Error: import failed\nexit 1", declared)).toEqual({
+    named: [],
+    undeclared: [],
+  });
 });
 
 it("keeps the reviewer away when a disputed run also crashes outside its tests", async () => {
