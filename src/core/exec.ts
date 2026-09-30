@@ -116,7 +116,8 @@ export function run(
   });
 }
 
-function killCommandGroup(child: ChildProcess, signal: NodeJS.Signals) {
+/** Signals a spawned command's whole process group (its tree on Windows). */
+export function killCommandGroup(child: ChildProcess, signal: NodeJS.Signals) {
   if (!child.pid) return;
   try {
     if (process.platform === "win32") killWindowsTree(child, signal);

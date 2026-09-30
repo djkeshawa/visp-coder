@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { killCommandGroup } from "../core/exec.js";
 import { productExecutionEnvironment } from "../core/execution-environment.js";
 import { bounded } from "./deadline.js";
 
@@ -60,8 +61,14 @@ export async function launchChrome(
       `--user-data-dir=${profile}`,
       "about:blank",
     ],
-    { stdio: ["ignore", "ignore", "pipe"], env: productExecutionEnvironment() },
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: productExecutionEnvironment(),
+      // Its own process group, so stopping it also ends the helpers it started.
+      detached: process.platform !== "win32",
+    },
   );
+  trackBrowser(child);
   let stderr = "";
   let diagnosticTruncated = false;
   const captureDiagnostic = (chunk: Buffer) => {
@@ -128,15 +135,49 @@ function startupError(
   );
 }
 
+/**
+ * A detached browser no longer receives the signal a host sends to visp's process group, so
+ * every browser still running when visp exits is killed with its group here.
+ */
+const liveBrowsers = new Set<ChildProcess>();
+function trackBrowser(child: ChildProcess): void {
+  if (process.platform === "win32") return;
+  if (liveBrowsers.size === 0) process.once("exit", killLiveBrowsers);
+  liveBrowsers.add(child);
+  child.once("exit", () => {
+    liveBrowsers.delete(child);
+    if (liveBrowsers.size === 0) process.removeListener("exit", killLiveBrowsers);
+  });
+}
+
+function killLiveBrowsers(): void {
+  for (const child of liveBrowsers) killCommandGroup(child, "SIGKILL");
+}
+
+/**
+ * Chrome's launcher script pipes stderr through a `cat`, and its helpers outlive the leader
+ * when only the leader is signalled; they keep the other end of stderr's socket open, so a
+ * failed browser kept `visp` running after its result was printed. The whole group is ended
+ * and the streams are released.
+ */
 async function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
-  const stopped = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  child.kill("SIGTERM");
-  const timeout = setTimeout(() => child.kill("SIGKILL"), 500);
   try {
-    await bounded("Browser cleanup", 2_000, async () => stopped);
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      const stopped = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      killCommandGroup(child, "SIGTERM");
+      const timeout = setTimeout(() => killCommandGroup(child, "SIGKILL"), 500);
+      try {
+        await bounded("Browser cleanup", 2_000, async () => stopped);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
   } finally {
-    clearTimeout(timeout);
+    // Helpers that outlived the leader, or ignored SIGTERM.
+    killCommandGroup(child, "SIGKILL");
+    child.stderr?.destroy();
+    child.stdout?.destroy();
+    child.unref?.();
   }
 }
 
