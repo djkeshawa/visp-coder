@@ -224,6 +224,16 @@ describe("generated hooks", () => {
       });
     expect(decision(JSON.parse(shell("rm -rf .visp acceptance")))).toBe("deny");
     expect(decision(JSON.parse(shell("git clean -fd")))).toBe("deny");
+    expect(decision(JSON.parse(shell("git clean -f")))).toBe("deny");
+    // A dry run deletes nothing: it is how a worker looks before it decides.
+    for (const dry of [
+      "git clean -n",
+      "git clean -nd",
+      "git clean -fdn",
+      "git clean -fd --dry-run",
+      "git clean --dry-run",
+    ])
+      expect(shell(dry), dry).toBe("");
     expect(shell("python3 acceptance/x/test.py")).toBe("");
     expect(shell("git stash")).toBe("");
     expect(shell("node --test acceptance/ && rm -rf dist")).toBe("");

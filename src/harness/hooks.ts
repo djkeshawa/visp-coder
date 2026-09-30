@@ -288,7 +288,9 @@ function destructiveShellReason(command) {
   for (const words of shellCommands(command)) {
     const executable = words[0];
     const operands = words.slice(1).filter((word) => !word.startsWith("-"));
-    if (executable === "git" && words[1] === "clean")
+    // A dry run only lists what a clean would delete.
+    const dryRun = words.slice(2).some((word) => word === "--dry-run" || /^-[A-Za-z]*n[A-Za-z]*$/.test(word));
+    if (executable === "git" && words[1] === "clean" && !dryRun)
       return "git clean may delete untracked VISP state or acceptance tests; inspect and remove individual files instead.";
     if (executable === "git" && words[1] === "stash" && words.slice(2).some((word) => /^(?:-[A-Za-z]*[ua]|--include-untracked|--all)$/.test(word)))
       return "git stash of untracked files may hide VISP state or acceptance tests; commit the work instead.";
