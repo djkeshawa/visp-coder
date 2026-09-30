@@ -46,3 +46,17 @@ it.each([
     expect(output).toContain("you never delegate it");
   },
 );
+
+it("sends the worker to the review only when next prints it, and never to a self-review", () => {
+  const output = helpOf(reviewCommand());
+  expect(output).toContain("Run only when `visp next` prints a review command.");
+  expect(output).toContain("If `visp done` runs VISP's own");
+  expect(output).toContain("a review you write yourself is not the independent review");
+  expect(output).not.toContain("Prefer visp review --prepare");
+  expect(output).toContain(
+    "When next printed the review command, --dispatch needs an attached host",
+  );
+  // What a host-delegated worker needs once next does print the command is kept.
+  expect(output).toContain("--session <id> --from -");
+  expect(output).toContain("do\nnot add subjectDigest, selection or captures");
+});

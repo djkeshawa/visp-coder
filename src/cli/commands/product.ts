@@ -479,9 +479,11 @@ export function reviewCommand(): Command {
     .addHelpText(
       "after",
       `
-Prefer visp review --prepare, then read packetPath and its actual images. Submit
-the packet's judgments with --session <id> --from -; VISP supplies identity, so
-do not add subjectDigest, selection or captures to a prepared-session response.
+Run only when \`visp next\` prints a review command. If \`visp done\` runs VISP's own
+reviewer, wait for it; a review you write yourself is not the independent review.
+When next does print one, read packetPath and its actual images, then submit the
+packet's judgments with --session <id> --from -; VISP supplies identity, so do
+not add subjectDigest, selection or captures to a prepared-session response.
 
 For legacy --template submissions, read visp review --json. Current evidence identifiers
 are in data.evidence and data.sources. Keep subjectDigest and selection from that
@@ -497,7 +499,7 @@ Use reviewer.context=current unless a genuinely fresh reviewer performed the
 review. Do not submit canned satisfied judgments; preserve unclear, unavailable
 and failed results with the evidence that supports them.
 
---dispatch needs an attached host adapter; retrying it cannot start a reviewer.
+When next printed the review command, --dispatch needs an attached host adapter; retrying it cannot start a reviewer.
 If no adapter is available, send --handoff to a reviewer through your host, or
 perform a current-context review of the bundle and submit a completed --template
 through --from -. Missing fresh-context dispatch does not prevent current-context
