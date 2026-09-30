@@ -700,7 +700,7 @@ async function attemptTests(
     ambiguities: redactStrings(response.ambiguities, workspace.paths.root),
   };
   if (!response.file)
-    return { status: "declined", reason: "No testable interface in the request", ...described };
+    return { status: "declined", reason: declineReason(response.notes), ...described };
   // The rejected file stays in the record so a person can see what the tester wrote.
   const content = response.file.content.slice(0, MAX_FILE_BYTES);
   const invalid = invalidFile(response.file);
@@ -897,6 +897,15 @@ function attributionRejection(
   return undefined;
 }
 
+/**
+ * The tester's own words say why it wrote no file (an interface it could not reach, a size limit
+ * it could not meet); the generic text hid that in the R12 benchmark round.
+ */
+function declineReason(notes: string): string {
+  const said = notes.replace(/\s+/g, " ").trim().slice(0, 300);
+  return said ? `The tester wrote no file: ${said}` : "No testable interface in the request";
+}
+
 function onlyStructuralChecks(response: TesterResponse): boolean {
   const described = `${response.notes} ${response.tests.map((test) => test.name).join(" ")}`;
   return (
@@ -1042,7 +1051,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
     "- The project is not implemented yet, so the file must fail now and pass once the request is met.",
     "- Before answering, check every case against the request and trace it through your own helpers (for example, how a missing body, None or null is actually sent). Remove any case you cannot justify from the quoted text.",
-    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines. Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
+    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines of your own code (a pasted browser kit does not count). Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
     ...(existing
       ? [
           "- This request changes an existing codebase, and you are in a disposable copy of it where you may run the existing program and its tests. Before asserting anything about existing behavior (routes, status codes, body shapes, error formats, the requests your setup makes), run the program and observe it; base every such assertion on what you observed, not on assumptions.",

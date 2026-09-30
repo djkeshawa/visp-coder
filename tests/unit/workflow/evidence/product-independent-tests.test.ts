@@ -635,6 +635,38 @@ it.skipIf(process.platform !== "linux")("records the writer's pid namespace", as
   });
 });
 
+it("records the tester's own reason when it writes no file", async () => {
+  const fixture = await testerWorkspace();
+  await writeIndependentTests(await fixture.workspace.state(), fixture.brief.feature, async () => ({
+    file: null,
+    tests: [],
+    notes: "The pasted kit plus the tests would exceed the\n500-line limit.",
+  }));
+  const record = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+  expect(record).toMatchObject({
+    ok: true,
+    value: {
+      status: "declined",
+      reason:
+        "The tester wrote no file: The pasted kit plus the tests would exceed the 500-line limit.",
+    },
+  });
+});
+
+it("keeps the generic decline reason when the tester explains nothing", async () => {
+  const fixture = await testerWorkspace();
+  await writeIndependentTests(await fixture.workspace.state(), fixture.brief.feature, async () => ({
+    file: null,
+    tests: [],
+    notes: " ",
+  }));
+  const record = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+  expect(record).toMatchObject({
+    ok: true,
+    value: { status: "declined", reason: "No testable interface in the request" },
+  });
+});
+
 it("does not launch a tester unless VISP launches the reviewer", async () => {
   const fixture = await productWorkspace({ critic: true });
   workspace = fixture.workspace;
