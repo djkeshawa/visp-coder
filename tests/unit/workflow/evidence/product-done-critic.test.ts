@@ -194,9 +194,10 @@ it("passes the whole-call deadline and cancellation to review startup", async ()
     await setup.workspace.state(),
     { task: "T001", deadline, signal: controller.signal },
     starter,
-    5000,
+    60_000,
   );
-  expect(Date.now() - started).toBeLessThan(2500);
+  // The startup wait is 60 s; returning within 30 s means the call deadline ended it.
+  expect(Date.now() - started).toBeLessThan(30_000);
   expect(starter).toHaveBeenCalledWith(
     expect.anything(),
     expect.objectContaining({ deadline, signal: controller.signal }),

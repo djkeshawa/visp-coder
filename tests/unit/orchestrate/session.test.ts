@@ -65,4 +65,42 @@ describe("session artifact compatibility", () => {
     expect(session.ok && session.value.activity).toHaveLength(25);
     expect(session.ok && session.value.activity[0]?.detail).toBe("search 0");
   });
+
+  it("keeps only the newest 1000 activity entries", async () => {
+    workspace = await TestWorkspace.create();
+    const state = await workspace.state();
+    const branch = workspace.git("branch", "--show-current").trim();
+    await mkdir(dirname(state.paths.session), { recursive: true });
+    const at = "2026-01-01T00:00:00.000Z";
+    await writeFile(
+      state.paths.session,
+      JSON.stringify({
+        kind: "sessions",
+        createdAt: at,
+        sessions: {
+          [branch]: {
+            kind: "session",
+            createdAt: at,
+            branch,
+            activity: Array.from({ length: 1000 }, (_, index) => ({
+              command: "query",
+              outcome: "ok",
+              detail: `old ${index}`,
+              at,
+            })),
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    for (let index = 0; index < 5; index += 1)
+      await recordActivity(state, { command: "query", outcome: "ok", detail: `new ${index}` });
+
+    const session = await readSession(state);
+    const activity = session.ok ? session.value.activity : [];
+    expect(activity).toHaveLength(1000);
+    expect(activity[0]?.detail).toBe("old 5");
+    expect(activity.at(-1)?.detail).toBe("new 4");
+  });
 });

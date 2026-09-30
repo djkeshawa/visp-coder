@@ -46,6 +46,16 @@ const APPENDED = [
 const MIN_CHUNK = 20;
 const MAX_CHUNK = 1000;
 const TIMEOUT_MS = 60_000;
+const MAX_CHUNK_FAILURES = 2;
+
+/**
+ * A `- ` list marker at the start of an argument is read as an option by the memory tool's
+ * parser. Numbered items are kept as written: they are not options and are recorded verbatim.
+ */
+function argumentText(chunk: string): string {
+  const text = chunk.replace(/^-\s+/, "");
+  return text.startsWith("-") ? `Stated: ${text}` : text;
+}
 
 export interface EarlierFeature {
   readonly feature: string;
@@ -138,16 +148,24 @@ async function recordFeatureChunks(
   progress: ChunkProgress,
 ): Promise<Result<boolean>> {
   let complete = true;
+  let failures = 0;
   for (const chunk of requestChunks(feature.originalRequest)) {
     const key = hashValue({ feature: feature.feature, chunk });
     if (progress.completed.has(key)) continue;
     const saved = await run(
       command,
-      ["decision", chunk, `Stated by the user for feature ${feature.feature}: ${feature.goal}`],
+      [
+        "decision",
+        argumentText(chunk),
+        `Stated by the user for feature ${feature.feature}: ${feature.goal}`,
+      ],
       { cwd: workspace.paths.root, timeoutMs: TIMEOUT_MS },
     );
     if (!saved.ok || saved.value.exitCode !== 0) {
       complete = false;
+      // A tool that cannot start or hangs fails every chunk the same way, up to a minute each.
+      failures += 1;
+      if (!saved.ok || saved.value.timedOut || failures >= MAX_CHUNK_FAILURES) break;
       continue;
     }
     const next = `${JSON.stringify({ version: 1, completed: [...progress.completed, key] }, null, 2)}\n`;

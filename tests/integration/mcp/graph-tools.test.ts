@@ -219,12 +219,21 @@ describe("graph tools over MCP", () => {
       return ok(undefined);
     });
     await ready;
+    let giveUp: ReturnType<typeof setTimeout> | undefined;
     try {
-      const started = performance.now();
-      const result = await call("visp_query", { operation: "search", target: "makeToken" });
+      // The lock is released only after this call returns, so a query that waited for it never settles.
+      const result = await Promise.race([
+        call("visp_query", { operation: "search", target: "makeToken" }),
+        new Promise<never>((_, reject) => {
+          giveUp = setTimeout(
+            () => reject(new Error("read-only query waited for the writer lock")),
+            20_000,
+          );
+        }),
+      ]);
       expect(result.isError).toBeFalsy();
-      expect(performance.now() - started).toBeLessThan(1000);
     } finally {
+      clearTimeout(giveUp);
       release();
       await held;
     }

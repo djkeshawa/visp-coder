@@ -6,6 +6,7 @@ export default defineConfig({
   define: runtimeDefines,
   test: {
     include: ["tests/**/*.test.ts"],
+    globalSetup: ["tests/global-setup.ts"],
     setupFiles: ["tests/host-isolation.ts"],
     // Test files isolate their own temp workspaces, so they scale with cores. On a
     // 16-core machine 6 workers ran the suite about twice as fast as 2; the cap

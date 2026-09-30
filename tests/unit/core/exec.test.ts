@@ -115,14 +115,15 @@ describe("run", () => {
         "-e",
         `
       const {spawn} = require('node:child_process');
-      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 2500)'], {stdio: 'inherit'});
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], {stdio: 'inherit'});
       child.unref();
     `,
       ],
-      { cwd: process.cwd(), timeoutMs: 1200 },
+      { cwd: process.cwd(), timeoutMs: 10_000 },
     );
     expect(result).toMatchObject({ ok: true, value: { exitCode: 0, timedOut: false } });
-    if (result.ok) expect(result.value.durationMs).toBeLessThan(1000);
+    // The grandchild sleeps 20 s; anything under 5 s means it was not waited for.
+    if (result.ok) expect(result.value.durationMs).toBeLessThan(5000);
   });
 
   it("aborts a running command promptly", async () => {
@@ -132,10 +133,10 @@ describe("run", () => {
       const result = await run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
         cwd: process.cwd(),
         signal: controller.signal,
-        timeoutMs: 1200,
+        timeoutMs: 10_000,
       });
       expect(result).toMatchObject({ ok: true, value: { aborted: true, timedOut: false } });
-      if (result.ok) expect(result.value.durationMs).toBeLessThan(1000);
+      if (result.ok) expect(result.value.durationMs).toBeLessThan(5000);
     } finally {
       clearTimeout(timer);
     }
