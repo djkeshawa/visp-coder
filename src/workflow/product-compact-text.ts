@@ -47,6 +47,7 @@ export function compactProductReply(
 }
 
 const SCALAR_FIELDS = [
+  "notice",
   "feature",
   "task",
   "taskClass",
