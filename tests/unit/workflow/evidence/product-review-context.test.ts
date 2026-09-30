@@ -5,6 +5,7 @@ import {
   previousReviewAssessments,
   productReviewAgenda,
 } from "../../../../src/workflow/product/review-context.js";
+import { independentReviewerContext } from "../../../../src/workflow/product/reviewer-handoff.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 
@@ -69,6 +70,48 @@ const record: ProductRecord = {
   stateText: "",
   state: initialProductState(brief, "2026-01-01"),
 };
+it("points the reviewer at quoted look and preview promises of a UI request only", () => {
+  const request =
+    "Build a browser game with a dotted preview while dragging. Save scores to a file.";
+  const ui = productReviewAgenda({ ...record, brief: { ...brief, originalRequest: request } });
+  expect(ui.requestPromises).toEqual([
+    "Build a browser game with a dotted preview while dragging.",
+  ]);
+  expect(ui.guidance).toContain("requestPromises are sentences quoted from the original request");
+  const plain = productReviewAgenda(record);
+  expect(plain).not.toHaveProperty("requestPromises");
+  expect(plain.guidance).not.toContain("requestPromises");
+  expect(ui.guidance.startsWith(plain.guidance)).toBe(true);
+});
+it("hands the independent reviewer the quoted promises only when there are some", () => {
+  const bundle = (requestPromises?: string[]) =>
+    ({
+      kind: "product-review",
+      feature: "001-context",
+      subjectDigest: "current",
+      originalRequest: "Build a browser game with a dotted preview.",
+      instructions: "",
+      outcomes: [],
+      agenda: {
+        examples: [],
+        omitted: { examples: 0 },
+        ...(requestPromises ? { requestPromises } : {}),
+      },
+      images: [],
+      sources: [],
+      interactionEvidence: {},
+      evidence: [],
+      gaps: [],
+      feedbackPlan: { findings: [] },
+    }) as unknown as Parameters<typeof independentReviewerContext>[0];
+  expect(independentReviewerContext(bundle(["It has a dotted preview."]))).toMatchObject({
+    requestPromises: ["It has a dotted preview."],
+    requestPromisesNote: expect.stringContaining("add no requirement beyond the request"),
+  });
+  const plain = independentReviewerContext(bundle());
+  expect(plain).not.toHaveProperty("requestPromises");
+  expect(plain).not.toHaveProperty("requestPromisesNote");
+});
 it("carries relevant final findings into a reopened slice with honest freshness", () => {
   const assessments = [
     {

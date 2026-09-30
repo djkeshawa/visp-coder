@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#142a35">
+  <title>Siege Cats — Catapult Challenge</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="game.js" defer></script>
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true"><span></span></div>
+        <div>
+          <p class="eyebrow">FIELD COMMAND</p>
+          <h1>Siege Cats</h1>
+        </div>
+      </div>
+      <div class="scoreboard" aria-label="Game status">
+        <div class="readout"><span>Level</span><strong id="level-value">1</strong></div>
+        <div class="readout score-readout"><span>Score</span><strong id="score-value">0</strong></div>
+      </div>
+      <button class="restart-button" id="restart-button" type="button"><span aria-hidden="true">↻</span> Restart</button>
+    </header>
+
+    <section class="ammo-panel" aria-label="Choose ammunition">
+      <div class="ammo-heading">
+        <span class="section-kicker">YOUR AMMO</span>
+        <span class="loaded-label">Loaded: <strong id="selected-value">stone</strong></span>
+      </div>
+      <div class="ammo-options">
+        <button class="ammo-button selected" id="ammo-stone" type="button" data-kind="stone" aria-pressed="true">
+          <span class="ammo-icon stone-icon" aria-hidden="true"></span><span class="ammo-title">Stone</span><span class="ammo-count" data-count>2</span>
+        </button>
+        <button class="ammo-button" id="ammo-bomb" type="button" data-kind="bomb" aria-pressed="false">
+          <span class="ammo-icon bomb-icon" aria-hidden="true"></span><span class="ammo-title">Bomb</span><span class="ammo-count" data-count>1</span>
+        </button>
+        <button class="ammo-button" id="ammo-cluster" type="button" data-kind="cluster" aria-pressed="false">
+          <span class="ammo-icon cluster-icon" aria-hidden="true"></span><span class="ammo-title">Cluster</span><span class="ammo-count" data-count>1</span>
+        </button>
+        <button class="ammo-button" id="ammo-fire" type="button" data-kind="fire" aria-pressed="false">
+          <span class="ammo-icon fire-icon" aria-hidden="true"></span><span class="ammo-title">Fire</span><span class="ammo-count" data-count>1</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="playfield-area" aria-label="Siege battlefield">
+      <div class="world-frame">
+        <canvas id="game" width="1200" height="600" tabindex="0" aria-label="Catapult battlefield. Drag the loaded projectile back and release to launch."></canvas>
+        <div class="result-panel" id="result-panel" role="dialog" aria-live="polite" aria-labelledby="result-title" hidden>
+          <div class="result-card">
+            <div class="result-spark" aria-hidden="true">✦</div>
+            <p class="section-kicker">FIELD REPORT</p>
+            <h2 id="result-title">Victory!</h2>
+            <p id="result-copy">The banners are down. Your next fort is waiting.</p>
+            <button class="result-button" id="result-button" type="button">Next level</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="game-footer">
+      <span class="tip-dot" aria-hidden="true"></span>
+      <span id="game-hint">Pull the loaded shot back, then release</span>
+      <span class="material-legend"><i class="wood-swatch"></i> Wood <i class="stone-swatch"></i> Stone <i class="metal-swatch"></i> Metal</span>
+    </footer>
+  </main>
+</body>
+</html>

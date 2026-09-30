@@ -92,7 +92,7 @@ The spec follows `comparisonSpecSchema`. Starter scenarios live in `tests/fixtur
 Related preparation commands:
 
 - `prepare-critic-comparison --comparison prepared/ --config critic-models.json` adds a critic ablation (no critic, same-model critic, stronger-model critic), or a staged `feedback-policy` study.
-- `prepare-review-calibration --comparison prepared/ --spec calibration/spec.json` pins reviewer calibration on defective and correct variants of fixed cases. `node scripts/prepare-review-calibration.mjs <inputs-dir> <reviewer.json>` generates its images first.
+- `prepare-review-calibration --comparison prepared/ --spec calibration/spec.json` pins reviewer calibration on defective and correct variants of fixed cases. `node scripts/prepare-review-calibration.mjs <inputs-dir> <reviewer.json> [all|scenario,...]` generates its images first (all seven scenarios by default; see `tests/fixtures/review-calibration/README.md`).
 - `pilot` and `summarize` read studies prepared under the older cost-first policy; `escalation <inputFile>` gives a deterministic next-step recommendation for a failed attempt.
 
 None of these commands promote anything automatically or produce a confidence claim; small pilots can find regressions but not establish general superiority.

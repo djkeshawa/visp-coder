@@ -4,6 +4,7 @@ import type { WorkspaceState } from "../state.js";
 import { type ProductFeedback, QUALITY_DIMENSIONS } from "./feedback-model.js";
 import { reviewerContextSchema } from "./model.js";
 import { type ProductReviewBundle, type ProductReviewOptions, runProductReview } from "./review.js";
+import { REQUEST_PROMISES_GUIDANCE } from "./review-context.js";
 
 const findingExample: ProductFeedback["findings"][number] = {
   dimension: "functional",
@@ -101,6 +102,12 @@ export function independentReviewerContext(bundle: ReturnType<typeof productRevi
     outcomes: bundle.outcomes,
     examples: bundle.agenda.examples,
     examplesOmitted: bundle.agenda.omitted.examples,
+    ...(bundle.agenda.requestPromises?.length
+      ? {
+          requestPromises: bundle.agenda.requestPromises,
+          requestPromisesNote: REQUEST_PROMISES_GUIDANCE,
+        }
+      : {}),
     ...(bundle.observationSequence ? { observationSequence: bundle.observationSequence } : {}),
     images: bundle.images,
     sources: bundle.sources.filter((source) => source.kind !== "authored-brief"),

@@ -1,0 +1,23 @@
+{
+  "variant": "defective",
+  "expectedDefects": [],
+  "expectedAdvisory": [
+    "sparse-level-content",
+    "fire-useless-without-wood"
+  ],
+  "caughtIf": [
+    [
+      "\\b(?:sparse(?:ly)?|emptier|empty|bare(?:ly)?|unfinished|placeholder|debug\\s+primitives?|(?:flat\\s+)?single-colou?r)\\b[^.\\n]{0,40}\\b(?:levels?|towers?|structures?|blocks?|wood|wooden|materials?|frames?|playfield)\\b|\\b(?:levels?|towers?|structures?|blocks?|wood|wooden|materials?|frames?|playfield)\\b[^.\\n]{0,40}\\b(?:sparse(?:ly)?|emptier|empty|bare(?:ly)?|unfinished|placeholder|debug\\s+primitives?|(?:flat\\s+)?single-colou?r)\\b"
+    ],
+    [
+      "\\b(?:wood|wooden)\\b",
+      "\\b(?:fire|flames?|burn\\w*)\\b",
+      "\\b(?:no\\s+wood(?:en)?|without\\s+wood|nothing\\s+to\\s+burn|useless|pointless|cannot\\s+burn|never\\s+burn)\\b"
+    ]
+  ],
+  "counterevidence": {
+    "level-1": "One small structure of a stone base, two wooden posts, a wooden lintel, two flags and a separate stone block, drawn as flat single-color rectangles.",
+    "level-3": "Two bare stone frames with no wood at all and two flags, so the fire projectile has nothing to burn. The structures are far emptier than a finished siege level and offer no visible texture."
+  },
+  "evaluationScope": "Finish and content of the two initial frames only, scored on optional (required: false) findings. Nothing here is a contract violation, so a required finding is a false rejection. Behavior, physics and scoring are not shown."
+}

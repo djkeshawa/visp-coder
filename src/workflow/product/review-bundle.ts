@@ -11,6 +11,7 @@ import {
 } from "./evidence-references.js";
 import { experimentReviewContext } from "./experiments.js";
 import { productFeedbackPlan } from "./feedback.js";
+import { newestRunPerJourney } from "./image-groups.js";
 import type { inspectProductImages } from "./images.js";
 import {
   latestExecutionsByOwner,
@@ -108,8 +109,8 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
           ),
       )
       .slice(-12),
-    captureRuns: record.state.captureRuns
-      .filter((candidate) => {
+    captureRuns: newestRunPerJourney(
+      record.state.captureRuns.filter((candidate) => {
         const run = productCaptureRunSchema.safeParse(candidate);
         if (!run.success || !evidenceApplies(record, subject, run.data)) return false;
         return (
@@ -119,8 +120,9 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
             .find((entry) => entry.id === run.data.task)
             ?.outcomes.some((id) => slice.outcomes.includes(id))
         );
-      })
-      .slice(-3),
+      }),
+      3,
+    ),
     previousAssessments: previous,
     assessments,
     images: images.images,

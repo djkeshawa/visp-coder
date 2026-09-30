@@ -1,0 +1,194 @@
+{
+  "inputs": [
+    {
+      "file": "game.js",
+      "sha256": "a7b33b7707a8a033eed4b3117aeed99c84d3c5ee2cf985bf2576e6c98369da5a"
+    },
+    {
+      "file": "index.html",
+      "sha256": "e42196349d08526a8272c6e2063f97b6cdd0ea3de100d320c7c331da6f7adb80"
+    },
+    {
+      "file": "style.css",
+      "sha256": "94d331fdc7a79808708cf978ddd4ca23ca3cfa939373466afb00e7beb48f9151"
+    }
+  ],
+  "operations": [
+    {
+      "id": "f2488188-716b-481b-b98e-a9159440947a",
+      "kind": "navigate",
+      "description": "Navigate file:///tmp/visp-freeze-IepcUS/index.html",
+      "completedAt": "2026-09-30T06:44:11.629Z"
+    },
+    {
+      "id": "280ac150-a6cc-4005-ba5b-0eda3ee144d3",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:11.631Z",
+      "resultDigest": "bf73547f57b70772bdb04f916b164a250de055fdfca7b6660266ee823b1b94e8",
+      "measurement": {
+        "json": "{\"box\":{\"left\":160,\"top\":130,\"scale\":1},\"bird\":{\"x\":158,\"y\":367,\"vx\":0,\"vy\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "4cfbf8d8-3d17-47e2-89d3-afe9cfbcbb31",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:11.632Z",
+      "resultDigest": "e2a680f100607205eebd12155698e7e1dad478ac9ca7f0d7931b4adb788e4395",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-IepcUS/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "5f8f7a0f-6b5a-45eb-9510-a47ccd24062c",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:11.634Z",
+      "resultDigest": "8a1847b1e177428e703c054cd91bdfcec1facd3e13c561dcafe4205ae596670d",
+      "captureId": "CAP-b11e6b2c-f3af-4f1f-aee1-0dae16945712",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-b11e6b2c-f3af-4f1f-aee1-0dae16945712\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#world\",\"viewportAreaFraction\":0.50625,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":960,\"height\":540},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":68.71875,\"height\":32,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "59cc2885-e073-40ff-afdb-d4d1c5f4b2fc",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-IepcUS/index.html",
+      "completedAt": "2026-09-30T06:44:11.843Z",
+      "resultDigest": "34ab1a004d4a532169bf63732e717b3ab4a93420117e942f2a3cd88ba893abde",
+      "captureId": "CAP-b11e6b2c-f3af-4f1f-aee1-0dae16945712"
+    },
+    {
+      "id": "6ec5058a-0db1-4926-aec0-72b9b1e5c9fd",
+      "kind": "pointer",
+      "description": "Move pointer to 318,497",
+      "completedAt": "2026-09-30T06:44:12.084Z",
+      "resultDigest": "9e18045450380f596e2e1e0c143ed3b355be81b72dc09b6710fd87142c09eaf1",
+      "measurement": {
+        "json": "{\"from\":{\"x\":318,\"y\":497},\"to\":{\"x\":318,\"y\":497},\"path\":[{\"x\":26.5,\"y\":41.416666666666664},{\"x\":53,\"y\":82.83333333333333},{\"x\":79.5,\"y\":124.25},{\"x\":106,\"y\":165.66666666666666},{\"x\":132.5,\"y\":207.08333333333334},{\"x\":159,\"y\":248.5},{\"x\":185.5,\"y\":289.9166666666667},{\"x\":212,\"y\":331.3333333333333},{\"x\":238.5,\"y\":372.75},{\"x\":265,\"y\":414.1666666666667},{\"x\":291.5,\"y\":455.5833333333333},{\"x\":318,\"y\":497}],\"durationMs\":100}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "c559d219-75d7-4ccc-9021-a0bdd006e496",
+      "kind": "pointer",
+      "description": "Begin pointer drag 318,497 to 246,529",
+      "completedAt": "2026-09-30T06:44:12.098Z"
+    },
+    {
+      "id": "4460b597-6e6e-433f-9e1a-871af33688db",
+      "kind": "pointer",
+      "description": "Move pointer to 246,529",
+      "completedAt": "2026-09-30T06:44:12.494Z",
+      "resultDigest": "ecf53fb73cf837c9ad7794b73fdf6a01d131801b1cbd9156e4140e8f02ecd3f9",
+      "measurement": {
+        "json": "{\"from\":{\"x\":246,\"y\":529},\"to\":{\"x\":246,\"y\":529},\"path\":[{\"x\":312,\"y\":499.6666666666667},{\"x\":306,\"y\":502.3333333333333},{\"x\":300,\"y\":505},{\"x\":294,\"y\":507.6666666666667},{\"x\":288,\"y\":510.3333333333333},{\"x\":282,\"y\":513},{\"x\":276,\"y\":515.6666666666666},{\"x\":270,\"y\":518.3333333333334},{\"x\":264,\"y\":521},{\"x\":258,\"y\":523.6666666666666},{\"x\":252,\"y\":526.3333333333334},{\"x\":246,\"y\":529}],\"durationMs\":100}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "63d8348b-a6bc-457d-aaf9-10d6f41be423",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:12.616Z",
+      "resultDigest": "e2a680f100607205eebd12155698e7e1dad478ac9ca7f0d7931b4adb788e4395",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-IepcUS/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "e94932ed-52f4-452e-8296-6a7087e5af9e",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:12.618Z",
+      "resultDigest": "1cc546fe7de42ad03d3aa8ace9cef67da4c37ffac9fa1ddc468ab2647ab4e475",
+      "captureId": "CAP-03e6d142-8e6e-443e-a8f2-8cb6f318faf2",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-03e6d142-8e6e-443e-a8f2-8cb6f318faf2\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#world\",\"viewportAreaFraction\":0.50625,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":960,\"height\":540},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":68.71875,\"height\":32,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "35eadaa7-0ee0-4d7a-a47a-a68f7d09e095",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-IepcUS/index.html",
+      "completedAt": "2026-09-30T06:44:12.883Z",
+      "resultDigest": "9e12843f5f9c6dd27411cd87835ba9a08312f667d62a12ead4c9ae090dab6769",
+      "captureId": "CAP-03e6d142-8e6e-443e-a8f2-8cb6f318faf2"
+    },
+    {
+      "id": "21a1b8c7-8c0c-4c9a-aed7-33ba7a5a2331",
+      "kind": "pointer",
+      "description": "Finish pointer drag at 246,529",
+      "completedAt": "2026-09-30T06:44:13.055Z"
+    },
+    {
+      "id": "8e455aed-04ec-4d9a-846c-8651c83e6c5a",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:13.206Z",
+      "resultDigest": "e2a680f100607205eebd12155698e7e1dad478ac9ca7f0d7931b4adb788e4395",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-IepcUS/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "0496d04e-eb30-408b-b766-842ad491d4f4",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:13.211Z",
+      "resultDigest": "db40c2f1a8f0458873c2bbd2b7947e9d35d661e8e575d25839cc6c165ff3d8a2",
+      "captureId": "CAP-d0f2ebd0-1cd5-4b27-8262-5b772033ba91",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-d0f2ebd0-1cd5-4b27-8262-5b772033ba91\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#world\",\"viewportAreaFraction\":0.50625,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":960,\"height\":540},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":68.71875,\"height\":32,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "fad2eb62-21c9-497d-bbf8-a892ee29182b",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-IepcUS/index.html",
+      "completedAt": "2026-09-30T06:44:13.415Z",
+      "resultDigest": "e88d869834eeddf1165bc68380b053176cc2360d44bc96738987a7593af3c2ba",
+      "captureId": "CAP-d0f2ebd0-1cd5-4b27-8262-5b772033ba91"
+    },
+    {
+      "id": "6bc661b0-8540-4f43-864a-a50baba2351a",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:13.418Z",
+      "resultDigest": "e2a680f100607205eebd12155698e7e1dad478ac9ca7f0d7931b4adb788e4395",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-IepcUS/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "e0ba06f1-afb1-4a56-8a6e-4aa0ebdd6bd4",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:13.420Z",
+      "resultDigest": "e5ec5761ed5ddf349b95ba75eba950bdf78b0b02b374893f86facf301116f41c",
+      "captureId": "CAP-5ae5cd4b-9ca3-4a25-8064-3f01c97a8d10",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-5ae5cd4b-9ca3-4a25-8064-3f01c97a8d10\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#world\",\"viewportAreaFraction\":0.50625,\"intrinsic\":{\"width\":960,\"height\":540},\"content\":{\"width\":960,\"height\":540},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart\",\"width\":68.71875,\"height\":32,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "6225c620-3e8e-4c5b-8ad6-77d4960e5993",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-IepcUS/index.html",
+      "completedAt": "2026-09-30T06:44:13.661Z",
+      "resultDigest": "6a318064972eeef9975a8ff82e53720705312440cfce33399f5c26ab1c125578",
+      "captureId": "CAP-5ae5cd4b-9ca3-4a25-8064-3f01c97a8d10"
+    }
+  ],
+  "provenance": "runner-observed"
+}

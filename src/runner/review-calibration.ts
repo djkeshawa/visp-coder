@@ -23,7 +23,8 @@ export const reviewCalibrationSchema = z
           })
           .strict(),
       )
-      .length(6),
+      .min(6)
+      .max(16),
   })
   .strict();
 
@@ -35,7 +36,8 @@ export async function prepareReviewCalibration(directory: string, input: unknown
     throw new Error("Duplicate calibration IDs");
   const scenarios = new Set(spec.cases.map((entry) => entry.scenario));
   if (
-    scenarios.size !== 3 ||
+    scenarios.size < 3 ||
+    spec.cases.length !== scenarios.size * 2 ||
     [...scenarios].some(
       (scenario) =>
         new Set(
@@ -43,7 +45,9 @@ export async function prepareReviewCalibration(directory: string, input: unknown
         ).size !== 2,
     )
   )
-    throw new Error("Calibration requires three scenarios with defective and control variants");
+    throw new Error(
+      "Calibration requires at least three scenarios with one defective and one control case each",
+    );
   const objects = join(directory, "objects");
   // lstat refuses a symlinked file; symlinked parent directories are ordinary (macOS keeps
   // temporary directories under the /var symlink) and do not change the pinned bytes.
