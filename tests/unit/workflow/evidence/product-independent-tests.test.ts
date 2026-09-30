@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -262,6 +263,46 @@ it("redacts baseline output using the real project's env files when running in a
   expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
   expect(result.ok && result.value.baseline?.output).toContain("[REDACTED]");
   expect(result.ok && result.value.baseline?.output).not.toContain("launch-private-value");
+});
+
+it("runs each baseline in a private HOME and temporary directory that are removed afterwards", async () => {
+  const fixture = await testerWorkspace();
+  const report = `import { writeFileSync, statSync } from "node:fs";
+writeFileSync(process.env.TMPDIR + "/scratch", "x");
+console.log("HOME_REPORT " + JSON.stringify({ home: process.env.HOME, tmp: process.env.TMPDIR,
+  temp: process.env.TEMP, mode: (statSync(process.env.HOME).mode & 0o777).toString(8) }));
+`;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.mjs", content: `${report}${FAILS_FIRST}` }),
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  const line = /HOME_REPORT (.*)/.exec((result.ok && result.value.baseline?.output) || "")?.[1];
+  const seen = JSON.parse(line ?? "{}") as Record<string, string>;
+  expect(seen.home).toMatch(/\/visp-baseline-[A-Za-z0-9]{6}$/);
+  expect(seen).toMatchObject({ tmp: `${seen.home}/tmp`, temp: `${seen.home}/tmp`, mode: "700" });
+  expect(existsSync(seen.home ?? "")).toBe(false);
+});
+
+it("still pins when the baseline leaves a read-only directory in its private home", async () => {
+  const fixture = await testerWorkspace();
+  const leave = `import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
+mkdirSync(process.env.HOME + "/mod/deep", { recursive: true });
+writeFileSync(process.env.HOME + "/mod/deep/file", "x");
+chmodSync(process.env.HOME + "/mod/deep", 0o500);
+chmodSync(process.env.HOME + "/mod", 0o500);
+console.log("HOME_IS " + process.env.HOME);
+`;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.mjs", content: `${leave}${FAILS_FIRST}` }),
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  const home = /HOME_IS (.*)/.exec((result.ok && result.value.baseline?.output) || "")?.[1] ?? "";
+  expect(home).toMatch(/visp-baseline-/);
+  expect(existsSync(home)).toBe(false);
 });
 
 it("pins against launch-time source even when the worker implements it while tests are written", async () => {

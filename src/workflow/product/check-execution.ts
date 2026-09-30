@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withProductCheckContext } from "../../core/check-context.js";
 import { commandExecutableDigest } from "../../core/command-executable.js";
@@ -9,7 +10,7 @@ import { hashValue } from "../../core/hash.js";
 import { outputRedactor, privatePath } from "../../core/redaction.js";
 import { err, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
-import { acceptanceEnvironment } from "./acceptance-environment.js";
+import { acceptanceEnvironment, privateTemporaryDirectory } from "./acceptance-environment.js";
 import { executeBrowserCheck } from "./browser-check-execution.js";
 import {
   describeProductCheck,
@@ -342,10 +343,10 @@ async function executeCommand(
     const result = await withProductCheckContext(
       workspace.paths.root,
       check.id,
-      async (environment) => {
+      async (environment, directory) => {
         const binary = argv.value[0] ?? "";
         const checkEnvironment = check.id.startsWith("PINNED_")
-          ? { ...acceptanceEnvironment(environment), ...extraEnvironment }
+          ? { ...(await privateAcceptanceEnvironment(environment, directory)), ...extraEnvironment }
           : environment;
         const before = identifyExecutable
           ? await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment)
@@ -382,6 +383,20 @@ async function executeCommand(
   } catch (cause) {
     return err(fromUnknown(cause, "COMMAND_FAILED"));
   }
+}
+
+/**
+ * A pinned run gets its own HOME and temporary directory inside the check's private
+ * directory, which the check context removes: concurrent runs share no browser profile lock
+ * and leave nothing behind. Ordinary checks keep the inherited HOME (npm and git need it).
+ */
+async function privateAcceptanceEnvironment(
+  environment: Record<string, string>,
+  directory: string,
+): Promise<Record<string, string>> {
+  const home = join(directory, "home");
+  await mkdir(privateTemporaryDirectory(home), { recursive: true, mode: 0o700 });
+  return acceptanceEnvironment(environment, home);
 }
 
 function commandStatus(output: Result<CommandOutput>, root: string): ProductExecution["status"] {

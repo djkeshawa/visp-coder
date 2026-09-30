@@ -1,4 +1,4 @@
-import { lstat, readdir, rm } from "node:fs/promises";
+import { chmod, lstat, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,8 +23,26 @@ export async function sweepStaleTempDirectories(
     const details = await lstat(path).catch(() => undefined);
     if (!details?.isDirectory() || (owner !== undefined && details.uid !== owner)) continue;
     if (Date.now() - details.mtimeMs <= maxAgeMs) continue;
-    await rm(path, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 }).catch(
-      () => undefined,
-    );
+    await removeTreeBestEffort(path);
   }
+}
+
+/**
+ * Removes a directory VISP made for a run, whatever the run left in it: a read-only
+ * directory (a Go module cache, a test that dropped write permission) would make a plain
+ * `rm` fail with EACCES. Directories are made writable first; whatever still cannot be
+ * removed is left for a later sweep. Never throws, so cleanup cannot change a result.
+ */
+export async function removeTreeBestEffort(path: string): Promise<void> {
+  await makeWritable(path, 0).catch(() => undefined);
+  await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(
+    () => undefined,
+  );
+}
+
+async function makeWritable(path: string, depth: number): Promise<void> {
+  const details = await lstat(path);
+  if (!details.isDirectory() || depth > 64) return;
+  await chmod(path, details.mode | 0o700);
+  for (const entry of await readdir(path)) await makeWritable(join(path, entry), depth + 1);
 }
