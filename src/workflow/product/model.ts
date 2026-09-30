@@ -16,6 +16,7 @@ import {
 import { browserCapabilitySchema } from "./environment-model.js";
 import { experimentResolutionsSchema } from "./experiment-model.js";
 import { productFeedbackSchema } from "./feedback-model.js";
+import { journeyRetirementSchema } from "./journey-ownership.js";
 import { reproductionSchema } from "./reproduction-model.js";
 import { userFeedbackRecordSchema } from "./user-feedback-model.js";
 
@@ -525,6 +526,7 @@ export const productStateSchema = z
     reproductions: z.array(reproductionSchema).optional(),
     captures: z.array(z.unknown()).default([]),
     captureRuns: z.array(z.unknown()).default([]),
+    journeyRetirements: z.array(journeyRetirementSchema).optional(),
     controls: z.array(z.unknown()).default([]),
     reviews: z
       .array(

@@ -167,11 +167,13 @@ function reviewInteractionEvidenceIds(
 export function deliveredReviewEvidenceIds(
   evidence: readonly { id: string; status: string }[],
   interactionEvidence: ReturnType<typeof reviewInteractionEvidence>,
+  experiments?: { readonly exploratory: readonly { readonly evidence: readonly string[] }[] },
 ): string[] {
   return [
     ...new Set([
       ...evidence.filter((entry) => entry.status !== "not-delivered").map((entry) => entry.id),
       ...reviewInteractionEvidenceIds(interactionEvidence),
+      ...(experiments?.exploratory.flatMap((run) => run.evidence) ?? []),
     ]),
   ];
 }

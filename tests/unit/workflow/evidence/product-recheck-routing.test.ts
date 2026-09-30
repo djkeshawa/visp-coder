@@ -393,7 +393,7 @@ it.each([undefined, "shallow"] as const)(
       ok: true,
       value: {
         action: "fix",
-        command: expect.stringContaining("--replay=RUN-old"),
+        command: expect.stringContaining("--replay-batch=RUN-old"),
         objective: expect.stringContaining("Replay the recorded input"),
         mayEdit: true,
         completion: "unresolved-product",

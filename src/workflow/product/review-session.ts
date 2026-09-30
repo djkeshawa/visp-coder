@@ -72,7 +72,11 @@ export function prepareReviewSession(
       id,
       selection: bundle.selection,
       reviewMode: workspace.config.workflow.reviewMode,
-      evidenceIds: deliveredReviewEvidenceIds(bundle.evidence, bundle.interactionEvidence),
+      evidenceIds: deliveredReviewEvidenceIds(
+        bundle.evidence,
+        bundle.interactionEvidence,
+        bundle.experiments,
+      ),
     };
     const saved = await applyFileTransaction(workspace.paths.root, "prepare-review-session", [
       ...[...new Map(images.map((image) => [image.path, image])).values()].map((image) => ({

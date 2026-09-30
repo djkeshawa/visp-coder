@@ -10,6 +10,7 @@ import {
   sameJourneyIntent,
 } from "./evidence-references.js";
 import { type ExperimentResolution, experimentResolutionsSchema } from "./experiment-model.js";
+import { exploratoryReviewHistory } from "./exploratory-history.js";
 import { hasExecutedDeclaredRevision, isDeclaredJourney } from "./journey-ownership.js";
 import type { ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
@@ -21,10 +22,12 @@ export function experimentReviewContext(
 ) {
   const failed = currentFailedJourneys(record, subject, slice?.id);
   return {
+    ...exploratoryReviewHistory(record, slice),
     failures: failed.slice(-3).map((run) => ({
       runId: run.id,
       kind: run.failure?.kind,
-      message: run.failure?.message,
+      message: run.failure?.message.slice(0, 600),
+      messageCharactersOmitted: Math.max(0, (run.failure?.message.length ?? 0) - 600),
       declaredCheck: isDeclaredJourney(record, run),
       captureIds: run.captures.slice(-2).map((entry) => entry.id),
     })),
@@ -43,7 +46,7 @@ export function experimentReviewContext(
           }))
       : [],
     guidance:
-      "A failed experiment remains unresolved unless its exact journey passes or a reviewer explicitly identifies a mistaken expectation. To diagnose an exploratory failure or an obsolete declared assertion after its revised check passes, submit experimentResolutions with runId, replacementRunId, outcome, reason, and evidence citing the replacement's successful observation and delivered image. Explain why the preserved outcome requires the replacement expectation. Current declared checks must be rerun or revised in the brief; the same declared check must execute successfully before diagnosing its obsolete assertion. Raw history remains unchanged; this judgment does not establish product quality.",
+      "Unlinked agent-proposed exploratory failures are information, not obligations. Inspect their original failure and any worker retirement reason; a retirement is not a pass. Retain a genuine product defect as a required feedback finding citing its supplied historical negative evidence; that finding overrides retirement and requires repair. A retained failed experiment remains unresolved unless its exact journey passes or a reviewer explicitly identifies a mistaken expectation. To diagnose an exploratory failure or an obsolete declared assertion after its revised check passes, submit experimentResolutions with runId, replacementRunId, outcome, reason, and evidence citing the replacement's successful observation and delivered image. Explain why the preserved outcome requires the replacement expectation. Current declared checks must be rerun or revised in the brief; the same declared check must execute successfully before diagnosing its obsolete assertion. Raw history remains unchanged; this judgment does not establish product quality.",
   };
 }
 

@@ -125,6 +125,7 @@ function citedJourney(
     const matches = originals.filter(
       (run) =>
         run.id === id ||
+        `HIST-${run.id}` === id ||
         run.captures.some((entry) => entry.id === id) ||
         run.operations.some((entry) => entry.id === id),
     );

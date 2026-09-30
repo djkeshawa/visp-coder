@@ -201,13 +201,14 @@ function reviewEvidence(
   const entries = catalogue.entries.filter(
     (entry) =>
       linked.has(entry.id) ||
+      entry.historicalFailure ||
       (entry.status !== "stale" &&
         (entry.kind !== "execution" || latest.has(entry.id)) &&
         (!entry.outcomes.length ||
           entry.outcomes.some((id) => outcomes.some((outcome) => outcome.id === id)))),
   );
   const rank = (entry: ProductEvidenceReference) =>
-    linked.has(entry.id) ? 0 : entry.kind === "operation" ? 2 : 1;
+    linked.has(entry.id) || entry.historicalFailure ? 0 : entry.kind === "operation" ? 2 : 1;
   entries.sort((a, b) => rank(a) - rank(b));
   return { entries: entries.slice(0, 60), omitted: Math.max(0, entries.length - 60) };
 }

@@ -143,6 +143,7 @@ it("keeps failed capture routing on repair while preserving replay", async () =>
 
   const capture = await runProductCapture(await setup.workspace.state(), {
     task: "T001",
+    outcomes: ["O001"],
     journey: { url: "http://127.0.0.1:3000/" },
   });
   expect(capture).toMatchObject({

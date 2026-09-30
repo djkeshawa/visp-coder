@@ -1,5 +1,9 @@
 import { ok, type Result } from "../../core/result.js";
-import { recordedReplayRuns, replayCommand } from "../evidence/capture-replay.js";
+import {
+  recordedReplayRuns,
+  replayBatchCommand,
+  replayCommand,
+} from "../evidence/capture-replay.js";
 import type { WorkspaceState } from "../state.js";
 import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import {
@@ -890,7 +894,7 @@ function failedJourneyNext(
         action: "fix",
         objective:
           "Replay the recorded input on the current implementation before deciding on further repair or review; the retained failure remains unresolved",
-        command: replayCommand(record.brief.feature, pendingReplay.id, slice.id),
+        command: replayBatchCommand(record.brief.feature, pendingReplay.id, slice.id),
         evidence: currentJourneyFailures(record, subject, slice.id),
         mayEdit: true,
         completion: "unresolved-product",

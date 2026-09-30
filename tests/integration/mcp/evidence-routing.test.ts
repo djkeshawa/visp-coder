@@ -122,6 +122,10 @@ describe("MCP product evidence feedback", () => {
 
   it("routes replay and mutually exclusive capture input through the shared validator", async () => {
     for (const args of [
+      { replayBatch: "missing", task: "T001" },
+      { retire: "missing", reason: "Unknown journey" },
+      { retire: "missing", replay: "missing", reason: "Conflicting modes" },
+      { reason: "Without retirement", journey: { url: "http://127.0.0.1/" } },
       { replay: "missing", task: "T001" },
       { replay: "missing", journey: { url: "http://127.0.0.1/" } },
       {},

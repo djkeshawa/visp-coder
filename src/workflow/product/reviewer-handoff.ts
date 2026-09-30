@@ -111,6 +111,11 @@ export function independentReviewerContext(bundle: ReturnType<typeof productRevi
     ...(bundle.observationSequence ? { observationSequence: bundle.observationSequence } : {}),
     images: bundle.images,
     sources: bundle.sources.filter((source) => source.kind !== "authored-brief"),
+    experiments: {
+      ...bundle.experiments,
+      guidance:
+        "These are recorded runner failures and worker-reported retirement reasons, not passing evidence or reviewer judgments. Assess the failure against the original request. Cite the supplied historical negative evidence only in a required product finding to require repair/replay of its original journey; retirement does not override such a finding. Historical references cannot establish current quality or resolve a prior finding. Omitted records remain accessible at originalRecords.",
+    },
     interactionEvidence: {
       ...bundle.interactionEvidence,
       guidance:

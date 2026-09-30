@@ -48,6 +48,11 @@ export function compactProductReply(
 
 const SCALAR_FIELDS = [
   "notice",
+  "information",
+  "expectation",
+  "retirement",
+  "originalStatus",
+  "canonicalRunId",
   "feature",
   "task",
   "taskClass",
@@ -77,6 +82,7 @@ const LIST_FIELDS = [
   "evidenceGaps",
   "journeyFailures",
   "imageGaps",
+  "runs",
 ] as const;
 const PLAN_FIELDS = ["capability", "firstSlice", "nextCheck", "findings", "gaps"] as const;
 const FEEDBACK_FIELDS = [

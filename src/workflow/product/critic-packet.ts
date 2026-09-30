@@ -154,7 +154,11 @@ export async function criticPacket(
       : {}),
     responseShape: independentReviewTemplate(),
     responseSchema: independentReviewJsonSchema(
-      deliveredReviewEvidenceIds(evidence, independent.interactionEvidence),
+      deliveredReviewEvidenceIds(
+        evidence,
+        independent.interactionEvidence,
+        independent.experiments,
+      ),
       independent.outcomes.map((outcome) => outcome.id),
       disputes.map((dispute) => dispute.test),
     ),

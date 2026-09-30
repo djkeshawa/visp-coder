@@ -3,7 +3,7 @@ import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { browserInputIdentitySchema } from "../../testing/browser-input-identity.js";
 import { browserJourneySchema } from "../../testing/browser-journey.js";
-import { replaySuggestions } from "../evidence/capture-replay.js";
+import { replayBatchCommand, replaySuggestions } from "../evidence/capture-replay.js";
 import {
   currentExactReplay,
   exactReplayIdentity,
@@ -17,8 +17,14 @@ import type { ProductReviewImage } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
 import { productCheckSupportsBehavior } from "./check-command.js";
 import { reviewCodeSources } from "./code-context.js";
+import { exploratoryFailureHistory, historicalFailureReferences } from "./exploratory-history.js";
 import { captureSchema, type ProductImageAvailability } from "./images.js";
-import { hasExecutedDeclaredRevision, isDeclaredJourney } from "./journey-ownership.js";
+import {
+  hasExecutedDeclaredRevision,
+  isDeclaredJourney,
+  journeyExpectationSchema,
+  journeyOwnershipIndex,
+} from "./journey-ownership.js";
 import {
   latestExecutionsByOwner,
   type ProductAssessment,
@@ -36,6 +42,8 @@ export interface ProductEvidenceReference {
   readonly summary: string;
   /** Runner-owned binding; never inferred from the reviewer's text. */
   readonly captureRunId?: string;
+  /** Verified historical failure, usable only to require repair/replay, never positive credit. */
+  readonly historicalFailure?: boolean;
   readonly outcomes: readonly string[];
   readonly viewport?: { width: number; height: number };
   readonly measurement?: { json: string; truncated: boolean };
@@ -102,6 +110,7 @@ export const productCaptureRunSchema = z.object({
   comparisonEnvironment: z.string().optional(),
   journey: browserJourneySchema.optional(),
   journeyKey: z.string().optional(),
+  expectation: journeyExpectationSchema.optional(),
   status: z.enum(["completed", "failed", "timed-out", "cancelled"]).optional(),
   completedInputs: z.array(browserInputIdentitySchema).optional(),
   failure: z
@@ -141,6 +150,7 @@ export async function productEvidenceCatalogue(
   imageReferences(record, subject, images, entries, aliases, availability);
   operationReferences(record, subject, entries, selectedSlice);
   controlReferences(record, subject, entries, selectedSlice);
+  historicalFailureEntries(record, entries, selectedSlice);
   const { sources, claims } = await productSources(workspace, record);
   sources.push(...(codeSources ?? (await reviewCodeSources(workspace, record))));
   for (const source of sources)
@@ -159,6 +169,7 @@ export async function productEvidenceCatalogue(
         status: "unavailable",
         summary: `${entry.summary}; ambiguous evidence ID`,
         supportsBehavior: false,
+        historicalFailure: false,
       };
   return { entries, aliases, sources, sourceClaims: claims };
 }
@@ -378,6 +389,7 @@ function operationReferences(
       const status = !current ? "stale" : observationStatus(observed);
       entries.push({
         id: observed.id,
+        captureRunId: run.id,
         kind: "operation",
         outcomes: run.task
           ? (record.brief.slices.find((slice) => slice.id === run.task)?.outcomes ?? [])
@@ -389,6 +401,44 @@ function operationReferences(
       });
     }
   }
+}
+
+function historicalFailureEntries(
+  record: ProductRecord,
+  entries: ProductEvidenceReference[],
+  slice?: ProductSlice,
+) {
+  const references = new Map<string, string>();
+  for (const run of exploratoryFailureHistory(record, slice).runs) {
+    for (const id of historicalFailureReferences(run)) references.set(id, run.id as string);
+    entries.push({
+      id: `HIST-${run.id}`,
+      kind: "operation",
+      status: "stale",
+      outcomes: [],
+      captureRunId: run.id,
+      historicalFailure: true,
+      supportsBehavior: false,
+      summary: `Historical runner failure ${run.id}: ${run.status}; ${run.failure?.message.slice(0, 600)}. Negative evidence only: require repair/replay; no current passing credit.`,
+    });
+  }
+  for (const [index, entry] of entries.entries())
+    if (entry.status === "stale" && references.has(entry.id))
+      entries[index] = {
+        ...entry,
+        captureRunId: references.get(entry.id),
+        historicalFailure: true,
+        supportsBehavior: false,
+        summary: entry.summary.slice(0, 600),
+        ...(entry.measurement
+          ? {
+              measurement: {
+                json: entry.measurement.json.slice(0, 2000),
+                truncated: entry.measurement.truncated || entry.measurement.json.length > 2000,
+              },
+            }
+          : {}),
+      };
 }
 
 function controlReferences(
@@ -511,16 +561,19 @@ export function currentJourneyFailures(
     ),
     ...pendingJourneyReplays(record, subject, task).map(
       (run) =>
-        `Replay required for ${run.id}: ${run.failure?.message}. Run visp capture --feature ${record.brief.feature}${run.task ? ` --task ${run.task}` : ""} --replay ${run.id}; keep the original interactions and assertions.`,
+        `Replay required for ${run.id}: ${run.failure?.message}. Run ${replayBatchCommand(record.brief.feature, run.id ?? "", run.task)}; keep the original interactions and assertions.`,
     ),
   ];
 }
 
 /** A source edit makes old evidence stale; it does not demonstrate that a known defect was repaired. */
 export function pendingJourneyReplays(record: ProductRecord, subject: string, task?: string) {
+  const ownership = journeyOwnershipIndex(record);
   const failed = new Map<string, z.infer<typeof productCaptureRunSchema>>();
   const current = latestCurrentJourneys(record, subject, task);
-  const unresolved = new Set(currentFailedJourneys(record, subject, task).map((run) => run.id));
+  const unresolved = new Set(
+    currentFailedJourneys(record, subject, task, ownership).map((run) => run.id),
+  );
   for (const candidate of record.state.captureRuns) {
     const parsed = productCaptureRunSchema.safeParse(candidate);
     if (!parsed.success) continue;
@@ -528,6 +581,7 @@ export function pendingJourneyReplays(record: ProductRecord, subject: string, ta
     if (
       !run.id ||
       !run.journey ||
+      ownership.isExploratory(run) ||
       run.failure?.kind !== "behavior" ||
       (task && run.task && run.task !== task) ||
       (run.task && !record.brief.slices.some((slice) => slice.id === run.task))
@@ -665,7 +719,12 @@ export function latestCurrentJourneys(record: ProductRecord, subject: string, ta
   return [...latest.values()];
 }
 
-export function currentFailedJourneys(record: ProductRecord, subject: string, task?: string) {
+export function currentFailedJourneys(
+  record: ProductRecord,
+  subject: string,
+  task?: string,
+  ownership = journeyOwnershipIndex(record),
+) {
   const runs = latestCurrentJourneys(record, subject, task);
   const completed = new Map(
     record.state.captureRuns.flatMap((candidate) => {
@@ -684,6 +743,7 @@ export function currentFailedJourneys(record: ProductRecord, subject: string, ta
     (run) =>
       run.status &&
       run.status !== "completed" &&
+      !(run.failure?.kind === "behavior" && ownership.isExploratory(run)) &&
       !resolutions.some(
         (resolution) =>
           resolution.runId === run.id &&
