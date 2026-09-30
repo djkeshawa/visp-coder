@@ -13,10 +13,10 @@ export const feedbackResolutionSchema = z
   .object({
     id: text,
     disposition: z
-      .enum(["repaired", "disproved"])
+      .enum(["repaired", "disproved", "still-open", "not-reproducible"])
       .optional()
       .describe(
-        "Omitted means repaired. Use disproved only when new executed counterevidence refutes the finding; explain why the claim or expectation was wrong, rather than claiming a repair.",
+        "Omitted means repaired. repaired and disproved require successful counterevidence. still-open and not-reproducible retain the finding; explain the remaining defect or missing evidence. Use disproved only when new executed counterevidence refutes the finding.",
       ),
     environmentChange: z
       .object({
@@ -32,7 +32,7 @@ export const feedbackResolutionSchema = z
         "Only for an explicitly assessed functional repair across two known different comparisonEnvironment identities. Never a disproof or permission to change assertions.",
       ),
     explanation: text,
-    evidence: z.array(text.describe("Exact supplied evidence ID.")).min(1),
+    evidence: z.array(text.describe("Exact supplied evidence ID.")),
     regression: z
       .union([
         z
@@ -46,7 +46,24 @@ export const feedbackResolutionSchema = z
         "For a functional repair, cite a distinct nearby behavior check and explain its relevance, or explain why no adjacent regression applies. Null is only for resolutions that do not need a repair regression.",
       ),
   })
-  .strict();
+  .strict()
+  .superRefine((resolution, context) => {
+    if (resolutionClosesFinding(resolution) && !resolution.evidence.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["evidence"],
+        message: "Closing a finding requires counterevidence",
+      });
+  });
+
+/** An explicit inability to reproduce a report never waives the required finding. */
+export function resolutionClosesFinding(resolution: { disposition?: string }) {
+  return (
+    resolution.disposition === undefined ||
+    resolution.disposition === "repaired" ||
+    resolution.disposition === "disproved"
+  );
+}
 export const productFeedbackSchema = z
   .object({
     phase: z.enum(["understanding", "product"]),

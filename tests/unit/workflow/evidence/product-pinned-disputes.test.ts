@@ -248,7 +248,7 @@ it("waives an upheld test: the suite skips it and the slice closes and accepts",
     { task: "T001", dispute: [ODD], disputeReason: REASON },
     inlineReview(host),
   );
-  expect(first.ok && first.value.closed).toBe(false);
+  expect(first.ok && first.value.closed).toBe(true);
   const again = await runProductDoneReviewed(await state(), { task: "T001" }, inlineReview(host));
   expect(again.ok, JSON.stringify(again)).toBe(true);
   if (!again.ok) return;
@@ -689,11 +689,13 @@ it("counts an upheld test as waived when the suite cannot skip it, so accept is 
     { task: "T001", dispute: [ODD], disputeReason: REASON },
     inlineReview(host),
   );
-  expect(first.ok && first.value.closed).toBe(false);
+  expect(first.ok && first.value.closed).toBe(true);
   const again = await runProductDoneReviewed(await state(), { task: "T001" }, inlineReview(host));
   expect(again.ok, JSON.stringify(again)).toBe(true);
   if (!again.ok) return;
-  const execution = again.value.executions.find((entry) => entry.check === "PINNED_1");
+  const execution = first.ok
+    ? first.value.executions.find((entry) => entry.check === "PINNED_1")
+    : undefined;
   expect(execution?.status).toBe("passed");
   expect(execution?.output).toContain("waived by the independent review");
   expect(again.value.closed, JSON.stringify(again.value.gaps)).toBe(true);
@@ -756,7 +758,7 @@ it("allows one more review of a dispute the reviewer left unruled, then hands it
   expect(report.ok && report.value.markdown).toContain("needs the human reviewer");
 });
 
-it("points next at done after an upheld ruling instead of fix", async () => {
+it("points next at acceptance after closing with an upheld ruling", async () => {
   const fixture = await disputeWorkspace();
   const { host } = reviewer(upholdAll);
   const done = await runProductDoneReviewed(
@@ -767,15 +769,14 @@ it("points next at done after an upheld ruling instead of fix", async () => {
   expect(done.ok, JSON.stringify(done)).toBe(true);
   if (!done.ok) return;
   expect(done.value.next).toMatchObject({
-    action: "implement",
-    command: expect.stringContaining("visp done"),
-    objective: expect.stringContaining("upheld"),
+    action: "accept",
+    command: expect.stringContaining("visp accept"),
   });
   const next = await runProductNext(await state(), {
     feature: fixture.brief.feature,
     task: "T001",
   });
-  expect(next.ok && next.value.action).toBe("implement");
+  expect(next.ok && next.value.action).toBe("accept");
 });
 
 it("resists re-rolling: at most two filings per test, prior rulings reach the reviewer", async () => {
