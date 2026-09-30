@@ -188,13 +188,16 @@ export interface TesterRequest {
 /** Returns the tester's raw structured answer; throws when the tester could not run. */
 export type IndependentTester = (request: TesterRequest) => Promise<unknown>;
 /** Starts the tester for a feature and reports its record once finished or after `waitMs`. */
-export type TestsStarter = (
+export type TestsStarter = ((
   workspace: WorkspaceState,
   feature: string,
   waitMs: number,
   /** Also restart a tester that failed, not only one that stopped without a result. */
   retryFailed?: boolean,
-) => Promise<Result<IndependentTestsRecord>>;
+) => Promise<Result<IndependentTestsRecord>>) & {
+  /** The tester runs inside the calling process, so that process must stay alive for it. */
+  readonly inProcess?: true;
+};
 
 /**
  * Testers usually return in 1–3 minutes. These are polling budgets, not a bound on
@@ -288,8 +291,11 @@ const STALE_TESTER_NAMES = [
 const STALE_TESTER_MS = 2 * 60 * 60_000;
 
 export function inlineTests(tester: IndependentTester): TestsStarter {
-  return (workspace, feature, _waitMs, retryFailed) =>
-    writeIndependentTests(workspace, feature, tester, retryFailed);
+  return Object.assign(
+    (workspace: WorkspaceState, feature: string, _waitMs: number, retryFailed?: boolean) =>
+      writeIndependentTests(workspace, feature, tester, retryFailed),
+    { inProcess: true as const },
+  );
 }
 
 /**
@@ -435,8 +441,8 @@ async function startingSourceDigest(
   return ok(digest);
 }
 
-/** `visp feature`, then the tester in the background when VISP launches one. */
-export async function createProductFeatureWithTests(
+/** `visp feature` without the tester: the source-brief check, then the feature. */
+export async function createProductFeatureChecked(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
   starter: TestsStarter | undefined,
@@ -453,12 +459,75 @@ export async function createProductFeatureWithTests(
         },
       ),
     );
-  const created = await createProductFeature(workspace, options);
-  if (!created.ok) return created;
-  // A repeated request returns the earlier feature, which must still end with pinned tests.
-  if (created.value.duplicateOf) await restartTester(workspace, created.value.duplicateOf, starter);
-  else await startIndependentTests(workspace, created.value.brief.feature, starter);
+  return createProductFeature(workspace, options);
+}
+
+/** `visp feature`, then the tester in the background when VISP launches one. */
+export async function createProductFeatureWithTests(
+  workspace: WorkspaceState,
+  options: ProductFeatureOptions,
+  starter: TestsStarter | undefined,
+): Promise<Result<ProductFeatureOutcome>> {
+  const created = await createProductFeatureChecked(workspace, options, starter);
+  if (created.ok) await startFeatureTester(workspace, created.value, starter);
   return created;
+}
+
+/** The tester of a new feature; of the earlier one when the request was a repeat. */
+function startFeatureTester(
+  workspace: WorkspaceState,
+  created: ProductFeatureOutcome,
+  starter: TestsStarter | undefined,
+): Promise<void> {
+  // A repeated request returns the earlier feature, which must still end with pinned tests.
+  return created.duplicateOf
+    ? restartTester(workspace, created.duplicateOf, starter)
+    : startIndependentTests(workspace, created.brief.feature, starter);
+}
+
+/** How long `visp feature` waits for the tester's record before it prints. */
+const RECORD_WAIT_MS = 3000;
+
+const TESTS_NOTE =
+  "Acceptance tests are being written in this process (3-10 min). Keep working; do not re-run visp feature. visp done reports them once pinned.";
+
+/**
+ * Starts the tester without waiting for it, so `visp feature` can print first. It waits only
+ * until the tests record shows running (or the start settled), so that `visp work` in another command
+ * finds a running tester instead of starting a second one. `finished` ends with the tester;
+ * its failures are in the tests record, never thrown.
+ */
+export async function beginFeatureTester(
+  workspace: WorkspaceState,
+  created: ProductFeatureOutcome,
+  starter: TestsStarter | undefined,
+): Promise<{ readonly testsNote?: string; readonly finished: Promise<void> }> {
+  const feature = created.duplicateOf ?? created.brief.feature;
+  let settled = false;
+  // The note is true only for a tester this process started and runs itself.
+  let started = false;
+  const watched: TestsStarter | undefined =
+    starter &&
+    Object.assign(
+      (...args: Parameters<TestsStarter>) => {
+        started = true;
+        return starter(...args);
+      },
+      starter.inProcess ? { inProcess: true as const } : {},
+    );
+  const finished = startFeatureTester(workspace, created, watched)
+    .catch(() => undefined)
+    .then(() => {
+      settled = true;
+    });
+  const deadline = Date.now() + RECORD_WAIT_MS;
+  for (;;) {
+    const record = await readTestsRecord(workspace, feature);
+    if (record.ok && record.value?.status === "running" && started && watched?.inProcess)
+      return { finished, testsNote: TESTS_NOTE };
+    if (settled || Date.now() >= deadline) return { finished };
+    await sleep(100);
+  }
 }
 
 /** The tester of an existing feature that has none, failed, or stopped without a result. */

@@ -92,6 +92,8 @@ export interface ProductFeatureOutcome {
   /** The earlier feature that already records this request; no second feature was created. */
   readonly duplicateOf?: string;
   readonly duplicateNote?: string;
+  /** Set by `visp feature` when its tester is writing tests in the same process. */
+  readonly testsNote?: string;
 }
 
 export async function createProductFeature(

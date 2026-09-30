@@ -1,7 +1,7 @@
 import { Command, Option } from "commander";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { parseRiskLevel, parseWorkflowMode } from "../../core/input.js";
-import { err, type Result } from "../../core/result.js";
+import { err, ok, type Result } from "../../core/result.js";
 import { BRIEF_INPUT_HELP } from "../../harness/command-guide.js";
 import { productCheckTemplate } from "../../workflow/product/check-guidance.js";
 import {
@@ -12,9 +12,10 @@ import {
   runProductNextAfterReview,
 } from "../../workflow/product/done-review.js";
 import {
+  beginFeatureTester,
   codexTester,
   configuredTestsStarter,
-  createProductFeatureWithTests,
+  createProductFeatureChecked,
   testsWaitMs,
   writeIndependentTests,
 } from "../../workflow/product/independent-tests.js";
@@ -129,7 +130,18 @@ function cliText(name: string, opts: ProductOptions, value: unknown): string {
   );
 }
 
-async function execute(name: string, opts: ProductOptions, mutate: boolean, run: Operation) {
+/**
+ * `after` runs once the result is printed and stdout is flushed, before the command
+ * releases; the work it starts (a tester) is awaited in this process, and its failures
+ * belong to its own record, so they are not reported here.
+ */
+async function execute(
+  name: string,
+  opts: ProductOptions,
+  mutate: boolean,
+  run: Operation,
+  after?: () => Promise<unknown>,
+) {
   const execution = cliExecutionOptions(name, opts);
   opts = execution.options;
   try {
@@ -176,6 +188,10 @@ async function execute(name: string, opts: ProductOptions, mutate: boolean, run:
       },
     );
     if (result.ok && productResultFailed(result.value)) process.exitCode = 1;
+    if (after) {
+      await new Promise((resolve) => process.stdout.write("", resolve));
+      await after().catch(() => undefined);
+    }
   } catch (cause) {
     process.exitCode = emitError(name, fromUnknown(cause, "ARTIFACT_INVALID"), {
       json: isJson(opts),
@@ -267,21 +283,41 @@ export function featureCommand(): Command {
         );
         return;
       }
-      await execute("feature", opts, true, async (state) =>
-        createProductFeatureWithTests(
-          state,
-          {
-            goal,
-            // Long requests with quotes are hard to pass as one shell argument.
-            sourceBrief:
-              opts.sourceBrief === "-"
-                ? (await readStandardInput()).toString("utf8")
-                : opts.sourceBrief,
-            branch: opts.branch,
-            riskLevel: risk.value,
-          },
-          configuredTestsStarter(state),
-        ),
+      // The tester runs after the result is printed; `execute` awaits it in this process.
+      let finished: Promise<void> | undefined;
+      await execute(
+        "feature",
+        opts,
+        true,
+        async (state) => {
+          const starter = configuredTestsStarter(state);
+          if ((starter || state.config.critic?.launch === "codex-exec") && !isJson(opts))
+            process.stderr.write(
+              "visp feature: recording the request takes up to 30 s (rule and memory checks). If your tool returns early, keep polling; never run visp feature twice.\n",
+            );
+          const created = await createProductFeatureChecked(
+            state,
+            {
+              goal,
+              // Long requests with quotes are hard to pass as one shell argument.
+              sourceBrief:
+                opts.sourceBrief === "-"
+                  ? (await readStandardInput()).toString("utf8")
+                  : opts.sourceBrief,
+              branch: opts.branch,
+              riskLevel: risk.value,
+            },
+            starter,
+          );
+          if (!created.ok) return created;
+          const started = await beginFeatureTester(state, created.value, starter);
+          finished = started.finished;
+          return ok({
+            ...created.value,
+            ...(started.testsNote ? { testsNote: started.testsNote } : {}),
+          });
+        },
+        () => finished ?? Promise.resolve(),
       );
     });
 }
