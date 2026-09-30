@@ -156,15 +156,20 @@ For UI work, recover the browser and capture the usable interaction before spend
 For a browser capture, pipe YAML/JSON to \`visp capture --task <id> --from -\`:
 
 \`\`\`yaml
-url: http://127.0.0.1:3000
+url: project:/index.html
 viewport: {width: 1280, height: 720}
 actions:
   - {kind: click, selector: "#start", capture: true}
-  - {kind: wait, durationMs: 300, capture: false}
+  - kind: drag
+    selector: "#handle"
+    position: {x: 0.5, y: 0.5}
+    by: {x: -0.4, y: 0.2}
+    captureDuring: true
+    captureAfterMs: [300, 900]
   - {kind: wait-for, selector: "#result", visibility: visible, capture: true}
 \`\`\`
 
-Waits use \`durationMs\` (1–10000). Follow settling waits with \`wait-for\` or \`compare\` to establish the expected state. Use the actual permitted URL and real controls. For local-file projects use a confined project file URL where the host permits it. Each journey allows six total captures, including the automatic initial capture, the final capture when the last action does not request one, \`capture: true\`, and drag \`captureDuring: true\`. Operation records are generated. Capture and verify return matching before/after observations; investigate possible regressions and execution gaps, and inspect actual images. Work and review handoffs attach a recheck to findings linked to recorded execution: use its command to revisit the original path, then inspect the result and one nearby behavior affected by the edit. A matching rerun is observed-unassessed, not a resolved finding. These comparisons are advisory, not quality approval. Legacy runs without a saved journey still need --from. A different input that succeeds does not resolve an earlier failed input.
+Waits use \`durationMs\` (1–10000). Follow settling waits with \`wait-for\` or \`compare\` to establish the expected state. Use real controls. \`project:/index.html\` serves a static page (HTML/JS/CSS, no backend) from the project on a port VISP chooses, so start nothing; for an app with a backend or build step, start your server on a free port you choose (not a fixed common one such as 3000, which another process may hold) and use its URL. A drag ends at viewport-pixel \`to\` or, as fractions of the element's box, \`by\`; it starts at \`from\` (pixels) or \`position\` (fractions). \`captureDuring: true\` captures the held state at full pull before release and \`captureAfterMs: [300, 900]\` captures again that many ms after release; \`position\`/\`by\` refuse rotated, skewed, flipped or offset-path elements, so use pixels there. Each journey allows six total captures, including the automatic initial capture, the final capture when the last action does not request one, \`capture: true\`, drag \`captureDuring: true\` and each \`captureAfterMs\` offset. Operation records are generated. Capture and verify return matching before/after observations; investigate possible regressions and execution gaps, and inspect actual images. Work and review handoffs attach a recheck to findings linked to recorded execution: use its command to revisit the original path, then inspect the result and one nearby behavior affected by the edit. A matching rerun is observed-unassessed, not a resolved finding. These comparisons are advisory, not quality approval. Legacy runs without a saved journey still need --from. A different input that succeeds does not resolve an earlier failed input.
 
 ## Reviewer execution
 
