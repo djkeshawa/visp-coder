@@ -1,8 +1,10 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { withStateMutation } from "../../../src/core/file-transaction.js";
 import { installHarness } from "../../../src/harness/install.js";
+import { planFor } from "../../../src/harness/targets.js";
 import { now } from "../../../src/workflow/artifacts/common.js";
 import {
   authorizedScopes,
@@ -154,6 +156,34 @@ describe("feature and foundation context resolution", () => {
 
     expect(context.ok).toBe(true);
     if (context.ok) expect(context.value.harnessInstalled).toBe(true);
+  });
+
+  it("counts a CRLF checkout of a text asset as installed but not a CRLF executable", async () => {
+    const initial = await workspace.state();
+    const config = parse(await readFile(initial.paths.config, "utf8"));
+    config.harness = "codex";
+    await writeFile(initial.paths.config, stringify(config), "utf8");
+    const configured = await workspace.state();
+    const installed = await installHarness(configured.paths, {
+      harness: "codex",
+      profile: configured.config.profile,
+      hooks: [],
+      mcp: false,
+    });
+    if (!installed.ok) throw new Error(installed.error.message);
+    const assets = planFor("codex", configured.config.profile).assets;
+    const text = assets.find((asset) => !asset.executable);
+    const script = assets.find((asset) => asset.executable);
+    if (!text || !script) throw new Error("expected a text and an executable Codex asset");
+    const crlf = (content: string) => content.replace(/\n/g, "\r\n");
+
+    await writeFile(join(workspace.root, text.path), crlf(text.content));
+    const withText = await buildFoundationContext(await workspace.state());
+    expect(withText.ok && withText.value.harnessInstalled).toBe(true);
+
+    await writeFile(join(workspace.root, script.path), crlf(script.content), { mode: 0o755 });
+    const withScript = await buildFoundationContext(await workspace.state());
+    expect(withScript.ok && withScript.value.harnessInstalled).toBe(false);
   });
 
   it("keeps changed files unknown when the repository diff cannot be read", async () => {

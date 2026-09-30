@@ -13,6 +13,7 @@ import {
   CLAUDE_SETTINGS_REGISTRATION,
   inspectForeignHarnessAssets,
   readAssetManifest,
+  sameAssetContent,
 } from "../harness/asset-inspection.js";
 import {
   CLAUDE_SETTINGS_FILE,
@@ -138,7 +139,7 @@ async function inspectHarnessAssetFiles(
       result.missing.push(asset.path);
       continue;
     }
-    if (current.value === asset.content) continue;
+    if (sameAssetContent(current.value, asset)) continue;
 
     // Matching what we recorded means visp wrote it and the template has since
     // moved on. Anything else is the user's edit, which is theirs to keep.

@@ -28,10 +28,12 @@ import {
   mcpRegistrationLabel,
   parseAssetManifestText,
   readAssetManifest,
+  sameAssetContent,
 } from "./asset-inspection.js";
 import {
   CLAUDE_PRE_TOOL_USE_HOOK,
   CLAUDE_SETTINGS_FILE,
+  type PlannedClaudeRegistration,
   planPreToolUseRegistration,
   planPreToolUseUnregistration,
 } from "./claude-settings.js";
@@ -426,7 +428,7 @@ async function planAsset(
   const metadata = await fs.metadata(asset.path);
   if (!metadata.ok) return metadata;
 
-  if (current.value === asset.content) {
+  if (current.value !== undefined && sameAssetContent(current.value, asset)) {
     const executableDrift = asset.executable && !isExecutableMode(metadata.value?.mode);
     plan.assets.push({ path: asset.path, status: executableDrift ? "written" : "unchanged" });
     plan.fingerprints[asset.path] = assetFingerprint(asset.content);
@@ -602,6 +604,8 @@ async function planClaudeHook(
       ),
     );
   }
+  const backup = await planSettingsBackup(fs, registration.value, current.value, plan);
+  if (!backup.ok) return backup;
   if (registration.value.content !== undefined) {
     plan.mutations.push({
       kind: "write",
@@ -610,6 +614,31 @@ async function planClaudeHook(
       expectedBefore: filePrecondition(current.value),
     });
   }
+  return ok(undefined);
+}
+
+/** `install --force` rewrites settings it cannot merge; the old text is kept beside it. */
+async function planSettingsBackup(
+  fs: ProjectFileSystem,
+  registration: PlannedClaudeRegistration,
+  text: string | undefined,
+  plan: InstallPlan,
+): Promise<Result<void>> {
+  if (!registration.discarded || text === undefined) return ok(undefined);
+  const path = `${CLAUDE_SETTINGS_FILE}.visp-backup-${assetFingerprint(text)}`;
+  const existing = await fs.readTextIfExists(path);
+  if (!existing.ok) return existing;
+  if (existing.value !== text) {
+    plan.mutations.push({
+      kind: "write",
+      path,
+      content: text,
+      expectedBefore: filePrecondition(existing.value),
+    });
+  }
+  plan.manualSteps.push(
+    `${CLAUDE_SETTINGS_FILE} could not be merged and was rewritten; the previous text is saved as ${path}. Copy back any permissions or env settings you need, then delete the backup: it may contain env secrets.`,
+  );
   return ok(undefined);
 }
 

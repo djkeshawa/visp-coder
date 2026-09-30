@@ -193,6 +193,36 @@ describe("registerPreToolUseHook", () => {
   });
 });
 
+describe("planPreToolUseRegistration discarding", () => {
+  it("marks a forced rewrite of unparseable or malformed hooks as discarding", () => {
+    for (const current of ["{ not json", JSON.stringify({ hooks: { PreToolUse: "x" } })]) {
+      const plan = planPreToolUseRegistration(current, HOOK_PATH, true);
+      expect(plan.ok && plan.value).toMatchObject({ status: "replaced", discarded: true });
+    }
+  });
+
+  it("does not mark an ordinary merge as discarding", () => {
+    const plan = planPreToolUseRegistration(JSON.stringify({ model: "opus" }), HOOK_PATH, true);
+    expect(plan.ok && plan.value.discarded).toBeUndefined();
+  });
+
+  it("keeps sibling hook events when PreToolUse is not an array, and none when hooks is not an object", () => {
+    const sibling = { matcher: "Bash", hooks: [{ command: "./log.sh" }] };
+    const kept = planPreToolUseRegistration(
+      JSON.stringify({ hooks: { PreToolUse: "x", PostToolUse: [sibling] } }),
+      HOOK_PATH,
+      true,
+    );
+    expect(kept.ok && JSON.parse(kept.value.content ?? "").hooks.PostToolUse).toEqual([sibling]);
+    const none = planPreToolUseRegistration(JSON.stringify({ hooks: [sibling] }), HOOK_PATH, true);
+    expect(none.ok && Object.keys(JSON.parse(none.value.content ?? "").hooks).sort()).toEqual([
+      "PreToolUse",
+      "Stop",
+      "UserPromptSubmit",
+    ]);
+  });
+});
+
 describe("preToolUseRegistration", () => {
   it("reports absent when nothing is wired", async () => {
     const result = await preToolUseRegistration(root, HOOK_PATH);

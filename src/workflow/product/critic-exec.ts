@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { run as execRun } from "../../core/exec.js";
 import { redactStrings } from "../../core/redaction.js";
-import { prepareCommand } from "../../core/windows-command.js";
+import { sweepStaleTempDirectories } from "../../core/stale-temp.js";
 import type { ProductCriticHost } from "./critic.js";
 import type { CriticPacket } from "./critic-packet.js";
 
@@ -50,6 +50,9 @@ export function codexExecCriticHost(options: {
       };
     },
     async review(packet, config) {
+      // Directories from reviews that were killed before they could clean up hold a copy of
+      // the sign-in; a review takes minutes, so an hour-old one is abandoned.
+      await sweepStaleTempDirectories(STALE_REVIEW_NAMES, STALE_REVIEW_MS);
       const directory = await mkdtemp(join(tmpdir(), "visp-critic-"));
       try {
         const images = await writeImages(directory, packet);
@@ -74,11 +77,17 @@ export function codexExecCriticHost(options: {
           response,
         };
       } finally {
-        await rm(directory, { recursive: true, force: true });
+        await rm(directory, REMOVE_TEMPORARY);
       }
     },
   };
 }
+
+/** Exactly what `mkdtemp` makes (prefix plus six characters), so named directories survive. */
+const STALE_REVIEW_NAMES = [/^visp-(?:critic|review)-[A-Za-z0-9]{6}$/];
+const STALE_REVIEW_MS = 60 * 60_000;
+/** The child may still be releasing files as it dies, so removal retries briefly. */
+const REMOVE_TEMPORARY = { recursive: true, force: true, maxRetries: 4, retryDelay: 100 } as const;
 
 /**
  * One read-only, ephemeral `codex exec` session in the project that answers `prompt` with
@@ -138,11 +147,21 @@ export async function runCodexStructured(options: {
     responsePath,
     "-",
   ];
-  const result = await run(options.executable ?? "codex", args, {
-    signal: options.signal,
-    stdin: options.prompt,
-    env: { ...process.env, CODEX_HOME: await privateCodexHome(options.directory) },
-  });
+  const codexHome = await privateCodexHome(options.directory);
+  const termination = forwardTermination(options.signal);
+  let result: RunResult;
+  try {
+    result = await run(options.executable ?? "codex", args, {
+      signal: termination.signal,
+      stdin: options.prompt,
+      env: { CODEX_HOME: codexHome },
+    });
+  } finally {
+    // The sign-in copy goes as soon as the process group is gone, not when the caller's
+    // directory is removed: the tester's directory lives for the whole session.
+    await rm(codexHome, REMOVE_TEMPORARY).catch(() => undefined);
+    termination.release();
+  }
   // Awaited so a CLI that exits right after still has the log; a logging failure is ignored.
   await Promise.resolve()
     .then(() => options.onActivity?.(sessionActivity(result.stdout)))
@@ -153,6 +172,61 @@ export async function runCodexStructured(options: {
     );
   return JSON.parse(await readFile(responsePath, "utf8"));
 }
+
+/**
+ * A background reviewer or tester process has no abort handler of its own, so an external
+ * SIGTERM/SIGINT would leave Codex running. This aborts the run on either signal and, once
+ * the runs have had time to clean up, delivers the signal again so the process still ends
+ * as it would have. When something else already handles the signal, that handler decides.
+ * Listeners of other concurrent runs are ours, not a sign that someone else handles it.
+ */
+function forwardTermination(signal?: AbortSignal): { signal: AbortSignal; release: () => void } {
+  const controller = new AbortController();
+  let received: TerminationSignal | undefined;
+  const handled = new Set<TerminationSignal>();
+  const attached = new Set<TerminationSignal>();
+  const listeners = TERMINATION_SIGNALS.map((name) => {
+    if (process.listenerCount(name) > ownListeners[name]) handled.add(name);
+    const listener = () => {
+      received ??= name;
+      // A `once` listener is gone after it fires.
+      if (attached.delete(name)) ownListeners[name] -= 1;
+      controller.abort();
+    };
+    process.once(name, listener);
+    attached.add(name);
+    ownListeners[name] += 1;
+    return [name, listener] as const;
+  });
+  return {
+    signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+    release() {
+      for (const [name, listener] of listeners) {
+        process.removeListener(name, listener);
+        if (attached.delete(name)) ownListeners[name] -= 1;
+      }
+      if (received && !handled.has(received)) reraiseLater(received);
+    },
+  };
+}
+
+type TerminationSignal = "SIGTERM" | "SIGINT";
+const TERMINATION_SIGNALS: readonly TerminationSignal[] = ["SIGTERM", "SIGINT"];
+/** Listeners forwardTermination has attached for runs that are still active. */
+const ownListeners: Record<TerminationSignal, number> = { SIGTERM: 0, SIGINT: 0 };
+const pendingReraise = new Set<TerminationSignal>();
+
+/** Delayed so concurrent runs and their callers' `finally` blocks finish first; once per signal. */
+function reraiseLater(name: TerminationSignal): void {
+  if (pendingReraise.has(name)) return;
+  pendingReraise.add(name);
+  setTimeout(() => {
+    pendingReraise.delete(name);
+    process.kill(process.pid, name);
+  }, RERAISE_DELAY_MS).unref();
+}
+
+const RERAISE_DELAY_MS = 1000;
 
 /**
  * Codex without network retries for over a minute before failing, after the call is
@@ -266,40 +340,24 @@ function sessionActivity(events: string): SessionActivity {
   return { webSearches, commands };
 }
 
-function run(
+/** Runs Codex in its own process group, so an abort or timeout also ends its descendants. */
+async function run(
   executable: string,
   args: string[],
-  options: { signal?: AbortSignal; stdin?: string; env?: NodeJS.ProcessEnv },
+  options: { signal?: AbortSignal; stdin?: string; env?: Record<string, string> },
 ): Promise<RunResult> {
-  return new Promise((resolve) => {
-    let stderr = "";
-    const stdout: Buffer[] = [];
-    let stdoutBytes = 0;
-    const prepared = prepareCommand(executable, args, options.env ?? process.env);
-    const child = spawn(prepared.file, prepared.args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      signal: options.signal,
-      killSignal: "SIGTERM",
-      windowsVerbatimArguments: prepared.windowsVerbatimArguments,
-      ...(options.env ? { env: options.env } : {}),
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-8000);
-    });
-    // Event log for monitoring; bounded so a runaway session cannot exhaust memory.
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stdoutBytes > 4 * 1024 * 1024) return;
-      stdoutBytes += chunk.length;
-      stdout.push(chunk);
-    });
-    const text = () => Buffer.concat(stdout).toString("utf8");
-    child.on("error", (error) =>
-      resolve({ exitCode: null, stdout: text(), stderr, error: error.message }),
-    );
-    child.on("close", (exitCode) => resolve({ exitCode, stdout: text(), stderr }));
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(options.stdin ?? "");
+  const result = await execRun(executable, args, {
+    cwd: process.cwd(),
+    timeoutMs: 0,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.stdin === undefined ? {} : { input: options.stdin }),
+    ...(options.env ? { env: options.env } : {}),
   });
+  if (!result.ok) return { exitCode: null, stdout: "", stderr: "", error: result.error.message };
+  const { exitCode, stdout, stderr, aborted } = result.value;
+  return aborted
+    ? { exitCode: null, stdout, stderr, error: "The operation was aborted" }
+    : { exitCode, stdout, stderr };
 }
 
 /** The reviewer VISP may launch for this project, or undefined when the host delegates. */

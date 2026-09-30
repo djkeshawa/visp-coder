@@ -385,6 +385,17 @@ describe("the harness assets check", () => {
     expect(result.status).toBe("ok");
   });
 
+  it("treats a CRLF checkout of a generated text asset as installed", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    const path = join(workspace.root, "AGENTS.visp.md");
+    const generated = await readFile(path, "utf8");
+    await writeFile(path, generated.replace(/\n/g, "\r\n"), "utf8");
+
+    const result = await check("harness assets");
+    expect(result.status).toBe("ok");
+  });
+
   /** A file the user changed is theirs; reinstalling over it would discard it. */
   it("leaves a file the user edited alone, and says it did", async () => {
     await installEverything();

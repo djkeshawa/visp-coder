@@ -1,9 +1,9 @@
-import { mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { vispError } from "../../../src/core/errors.js";
 import { exists, ProjectFileSystem } from "../../../src/core/fs.js";
-import { err } from "../../../src/core/result.js";
+import { err, ok } from "../../../src/core/result.js";
 import { runtimeIdentity } from "../../../src/core/version.js";
 import { hookCommand } from "../../../src/harness/claude-settings.js";
 import { defaultHooks, installHarness, readAssetManifest } from "../../../src/harness/install.js";
@@ -322,6 +322,67 @@ describe("transactional harness installation", () => {
       expect(await exists(join(workspace.root, "AGENTS.visp.md"))).toBe(false);
     },
   );
+
+  describe("install --force over Claude settings it cannot merge", () => {
+    const forceClaude = async () => {
+      const result = await installHarness(
+        (await workspace.state()).paths,
+        { harness: "claude-code", hooks: ["claude"], mcp: false, force: true },
+        { guardHandshake: async () => ok(undefined) },
+      );
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value;
+    };
+    const backups = async () =>
+      (await readdir(join(workspace.root, ".claude"))).filter((name) =>
+        name.startsWith("settings.json.visp-backup-"),
+      );
+
+    it("saves unparseable settings before rewriting them and names the copy", async () => {
+      const original = "{ not json, but the user's permissions are in here\n";
+      await workspace.write(".claude/settings.json", original);
+      const installed = await forceClaude();
+      const [backup, ...others] = await backups();
+      expect(others).toEqual([]);
+      expect(await readFile(join(workspace.root, ".claude", backup ?? ""), "utf8")).toBe(original);
+      expect(installed.manualSteps.join(" ")).toContain(`.claude/${backup}`);
+      expect(installed.manualSteps.join(" ")).toContain("could not be merged");
+      expect(installed.manualSteps.join(" ")).toContain("may contain env secrets");
+      expect(
+        JSON.parse(await readFile(join(workspace.root, ".claude/settings.json"), "utf8")).hooks
+          .PreToolUse,
+      ).toHaveLength(2);
+    });
+
+    it("keeps sibling hook events when PreToolUse is not an array", async () => {
+      const original = JSON.stringify({
+        model: "opus",
+        hooks: {
+          PreToolUse: "x",
+          PostToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "./log.sh" }] }],
+        },
+      });
+      await workspace.write(".claude/settings.json", original);
+      await forceClaude();
+      const next = JSON.parse(
+        await readFile(join(workspace.root, ".claude/settings.json"), "utf8"),
+      );
+      expect(next.model).toBe("opus");
+      expect(next.hooks.PostToolUse).toEqual([
+        { matcher: "Bash", hooks: [{ type: "command", command: "./log.sh" }] },
+      ]);
+      expect(next.hooks.PreToolUse.length).toBeGreaterThan(0);
+      const [backup] = await backups();
+      expect(await readFile(join(workspace.root, ".claude", backup ?? ""), "utf8")).toBe(original);
+    });
+
+    it("writes no backup when the settings merge cleanly", async () => {
+      await workspace.write(".claude/settings.json", JSON.stringify({ model: "opus" }));
+      const installed = await forceClaude();
+      expect(await backups()).toEqual([]);
+      expect(installed.manualSteps.join(" ")).not.toContain("could not be merged");
+    });
+  });
 
   it("uses harness-appropriate local enforcement defaults", () => {
     expect(defaultHooks("claude-code")).toEqual(["claude", "git"]);

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { planAgentActivation, planAgentDeactivation } from "../../../src/harness/activation.js";
 import { installHarness } from "../../../src/harness/install.js";
+import { planFor } from "../../../src/harness/targets.js";
 import { TestWorkspace } from "../support/workspace.js";
 
 // A fresh AGENTS.md receives exactly the generated block and a trailing newline.
@@ -42,6 +43,54 @@ async function installCodex(force = false) {
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
 }
+
+describe("CRLF checkouts", () => {
+  const crlf = (text: string) => text.replace(/\n/g, "\r\n");
+
+  it("treats a CRLF copy of the generated block as current and removes it cleanly", () => {
+    const block = crlf(expectedActivationBlock);
+    const source = `# My rules\n\n${block}\n`;
+    expect(planAgentActivation("codex", source, false)).toEqual({
+      ok: true,
+      value: { status: "current" },
+    });
+    expect(planAgentDeactivation(source)).toEqual({ status: "removed", content: "# My rules\n" });
+  });
+
+  it("still treats a CRLF block with a user edit as edited", () => {
+    const edited = crlf(expectedActivationBlock.replace("No custom skill", "My own skill"));
+    expect(planAgentActivation("codex", `${edited}\n`, false).ok).toBe(false);
+    expect(planAgentDeactivation(`${edited}\n`).status).toBe("edited");
+  });
+
+  it("leaves a current CRLF AGENTS.md block untouched on reinstall", async () => {
+    const source = `# My rules\r\n\r\n${crlf(expectedActivationBlock)}\r\n`;
+    await workspace.write("AGENTS.md", source);
+    await installCodex();
+    expect(await readFile(join(workspace.root, "AGENTS.md"), "utf8")).toBe(source);
+  });
+
+  it("does not block on a CRLF text asset and rewrites a CRLF executable without --force", async () => {
+    const first = await installCodex();
+    const assets = planFor("codex", "minimal").assets;
+    const text = assets.find((asset) => !asset.executable);
+    const script = assets.find((asset) => asset.executable);
+    if (!text || !script) throw new Error("expected a text and an executable Codex asset");
+    expect(first.assets.length).toBeGreaterThan(0);
+    const textPath = join(workspace.root, text.path);
+    const scriptPath = join(workspace.root, script.path);
+    await writeFile(textPath, crlf(text.content));
+    await writeFile(scriptPath, crlf(script.content), { mode: 0o755 });
+
+    const second = await installCodex();
+
+    expect(second.assets.find((asset) => asset.path === text.path)?.status).toBe("unchanged");
+    expect(await readFile(textPath, "utf8")).toBe(crlf(text.content));
+    // A CRLF shell script does not run: the recorded fingerprint proves it is VISP's own.
+    expect(second.assets.find((asset) => asset.path === script.path)?.status).toBe("written");
+    expect(await readFile(scriptPath, "utf8")).toBe(script.content);
+  });
+});
 
 describe("project instruction activation", () => {
   it("upgrades and removes only the exact earlier CLI-first block", () => {
