@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ok } from "../../../../src/core/result.js";
@@ -153,6 +153,15 @@ it("reports a background review that finishes before it is ever pending", async 
     reviewed: true,
     findings: [{ problem: "Wrong status", nextCheck: "GET /x", required: true }],
   });
+  // The process log lives in the feature directory, not in a per-review temp directory.
+  const log = join(
+    setup.workspace.root,
+    ".visp/features",
+    setup.brief.feature,
+    "review-process.log",
+  );
+  expect(JSON.parse(await readFile(log, "utf8"))).toMatchObject({ ok: true });
+  if (process.platform !== "win32") expect((await stat(log)).mode & 0o777).toBe(0o600);
 });
 
 it("waits for a running review and reports its recorded state instead of a wait step", async () => {

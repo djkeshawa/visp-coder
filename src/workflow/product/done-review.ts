@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -61,6 +60,9 @@ interface ReviewSelection extends ProductSelection {
   /** Running the same command again is cheap and safe: an inline review may wait for it. */
   readonly rerunnable?: boolean;
 }
+
+/** What the detached review process writes: its JSON envelope, read back when it exits early. */
+const REVIEW_PROCESS_LOG = "review-process.log";
 
 /** Returned reviews took 48 s at the median and 75 s at p90; a review with less left is cut off. */
 const MIN_INLINE_REVIEW_MS = 75_000;
@@ -456,8 +458,9 @@ export function deadlineSignal(
  */
 export function backgroundReview(cli: string, startupMs = 15_000): ReviewStarter {
   return async (workspace, selection) => {
-    const log = join(await mkdtemp(join(tmpdir(), "visp-review-")), "review.json");
-    const output = openSync(log, "w");
+    // The feature's own directory keeps the process log: no stray temp directory per review.
+    const log = workspace.paths.featureFile(selection.feature, REVIEW_PROCESS_LOG);
+    const output = openSync(log, "w", 0o600);
     const child = spawn(
       process.execPath,
       [
