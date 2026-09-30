@@ -1529,6 +1529,9 @@ it.each([
     expect(feature.ok, JSON.stringify(feature)).toBe(true);
     expect(prompts).toHaveLength(1);
     const prompt = prompts[0] as string;
+    expect(prompt).toContain(
+      "- For each invariant the request states (something never happens: never passes through, never exceeds, never negative), include one bounded check that tries to break it (a small sweep of inputs or a simulated run) and fails if it ever happens.",
+    );
     expect(prompt).not.toContain(TESTER_BROWSER_KIT.trim());
     expect(prompt.includes("openPage(url,")).toBe(kit);
     expect(prompt.includes("BrowserUnavailable")).toBe(kit);
