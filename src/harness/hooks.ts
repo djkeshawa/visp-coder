@@ -18,7 +18,7 @@ import { hookCommand } from "./claude-settings.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 15;
+export const HOOK_TEMPLATE_VERSION = 16;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -33,7 +33,8 @@ export function renderPreToolUseHook(): string {
 // Decisions come from \`${PRODUCT_NAME} guard\`, so this file holds no rules of its own.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const cli = ${cli};
@@ -90,17 +91,30 @@ if (input?.hook_event_name === "UserPromptSubmit") {
 }
 
 // A weak worker stopped with slices open and no acceptance, so the pinned tests never ran
-// as final checks. Send it back to the next step a few times, only for recent work.
+// as final checks. Send it back to the next step, only for recent work. A block is a nudge
+// about one step: the same step is raised at most twice, and again only when the feature
+// changed since the last nudge; a handoff or an unusable environment is raised once.
 if (input?.hook_event_name === "Stop") {
   const root = projectRoot();
   try {
     const status = JSON.parse(readFileSync(join(root, ".visp", "status.json"), "utf8"));
-    const recent = Date.now() - Date.parse(status.updatedAt) < 60 * 60 * 1000;
-    if (!status.activeFeature || !recent) process.exit(0);
+    if (!status.activeFeature) process.exit(0);
+    // Recent work moves the feature's state file; status.json alone misses a long check.
+    let touched = Date.parse(status.updatedAt);
+    try {
+      touched = Math.max(
+        Number.isFinite(touched) ? touched : 0,
+        statSync(join(root, ".visp", "features", String(status.activeFeature), "product-state.json")).mtimeMs,
+      );
+    } catch {}
+    if (!(Date.now() - touched < 60 * 60 * 1000)) process.exit(0);
     const envelope = JSON.parse(
       // Unselected, so a later session's untaken request is sent to a feature of its own.
+      // The observer marker makes \`${PRODUCT_NAME} next\` trust the worker's recorded browser
+      // capability and report a \`progress\` token; it changes nothing else.
       execFileSync(process.execPath, [cli, "next", "--json"], {
         cwd: root,
+        env: { ...process.env, VISP_OBSERVER: "stop-hook" },
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 170000,
       }).toString(),
@@ -111,23 +125,68 @@ if (input?.hook_event_name === "Stop") {
       try { readFileSync(edits); } catch { process.exit(0); }
     }
     if (!envelope?.ok || !next?.action || next.action === "complete") process.exit(0);
+    const day = 24 * 60 * 60 * 1000;
+    const plain = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    const now = Date.now();
+    const kind =
+      next.completion === "handoff" ? "handoff" : next.completion === "unresolved-environment" ? "environment" : "work";
+    const limit = kind === "work" ? 2 : 1;
+    // Ids and values change from call to call; the command's verb and flags name the step.
+    const words = String(next.command ?? "").split(/\\s+/).filter(Boolean);
+    const shape = words.filter((word, index) => index < 2 || word.startsWith("-"));
+    const fingerprint = createHash("sha256")
+      .update(JSON.stringify([status.activeFeature, next.action, next.completion ?? "", next.task ?? "", shape]))
+      .digest("hex");
+    const progress = typeof next.progress === "string" ? next.progress : "";
     const counts = join(root, ".visp", "session", "stop-blocks.json");
-    let blocked = {};
+    let entries = {};
     try {
-      blocked = JSON.parse(readFileSync(counts, "utf8"));
+      const stored = JSON.parse(readFileSync(counts, "utf8"));
+      if (stored?.version === 2 && plain(stored.entries)) entries = stored.entries;
     } catch {}
-    // Once reviews are spent the loop ends in a handoff: one reminder to write it.
-    const handoff = next.completion === "handoff";
-    const key = [input.session_id ?? "unknown", status.activeFeature, handoff ? "handoff" : "work"].join(":");
-    const used = blocked[key] ?? 0;
-    if (used >= (handoff ? 1 : 3)) process.exit(0);
-    mkdirSync(join(root, ".visp", "session"), { recursive: true });
-    writeFileSync(counts, JSON.stringify({ ...blocked, [key]: used + 1 }));
+    for (const [name, entry] of Object.entries(entries)) {
+      if (!plain(entry) || !(now - Date.parse(entry.at) < day)) delete entries[name];
+      else if (plain(entry.fps))
+        for (const [id, seen] of Object.entries(entry.fps))
+          if (!plain(seen) || !(now - Date.parse(seen.at) < day)) delete entry.fps[id];
+    }
+    const key = [input.session_id ?? "unknown", status.activeFeature].join(":");
+    const entry = plain(entries[key]) && plain(entries[key].fps) ? entries[key] : { total: 0, fps: {} };
+    const seen = plain(entry.fps[fingerprint]) ? entry.fps[fingerprint] : undefined;
+    if ((Number(entry.total) || 0) >= 6) process.exit(0);
+    // The same step blocks up to its limit whatever the worker did in between: in weak-worker
+    // runs most repeated nudges were followed, and waiting for a progress change let a worker
+    // that did nothing stop after one nudge.
+    if (seen && (Number(seen.count) || 0) >= limit) process.exit(0);
+    // The counter is on disk before the block is emitted; if it cannot be written the
+    // worker is not blocked, since nothing would bound the repeats.
+    const at = new Date(now).toISOString();
+    entries[key] = {
+      total: (Number(entry.total) || 0) + 1,
+      at,
+      fps: { ...entry.fps, [fingerprint]: { count: (Number(seen?.count) || 0) + 1, progress, at } },
+    };
+    const temporary = counts + "." + process.pid + ".tmp";
+    try {
+      mkdirSync(join(root, ".visp", "session"), { recursive: true });
+      writeFileSync(temporary, JSON.stringify({ version: 2, entries }));
+      renameSync(temporary, counts);
+    } catch {
+      try { unlinkSync(temporary); } catch {}
+      process.exit(0);
+    }
+    const objective = String(next.objective ?? "").trim().replace(/[.\\s]+$/, "");
+    const feature = status.activeFeature;
+    const command = next.command;
     const reason = !next.feature
-      ? \`\${next.objective}. Run: \${next.command}\`
-      : handoff
-      ? \`Independent review of \${status.activeFeature} is spent with findings open. Run \${next.command} and summarize the open findings in your final message for the human reviewer.\`
-      : \`Feature \${status.activeFeature} is not accepted yet. Next: \${next.objective} Run: \${next.command}. Continue until visp accept succeeds, or state in your final message why it cannot.\`;
+      ? command ? \`\${objective}. Run: \${command}\` : \`\${objective}.\`
+      : kind === "handoff"
+      ? command
+        ? \`\${objective}. Run: \${command} once, then say in your final message what is still open and that \${feature} needs the human reviewer.\`
+        : \`\${objective}. Say in your final message what is still open and that \${feature} needs the human reviewer.\`
+      : kind === "environment"
+      ? \`VISP cannot verify \${feature} until its execution environment works: \${objective}.\${command ? \` Run: \${command} once.\` : ""} If it is still unavailable, say in your final message which capability is missing and that \${feature} is not verified; do not retry it repeatedly.\`
+      : \`VISP's next step for \${feature}: \${objective}.\${command ? \` Run: \${command}.\` : ""} If your own \\\`${PRODUCT_NAME} next\\\` shows a different step, follow that one. If you cannot finish, say in your final message what is left and why.\`;
     process.stdout.write(JSON.stringify({ decision: "block", reason }));
   } catch {}
   process.exit(0);
