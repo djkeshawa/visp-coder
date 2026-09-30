@@ -183,7 +183,10 @@ describe("critic advice when VISP launches the reviewer", () => {
       /Follow `visp next`: it says when to run visp done again and when to hand off with visp pr\.$/,
     );
     const status = await critic({ operation: "status" });
-    expect(status).toMatchObject({ ok: true, value: { callsUsed: 2 } });
+    expect(status).toMatchObject({
+      ok: true,
+      value: { callsUsed: 0, featureBudget: { reservedMs: 2 * config.timeoutMs } },
+    });
   });
 
   it("tells the worker to wait while VISP's reviewer is still running", async () => {

@@ -285,6 +285,11 @@ describe("VISP's reviewer capacity", () => {
       await launch("codex-exec");
       await ready({ ...config, maxCalls: 1 });
       await run({ operation: "review" }, failing());
+      await run({ operation: "review" }, failing());
+      expect(await run({ operation: "status" })).toMatchObject({
+        ok: true,
+        value: { callsUsed: 0, featureBudget: { reservedMs: 2 * config.timeoutMs } },
+      });
       expect((await runProductDone(await setup.workspace.state(), { task: "T001" })).ok).toBe(true);
       const step = await next();
       expect(step).toMatchObject({
