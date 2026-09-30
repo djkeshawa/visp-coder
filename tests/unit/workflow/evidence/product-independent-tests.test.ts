@@ -12,6 +12,7 @@ import {
 } from "../../../../src/workflow/product/done-review.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import {
+  acceptanceProgress,
   backgroundTests,
   codexTester,
   configuredTestsStarter,
@@ -1305,8 +1306,22 @@ it("runs a new-project tester in an empty directory and sweeps abandoned auth co
   const stale = await mkdtemp(join(tmpdir(), "visp-tester-"));
   await mkdir(join(stale, "codex-home"));
   await writeFile(join(stale, "codex-home", "auth.json"), "secret");
-  const old = new Date(Date.now() - 25 * 60 * 60_000);
+  // Past two hours the copy is abandoned; a younger one may belong to a running tester, and
+  // a directory that only looks like one (not mkdtemp's shape) is never touched.
+  const old = new Date(Date.now() - 3 * 60 * 60_000);
   await utimes(stale, old, old);
+  const young = await mkdtemp(join(tmpdir(), "visp-tester-"));
+  const youngAge = new Date(Date.now() - 60 * 60_000);
+  await utimes(young, youngAge, youngAge);
+  const named = join(tmpdir(), `visp-tester-notes-${process.pid}`);
+  await mkdir(named);
+  await utimes(named, old, old);
+  // The snapshot's launch-time source copy and baseline copies use their own prefixes.
+  const copies = [
+    await mkdtemp(join(tmpdir(), "visp-tester-source-")),
+    await mkdtemp(join(tmpdir(), "visp-tester-baseline-")),
+  ];
+  for (const copy of copies) await utimes(copy, old, old);
   const fake = join(fixture.workspace.root, "..", `fake-codex-empty-${Date.now()}.mjs`);
   await writeFile(
     fake,
@@ -1328,6 +1343,47 @@ writeFileSync(args[args.indexOf("--output-last-message") + 1], JSON.stringify({
   })) as { notes: string };
   expect(JSON.parse(response.notes)).toEqual([]);
   await expect(readFile(join(stale, "codex-home", "auth.json"))).rejects.toThrow();
+  const { stat, rm } = await import("node:fs/promises");
+  try {
+    for (const copy of copies) await expect(stat(copy)).rejects.toThrow();
+    expect((await stat(young)).isDirectory()).toBe(true);
+    expect((await stat(named)).isDirectory()).toBe(true);
+  } finally {
+    await rm(young, { recursive: true, force: true });
+    await rm(named, { recursive: true, force: true });
+    for (const copy of copies) await rm(copy, { recursive: true, force: true });
+  }
+});
+
+it("says a pinned run cut off by the deadline was not shown failing", async () => {
+  const fixture = await testerWorkspace();
+  const suite = selfReporting(`  const { value } = await import("../../src/value.mjs");
+  if (value === 3) await new Promise((resolve) => setTimeout(resolve, 30000));
+  assert.equal(typeof value, "number");
+  assert.ok(Number.isInteger(value));
+  assert.equal(value, 2);`);
+  const pinned = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: suite }),
+  );
+  expect(pinned.ok && pinned.value.status, JSON.stringify(pinned)).toBe("pinned");
+  const progress = async (value: number, deadline?: number) => {
+    await fixture.workspace.write("src/value.mjs", `export const value = ${value};\n`);
+    return acceptanceProgress(await fixture.workspace.state(), fixture.brief.feature, [], {
+      ...(deadline ? { deadline } : {}),
+    });
+  };
+  const [cutOff] = await progress(3, Date.now() + 1500);
+  expect(cutOff?.passing).toBe(false);
+  expect(cutOff?.note).toContain("cut off, not shown failing");
+  expect(cutOff?.note).not.toContain("still fail");
+  expect(cutOff?.failure).toBeUndefined();
+  const [failing] = await progress(1);
+  expect(failing?.note).toContain("still fail");
+  expect(failing?.failure).toContain("FAIL: value");
+  const [passing] = await progress(2);
+  expect(passing).toMatchObject({ passing: true, note: "Pinned acceptance tests pass." });
 });
 
 // A suite that starts a server left it running after the baseline run.

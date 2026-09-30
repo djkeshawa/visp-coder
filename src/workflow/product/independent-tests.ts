@@ -6,11 +6,9 @@ import {
   cp,
   mkdir,
   mkdtemp,
-  readdir,
   readFile,
   readlink,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,6 +25,7 @@ import { matchesPattern } from "../../core/patterns.js";
 import { processIdentity } from "../../core/process-identity.js";
 import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { sweepStaleTempDirectories } from "../../core/stale-temp.js";
 import { prepareCommand } from "../../core/windows-command.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
@@ -244,7 +243,7 @@ export function codexTester(
     const { lookup: dnsLookup } = await import("node:dns/promises");
     if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)))))
       throw new Error("The tester cannot reach its model from this process");
-    await sweepOldTesterDirectories();
+    await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
     const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
     try {
       const root = request.explore
@@ -275,16 +274,14 @@ export function codexTester(
   };
 }
 
-async function sweepOldTesterDirectories(): Promise<void> {
-  const entries = await readdir(tmpdir(), { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith("visp-tester-")) continue;
-    const path = join(tmpdir(), entry.name);
-    const details = await stat(path).catch(() => undefined);
-    if (details && Date.now() - details.mtimeMs > 24 * 60 * 60_000)
-      await rm(path, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
+/** Exactly what `mkdtemp` makes (prefix plus six characters), so named directories survive. */
+const STALE_TESTER_NAMES = [
+  /^visp-tester-[A-Za-z0-9]{6}$/,
+  // The launch-time source copy and each baseline run's copy (tester-snapshot.ts).
+  /^visp-tester-(?:source|baseline)-[A-Za-z0-9]{6}$/,
+];
+/** A tester is bounded by its deadline plus the baseline run; older copies are abandoned. */
+const STALE_TESTER_MS = 2 * 60 * 60_000;
 
 export function inlineTests(tester: IndependentTester): TestsStarter {
   return (workspace, feature) => writeIndependentTests(workspace, feature, tester);
@@ -1250,6 +1247,16 @@ export interface AcceptanceProgress {
   readonly note: string;
 }
 
+function progressNote(passing: boolean, timedOut: boolean): string {
+  if (passing) return "Pinned acceptance tests pass.";
+  return timedOut ? TIMED_OUT_NOTE : STILL_FAIL_NOTE;
+}
+
+const STILL_FAIL_NOTE =
+  "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one.";
+const TIMED_OUT_NOTE =
+  "Pinned acceptance tests did not finish in the time left for this command; they were cut off, not shown failing. Run visp done again for a full result. The last slice cannot close until they pass.";
+
 /**
  * Weak workers stopped before the last slice, where pinned tests become checks, so they
  * never saw them fail. Earlier `done` calls run them for information: a failure there
@@ -1286,10 +1293,9 @@ export async function acceptanceProgress(
     results.push({
       passing,
       command: command.join(" "),
-      ...(passing ? {} : { failure: outcome.output.slice(-1200) }),
-      note: passing
-        ? "Pinned acceptance tests pass."
-        : "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one.",
+      // A run that was cut off shows nothing failing, so it carries no failure tail.
+      ...(passing || outcome.timedOut ? {} : { failure: outcome.output.slice(-1200) }),
+      note: progressNote(passing, outcome.timedOut),
     });
   }
   return results;
