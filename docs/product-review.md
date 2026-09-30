@@ -26,9 +26,9 @@ checks:
     environment: browser
 ```
 
-Use the application's real selectors, states and files. An HTTP(S) application must already be running. Journeys run in an installed Chrome/Chromium (`CHROME_BIN`, or `google-chrome` by default) with an isolated profile and the browser sandbox enabled; VISP never downloads a browser or uses your open session.
+Use the application's real selectors, states and files. An HTTP(S) application must already be running. For a static page or game (HTML, JS and CSS, no backend) use the journey url `project:/index.html`: VISP serves the project itself for the journey on a loopback port it chooses and stops the server afterwards, so no server needs to be started. That server answers GET and HEAD only, serves the current project bytes, never serves `.env*`, `.git`, `.visp`, `dist/`, `build/`, `node_modules/`, configured blocked paths, anything behind a symlink or any file with more than one hard link, and refuses requests beyond 20000 per journey or 128 MiB in total. An app that needs a build output or a backend runs its own server on a free port. Journeys run in an installed Chrome/Chromium (`CHROME_BIN`, or `google-chrome` by default) with an isolated profile and the browser sandbox enabled; VISP never downloads a browser or uses your open session.
 
-A `file:///…` URL works when every loaded file is a regular, non-symlinked file inside the project and outside blocked paths. Workers, popups and downloads are unsupported in this mode; use a local HTTP server for those applications.
+A `file:///…` URL works when every loaded file is a regular, non-symlinked, single-link file inside the project and outside blocked paths. Workers, popups and downloads are unsupported in this mode; use a local HTTP server for those applications.
 
 Each journey records an initial capture, runs its actions and records the final state. Limits: 60 seconds and six captures per journey, 10 seconds per wait.
 

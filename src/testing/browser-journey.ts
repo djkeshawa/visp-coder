@@ -20,6 +20,12 @@ import {
 } from "./browser-session.js";
 import { BrowserRuntimeError } from "./chrome-transport.js";
 import { bounded } from "./deadline.js";
+import {
+  PROJECT_SCHEME,
+  type ProjectServer,
+  parseProjectUrl,
+  startProjectServer,
+} from "./project-server.js";
 
 const viewport = z
   .object({
@@ -36,9 +42,15 @@ export const browserJourneySchema = z
       .string()
       .url()
       .refine(
-        (value) => ["http:", "https:", "file:"].includes(new URL(value).protocol),
-        "Application URL must use HTTP(S) or a confined project file URL",
-      ),
+        (value) => ["http:", "https:", "file:", PROJECT_SCHEME].includes(new URL(value).protocol),
+        'Application URL must use HTTP(S), a confined project file URL or "project:/<file>"',
+      )
+      .superRefine((value, context) => {
+        const parsed =
+          new URL(value).protocol === PROJECT_SCHEME ? parseProjectUrl(value) : undefined;
+        if (parsed && "error" in parsed)
+          context.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
+      }),
     viewport: viewport.optional(),
     actions: z
       .array(
@@ -250,22 +262,48 @@ export async function runBrowserJourney(options: {
       operations: [],
       failure: { kind: "environment", message: "Browser journey cancelled before startup" },
     };
-  const localFile = new URL(journey.url).protocol === "file:";
+  const protocol = new URL(journey.url).protocol;
+  const localFile = protocol === "file:";
   if (localFile) {
     if (!options.projectRoot)
       throw new Error("Local-file journeys require an explicit project root");
     await readBrowserFile(options.projectRoot, journey.url, options.blockedPaths);
   }
+  if (protocol === PROJECT_SCHEME && !options.projectRoot)
+    throw new Error("Project journeys require an explicit project root");
+  // The capture owns the server for exactly the journey: every exit path below closes it.
+  const server =
+    protocol === PROJECT_SCHEME && options.projectRoot
+      ? await startProjectServer({
+          root: options.projectRoot,
+          blockedPaths: options.blockedPaths,
+        })
+      : undefined;
+  try {
+    return await runOpenJourney({ ...options, journey }, localFile, server);
+  } finally {
+    await server?.close();
+  }
+}
+
+async function runOpenJourney(
+  options: Parameters<typeof runBrowserJourney>[0] & { readonly journey: BrowserJourney },
+  localFile: boolean,
+  server: ProjectServer | undefined,
+): Promise<BrowserJourneyResult> {
+  const { journey } = options;
   const session = await openBrowserSession({
     ...options,
     viewport: journey.viewport,
     fileRoot: localFile ? options.projectRoot : undefined,
+    present: server ? (url: string) => server.present(url) : undefined,
   });
   const captures: ProductReviewCapture[] = [];
   const deadline = Date.now() + 60_000;
   const progress: { actionIndex?: number } = {};
   const cancel = () => {
     void session.close().catch(() => {});
+    void server?.close();
   };
   options.signal?.addEventListener("abort", cancel, { once: true });
   try {
@@ -281,10 +319,13 @@ export async function runBrowserJourney(options: {
         capture,
         progress,
         options.signal ? AbortSignal.any([signal, options.signal]) : signal,
+        server,
       );
+      noteRefusals(session, server);
       return { status: "completed" as const, captures, operations: session.operations };
     });
   } catch (cause) {
+    noteRefusals(session, server);
     return await failedJourney(
       session,
       captures,
@@ -299,15 +340,39 @@ export async function runBrowserJourney(options: {
   }
 }
 
+/** A blocked or over-budget request leaves a broken page; say so where the operations are read. */
+function noteRefusals(session: BrowserSession, server: ProjectServer | undefined) {
+  if (!server?.refusalCount) return;
+  const listed = server.refusals.length;
+  const count = server.refusalCount;
+  try {
+    session.record(
+      "observe",
+      `VISP's project server refused ${count} request(s)${count > listed ? `, first ${listed}` : ""}: ${server.refusals.join("; ")}`,
+      server.refusals,
+    );
+  } catch {
+    // A closed session has nothing left to annotate.
+  }
+}
+
 async function executeJourney(
   session: BrowserSession,
   journey: BrowserJourney,
   capture: () => Promise<void>,
   progress: { actionIndex?: number },
   signal: AbortSignal,
+  server?: ProjectServer,
 ) {
   signal.throwIfAborted();
-  await session.navigate(journey.url);
+  if (server)
+    await session.navigate(server.resolve(journey.url), {
+      annotate: (url) => {
+        const digest = server.digestOf(url);
+        return digest && `served by VISP from the project, sha256 ${digest.slice(0, 12)}`;
+      },
+    });
+  else await session.navigate(journey.url);
   await capture();
   session.assertHealthy?.();
   for (const [index, action] of journey.actions.entries()) {

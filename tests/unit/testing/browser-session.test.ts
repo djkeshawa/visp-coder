@@ -175,6 +175,133 @@ describe("browser session ownership", () => {
     expect(session.operations.map((entry) => entry.description)).toEqual([description]);
     await session.close();
   });
+  describe("URLs VISP serves itself", () => {
+    const origin = "http://127.0.0.1:5555";
+    const present = (url: string) =>
+      url.startsWith(`${origin}/`) ? `project:${url.slice(origin.length)}` : url;
+    const navigateAnswering = async (
+      status: number,
+      finalUrl: string,
+      annotate?: (url: string) => string | undefined,
+    ) => {
+      const listeners = new Set<(event: Record<string, unknown>) => void>();
+      transport.onEvent.mockImplementation(((
+        listener: (event: Record<string, unknown>) => void,
+      ) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      }) as never);
+      const session = await openBrowserSession({
+        directory: root,
+        subjectDigest: "a".repeat(64),
+        present,
+      });
+      transport.send.mockImplementation(async (method: string) => {
+        if (method === "Page.navigate") {
+          for (const listener of listeners)
+            listener({
+              method: "Network.responseReceived",
+              sessionId: "session",
+              params: { type: "Document", loaderId: "L1", response: { status, url: finalUrl } },
+            });
+          return { loaderId: "L1" };
+        }
+        return {};
+      });
+      const navigation = session.navigate(`${origin}/index.html#go`, { annotate });
+      return { session, navigation };
+    };
+
+    it("names the project URL and adds the served digest", async () => {
+      const { session, navigation } = await navigateAnswering(200, `${origin}/index.html`, (url) =>
+        url === `${origin}/index.html` ? "served by VISP from the project, sha256 abc" : undefined,
+      );
+      await navigation;
+      expect(session.operations.map((entry) => entry.description)).toEqual([
+        "Navigate project:/index.html#go (HTTP 200), served by VISP from the project, sha256 abc",
+      ]);
+      await session.close();
+    });
+
+    it("shows a redirect target as a project URL, without the port", async () => {
+      const { session, navigation } = await navigateAnswering(200, `${origin}/sub/`);
+      await navigation;
+      expect(session.operations[0]?.description).toBe(
+        "Navigate project:/index.html#go (HTTP 200, redirected to project:/sub/)",
+      );
+      await session.close();
+    });
+
+    it("names a capture by its project URL, never the ephemeral port, but navigates the real one", async () => {
+      const { session, navigation } = await navigateAnswering(200, `${origin}/index.html`);
+      await navigation;
+      transport.send.mockImplementation(async (method: string) => {
+        if (method === "Runtime.evaluate") return { result: { value: `${origin}/index.html#go` } };
+        if (method === "Page.captureScreenshot")
+          return { data: pngHeader(1280, 720).toString("base64") };
+        return {};
+      });
+      const capture = await session.capture();
+      expect(capture.route).toBe("project:/index.html#go");
+      expect(capture.steps).toEqual(["Navigate project:/index.html#go (HTTP 200)"]);
+      expect(session.operations.find((entry) => entry.kind === "capture")?.description).toBe(
+        "Capture project:/index.html#go",
+      );
+      await session.close();
+    });
+
+    it("explains a missing project file and does not annotate a failed answer", async () => {
+      const annotate = vi.fn(() => "sha");
+      const { session, navigation } = await navigateAnswering(
+        404,
+        `${origin}/index.html`,
+        annotate,
+      );
+      await expect(navigation).rejects.toThrow(
+        "project:/index.html#go does not exist in the project (HTTP 404); check the path relative to the project root.",
+      );
+      await expect(navigation).rejects.toBeInstanceOf(BrowserBehaviorFailure);
+      expect(annotate).not.toHaveBeenCalled();
+      expect(session.operations[0]?.description).toBe("Navigate project:/index.html#go (HTTP 404)");
+      await session.close();
+    });
+
+    it("explains a refused project path and points built apps to their own server", async () => {
+      const { session, navigation } = await navigateAnswering(403, `${origin}/index.html`);
+      await expect(navigation).rejects.toThrow(
+        /could not be served from the project \(HTTP 403\).*dist\/.*own server/,
+      );
+      await session.close();
+    });
+  });
+  it("points an HTTP 4xx from another server to the project: URL", async () => {
+    const listeners = new Set<(event: Record<string, unknown>) => void>();
+    transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as never);
+    const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
+    transport.send.mockImplementation(async (method: string) => {
+      if (method === "Page.navigate") {
+        for (const listener of listeners)
+          listener({
+            method: "Network.responseReceived",
+            sessionId: "session",
+            params: {
+              type: "Document",
+              loaderId: "L1",
+              response: { status: 404, url: "http://localhost:1234/a" },
+            },
+          });
+        return { loaderId: "L1" };
+      }
+      return {};
+    });
+    await expect(session.navigate("http://localhost:1234/a")).rejects.toThrow(
+      'for a static page use "project:/<file>" as the journey url',
+    );
+    await session.close();
+  });
   it("ignores an application exception event arriving after close began", async () => {
     const listeners = new Set<(event: Record<string, unknown>) => void>();
     transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
