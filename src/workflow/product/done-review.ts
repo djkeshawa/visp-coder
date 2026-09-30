@@ -10,6 +10,7 @@ import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses } from "./assessment.js";
 import { cancelledExecution } from "./check-lifecycle.js";
 import { type ProductCriticHost, runProductCritic } from "./critic.js";
+import { type ReviewerCapacity, reviewerCapacity } from "./critic-capacity.js";
 import { codexExecCriticHost, configuredCriticLauncher } from "./critic-exec.js";
 import { hasPendingCriticReview } from "./critic-policy.js";
 import { type ProductVerification, runProductAccept, runProductDone } from "./evidence.js";
@@ -202,16 +203,34 @@ async function pinnedView(
     );
     if (!refreshed.ok) return refreshed;
   }
+  // Whether VISP's reviewer can still rule matters only to a dispute, filed now or open.
+  const capacity = async (): Promise<ReviewerCapacity> =>
+    dispute !== undefined || (await disputeState(workspace, feature)).all.some(isOpen)
+      ? reviewerCapacity(
+          workspace,
+          feature,
+          verification.subjectDigest,
+          verification.closed || !verification.task ? undefined : verification.task,
+        )
+      : { available: true };
   const filed = dispute
-    ? await fileDisputes(workspace, feature, dispute, failing, verification.subjectDigest)
+    ? await fileDisputes(
+        workspace,
+        feature,
+        dispute,
+        failing,
+        verification.subjectDigest,
+        await capacity(),
+      )
     : undefined;
   if (filed && !filed.ok) return filed;
-  const report = (outcomes?: readonly DisputeOutcome[]) =>
+  const report = async (outcomes?: readonly DisputeOutcome[]) =>
     pinnedTestsReport(workspace, feature, {
       ...(outcomes ? { filed: outcomes } : {}),
       failing: failing.length > 0,
       command,
       failures: failing,
+      capacity: await capacity(),
     });
   const wrap = (pinnedTests: PinnedTestsReport | undefined) => (pinnedTests ? { pinnedTests } : {});
   const initial = wrap(await report(filed?.value));
@@ -221,6 +240,8 @@ async function pinnedView(
     refreshed: async () => wrap(await report(filed?.value)),
   });
 }
+
+const isOpen = (entry: PinnedDispute) => entry.status === "open";
 
 /** Starts the review and, when it is still running, holds the call for its result. */
 async function launchReview(

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
+import type { ReviewerCapacity } from "./critic-capacity.js";
 import type { DisputeRuling } from "./independent-review.js";
 import {
   type IndependentTestsRecord,
@@ -169,6 +170,7 @@ export async function fileDisputes(
   input: DisputeInput,
   failing: readonly FailingPinned[],
   subject: string,
+  capacity: ReviewerCapacity = { available: true },
 ): Promise<Result<DisputeOutcome[]>> {
   const loaded = await readTestsRecord(workspace, feature);
   if (!loaded.ok) return loaded;
@@ -177,7 +179,7 @@ export async function fileDisputes(
     return err(
       vispError("STAGE_BLOCKED", "This feature has no pinned acceptance tests to dispute"),
     );
-  const available = await reviewerAvailable(workspace, feature);
+  const available = await reviewerAvailable(workspace, feature, capacity);
   if (available) return err(vispError("STAGE_BLOCKED", available));
   const declared = record.tests.map((entry) => entry.name);
   const verified = (await pinnedWaivers(workspace, feature)).names;
@@ -211,11 +213,14 @@ export async function fileDisputes(
 async function reviewerAvailable(
   workspace: WorkspaceState,
   feature: string,
+  capacity: ReviewerCapacity,
 ): Promise<string | undefined> {
   const product = await readProductRecord(workspace, { feature });
-  if (reviewerRules(workspace) && product.ok && product.value.state.criticEnabled !== false)
-    return undefined;
-  return "No independent reviewer runs for this feature, so a dispute cannot be ruled and nothing can be waived. Satisfy the test, or tell the user which request sentence and test disagree";
+  if (!reviewerRules(workspace) || !product.ok || product.value.state.criticEnabled === false)
+    return "No independent reviewer runs for this feature, so a dispute cannot be ruled and nothing can be waived. Satisfy the test, or tell the user which request sentence and test disagree";
+  if (!capacity.available)
+    return "No independent reviewer can rule on it: the review budget is spent or the reviewer is unavailable, so nothing can be waived. Satisfy the test, or tell the user which request sentence and test disagree";
+  return undefined;
 }
 
 function filedDispute(
@@ -492,6 +497,8 @@ export async function pinnedTestsReport(
     readonly command: "done" | "accept";
     /** Those failing runs, so a suite that crashed gets the crash hint, not the dispute one. */
     readonly failures?: readonly FailingPinned[];
+    /** Whether VISP's reviewer can still rule; an open dispute without one goes to the human. */
+    readonly capacity?: ReviewerCapacity;
   },
 ): Promise<PinnedTestsReport | undefined> {
   const state = await disputeState(workspace, feature);
@@ -506,6 +513,7 @@ export async function pinnedTestsReport(
         context.command,
         waivers.names.includes(entry.test),
         waivers.suiteSkips,
+        context.capacity?.available !== false,
       ),
     }));
   const report: PinnedTestsReport = {
@@ -536,10 +544,13 @@ function disputeNote(
   command: string,
   verified: boolean,
   suiteSkips: boolean,
+  reviewerCanRule: boolean,
 ): string {
   const reasoning = entry.ruling?.reasoning.slice(0, 400) ?? "";
   if (entry.status === "open" && entry.reviews >= MAX_REVIEWS_PER_FILING)
     return "the independent reviewer left this unruled twice; it is handed to the human reviewer: run visp pr";
+  if (entry.status === "open" && !reviewerCanRule)
+    return "the independent reviewer cannot rule on this (its review budget is spent or it is unavailable); hand it to the human reviewer: run visp pr, which lists it";
   if (entry.status === "open")
     return `awaiting the independent reviewer; run visp ${command}, which launches it`;
   if (entry.status === "rejected")
@@ -571,7 +582,8 @@ export async function pinnedRoute(
   task: string | undefined,
   failures: readonly { check: string; status: string; output: string }[],
   command: "done" | "accept",
-  history: readonly PinnedHistoryRun[] = [],
+  history: readonly PinnedHistoryRun[],
+  capacity: ReviewerCapacity,
 ): Promise<PinnedRoute> {
   const pinned = failures.filter((entry) => entry.check.startsWith("PINNED_"));
   if (!pinned.length) return { evidence: [] };
@@ -581,6 +593,7 @@ export async function pinnedRoute(
     failing: true,
     command,
     failures: pinned.map(({ check, output }) => ({ check, output })),
+    capacity,
   });
   const evidence = [
     ...(report?.hint ? [report.hint] : []),
@@ -592,11 +605,14 @@ export async function pinnedRoute(
   const settled =
     only && pinned.every((entry) => allFailuresIn(entry.output, state.declared, waivers.names));
   if (settled) return { evidence, override: upheldOverride(command, feature, task) };
-  const covered = [...state.handedOff.map((entry) => entry.test), ...waivers.names];
+  // Without a reviewer that can still rule, a dispute awaiting one goes to the human too.
+  const cannotRule = !capacity.available && state.pending.length > 0;
+  const handOff = cannotRule ? [...state.handedOff, ...state.pending] : state.handedOff;
+  const covered = [...handOff.map((entry) => entry.test), ...waivers.names];
   const allSettled =
     only && pinned.every((entry) => allFailuresIn(entry.output, state.declared, covered));
-  if (state.handedOff.length && allSettled)
-    return { evidence, override: handedOffOverride(feature, state.handedOff) };
+  if (handOff.length && allSettled)
+    return { evidence, override: handedOffOverride(feature, handOff, cannotRule) };
   const stuck = await pinnedHandoff(workspace, feature, failures, history);
   if (stuck) return { evidence, override: stuck };
   const crashed =
@@ -627,10 +643,14 @@ function upheldOverride(
 function handedOffOverride(
   feature: string,
   handedOff: readonly PinnedDispute[],
+  cannotRule: boolean,
 ): NonNullable<PinnedRoute["override"]> {
+  const tests = handedOff.map((entry) => JSON.stringify(entry.test)).join(", ");
   return {
     action: "fix",
-    objective: `The independent reviewer left the dispute of ${handedOff.map((entry) => JSON.stringify(entry.test)).join(", ")} unruled twice. Hand it to the human reviewer: run visp pr, which lists it`,
+    objective: cannotRule
+      ? `The independent reviewer cannot rule on the dispute of ${tests} (its review budget is spent or it is unavailable). Hand it to the human reviewer: run visp pr, which lists it`
+      : `The independent reviewer left the dispute of ${tests} unruled twice. Hand it to the human reviewer: run visp pr, which lists it`,
     command: `visp pr --feature ${feature}`,
     completion: "handoff",
   };

@@ -990,3 +990,85 @@ it("hands off only when every failing test is handed off or waived", async () =>
     command: expect.stringContaining("visp pr"),
   });
 });
+
+// What codexExecCriticHost is: capabilities come from inspect, so VISP's own attempts are native.
+function launched(host: { review: (packet: CriticPacket) => Promise<unknown> }) {
+  return {
+    inspect: async () => ({
+      harness: "codex" as const,
+      model: NATIVE.model,
+      reasoningEffort: "high" as const,
+      freshContext: true,
+      images: true,
+      readOnly: true,
+      delegationAllowed: true,
+    }),
+    review: async (packet: CriticPacket) => ({
+      context: "fresh" as const,
+      ...((await host.review(packet)) as object),
+    }),
+  } as unknown as Parameters<typeof inlineReview>[0];
+}
+
+it("hands a pending dispute to the human reviewer once the reviewer's calls are spent", async () => {
+  const fixture = await disputeWorkspace({ maxCalls: 1 });
+  const feature = fixture.brief.feature;
+  const { host } = reviewer(() => []);
+  // The one review the feature may spend leaves the dispute unruled and open.
+  const first = await runProductDoneReviewed(
+    await state(),
+    { task: "T001", dispute: [ODD], disputeReason: REASON },
+    inlineReview(host),
+  );
+  expect(first.ok, JSON.stringify(first)).toBe(true);
+  if (!first.ok) return;
+  expect(first.value.pinnedTests?.disputes?.[0]?.note).toContain("cannot rule on this");
+  expect(first.value.pinnedTests?.disputes?.[0]?.note).toContain("visp pr");
+  const next = await runProductNext(await state(), { feature, task: "T001" });
+  expect(next.ok && next.value).toMatchObject({
+    completion: "handoff",
+    command: expect.stringContaining("visp pr"),
+    objective: expect.stringContaining("cannot rule on the dispute"),
+  });
+});
+
+it("refuses to file a dispute when no reviewer can rule on it", async () => {
+  const fixture = await disputeWorkspace({ maxCalls: 1 });
+  const { host } = reviewer(() => []);
+  const input = { task: "T001", dispute: [ODD], disputeReason: REASON };
+  await runProductDoneReviewed(await state(), input, inlineReview(host));
+  const refused = await runProductDoneReviewed(await state(), input, inlineReview(host));
+  expect(refused).toMatchObject({
+    ok: false,
+    error: { message: expect.stringContaining("No independent reviewer can rule on it") },
+  });
+  expect(await disputes(await state(), fixture.brief.feature)).toEqual([
+    expect.objectContaining({ status: "open" }),
+  ]);
+});
+
+it("hands a pending dispute over after the launched reviewer failed twice on this source", async () => {
+  const fixture = await disputeWorkspace({ native: true });
+  const feature = fixture.brief.feature;
+  const crashing = launched({
+    review: vi.fn(async () => {
+      throw new Error("codex exec crashed");
+    }),
+  });
+  const input = { task: "T001", dispute: [ODD], disputeReason: REASON };
+  await runProductDoneReviewed(await state(), input, inlineReview(crashing));
+  const once = await runProductNext(await state(), { feature, task: "T001" });
+  expect(once.ok && once.value.completion).not.toBe("handoff");
+  await runProductDoneReviewed(await state(), { task: "T001" }, inlineReview(crashing));
+  const twice = await runProductNext(await state(), { feature, task: "T001" });
+  expect(twice.ok && twice.value).toMatchObject({
+    completion: "handoff",
+    command: expect.stringContaining("visp pr"),
+    objective: expect.stringContaining("cannot rule on the dispute"),
+  });
+  // Another edit gives VISP's reviewer a fresh source, so the dispute waits for it again.
+  await workspace?.write("src/value.mjs", "export const value = 2; // edited\n");
+  await runProductDoneReviewed(await state(), { task: "T001" });
+  const changed = await runProductNext(await state(), { feature, task: "T001" });
+  expect(changed.ok && changed.value.completion).not.toBe("handoff");
+});

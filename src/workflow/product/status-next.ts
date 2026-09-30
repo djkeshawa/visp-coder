@@ -18,7 +18,7 @@ import {
   reviewCorrectionOutcomes,
   sliceExecutionCheckIds,
 } from "./corrections.js";
-import { unconfiguredCriticSpending } from "./critic-budget.js";
+import { type ReviewerCapacity, reviewerCapacity, reviewerHandoff } from "./critic-capacity.js";
 import { browserEnvironmentIdentity, environmentNext, needsBrowser } from "./environment.js";
 import {
   currentFailedJourneys,
@@ -29,6 +29,7 @@ import { findingAppliesToSlice, outstandingFeedback, productFeedbackGaps } from 
 import { functionalRegressionRequirement } from "./functional-regression.js";
 import { findFunctionalRepair } from "./functional-resolution.js";
 import { checksFor, closedSlice, type ProductSlice } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
 import { repairRecheck } from "./repair-recheck.js";
@@ -183,6 +184,7 @@ async function nextClosedProduct(
     if (environmentJourney) return ok(environmentJourney);
   }
   const journeys = currentJourneyFailures(record, subject);
+  const reviewer = await reviewerState(workspace, record, subject);
   const route = await pinnedRoute(
     workspace,
     record.brief.feature,
@@ -190,6 +192,7 @@ async function nextClosedProduct(
     failures,
     "accept",
     record.state.executions,
+    reviewer.capacity,
   );
   const gaps = [
     ...route.evidence,
@@ -244,13 +247,13 @@ async function nextClosedProduct(
     (await productImageEvidenceGaps(workspace, record, subject)).length > 0;
   return ok({
     feature: record.brief.feature,
-    ...finalStep(workspace, record, refine),
+    ...finalStep(record, refine, reviewer),
     evidence: [...gaps, ...assessmentGaps],
     mayEdit: false,
   });
 }
 
-function finalStep(workspace: WorkspaceState, record: ProductRecord, refine: boolean) {
+function finalStep(record: ProductRecord, refine: boolean, reviewer: ReviewerState) {
   const feature = record.brief.feature;
   if (!refine)
     return {
@@ -258,7 +261,9 @@ function finalStep(workspace: WorkspaceState, record: ProductRecord, refine: boo
       objective: "Run final checks against the assembled product and preserved expectations",
       command: `visp accept --feature ${feature}`,
     };
-  return reviewerRuns(workspace)
+  if (reviewer.runs && !reviewer.capacity.available)
+    return reviewerHandoff(feature, reviewer.capacity, "assessment");
+  return reviewer.runs
     ? {
         action: "refine" as const,
         objective:
@@ -302,7 +307,9 @@ async function nextOpenSlice(
   ].filter((execution) => execution.status !== "passed");
   const environment = await sliceEnvironmentNext(workspace, record, slice, failures);
   if (environment) return ok(environment);
-  if (failures.length) return ok(await failedSliceNext(workspace, record, slice, failures));
+  const reviewer = await reviewerState(workspace, record, subject, slice);
+  if (failures.length)
+    return ok(await failedSliceNext(workspace, record, slice, failures, reviewer));
   const journeyNext = failedJourneyNext(record, subject, slice);
   if (journeyNext) return journeyNext;
   const statuses = outcomeStatuses(record, subject, slice);
@@ -334,15 +341,14 @@ async function nextOpenSlice(
     findings.length ||
     (hasObservedProduct && reviewGaps.some((entry) => entry.review === "failed"))
   ) {
-    const reviewerRechecks = reviewerRuns(workspace);
     const missingReproduction = unreproducedFindings(
       record,
       findings,
       subject,
       slice,
-      reviewerRechecks,
+      reviewer.runs,
     );
-    const route = await repairRoute(workspace, record, slice, missingReproduction.length > 0);
+    const route = repairRoute(record, slice, missingReproduction.length > 0, reviewer);
     return ok({
       ...base,
       action: "fix",
@@ -427,6 +433,7 @@ async function failedSliceNext(
   record: ProductRecord,
   slice: ProductSlice,
   failures: readonly { check: string; status: string; output: string }[],
+  reviewer: ReviewerState,
 ): Promise<ProductNext> {
   const feature = record.brief.feature;
   const route = await pinnedRoute(
@@ -436,6 +443,7 @@ async function failedSliceNext(
     failures,
     "done",
     record.state.executions,
+    reviewer.capacity,
   );
   const evidence = [
     ...route.evidence,
@@ -497,39 +505,47 @@ function pinnedStep(
   };
 }
 
-async function repairRoute(
-  workspace: WorkspaceState,
+function repairRoute(
   record: ProductRecord,
   slice: ProductSlice,
   missingReproduction: boolean,
+  reviewer: ReviewerState,
 ) {
-  const reviewerRechecks = reviewerRuns(workspace);
-  if (reviewerRechecks && (await reviewBudgetSpent(workspace, record)))
+  if (reviewer.runs && !reviewer.capacity.available) {
+    const handoff = reviewerHandoff(record.brief.feature, reviewer.capacity, "findings");
     return {
-      objective:
-        "The independent review budget is spent. Fix what you can and rerun your checks, then run visp pr to hand the remaining findings to a human reviewer",
-      command: `visp pr --feature ${record.brief.feature}`,
-      completion: "handoff" as const,
+      objective: handoff.objective,
+      command: handoff.command,
+      completion: handoff.completion,
     };
+  }
   return {
-    objective: repairObjective(record, slice, missingReproduction, reviewerRechecks),
+    objective: repairObjective(record, slice, missingReproduction, reviewer.runs),
     command: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
     completion: "unresolved-product" as const,
   };
 }
 
-/** VISP launches its own reviewer, so routing never asks the worker to delegate one. */
-function reviewerRuns(workspace: WorkspaceState): boolean {
-  return workspace.config.critic?.launch === "codex-exec";
+/**
+ * Whether VISP launches its own reviewer, so routing never asks the worker to delegate one, and
+ * whether that reviewer can still run. A bounded loop needs an end: once its budget is spent or
+ * it failed twice on this source, what is open goes to the human reviewer through `visp pr`.
+ */
+interface ReviewerState {
+  readonly runs: boolean;
+  readonly capacity: ReviewerCapacity;
 }
 
-/**
- * A bounded loop needs an end: once VISP's reviews are spent, open findings are handed to
- * the human reviewer through `visp pr` rather than cycling without a reviewer.
- */
-async function reviewBudgetSpent(workspace: WorkspaceState, record: ProductRecord) {
-  const spending = await unconfiguredCriticSpending(workspace, record.brief.feature);
-  return spending.ok && "callsRemaining" in spending.value && spending.value.callsRemaining === 0;
+async function reviewerState(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  subject: string,
+  slice?: ProductSlice,
+): Promise<ReviewerState> {
+  return {
+    runs: reviewerRules(workspace),
+    capacity: await reviewerCapacity(workspace, record.brief.feature, subject, slice?.id),
+  };
 }
 
 /** A VISP-launched reviewer re-checks open findings itself, so no reproduction is asked for. */
