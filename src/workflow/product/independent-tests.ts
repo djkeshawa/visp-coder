@@ -6,11 +6,9 @@ import {
   cp,
   mkdir,
   mkdtemp,
-  readdir,
   readFile,
   readlink,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,8 +22,10 @@ import { resolvedProductExecutionEnvironment } from "../../core/execution-enviro
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
+import { processIdentity } from "../../core/process-identity.js";
 import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { sweepStaleTempDirectories } from "../../core/stale-temp.js";
 import { prepareCommand } from "../../core/windows-command.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
@@ -36,9 +36,13 @@ import {
   updateProductBrief,
 } from "./brief.js";
 import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
+import { browserUnavailable } from "./environment.js";
 import { hostRequest } from "./host-prompts.js";
 import {
   disputeSchema,
+  environmentErrorLine,
+  environmentOnly,
+  failLineStats,
   TESTS_RECORD,
   WAIVED_TESTS_ENV,
   waivedTestsEnv,
@@ -47,6 +51,7 @@ import { rulesForRequest, withRules } from "./project-rules.js";
 import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
 import { productSourceSnapshot } from "./subject.js";
+import { testerBrowserKitLines } from "./tester-browser-kit.js";
 import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./tester-snapshot.js";
 
 /**
@@ -129,6 +134,8 @@ const independentTestsRecordSchema = z
     startedAt: z.string(),
     /** The writing process; a host that ends it (Codex's sandbox does) leaves no result. */
     pid: z.number().int().optional(),
+    /** The writer's pid namespace: a pid means nothing to a process in another one. */
+    pidNamespace: z.string().optional(),
     finishedAt: z.string().optional(),
     model: z.string().optional(),
     reason: z.string().optional(),
@@ -236,7 +243,7 @@ export function codexTester(
     const { lookup: dnsLookup } = await import("node:dns/promises");
     if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)))))
       throw new Error("The tester cannot reach its model from this process");
-    await sweepOldTesterDirectories();
+    await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
     const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
     try {
       const root = request.explore
@@ -267,16 +274,14 @@ export function codexTester(
   };
 }
 
-async function sweepOldTesterDirectories(): Promise<void> {
-  const entries = await readdir(tmpdir(), { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith("visp-tester-")) continue;
-    const path = join(tmpdir(), entry.name);
-    const details = await stat(path).catch(() => undefined);
-    if (details && Date.now() - details.mtimeMs > 24 * 60 * 60_000)
-      await rm(path, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
+/** Exactly what `mkdtemp` makes (prefix plus six characters), so named directories survive. */
+const STALE_TESTER_NAMES = [
+  /^visp-tester-[A-Za-z0-9]{6}$/,
+  // The launch-time source copy and each baseline run's copy (tester-snapshot.ts).
+  /^visp-tester-(?:source|baseline)-[A-Za-z0-9]{6}$/,
+];
+/** A tester is bounded by its deadline plus the baseline run; older copies are abandoned. */
+const STALE_TESTER_MS = 2 * 60 * 60_000;
 
 export function inlineTests(tester: IndependentTester): TestsStarter {
   return (workspace, feature) => writeIndependentTests(workspace, feature, tester);
@@ -355,7 +360,7 @@ export async function independentTestsBeforeWork(
     if (!started.ok) return started;
     record = started.value;
   }
-  return ok(summary(record));
+  return ok(await summary(record));
 }
 
 function unavailableTester(workspace: WorkspaceState): IndependentTestsSummary | undefined {
@@ -486,9 +491,9 @@ async function testerLaunches(workspace: WorkspaceState, record: ProductRecord):
   return policy.ok && policy.value.enabled && policy.value.config?.harness === "codex";
 }
 
-function summary(record: IndependentTestsRecord): IndependentTestsSummary {
+async function summary(record: IndependentTestsRecord): Promise<IndependentTestsSummary> {
   if (record.status === "running")
-    return isStale(record)
+    return (await isStale(record))
       ? {
           status: "failed",
           reason:
@@ -523,7 +528,8 @@ export async function writeIndependentTests(
 ): Promise<Result<IndependentTestsRecord>> {
   const existing = await readTestsRecord(workspace, feature);
   if (!existing.ok) return existing;
-  if (existing.value && !mayRestartTester(existing.value, retryFailed)) return ok(existing.value);
+  if (existing.value && !(await mayRestartTester(existing.value, retryFailed)))
+    return ok(existing.value);
   if (retryFailed && existing.value?.status === "failed") {
     const pending = await retryPendingPin(workspace, feature, existing.value);
     if (pending) return pending;
@@ -548,12 +554,14 @@ export async function writeIndependentTests(
     const saved = await saveTestsRecord(workspace, feature, declined, existing.value);
     return saved.ok ? ok(declined) : saved;
   }
+  const { pidNamespace } = await processIdentity(process.pid);
   const running: IndependentTestsRecord = {
     version: 1,
     status: "running",
     startedAt,
     model,
     pid: process.pid,
+    ...(pidNamespace ? { pidNamespace } : {}),
     sourceDigest,
   };
   const marked = await saveTestsRecord(workspace, feature, running, existing.value);
@@ -631,9 +639,13 @@ async function testerSetup(
   });
 }
 
-function mayRestartTester(record: IndependentTestsRecord, retryFailed: boolean): boolean {
+async function mayRestartTester(
+  record: IndependentTestsRecord,
+  retryFailed: boolean,
+): Promise<boolean> {
   return (
-    (retryFailed && record.status === "failed") || (record.status === "running" && isStale(record))
+    (retryFailed && record.status === "failed") ||
+    (record.status === "running" && (await isStale(record)))
   );
 }
 
@@ -702,6 +714,7 @@ async function attemptTests(
     feature,
     response.file,
     response.existingBehavior,
+    response.tests.map((test) => test.name),
     snapshot,
   ).catch((cause) => ({ status: "failed" as const, reason: message(cause) }));
   return {
@@ -742,6 +755,11 @@ function repairPrompt(prompt: string, content: string, reason: string): string {
     content,
     "",
     "Read the repository and the failure again, then return the whole corrected file. Keep only assertions the request or the repository supports. If the run timed out, cut search iteration counts and stop each search at the first interface error.",
+    ...(reason.startsWith(NO_NAMED_FAILURE) || reason.startsWith(UNDECLARED_FAILURE)
+      ? [
+          "Print `FAIL: <exact name from tests[].name>: <reason>` for every test that fails, also when nothing is implemented. Import or start the product inside each test, or catch the import, missing-file or connection error per test, so a missing module, script or server is that test's failure and never a crash of the whole file. Do not use unittest's default runner output or any other framework output that prints its own FAIL lines. Exception: when the browser itself cannot start, print `ENVIRONMENT ERROR: <message>` once, close everything, exit non-zero and print no FAIL line.",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -751,6 +769,7 @@ async function keepFailingTests(
   feature: string,
   file: { name: string; content: string },
   existingBehavior: boolean,
+  declared: string[],
   snapshot: TesterSnapshot,
 ): Promise<TestFields> {
   const safeName = file.name.replace(/\.(?:test|spec)\.mjs$/, ".acceptance.mjs");
@@ -764,11 +783,25 @@ async function keepFailingTests(
       await writeFile(join(root, path), file.content, { flag: "wx" });
       return runBaseline(root, command, extra, { redact });
     });
-  const baseline = await execute();
+  const { fullOutput, ...stored } = await execute();
   const existing = existingBehavior ? await execute({ VISP_TEST_SCOPE: "existing" }) : undefined;
-  const kept = { file: path, command, baseline };
-  const rejection = baselineRejection(baseline, existing);
-  if (rejection) return { status: "rejected", reason: rejection, content: file.content, ...kept };
+  const kept = { file: path, command, baseline: stored };
+  const rejection = await baselineRejection(
+    { ...stored, fullOutput },
+    existing,
+    declared,
+    redact,
+    workspace.paths.root,
+  );
+  if (rejection) return { ...rejection, content: file.content, ...kept };
+  // A file with no declared tests skips the name gate, but a failure still needs a FAIL line.
+  if (!declared.length && !/^\s*FAIL:/im.test(fullOutput))
+    return {
+      status: "declined",
+      reason:
+        "The suite declares no tests and reported no failing test before implementation, so a later failure cannot be attributed to a test or disputed",
+      ...kept,
+    };
   const written = await retryBusy(() =>
     applyFileTransaction(workspace.paths.root, "write-acceptance-tests", [
       {
@@ -786,9 +819,46 @@ async function keepFailingTests(
   return { status: "failed", reason: pinned.error.message, ...kept };
 }
 
-function baselineRejection(
+const NO_NAMED_FAILURE =
+  "The suite failed before implementation but reported no declared test as failing";
+const MAX_LISTED_LINES = 5;
+const MAX_LISTED_CHARS = 300;
+const UNDECLARED_FAILURE = "The suite printed FAIL lines that name no declared test";
+/** A suite that reports an environment error while a browser starts here is repaired. */
+const BROWSER_AVAILABLE =
+  "VISP's own check starts a browser here: the browser is available, so do not print ENVIRONMENT ERROR; print a FAIL line per failing test.";
+
+async function baselineRejection(
   baseline: Awaited<ReturnType<typeof runBaseline>>,
-  existing?: Awaited<ReturnType<typeof runBaseline>>,
+  existing: Awaited<ReturnType<typeof runBaseline>> | undefined,
+  declared: readonly string[],
+  redact: (text: string) => string,
+  root: string,
+): Promise<Pick<TestFields, "status" | "reason"> | undefined> {
+  const failure = runFailure(baseline, existing);
+  if (failure) return { status: "rejected", reason: failure };
+  // A suite that says only "environment error" tells nothing about the product, but a suite
+  // can print that line to dodge attribution, so VISP checks the browser itself.
+  const environment = environmentOnly(baseline.fullOutput, declared)
+    ? environmentErrorLine(baseline.fullOutput)
+    : undefined;
+  if (environment !== undefined && (await browserUnavailable(root)))
+    return {
+      status: "failed",
+      reason: `The suite could not run in this environment (${redact(environment).slice(0, MAX_LISTED_CHARS)}) and VISP's own check finds no browser that starts here, so no product behavior was tested and no tests were pinned. Run the tester again where a browser is available.`,
+    };
+  const reason = attributionRejection(baseline.fullOutput, baseline.output, declared, redact);
+  return reason
+    ? {
+        status: "rejected",
+        reason: environment === undefined ? reason : `${reason} ${BROWSER_AVAILABLE}`,
+      }
+    : undefined;
+}
+
+function runFailure(
+  baseline: Awaited<ReturnType<typeof runBaseline>>,
+  existing: Awaited<ReturnType<typeof runBaseline>> | undefined,
 ): string | undefined {
   if (existing && (existing.exitCode !== 0 || existing.timedOut || existing.spawnFailed))
     return `Tests of existing behavior fail on the launch-time repository copy, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`;
@@ -797,6 +867,31 @@ function baselineRejection(
   if (baseline.timedOut) return "The tests did not finish on the unimplemented project";
   if (baseline.exitCode === 0)
     return "The tests pass before any implementation, so they check nothing new";
+  return undefined;
+}
+
+/**
+ * A later failure must be attributable to a test the reviewer can rule on: a crash before
+ * any test ran, or FAIL lines with other names, would pin a suite nobody can dispute.
+ */
+function attributionRejection(
+  full: string,
+  tail: string,
+  declared: readonly string[],
+  redact: (text: string) => string,
+): string | undefined {
+  if (!declared.length) return undefined;
+  const stats = failLineStats(full, declared);
+  if (!stats.named.length)
+    return `${NO_NAMED_FAILURE}, so a later failure cannot be attributed to a test or disputed (a crash, an import or syntax error, or FAIL lines with other names). Declared names: ${declared
+      .slice(0, 12)
+      .map((name) => JSON.stringify(name))
+      .join(", ")}. Output tail: ${tail.slice(-600)}`;
+  if (stats.undeclared.length)
+    return `${UNDECLARED_FAILURE} (${stats.undeclared
+      .slice(0, MAX_LISTED_LINES)
+      .map((line) => JSON.stringify(redact(line).slice(0, MAX_LISTED_CHARS)))
+      .join(", ")}). Every FAIL line must be \`FAIL: <exact name from tests[].name>: <reason>\`.`;
   return undefined;
 }
 
@@ -935,9 +1030,12 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "- When the request names deterministic controls (a clock, a step function, a seed, a reset), drive time and setup through them instead of real-time waits.",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
     "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
+    ...testerBrowserKitLines(request),
     "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
     "- Start and stop anything the tests need, the way the request says, with timeouts on every wait. Use a free port where one is needed.",
     "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why, one line per failing test: `FAIL: <exact name from tests[].name>: <reason>`.",
+    "- Print the FAIL lines yourself. Do not rely on unittest's default runner output or any other framework output: it names methods (`FAIL: test_x (Mod.Cls.test_x)`), not your declared tests, and does not count.",
+    "- This holds when nothing is implemented yet: catch a missing module, script or refused connection per test and print that test's FAIL line; never import or start the product at file top level outside a test. Exception: when the browser itself cannot start, print `ENVIRONMENT ERROR: <message>` once, close everything, exit non-zero and print no FAIL line.",
     "- Only the checks' own assertions may fail the run. Errors while cleaning up after the tests (closing a browser or server, killing a child process, removing temporary directories or browser profiles) must be caught and ignored, and must never change the exit status: wrap every teardown step in try/catch (or `ignore_errors=True` / `force: true` with retries) and exit from the assertion results alone.",
     "- Assertions must not depend on incidental ordering the request does not state: object key order, Set or dict iteration order, the order of unordered results, or timing. Compare parsed values, sort before comparing, or check membership.",
     `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
@@ -997,14 +1095,20 @@ async function runBaseline(
     timeoutMs: options.timeoutMs ?? BASELINE_TIMEOUT_MS,
     signal: options.signal,
   });
-  return result.ok
-    ? {
-        exitCode: result.value.exitCode,
-        timedOut: result.value.timedOut,
-        spawnFailed: false,
-        output: redact(`${result.value.stdout}\n${result.value.stderr}`.trim()).slice(-2000),
-      }
-    : { exitCode: -1, timedOut: false, spawnFailed: true, output: redact(result.error.message) };
+  if (!result.ok) {
+    const output = redact(result.error.message);
+    return { exitCode: -1, timedOut: false, spawnFailed: true, output, fullOutput: output };
+  }
+  const full = `${result.value.stdout}\n${result.value.stderr}`.trim();
+  return {
+    exitCode: result.value.exitCode,
+    timedOut: result.value.timedOut,
+    spawnFailed: false,
+    output: redact(full).slice(-2000),
+    // Unredacted so declared test names match what the suite printed; only used to attribute
+    // FAIL lines in memory, never stored or shown (`output` above is what a record keeps).
+    fullOutput: full.slice(-200_000),
+  };
 }
 
 async function pinTests(
@@ -1143,6 +1247,16 @@ export interface AcceptanceProgress {
   readonly note: string;
 }
 
+function progressNote(passing: boolean, timedOut: boolean): string {
+  if (passing) return "Pinned acceptance tests pass.";
+  return timedOut ? TIMED_OUT_NOTE : STILL_FAIL_NOTE;
+}
+
+const STILL_FAIL_NOTE =
+  "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one.";
+const TIMED_OUT_NOTE =
+  "Pinned acceptance tests did not finish in the time left for this command; they were cut off, not shown failing. Run visp done again for a full result. The last slice cannot close until they pass.";
+
 /**
  * Weak workers stopped before the last slice, where pinned tests become checks, so they
  * never saw them fail. Earlier `done` calls run them for information: a failure there
@@ -1179,10 +1293,9 @@ export async function acceptanceProgress(
     results.push({
       passing,
       command: command.join(" "),
-      ...(passing ? {} : { failure: outcome.output.slice(-1200) }),
-      note: passing
-        ? "Pinned acceptance tests pass."
-        : "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one.",
+      // A run that was cut off shows nothing failing, so it carries no failure tail.
+      ...(passing || outcome.timedOut ? {} : { failure: outcome.output.slice(-1200) }),
+      note: progressNote(passing, outcome.timedOut),
     });
   }
   return results;
@@ -1192,11 +1305,21 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isStale(record: IndependentTestsRecord): boolean {
-  return (
-    (record.pid !== undefined && !processAlive(record.pid)) ||
-    Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS
-  );
+/**
+ * A running record is stale once its writer is gone or it outlived every deadline. Codex
+ * runs each sandboxed command in its own pid namespace, where another command's tester is
+ * invisible (or its pid names an unrelated process): across namespaces liveness cannot be
+ * told, so only the age decides.
+ */
+async function isStale(record: IndependentTestsRecord): Promise<boolean> {
+  if (Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS) return true;
+  if (record.pid === undefined) return false;
+  if (
+    record.pidNamespace &&
+    (await processIdentity(process.pid)).pidNamespace !== record.pidNamespace
+  )
+    return false;
+  return !processAlive(record.pid);
 }
 
 function processAlive(pid: number): boolean {

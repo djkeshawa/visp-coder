@@ -68,6 +68,12 @@ export type PinnedDispute = z.infer<typeof disputeSchema>;
 const UNCAUGHT =
   /^\s*(?:Traceback \(most recent call last\)|Uncaught\b|Unhandled\b|[\w.$]*(?:Error|Exception)(?:\s*\[[^\]]*\])?:|at\s+\S)/;
 
+/** Windows suites end lines with CRLF; a stray `\r` must not hide a `FAIL:` line. */
+const OUTPUT_LINES = /\r?\n/;
+
+/** unittest's default runner names methods, not declared tests: `FAIL: test_x (Mod.Cls.test_x)`. */
+const RUNNER_LINE = /^\w+ \([\w.]+\)$/;
+
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
 /**
@@ -82,24 +88,77 @@ export function failingTests(
 ): { names: string[]; unattributed: number } {
   const names = new Set<string>();
   let unattributed = 0;
-  for (const line of output.split("\n")) {
+  for (const line of output.split(OUTPUT_LINES)) {
     const match = /^\s*FAIL:\s*(.*)$/i.exec(line);
     if (!match) {
       // An uncaught error or trace outside a FAIL line is a failure no test name explains.
       if (UNCAUGHT.test(line)) unattributed += 1;
       continue;
     }
-    const rest = squash(match[1] ?? "");
-    const found = declared
-      .filter((name) => {
-        const key = squash(name);
-        return rest === key || rest.startsWith(`${key}:`) || rest.startsWith(`${key} `);
-      })
-      .sort((a, b) => b.length - a.length)[0];
+    const found = declaredName(match[1] ?? "", declared);
     if (found) names.add(found);
     else unattributed += 1;
   }
   return { names: [...names], unattributed };
+}
+
+/** The longest declared name a `FAIL:` line's text starts with (`name`, `name:` or `name `). */
+function declaredName(text: string, declared: readonly string[]): string | undefined {
+  const rest = squash(text);
+  return declared
+    .filter((name) => {
+      const key = squash(name);
+      return rest === key || rest.startsWith(`${key}:`) || rest.startsWith(`${key} `);
+    })
+    .sort((a, b) => b.length - a.length)[0];
+}
+
+/**
+ * How a baseline's `FAIL:` lines relate to the declared tests: the declared names it reports
+ * as failing, and the text of every `FAIL:` line that names none of them. Same line rules as
+ * `failingTests`, without counting uncaught errors: a crash before any test ran has none.
+ * A line in unittest's own runner format is neither: it names no declared test, and the
+ * suite still owes a `FAIL:` line with a declared name.
+ */
+export function failLineStats(
+  output: string,
+  declared: readonly string[],
+): { named: string[]; undeclared: string[] } {
+  const named = new Set<string>();
+  const undeclared: string[] = [];
+  for (const line of output.split(OUTPUT_LINES)) {
+    const match = /^\s*FAIL:\s*(.*)$/i.exec(line);
+    if (!match) continue;
+    const found = declaredName(match[1] ?? "", declared);
+    const text = (match[1] ?? "").trim();
+    if (found) named.add(found);
+    else if (!RUNNER_LINE.test(text)) undeclared.push(text);
+  }
+  return { named: [...named], undeclared };
+}
+
+/**
+ * A suite reports that its environment, not the product, stopped it (a browser that cannot
+ * start) with a line `ENVIRONMENT ERROR: <message>` and no `FAIL:` line for it. Returns the
+ * message of the first such line, uncut: redact it before showing or cutting it.
+ */
+export function environmentErrorLine(output: string): string | undefined {
+  for (const line of output.split(OUTPUT_LINES)) {
+    const match = /^\s*ENVIRONMENT ERROR:\s*(.*)$/.exec(line);
+    if (match) return (match[1] ?? "").trim() || "no message";
+  }
+  return undefined;
+}
+
+/**
+ * The output says the environment stopped the suite and nothing else: an `ENVIRONMENT ERROR:`
+ * line, no failing test, no `FAIL:` line of any kind and no uncaught error or trace. A
+ * product can print that line too, so on its own this proves nothing (see check-execution).
+ */
+export function environmentOnly(output: string, declared: readonly string[]): boolean {
+  if (environmentErrorLine(output) === undefined) return false;
+  const failing = failingTests(output, declared);
+  return failing.names.length === 0 && failing.unattributed === 0;
 }
 
 /** Every failing test of the run is attributed and in `covered`. */

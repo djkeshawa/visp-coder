@@ -7,8 +7,10 @@ import { hashValue } from "../../../../src/core/hash.js";
 import { inspectStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { validateProductCheckCommand } from "../../../../src/workflow/product/check-command.js";
+import { waivedResult } from "../../../../src/workflow/product/check-execution.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { executionSchema, productCheckSchema } from "../../../../src/workflow/product/model.js";
+import { failingTests } from "../../../../src/workflow/product/pinned-dispute-model.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
@@ -75,6 +77,112 @@ describe("product command check execution boundary", () => {
         next: { mayEdit: true, objective: expect.stringContaining("correcting its command") },
       },
     });
+  });
+  it("keeps every FAIL line of a long run, including those the tail cut drops", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const names = Array.from({ length: 70 }, (_, index) => `case ${index}`);
+    const script = [
+      `for (const n of ${JSON.stringify(names)}) console.log("FAIL: " + n + ": expected 1");`,
+      'console.log("x".repeat(7000)); console.log("y".repeat(7000));',
+      'console.error("final line"); process.exit(1)',
+    ].join("\n");
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [process.execPath, "-e", script],
+        })),
+      },
+      reason: "Exercise a long failing run",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output.length).toBeLessThanOrEqual(8000);
+    expect(output).toContain("VISP: FAIL lines from earlier in the output:");
+    expect(output).toContain("final line");
+    // Every name is attributed as in the full run (at most 60 lines are repeated, so the
+    // first 60 declared names are what a dispute may name).
+    const kept = failingTests(output, names.slice(0, 60));
+    expect(kept.names).toHaveLength(60);
+    expect(kept.unattributed).toBe(0);
+  });
+  it("never lets the shortened record decide that a failing run was entirely waived", () => {
+    const waived = Array.from({ length: 12 }, (_, index) => `waived test ${index}`);
+    const waivers = { names: waived, declared: [...waived, "real bug"], suiteSkips: false };
+    const failed = (stdout: string) =>
+      ({
+        ok: true as const,
+        value: {
+          command: "suite",
+          exitCode: 1,
+          stdout,
+          stderr: "",
+          timedOut: false,
+          durationMs: 1,
+        },
+      }) as const;
+    const lines = waived.map((name) => `FAIL: ${name}: ${"r".repeat(280)}`);
+    const noise = "n".repeat(14_000);
+    // 12 long waived lines, then an undisputed real failure, then noise that cuts them from
+    // the recorded tail: the waiver must still see the real failure.
+    const withBug = [...lines, "FAIL: real bug: it is broken", noise].join("\n");
+    expect(waivedResult(failed(withBug), withBug, "/tmp", waivers).status).toBe("failed");
+    // Control: only waived failures count as passed.
+    const onlyWaived = [...lines, noise].join("\n");
+    expect(waivedResult(failed(onlyWaived), onlyWaived, "/tmp", waivers).status).toBe("passed");
+    // An early traceback that the recorded tail would cut still blocks the waiver.
+    const crashed = [...lines, "Traceback (most recent call last):", noise].join("\n");
+    expect(waivedResult(failed(crashed), crashed, "/tmp", waivers).status).toBe("failed");
+  });
+  it("says so when the recorded run leaves early FAIL lines out", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const script = [
+      'for (let i = 0; i < 70; i++) console.log("FAIL: case " + i + ": " + "r".repeat(250));',
+      'console.log("x".repeat(9000)); process.exit(1)',
+    ].join("\n");
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [process.execPath, "-e", script],
+        })),
+      },
+      reason: "Exercise a run with more early FAIL lines than fit",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output.length).toBeLessThanOrEqual(8000);
+    expect(output).toMatch(/VISP: \d+ more FAIL lines are left out here; waiver and dispute/);
+  });
+  it("does not add an earlier-lines block when the tail already holds every FAIL line", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const script =
+      'console.log("z".repeat(9000)); console.log("FAIL: last: nope"); process.exit(1)';
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [process.execPath, "-e", script],
+        })),
+      },
+      reason: "Exercise a long run with a late FAIL line",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output).not.toContain("earlier in the output");
+    expect(output).toContain("FAIL: last: nope");
   });
   it("classifies a sandbox-denied subprocess as an environment failure", async () => {
     const { workspace, brief } = await productWorkspace();

@@ -66,6 +66,23 @@ export async function checkBrowserEnvironment(
   }
 }
 
+/**
+ * VISP's own observation that no browser starts here: the capability recorded for the
+ * current environment, else a fresh blank-page probe. Output a product or suite printed
+ * never counts.
+ */
+export async function browserUnavailable(
+  root: string,
+  cached?: BrowserCapability,
+): Promise<boolean> {
+  if (
+    cached?.status === "unavailable" &&
+    cached.environment === (await browserEnvironmentIdentity(root))
+  )
+    return true;
+  return (await checkBrowserEnvironment(root, cached)).status === "unavailable";
+}
+
 export function failedBrowserCapability(
   environment: string,
   detail: string,

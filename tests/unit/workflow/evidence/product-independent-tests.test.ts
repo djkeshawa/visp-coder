@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
+import { processIdentity } from "../../../../src/core/process-identity.js";
 import { ok } from "../../../../src/core/result.js";
 import { withStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
@@ -11,6 +12,7 @@ import {
 } from "../../../../src/workflow/product/done-review.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import {
+  acceptanceProgress,
   backgroundTests,
   codexTester,
   configuredTestsStarter,
@@ -29,19 +31,39 @@ import { compactProductReply } from "../../../../src/workflow/product-compact-te
 import { productWorkspace } from "../../support/product-workspace.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
+// VISP's own browser probe, so tests decide whether a browser "starts" here.
+const browser = vi.hoisted(() => ({ down: false, probes: 0 }));
+vi.mock("../../../../src/testing/browser-capability.js", () => ({
+  probeBrowserCapability: async () => {
+    browser.probes += 1;
+    if (browser.down) throw new Error("Chrome executable not found");
+  },
+}));
+
 let workspace: TestWorkspace | undefined;
 afterEach(async () => {
   await workspace?.destroy();
   workspace = undefined;
 });
 
-// The fixture's module returns 1; the request promises 2.
-const FAILS_FIRST = `import assert from "node:assert/strict";
-import { value } from "../../src/value.mjs";
-assert.equal(typeof value, "number");
-assert.ok(Number.isInteger(value));
-assert.equal(value, 2);
+/**
+ * A suite that reports its own failure the way VISP asks testers to: assertions run inside
+ * one guarded test that prints `FAIL: <declared name>: <reason>` and sets a non-zero exit.
+ */
+const selfReporting = (body: string, name = "value") => `import assert from "node:assert/strict";
+try {
+${body}
+} catch (error) {
+  console.log(\`FAIL: ${name}: \${String(error?.message ?? error).replace(/\\s+/g, " ")}\`);
+  process.exitCode = 1;
+}
 `;
+
+// The fixture's module returns 1; the request promises 2.
+const FAILS_FIRST = selfReporting(`  const { value } = await import("../../src/value.mjs");
+  assert.equal(typeof value, "number");
+  assert.ok(Number.isInteger(value));
+  assert.equal(value, 2);`);
 
 async function testerWorkspace() {
   const fixture = await productWorkspace({ critic: true });
@@ -207,12 +229,10 @@ it("does not expose operator secrets to candidate tests", async () => {
   const previous = process.env.VISP_TEST_OPERATOR_SECRET;
   process.env.VISP_TEST_OPERATOR_SECRET = "secret";
   try {
-    const content = `import assert from "node:assert/strict";
-import { value } from "../../src/value.mjs";
-assert.equal(process.env.VISP_TEST_OPERATOR_SECRET, undefined);
-assert.equal(typeof value, "number");
-assert.equal(value, 2);
-`;
+    const content = selfReporting(`  const { value } = await import("../../src/value.mjs");
+  assert.equal(process.env.VISP_TEST_OPERATOR_SECRET, undefined);
+  assert.equal(typeof value, "number");
+  assert.equal(value, 2);`);
     const result = await writeIndependentTests(
       await fixture.workspace.state(),
       fixture.brief.feature,
@@ -332,17 +352,15 @@ it("checks existing behavior on a fresh launch copy even after a full baseline w
         existingBehavior: true,
         file: {
           name: "value.mjs",
-          content: `import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { value } from "../../src/value.mjs";
-assert.equal(typeof value, "number");
-assert.ok(Number.isInteger(value));
-if (process.env.VISP_TEST_SCOPE === "existing") assert.equal(value, 1);
-else {
-  writeFileSync("src/value.mjs", "export const value = 2;\\n");
-  assert.equal(value, 2);
-}
-`,
+          content: selfReporting(`  const { writeFileSync } = await import("node:fs");
+  const { value } = await import("../../src/value.mjs");
+  assert.equal(typeof value, "number");
+  assert.ok(Number.isInteger(value));
+  if (process.env.VISP_TEST_SCOPE === "existing") assert.equal(value, 1);
+  else {
+    writeFileSync("src/value.mjs", "export const value = 2;\\n");
+    assert.equal(value, 2);
+  }`),
         },
         tests: [],
         notes: "",
@@ -503,6 +521,77 @@ it("reports a live tester as running beyond ten minutes", async () => {
     inlineTests(tester(null)),
   );
   expect(work.ok && work.value.independentTests?.status).toBe("running");
+});
+
+// Codex runs every sandboxed command in its own pid namespace; kill(pid, 0) proves nothing there.
+const DEAD_PID = 2 ** 22 + 7;
+async function workWithRunningRecord(record: Record<string, unknown>) {
+  const fixture = await testerWorkspace();
+  await fixture.workspace.write(
+    `.visp/features/${fixture.brief.feature}/acceptance-tests.json`,
+    JSON.stringify({ version: 1, status: "running", ...record }),
+  );
+  const work = await runProductWork(
+    await fixture.workspace.state(),
+    { task: "T001" },
+    inlineTests(tester(null)),
+  );
+  return work.ok ? work.value.independentTests : undefined;
+}
+
+it.skipIf(process.platform !== "linux")(
+  "keeps a tester from another pid namespace running while it is young",
+  async () => {
+    expect(
+      await workWithRunningRecord({
+        startedAt: new Date().toISOString(),
+        pid: DEAD_PID,
+        pidNamespace: "pid:[4026539999]",
+      }),
+    ).toMatchObject({ status: "running" });
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "ends a tester from another pid namespace by age alone",
+  async () => {
+    expect(
+      await workWithRunningRecord({
+        startedAt: new Date(Date.now() - 27 * 60_000).toISOString(),
+        pid: process.pid,
+        pidNamespace: "pid:[4026539999]",
+      }),
+    ).toMatchObject({ status: "failed" });
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "still judges a same-namespace tester by whether its process is alive",
+  async () => {
+    const { pidNamespace } = await processIdentity(process.pid);
+    const startedAt = new Date().toISOString();
+    expect(
+      await workWithRunningRecord({ startedAt, pid: process.pid, pidNamespace }),
+    ).toMatchObject({ status: "running" });
+    await workspace?.destroy();
+    expect(await workWithRunningRecord({ startedAt, pid: DEAD_PID, pidNamespace })).toMatchObject({
+      status: "failed",
+    });
+  },
+);
+
+it.skipIf(process.platform !== "linux")("records the writer's pid namespace", async () => {
+  const fixture = await testerWorkspace();
+  let seen: unknown;
+  await writeIndependentTests(await fixture.workspace.state(), fixture.brief.feature, async () => {
+    seen = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+    return { file: null, tests: [], notes: "" };
+  });
+  const { pidNamespace } = await processIdentity(process.pid);
+  expect(seen).toMatchObject({
+    ok: true,
+    value: { status: "running", pid: process.pid, pidNamespace },
+  });
 });
 
 it("does not launch a tester unless VISP launches the reviewer", async () => {
@@ -768,12 +857,7 @@ it("has VISP's reviewer assess the assembled product when acceptance lacks an as
   expect(accepted.value.critic).toMatchObject({ reason: "reviewer unavailable in test" });
 });
 
-const BAD_THEN_GOOD = (value: string) => `import assert from "node:assert/strict";
-import { value } from "../../src/value.mjs";
-assert.equal(typeof value, "number");
-assert.ok(Number.isInteger(value));
-assert.equal(value, ${value});
-`;
+const BAD_THEN_GOOD = (expected: string) => FAILS_FIRST.replace("value, 2", `value, ${expected}`);
 
 // On an existing codebase, trial suites were wrong in every variant tried.
 it("does not launch the tester on an existing codebase", async () => {
@@ -814,6 +898,275 @@ it("gives the tester one repair round with the failure output", async () => {
   expect(work.ok && work.value.independentTests?.status).toBe("pinned");
   expect(prompts).toHaveLength(2);
   expect(prompts[1]).toContain("pass before any implementation");
+});
+
+// A pinned suite that crashes before any test ran leaves a later failure nobody can dispute.
+const CRASHES = `import assert from "node:assert/strict";
+import { value } from "../../src/missing.mjs";
+assert.equal(value, 2); assert.ok(value); assert.ok(value);
+`;
+
+it("rejects a baseline that crashed before any declared test failed, then repairs it once", async () => {
+  const fixture = await testerWorkspace();
+  const prompts: string[] = [];
+  const repairing: IndependentTester = async (request) => {
+    prompts.push(request.prompt);
+    return {
+      file: { name: "value.test.mjs", content: prompts.length === 1 ? CRASHES : FAILS_FIRST },
+      tests: [{ name: "value", quote: "Return two" }],
+      notes: "",
+    };
+  };
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    repairing,
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain("reported no declared test as failing");
+  expect(prompts[1]).toContain('Declared names: "value"');
+  expect(prompts[1]).toContain("Print `FAIL: <exact name from tests[].name>: <reason>`");
+  expect(prompts[1]).toContain("ENVIRONMENT ERROR:");
+  // The first prompt carries no repair-only text.
+  expect(prompts[0]).not.toContain("reported no declared test as failing");
+  // The full baseline output is used to attribute lines and is never stored.
+  const stored = await readFile(
+    join(fixture.workspace.root, `.visp/features/${fixture.brief.feature}/acceptance-tests.json`),
+    "utf8",
+  );
+  expect(stored).not.toContain("fullOutput");
+  expect(result.ok && Object.keys(result.value.baseline ?? {}).sort()).toEqual([
+    "exitCode",
+    "output",
+    "spawnFailed",
+    "timedOut",
+  ]);
+});
+
+it("rejects FAIL lines that name no declared test and keeps the file when repair fails too", async () => {
+  const fixture = await testerWorkspace();
+  const prompts: string[] = [];
+  const unnamed = `${FAILS_FIRST}console.log("FAIL: test_value (Suite.test_value): boom");\n`;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async (request) => {
+      prompts.push(request.prompt);
+      return {
+        file: { name: "value.test.mjs", content: unnamed },
+        tests: [{ name: "value", quote: "Return two" }],
+        notes: "",
+      };
+    },
+  );
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain("Every FAIL line must be");
+  expect(result.ok && result.value.status).toBe("rejected");
+  expect(result.ok && result.value.reason).toContain("name no declared test");
+  expect(result.ok && result.value.reason).toContain("test_value (Suite.test_value)");
+  expect(result.ok && result.value.content).toBe(unnamed);
+  const record = await readProductRecord(await fixture.workspace.state(), {});
+  if (!record.ok) throw new Error(record.error.message);
+  expect(record.value.brief.acceptanceBaseline).toEqual([]);
+});
+
+it("pins a self-reporting suite that declares no tests, and declines one that never says FAIL", async () => {
+  const fixture = await testerWorkspace();
+  const pinned = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async () => ({ file: { name: "value.test.mjs", content: FAILS_FIRST }, tests: [], notes: "" }),
+  );
+  expect(pinned.ok && pinned.value.status, JSON.stringify(pinned)).toBe("pinned");
+  const other = await testerWorkspace();
+  const declined = await writeIndependentTests(
+    await other.workspace.state(),
+    other.brief.feature,
+    async () => ({ file: { name: "value.test.mjs", content: CRASHES }, tests: [], notes: "" }),
+  );
+  expect(declined.ok && declined.value.status).toBe("declined");
+  expect(declined.ok && declined.value.reason).toContain("declares no tests");
+  const record = await readProductRecord(await other.workspace.state(), {});
+  if (!record.ok) throw new Error(record.error.message);
+  expect(record.value.brief.acceptanceBaseline).toEqual([]);
+});
+
+it("accepts FAIL lines that end in CRLF, as Python prints them on Windows", async () => {
+  const fixture = await testerWorkspace();
+  const crlf = FAILS_FIRST.replace(
+    "process.exitCode = 1;",
+    'process.stdout.write("FAIL: value: crlf line\\r\\n"); process.exitCode = 1;',
+  );
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: crlf }),
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+});
+
+it("does not count unittest's runner lines as declared failures, and does not list secrets", async () => {
+  const fixture = await testerWorkspace();
+  await fixture.workspace.write(".env", "PRIVATE_TOKEN=launch-private-value\n");
+  const noisy = `${FAILS_FIRST}console.log("FAIL: test_value (Suite.test_value)");
+console.log("FAIL: " + "a".repeat(285) + "launch-private-value");
+for (let index = 0; index < 8; index += 1) console.log("FAIL: other " + index);
+`;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: noisy }),
+  );
+  expect(result.ok && result.value.status).toBe("rejected");
+  const reason = (result.ok && result.value.reason) || "";
+  expect(reason).toContain("name no declared test");
+  expect(reason).not.toContain("launch-private");
+  expect(reason).not.toContain("test_value (Suite");
+  // At most five lines are listed, each cut to 300 characters after redaction.
+  expect(reason.match(/"FAIL|"a{20}|"other/g)?.length ?? 0).toBeLessThanOrEqual(5);
+  expect(reason).toContain("other 0");
+  expect(reason).not.toContain("other 5");
+});
+
+it("still needs a declared name when the only FAIL lines are unittest's runner lines", async () => {
+  const fixture = await testerWorkspace();
+  const runnerOnly = `${CRASHES}console.log("FAIL: test_value (Suite.test_value)");\n`;
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: runnerOnly }),
+  );
+  expect(result.ok && result.value.status).toBe("rejected");
+  expect(result.ok && result.value.reason).toContain("reported no declared test as failing");
+});
+
+it("tells the tester to print a FAIL line per test with a browser carve-out", async () => {
+  const fixture = await testerWorkspace();
+  const prompts: string[] = [];
+  await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester(null, prompts),
+  );
+  expect(prompts[0]).toContain("This holds when nothing is implemented yet");
+  expect(prompts[0]).toContain("never import or start the product at file top level");
+  expect(prompts[0]).toContain("when the browser itself cannot start, print `ENVIRONMENT ERROR:");
+});
+
+// A suite whose browser cannot start says so instead of failing tests. VISP believes it only
+// when its own probe agrees: a product or suite can print the line to dodge attribution.
+const ENVIRONMENT_ONLY = `import assert from "node:assert/strict";
+console.log("ENVIRONMENT ERROR: Chrome executable not found");
+assert.ok(1); assert.ok(1); assert.ok(1);
+process.exit(1);
+`;
+
+async function environmentTester(browserDown: boolean, second?: string) {
+  browser.down = browserDown;
+  browser.probes = 0;
+  const fixture = await testerWorkspace();
+  const prompts: string[] = [];
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async (request) => {
+      prompts.push(request.prompt);
+      return {
+        file: {
+          name: "browser.test.mjs",
+          content: prompts.length > 1 && second ? second : ENVIRONMENT_ONLY,
+        },
+        tests: [{ name: "value", quote: "Return two" }],
+        notes: "",
+      };
+    },
+  );
+  const record = await readProductRecord(await fixture.workspace.state(), {});
+  if (!record.ok) throw new Error(record.error.message);
+  return { result, prompts, pinned: record.value.brief.acceptanceBaseline.length };
+}
+
+it("records a tester failure, without repair or pin, when only the environment stopped the suite", async () => {
+  const { result, prompts, pinned } = await environmentTester(true);
+  expect(prompts).toHaveLength(1);
+  expect(result.ok && result.value.status).toBe("failed");
+  expect(result.ok && result.value.reason).toContain("could not run in this environment");
+  expect(result.ok && result.value.reason).toContain("Chrome executable not found");
+  expect(pinned).toBe(0);
+  expect(browser.probes).toBe(1);
+});
+
+it("repairs a suite that claims an environment error while a browser starts here", async () => {
+  const { result, prompts, pinned } = await environmentTester(false, FAILS_FIRST);
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain("do not print ENVIRONMENT ERROR");
+  expect(prompts[1]).toContain("reported no declared test as failing");
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(pinned).toBe(1);
+  // Still rejected when the repair prints the line again.
+  const again = await environmentTester(false);
+  expect(again.result.ok && again.result.value.status).toBe("rejected");
+  expect(again.pinned).toBe(0);
+});
+
+it("pins a suite that names a failing test even when it also prints an environment error", async () => {
+  browser.down = true;
+  browser.probes = 0;
+  const fixture = await testerWorkspace();
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({
+      name: "value.test.mjs",
+      content: `${FAILS_FIRST}console.log("ENVIRONMENT ERROR: teardown noise");\n`,
+    }),
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(browser.probes).toBe(0);
+});
+
+it("classifies a pinned run as environment-failed only when VISP's own probe agrees", async () => {
+  const fixture = await testerWorkspace();
+  const suite = selfReporting(`  const { value } = await import("../../src/value.mjs");
+  if (value === "env" || value === "mixed") {
+    if (value === "mixed") console.log("FAIL: something else: broke");
+    console.log("ENVIRONMENT ERROR: Chrome executable not found");
+    process.exit(1);
+  }
+  if (value === "trace") {
+    console.log("ENVIRONMENT ERROR: Chrome executable not found");
+    throw new TypeError("boom");
+  }
+  assert.equal(typeof value, "number");
+  assert.ok(Number.isInteger(value));
+  assert.equal(value, 2);`);
+  browser.down = false;
+  const pinned = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: suite }),
+  );
+  expect(pinned.ok && pinned.value.status, JSON.stringify(pinned)).toBe("pinned");
+  expect((await runProductWork(await fixture.workspace.state(), { task: "T001" })).ok).toBe(true);
+  const statusWith = async (value: string, down: boolean) => {
+    browser.down = down;
+    await fixture.workspace.write("src/value.mjs", `export const value = ${value};\n`);
+    const done = await runProductDone(await fixture.workspace.state(), { task: "T001" });
+    return done.ok ? done.value.executions.find((run) => run.check === "PINNED_1") : undefined;
+  };
+  const environment = await statusWith('"env"', true);
+  expect(environment?.status).toBe("environment-failed");
+  expect(environment?.output).toContain("ENVIRONMENT ERROR: Chrome executable not found");
+  expect(environment?.output).toContain("not a product failure");
+  // The same output with a browser that starts is a product failure printing the line itself.
+  expect((await statusWith('"env"', false))?.status).toBe("failed");
+  // Any other FAIL line, or an uncaught error, keeps a real failure a failure.
+  expect((await statusWith('"mixed"', true))?.status).toBe("failed");
+  expect((await statusWith('"trace"', true))?.status).toBe("failed");
+  // A named failure is a product failure, and a passing run passes.
+  expect((await statusWith("3", true))?.status).toBe("failed");
+  expect((await statusWith("2", true))?.status).toBe("passed");
 });
 
 // Codex's sandbox ends background processes when a command finishes; the record said
@@ -953,8 +1306,22 @@ it("runs a new-project tester in an empty directory and sweeps abandoned auth co
   const stale = await mkdtemp(join(tmpdir(), "visp-tester-"));
   await mkdir(join(stale, "codex-home"));
   await writeFile(join(stale, "codex-home", "auth.json"), "secret");
-  const old = new Date(Date.now() - 25 * 60 * 60_000);
+  // Past two hours the copy is abandoned; a younger one may belong to a running tester, and
+  // a directory that only looks like one (not mkdtemp's shape) is never touched.
+  const old = new Date(Date.now() - 3 * 60 * 60_000);
   await utimes(stale, old, old);
+  const young = await mkdtemp(join(tmpdir(), "visp-tester-"));
+  const youngAge = new Date(Date.now() - 60 * 60_000);
+  await utimes(young, youngAge, youngAge);
+  const named = join(tmpdir(), `visp-tester-notes-${process.pid}`);
+  await mkdir(named);
+  await utimes(named, old, old);
+  // The snapshot's launch-time source copy and baseline copies use their own prefixes.
+  const copies = [
+    await mkdtemp(join(tmpdir(), "visp-tester-source-")),
+    await mkdtemp(join(tmpdir(), "visp-tester-baseline-")),
+  ];
+  for (const copy of copies) await utimes(copy, old, old);
   const fake = join(fixture.workspace.root, "..", `fake-codex-empty-${Date.now()}.mjs`);
   await writeFile(
     fake,
@@ -976,22 +1343,59 @@ writeFileSync(args[args.indexOf("--output-last-message") + 1], JSON.stringify({
   })) as { notes: string };
   expect(JSON.parse(response.notes)).toEqual([]);
   await expect(readFile(join(stale, "codex-home", "auth.json"))).rejects.toThrow();
+  const { stat, rm } = await import("node:fs/promises");
+  try {
+    for (const copy of copies) await expect(stat(copy)).rejects.toThrow();
+    expect((await stat(young)).isDirectory()).toBe(true);
+    expect((await stat(named)).isDirectory()).toBe(true);
+  } finally {
+    await rm(young, { recursive: true, force: true });
+    await rm(named, { recursive: true, force: true });
+    for (const copy of copies) await rm(copy, { recursive: true, force: true });
+  }
+});
+
+it("says a pinned run cut off by the deadline was not shown failing", async () => {
+  const fixture = await testerWorkspace();
+  const suite = selfReporting(`  const { value } = await import("../../src/value.mjs");
+  if (value === 3) await new Promise((resolve) => setTimeout(resolve, 30000));
+  assert.equal(typeof value, "number");
+  assert.ok(Number.isInteger(value));
+  assert.equal(value, 2);`);
+  const pinned = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: suite }),
+  );
+  expect(pinned.ok && pinned.value.status, JSON.stringify(pinned)).toBe("pinned");
+  const progress = async (value: number, deadline?: number) => {
+    await fixture.workspace.write("src/value.mjs", `export const value = ${value};\n`);
+    return acceptanceProgress(await fixture.workspace.state(), fixture.brief.feature, [], {
+      ...(deadline ? { deadline } : {}),
+    });
+  };
+  const [cutOff] = await progress(3, Date.now() + 1500);
+  expect(cutOff?.passing).toBe(false);
+  expect(cutOff?.note).toContain("cut off, not shown failing");
+  expect(cutOff?.note).not.toContain("still fail");
+  expect(cutOff?.failure).toBeUndefined();
+  const [failing] = await progress(1);
+  expect(failing?.note).toContain("still fail");
+  expect(failing?.failure).toContain("FAIL: value");
+  const [passing] = await progress(2);
+  expect(passing).toMatchObject({ passing: true, note: "Pinned acceptance tests pass." });
 });
 
 // A suite that starts a server left it running after the baseline run.
 it("ends every process a baseline test run started", async () => {
   const fixture = await testerWorkspace();
   const pidFile = join(fixture.workspace.root, "..", `leak-${Date.now()}.pid`);
-  const leaking = `import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+  const leaking = `import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { value } from "../../src/value.mjs";
 const server = spawn(process.execPath, ["-e", "setTimeout(() => {}, 300000)"], { stdio: "ignore" });
+server.unref();
 writeFileSync(${JSON.stringify(pidFile)}, String(server.pid));
-assert.equal(typeof value, "number");
-assert.ok(Number.isInteger(value));
-assert.equal(value, 2);
-`;
+${FAILS_FIRST}`;
   const work = await runProductWork(
     await fixture.workspace.state(),
     { task: "T001" },
