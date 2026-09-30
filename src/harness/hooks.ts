@@ -540,7 +540,7 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
         PreToolUse: [
           {
             matcher: "Edit|Write|NotebookEdit",
-            hooks: [{ type: "command", command: hookCommand(hookPath) }],
+            hooks: [{ type: "command", command: hookCommand(hookPath, true) }],
           },
         ],
       },
@@ -710,7 +710,11 @@ jobs:
 `;
 }
 
-/** Codex runs hooks through a shell from the session directory; resolve the project root. */
+/**
+ * Codex runs hooks through a shell from the session directory; resolve the project root.
+ * The command keeps its earlier text on purpose: Codex trusts a hook by a hash of its command,
+ * so changing it would make upgraded projects skip every hook silently.
+ */
 export const CODEX_HOOK_SCRIPT = ".visp/hooks/codex-hooks.mjs";
 const CODEX_HOOK_COMMAND =
   process.platform === "win32"

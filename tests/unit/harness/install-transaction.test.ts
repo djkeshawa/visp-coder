@@ -291,7 +291,10 @@ describe("transactional harness installation", () => {
             {
               matcher: "Write",
               hooks: [
-                { type: "command", command: hookCommand(".visp/hooks/claude-pretooluse.mjs") },
+                {
+                  type: "command",
+                  command: hookCommand(".visp/hooks/claude-pretooluse.mjs", true),
+                },
               ],
             },
           ],
