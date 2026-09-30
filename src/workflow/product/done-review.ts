@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
-import { outcomeStatuses } from "./assessment.js";
+import { finalProductAssessmentGaps, outcomeStatuses } from "./assessment.js";
 import { cancelledExecution } from "./check-lifecycle.js";
 import { type ProductCriticHost, runProductCritic } from "./critic.js";
 import { type ReviewerCapacity, reviewerCapacity } from "./critic-capacity.js";
@@ -15,7 +15,7 @@ import { hasPendingCriticReview } from "./critic-policy.js";
 import { type ProductVerification, runProductAccept, runProductDone } from "./evidence.js";
 import { openRequiredFindings, outstandingFeedback } from "./findings.js";
 import { type AcceptanceProgress, acceptanceProgress } from "./independent-tests.js";
-import { closedSlice, latestExecutionsByOwner } from "./model.js";
+import { checksFor, latestExecutionsByOwner } from "./model.js";
 import type { PinnedDispute } from "./pinned-dispute-model.js";
 import {
   type DisputeInput,
@@ -32,6 +32,7 @@ import {
   refreshDisputes,
   rulingCurrent,
 } from "./pinned-disputes.js";
+import { completesFeature } from "./review-selection.js";
 import type { ProductNext } from "./status.js";
 import { runProductNext } from "./status.js";
 import { type ProductRecord, type ProductSelection, readProductRecord } from "./store.js";
@@ -128,7 +129,7 @@ export async function runProductDoneReviewed(
     feature,
     // `done` reuses passed checks, so running it again costs little; `accept` re-runs them all.
     rerunnable,
-    ...(done.value.closed || !done.value.task ? {} : { task: done.value.task }),
+    ...(record && completesFeature(record, done.value.task) ? {} : { task: done.value.task }),
   });
   if (options.signal?.aborted) return cancelledExecution();
   return doneAfterReview(workspace, options, done.value, critic, pinned.value);
@@ -342,6 +343,12 @@ async function reviewNotNeeded(
 ): Promise<DoneCriticSummary | undefined> {
   // A dispute is decided only by a review; once it has ruled on this exact source, another
   // review of it would find nothing new.
+  if (
+    record &&
+    completesFeature(record, task) &&
+    finalProductAssessmentGaps(record, subject).length > 0
+  )
+    return undefined;
   if (pending.length) return undefined;
   if (
     record &&
@@ -358,12 +365,14 @@ async function reviewNotNeeded(
       reason: "The independent review already ruled on this exact source",
     };
   if (!record || !task) return undefined;
-  if (!skippableReview(record, task, subject)) return undefined;
+  const capacity = await reviewerCapacity(workspace, feature, subject, task);
+  if (!skippableReview(record, task, subject, capacity.reserveCompletingReview)) return undefined;
   return {
     reviewed: false,
     findings: [],
-    reason:
-      "The previous independent review found no required problems; the next review runs when the last slice is done",
+    reason: capacity.reserveCompletingReview
+      ? "Skipped this non-completing slice review to reserve independent review capacity (one call and its full timeout) for the completing whole-feature review; no call spent"
+      : "The previous independent review found no required problems; the next review runs when the last slice is done",
   };
 }
 
@@ -379,23 +388,34 @@ export function reviewOwed(record: ProductRecord, task: string, subject: string)
     (openRequiredFindings(record, slice).length > 0 ||
       outcomeStatuses(record, subject, slice).some(
         (entry) =>
-          entry.priority === "must" && entry.requiredReview && entry.review !== "satisfied",
+          entry.priority === "must" &&
+          entry.review !== "satisfied" &&
+          (entry.requiredReview ||
+            entry.review === "failed" ||
+            (record.brief.outcomes.some(
+              (outcome) => outcome.id === entry.id && outcome.kind !== "functional",
+            ) &&
+              !checksFor(record.brief, slice).some((check) => check.outcomes.includes(entry.id)))),
       ))
   );
 }
 
-/** A clean previous review, a slice that does not complete the feature, and no required review owed. */
-export function skippableReview(record: ProductRecord, task: string, subject: string): boolean {
-  const { brief, state } = record;
+/** Optional middle reviews can yield to a clean predecessor or the completing review's reserve. */
+export function skippableReview(
+  record: ProductRecord,
+  task: string,
+  subject: string,
+  reserveCompletingReview = false,
+): boolean {
+  if (completesFeature(record, task) || reviewOwed(record, task, subject)) return false;
+  if (reserveCompletingReview) return true;
+  const { state } = record;
   const last = state.reviews.at(-1);
   if (!last?.reviewer?.model) return false;
   const clean =
     last.assessments.every((assessment) => assessment.status !== "failed") &&
     !outstandingFeedback(record).some((finding) => finding.required && finding.phase === "product");
-  const completesFeature = brief.slices.every(
-    (slice) => slice.id === task || closedSlice(state.slices[slice.id]?.status),
-  );
-  return clean && !completesFeature && !reviewOwed(record, task, subject);
+  return clean;
 }
 
 /**

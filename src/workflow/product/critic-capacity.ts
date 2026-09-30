@@ -1,6 +1,10 @@
 import { CRITIC_CALL_TIMEOUT_MS, CRITIC_MAX_CALLS } from "../../config/critic.js";
 import type { WorkspaceState } from "../state.js";
-import { featureCriticBudgetGap, readFeatureCriticBudget } from "./critic-budget.js";
+import {
+  featureCriticBudgetGap,
+  featureCriticCapacity,
+  readFeatureCriticBudget,
+} from "./critic-budget.js";
 import { relaunchBlocked } from "./critic-status.js";
 import { criticSelection, readCriticState } from "./critic-store.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
@@ -9,6 +13,10 @@ import { reviewerRules } from "./pinned-dispute-model.js";
 export interface ReviewerCapacity {
   readonly available: boolean;
   readonly reason?: string;
+  readonly callsRemaining?: number;
+  readonly reservableCalls?: number;
+  /** An optional slice dispatch would leave no call or timeout for the assembled review. */
+  readonly reserveCompletingReview?: boolean;
 }
 
 const AVAILABLE: ReviewerCapacity = { available: true };
@@ -50,14 +58,38 @@ async function recordedCapacity(
     maxCalls: workspace.config.critic?.maxCalls ?? CRITIC_MAX_CALLS,
   });
   if (!budget.ok) return AVAILABLE;
+  const capacity = featureCriticCapacity(budget.value.budget, timeoutMs);
+  const { callsRemaining, reservableCalls } = capacity;
   if (featureCriticBudgetGap(budget.value.budget, timeoutMs))
-    return { available: false, reason: "The independent review budget is spent." };
+    return {
+      available: false,
+      callsRemaining,
+      reservableCalls,
+      reason: "The independent review budget is spent.",
+    };
   if (state && relaunchBlocked(state, subject, selected.value.phase))
     return {
       available: false,
+      callsRemaining,
+      reservableCalls,
       reason: "VISP's independent reviewer failed twice on this source.",
     };
-  return AVAILABLE;
+  const completing = await criticSelection(workspace, { feature }, true);
+  if (!completing.ok) return { available: true, callsRemaining, reservableCalls };
+  const completingState = await readCriticState(workspace, completing.value);
+  if (!completingState.ok) return { available: true, callsRemaining, reservableCalls };
+  const completingTimeoutMs =
+    completingState.value.state?.config.timeoutMs ??
+    workspace.config.critic?.timeoutMs ??
+    CRITIC_CALL_TIMEOUT_MS;
+  return {
+    available: true,
+    callsRemaining,
+    reservableCalls,
+    reserveCompletingReview:
+      reservableCalls > 0 &&
+      (callsRemaining < 2 || capacity.remainingMs < timeoutMs + completingTimeoutMs),
+  };
 }
 
 /** The step when VISP's reviewer cannot run again: hand what remains to the human reviewer. */

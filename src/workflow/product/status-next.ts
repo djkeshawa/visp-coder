@@ -38,6 +38,7 @@ import { reviewerRules } from "./pinned-dispute-model.js";
 import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
 import { repairRecheck } from "./repair-recheck.js";
+import { completesFeature } from "./review-selection.js";
 import {
   unavailableClosedReviewerFindingsNext,
   unavailableReviewerFindingsNext,
@@ -586,7 +587,12 @@ async function reviewerState(
 ): Promise<ReviewerState> {
   return {
     runs: reviewerRules(workspace),
-    capacity: await reviewerCapacity(workspace, record.brief.feature, subject, slice?.id),
+    capacity: await reviewerCapacity(
+      workspace,
+      record.brief.feature,
+      subject,
+      completesFeature(record, slice?.id) ? undefined : slice?.id,
+    ),
   };
 }
 
@@ -776,7 +782,9 @@ function launchedSliceReview(
     action: exhausted ? "understand" : "refine",
     objective: exhausted
       ? "Refinement budget exhausted; required outcomes remain unresolved. Choose a focused new hypothesis or revise the budget explicitly."
-      : "Run visp done: VISP's independent reviewer assesses this slice's outcomes.",
+      : completesFeature(record, slice.id)
+        ? "Run visp done: VISP's independent reviewer assesses every feature outcome on the completing slice."
+        : "Run visp done: VISP's independent reviewer assesses this slice's outcomes.",
     command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
     completion: "unresolved-product",
   };
