@@ -14,6 +14,7 @@ import { browserKey } from "./browser-keys.js";
 import { measureRenderedLayout } from "./browser-layout.js";
 import { BrowserBehaviorFailure } from "./browser-observations.js";
 import { type ChromeTransport, launchChrome } from "./chrome-transport.js";
+import { PROJECT_SCHEME } from "./project-server.js";
 
 const CHROME_ERROR_PAGE = "chrome-error://chromewebdata/";
 
@@ -35,6 +36,10 @@ export interface BrowserOperation {
   /** Bounded serialized observed value; truncation is explicit and never a passing assertion. */
   readonly measurement?: { readonly json: string; readonly truncated: boolean };
 }
+/** `annotate` adds a fact about the main document VISP itself served to the navigate operation. */
+export interface NavigateOptions {
+  readonly annotate?: (finalUrl: string) => string | undefined;
+}
 export interface BrowserSession {
   readonly page: InteractionPage;
   readonly operations: readonly BrowserOperation[];
@@ -42,7 +47,7 @@ export interface BrowserSession {
   assertHealthy?(): void;
   sample<R, A>(fn: (arg: A) => R, arg: A): Promise<R>;
   record(kind: "observe" | "scroll", description: string, result: unknown): string;
-  navigate(url: string): Promise<void>;
+  navigate(url: string, options?: NavigateOptions): Promise<void>;
   /** Change the viewport in place; preserves the current document and application state. */
   resize(viewport: { width: number; height: number }): Promise<void>;
   drag(gesture: DragGesture, intermediate?: () => Promise<void>): Promise<void>;
@@ -61,6 +66,12 @@ export async function openBrowserSession(options: {
   readonly viewport?: { width: number; height: number };
   readonly fileRoot?: string;
   readonly blockedPaths?: readonly string[];
+  /**
+   * How operations and capture routes name a URL VISP itself serves (`project:/index.html`, never
+   * the ephemeral port), so the same journey on another run has the same route. Navigation and
+   * confinement always use the real URL.
+   */
+  readonly present?: (url: string) => string;
 }): Promise<BrowserSession> {
   if (!/^[0-9a-f]{64}$/.test(options.subjectDigest))
     throw new Error("subjectDigest must be SHA-256");
@@ -151,7 +162,8 @@ export async function openBrowserSession(options: {
     const pointer = { x: 0, y: 0 };
     const page = interactionPage(inputSend, record, pointer);
     const quietPage = interactionPage(inputSend, () => {});
-    const navigate = async (url: string) => {
+    const present = options.present ?? ((value: string) => value);
+    const navigate = async (url: string, navigation?: NavigateOptions) => {
       await checkNavigation(url, options.fileRoot, options.blockedPaths);
       documents.clear();
       const response = await inputSend("Page.navigate", { url });
@@ -165,8 +177,9 @@ export async function openBrowserSession(options: {
         awaitPromise: true,
       });
       await files?.check();
-      const note = servedDocumentNote(url, served);
-      record("navigate", `Navigate ${url}${note.suffix}`);
+      const note = servedDocumentNote(url, served, present);
+      const fact = served && served.status < 400 ? navigation?.annotate?.(served.url) : undefined;
+      record("navigate", `Navigate ${present(url)}${note.suffix}${fact ? `, ${fact}` : ""}`);
       if (note.failure) throw new BrowserBehaviorFailure(note.failure);
     };
     return {
@@ -249,13 +262,13 @@ export async function openBrowserSession(options: {
         }
         assertOpen();
         await files?.check();
-        record("capture", `Capture ${route}`, bytes.toString("base64"), id);
+        record("capture", `Capture ${present(route)}`, bytes.toString("base64"), id);
         return {
           id,
           path,
           sha256: sha256(bytes),
           subjectDigest: options.subjectDigest,
-          route,
+          route: present(route),
           steps: operations
             .filter((operation) => operation.kind !== "measure" && operation.kind !== "capture")
             .slice(-4)
@@ -289,16 +302,26 @@ export async function openBrowserSession(options: {
 function servedDocumentNote(
   url: string,
   served: { status: number; url: string } | undefined,
+  present: (url: string) => string,
 ): { suffix: string; failure?: string } {
   const requested = new URL(url);
   if (!served || requested.protocol === "file:") return { suffix: "" };
   requested.hash = "";
-  const redirect = served.url === requested.href ? "" : `, redirected to ${served.url}`;
+  const redirect = served.url === requested.href ? "" : `, redirected to ${present(served.url)}`;
   const suffix = ` (HTTP ${served.status}${redirect})`;
   if (served.status < 400) return { suffix };
+  const display = present(url);
+  if (display.startsWith(PROJECT_SCHEME))
+    return {
+      suffix,
+      failure:
+        served.status === 404
+          ? `${display} does not exist in the project (HTTP 404); check the path relative to the project root.`
+          : `${display} could not be served from the project (HTTP ${served.status}). .env files, .git, .visp, dist/, build/ and node_modules/ are never served; an app that needs them must run its own server on a free port and use its http://127.0.0.1:<port>/ URL as the journey url.`,
+    };
   return {
     suffix,
-    failure: `${url} answered HTTP ${served.status}. Either the server is serving a different directory or app than this project, or the page does not exist. Serve this project's files and confirm the URL returns 200 before rerunning.`,
+    failure: `${url} answered HTTP ${served.status}. Either the server is serving a different directory or app than this project, or the page does not exist. Serve this project's files (for a static page use "project:/<file>" as the journey url) and confirm the URL returns 200 before rerunning.`,
   };
 }
 

@@ -223,7 +223,7 @@ export async function confineBrowserFiles(
   };
 }
 
-function contentType(path: string): string {
+export function contentType(path: string): string {
   const types: Record<string, string> = {
     ".html": "text/html",
     ".htm": "text/html",
@@ -240,6 +240,20 @@ function contentType(path: string): string {
     ".woff": "font/woff",
     ".woff2": "font/woff2",
     ".wasm": "application/wasm",
+    ".txt": "text/plain",
+    ".ico": "image/x-icon",
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".map": "application/json",
+    ".webmanifest": "application/manifest+json",
+    ".xml": "application/xml",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
   };
   return types[extname(path).toLowerCase()] ?? "application/octet-stream";
 }

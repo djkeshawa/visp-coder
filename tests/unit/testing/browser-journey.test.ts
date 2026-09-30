@@ -2,7 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sha256 } from "../../../src/core/hash.js";
 import { BrowserSecurityError } from "../../../src/testing/browser-files.js";
 import {
   type BrowserJourney,
@@ -612,4 +613,203 @@ it("stops an active observation when cancellation arrives", async () => {
   });
   const result = await runBrowserJourney({ ...options, signal: controller.signal });
   expect(result.status).toBe("cancelled");
+});
+
+describe("project: journeys (VISP-owned static server)", () => {
+  let project: string;
+  beforeEach(async () => {
+    project = await mkdtemp(join(tmpdir(), "visp-journey-project-"));
+    await writeFile(join(project, "index.html"), "<p>Ready</p>");
+    await writeFile(join(project, ".env"), "TOKEN=SECRET");
+  });
+  afterEach(async () => {
+    await rm(project, { recursive: true, force: true });
+  });
+  const projectOptions = (url = "project:/index.html", extra: object = {}) => ({
+    ...options,
+    projectRoot: project,
+    journey: { url, actions: [] },
+    ...extra,
+  });
+  const alive = (url: string) =>
+    fetch(url).then(
+      () => true,
+      () => false,
+    );
+  /** Navigation mock that behaves like a browser: it really requests the loopback URL. */
+  const requestingNavigation = (seen: { url?: string }) =>
+    browser.navigate.mockImplementation(async (url: string) => {
+      seen.url = url;
+      await fetch(url);
+    });
+
+  it("accepts project URLs and refuses malformed or escaping ones", () => {
+    for (const url of ["project:/index.html", "project:/a/b.html?x=1#y", "project:/"])
+      expect(browserJourneySchema.safeParse({ url, actions: [] }).success).toBe(true);
+    for (const url of [
+      "project://host/index.html",
+      "project:index.html",
+      "project:/../x",
+      "project:/%2e%2e/x",
+      "project:/a%2fb",
+      "project:/a\\b",
+      "ftp://x/",
+    ])
+      expect(browserJourneySchema.safeParse({ url, actions: [] }).success).toBe(false);
+  });
+
+  it("requires an explicit project root and starts nothing without one", async () => {
+    await expect(
+      runBrowserJourney({ ...options, journey: { url: "project:/index.html", actions: [] } }),
+    ).rejects.toThrow("explicit project root");
+    expect(browser.open).not.toHaveBeenCalled();
+  });
+
+  it("navigates to a loopback URL, presents the project URL and records the served digest", async () => {
+    const seen: { url?: string } = {};
+    requestingNavigation(seen);
+    const result = await runBrowserJourney(projectOptions("project:/index.html?level=2#go"));
+    expect(result.status).toBe("completed");
+    expect(seen.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/index\.html\?level=2#go$/);
+    const [url, navigation] = browser.navigate.mock.calls[0] as [
+      string,
+      { annotate(url: string): string | undefined },
+    ];
+    // The session presents routes and operations through the server's mapper, port-free.
+    const opened = browser.open.mock.calls[0]?.[0] as { present(url: string): string };
+    expect(opened.present(url)).toBe("project:/index.html?level=2#go");
+    expect(opened.present("https://example.com/x")).toBe("https://example.com/x");
+    expect(navigation.annotate(url)).toBe(
+      `served by VISP from the project, sha256 ${sha256("<p>Ready</p>").slice(0, 12)}`,
+    );
+  });
+
+  it("does not use the server for http or file journeys", async () => {
+    await runBrowserJourney(options);
+    expect(browser.open.mock.calls[0]?.[0].present).toBeUndefined();
+    expect(browser.navigate).toHaveBeenCalledExactlyOnceWith("http://localhost/");
+  });
+
+  it("closes the server after a completed journey", async () => {
+    const seen: { url?: string } = {};
+    requestingNavigation(seen);
+    await runBrowserJourney(projectOptions());
+    expect(await alive(seen.url ?? "")).toBe(false);
+  });
+
+  it("closes the server when the journey fails", async () => {
+    const seen: { url?: string } = {};
+    browser.navigate.mockImplementation(async (url: string) => {
+      seen.url = url;
+      throw new BrowserBehaviorFailure("HTTP 404");
+    });
+    expect((await runBrowserJourney(projectOptions())).status).toBe("failed");
+    expect(await alive(seen.url ?? "")).toBe(false);
+  });
+
+  it("closes the server when navigation throws an unexpected error", async () => {
+    const seen: { url?: string } = {};
+    browser.navigate.mockImplementation(async (url: string) => {
+      seen.url = url;
+      throw new Error("Navigation disconnected");
+    });
+    await expect(runBrowserJourney(projectOptions())).rejects.toThrow("Navigation disconnected");
+    expect(await alive(seen.url ?? "")).toBe(false);
+  });
+
+  it("closes the server when the browser cannot start", async () => {
+    browser.open.mockImplementationOnce(async () => {
+      throw new BrowserUnavailableError("no browser");
+    });
+    const spy = vi.spyOn(
+      await import("../../../src/testing/project-server.js"),
+      "startProjectServer",
+    );
+    await expect(runBrowserJourney(projectOptions())).rejects.toThrow("no browser");
+    const server = await spy.mock.results[0]?.value;
+    expect(await alive(`${server.origin}/index.html`)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it("closes the server when the run is aborted mid-journey", async () => {
+    const controller = new AbortController();
+    const seen: { url?: string } = {};
+    browser.navigate.mockImplementation(async (url: string) => {
+      seen.url = url;
+      await fetch(url);
+      expect(await alive(url)).toBe(true);
+      controller.abort();
+      throw new Error("aborted");
+    });
+    const result = await runBrowserJourney(
+      projectOptions("project:/index.html", { signal: controller.signal }),
+    );
+    expect(result.status).toBe("cancelled");
+    expect(await alive(seen.url ?? "")).toBe(false);
+  });
+
+  it("does not start a server when aborted before startup", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const spy = vi.spyOn(
+      await import("../../../src/testing/project-server.js"),
+      "startProjectServer",
+    );
+    const result = await runBrowserJourney(
+      projectOptions("project:/index.html", { signal: controller.signal }),
+    );
+    expect(result.status).toBe("cancelled");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("closes the server on a stalled journey timeout", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const seen: { url?: string } = {};
+    browser.navigate.mockImplementation((url: string) => {
+      seen.url = url;
+      return new Promise(() => {});
+    });
+    const pending = runBrowserJourney(projectOptions());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await pending).toMatchObject({ status: "timed-out" });
+    vi.useRealTimers();
+    expect(await alive(seen.url ?? "")).toBe(false);
+  });
+
+  it("records what the project server refused as an observation", async () => {
+    browser.navigate.mockImplementation(async (url: string) => {
+      await fetch(url);
+      await fetch(new URL("/.env", url));
+    });
+    const result = await runBrowserJourney(projectOptions());
+    expect(result.status).toBe("completed");
+    expect(browser.operations.at(-1)?.description).toContain("refused 1 request(s): 403 GET /.env");
+    expect(browser.operations.at(-1)?.description).not.toContain("SECRET");
+  });
+
+  it("reports the true count of refused requests when only the first few are listed", async () => {
+    browser.navigate.mockImplementation(async (url: string) => {
+      await fetch(url);
+      for (let i = 0; i < 8; i += 1) await fetch(new URL(`/.env${i}`, url)).catch(() => {});
+      for (let i = 0; i < 8; i += 1) await fetch(new URL("/.git/config", url));
+    });
+    await runBrowserJourney(projectOptions());
+    expect(browser.operations.at(-1)?.description).toMatch(
+      /^VISP's project server refused 8 request\(s\), first 5: /,
+    );
+  });
+
+  it("keeps the journey key independent of the port", async () => {
+    const seen: string[] = [];
+    browser.navigate.mockImplementation(async (url: string) => {
+      seen.push(url);
+    });
+    await runBrowserJourney(projectOptions());
+    await runBrowserJourney(projectOptions());
+    expect(new Set(seen.map((url) => new URL(url).port)).size).toBe(2);
+    const { productJourneyKey } = await import("../../../src/workflow/evidence/product-journey.js");
+    const journey = browserJourneySchema.parse({ url: "project:/index.html", actions: [] });
+    expect(productJourneyKey(journey)).toBe(productJourneyKey(browserJourneySchema.parse(journey)));
+  });
 });
