@@ -12,7 +12,7 @@ import {
   scrollToElement,
   waitForObservation,
 } from "./browser-observations.js";
-import { actAtPoint } from "./browser-points.js";
+import { actAtPoint, resolveElementPoint } from "./browser-points.js";
 import {
   type BrowserOperation,
   type BrowserSession,
@@ -100,7 +100,15 @@ export const browserJourneySchema = z
                 .object({ x: z.number().finite(), y: z.number().finite() })
                 .strict()
                 .optional(),
-              to: z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
+              /** Start as fractions of the element's border box; the alternative to `from`. */
+              position: relativePoint.optional(),
+              /** Viewport pixels; the alternative to `by`. */
+              to: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(),
+              /** Travel as fractions of the element's border box width and height. */
+              by: z
+                .object({ x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) })
+                .strict()
+                .optional(),
               input: z.enum(["pointer", "touch"]).optional(),
               cancel: z.boolean().optional(),
               steps: z.number().int().min(2).max(60).optional(),
@@ -146,12 +154,7 @@ export const browserJourneySchema = z
         message: "Journey exceeds six representative captures",
       });
     journey.actions.forEach((action, index) => {
-      if (action.kind === "drag" && action.cancel && action.input !== "touch")
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["actions", index, "cancel"],
-          message: "Native gesture cancellation requires touch input",
-        });
+      if (action.kind === "drag") checkDragAction(action, index, context);
       if (
         action.kind === "compare" &&
         action.mode === "text" &&
@@ -176,6 +179,24 @@ export const browserJourneySchema = z
         });
     });
   });
+type DragAction = Extract<BrowserJourney["actions"][number], { kind: "drag" }>;
+
+function checkDragAction(action: DragAction, index: number, context: z.RefinementCtx) {
+  const issue = (field: string, message: string) =>
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["actions", index, field], message });
+  if (action.to && action.by)
+    issue("by", "Use to (viewport pixels) or by (fractions of the element box), not both");
+  if (!action.to && !action.by)
+    issue("to", "A drag needs to (viewport pixels) or by (fractions of the element box)");
+  if (action.from && action.position)
+    issue(
+      "position",
+      "Use from (viewport pixels) or position (fractions of the element box), not both",
+    );
+  if (action.cancel && action.input !== "touch")
+    issue("cancel", "Native gesture cancellation requires touch input");
+}
+
 export type BrowserJourney = z.infer<typeof browserJourneySchema>;
 
 export interface BrowserJourneyFailure {
@@ -375,16 +396,11 @@ async function performAction(
 
 async function performDrag(
   session: BrowserSession,
-  action: Extract<BrowserJourney["actions"][number], { kind: "drag" }>,
+  action: DragAction,
   capture: () => Promise<void>,
 ): Promise<void> {
-  const control = await session.page.evaluate(
-    measureControl,
-    action.from ? { selector: action.selector, point: action.from } : action.selector,
-  );
-  if (!control.reachable)
-    throw new BrowserBehaviorFailure(`${action.selector}: ${control.reasons.join("; ")}`);
-  const from = action.from ?? { x: control.x, y: control.y };
+  const { selector } = action;
+  const { from, to } = await resolveDragPoints(session, action);
   const geometry = await session.page.evaluate(
     ({ selector, from, to }) => {
       const element = document.querySelector(selector);
@@ -402,14 +418,16 @@ async function performDrag(
         destination: to.x >= 0 && to.x < innerWidth && to.y >= 0 && to.y < innerHeight,
       };
     },
-    { selector: action.selector, from, to: action.to },
+    { selector, from, to },
   );
   if (!geometry.origin || !geometry.destination)
-    throw new BrowserBehaviorFailure("Drag must start on the control and end within the viewport");
+    throw new BrowserBehaviorFailure(
+      `Drag must start on the control and end within the viewport (from ${roundPoint(from)} to ${roundPoint(to)})`,
+    );
   await session.drag(
     {
       from,
-      to: action.to,
+      to,
       input: action.input ?? DRAG_DEFAULTS.input,
       cancel: action.cancel ?? DRAG_DEFAULTS.cancel,
       steps: action.steps ?? DRAG_DEFAULTS.steps,
@@ -417,4 +435,44 @@ async function performDrag(
     },
     action.captureDuring ? capture : undefined,
   );
+}
+
+function roundPoint(point: { x: number; y: number }): string {
+  return `${Math.round(point.x * 10) / 10},${Math.round(point.y * 10) / 10}`;
+}
+
+/** Start and end in viewport pixels, whether the action gave pixels or fractions of the element box. */
+async function resolveDragPoints(session: BrowserSession, action: DragAction) {
+  const { selector, position } = action;
+  const control = await session.page.evaluate(
+    measureControl,
+    action.from ? { selector, point: action.from } : position ? { selector, position } : selector,
+  );
+  if (!control.reachable)
+    throw new BrowserBehaviorFailure(`${selector}: ${control.reasons.join("; ")}`);
+  const resolved = position || action.by ? await resolveFractionalBox(session, action) : undefined;
+  const origin = action.from ?? resolved ?? control;
+  const from = { x: origin.x, y: origin.y };
+  const box = resolved?.borderBox;
+  const to = action.by
+    ? box && { x: from.x + action.by.x * box.width, y: from.y + action.by.y * box.height }
+    : action.to;
+  if (!to) throw new BrowserBehaviorFailure(`${selector}: Drag travel could not be resolved`);
+  return { from, to };
+}
+
+/**
+ * Fractions of a rotated, skewed or flipped box are not the box the author sees, so the geometry
+ * guard applies to `by` as well as `position`. Only `position` also needs a receivable start point.
+ */
+async function resolveFractionalBox(session: BrowserSession, action: DragAction) {
+  const { selector, position } = action;
+  const resolved = await session.page.evaluate(resolveElementPoint, {
+    selector,
+    position: position ?? { x: 0.5, y: 0.5 },
+    exact: true,
+  });
+  if (resolved.unsupportedGeometry || (position && resolved.error))
+    throw new BrowserBehaviorFailure(`${selector}: ${resolved.error}`);
+  return resolved;
 }
