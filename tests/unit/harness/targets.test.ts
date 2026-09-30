@@ -182,8 +182,8 @@ describe("the minimal profile", () => {
 
     // chars/4 as a coarse token proxy; the point is an enforced ceiling.
     // 300 -> 329: room for the one-line labeled-text UI rule, with no other rule shortened.
-    // 329 -> 358: room for the review-routing and early-return rules (1430 chars).
-    expect(guide.length / 4).toBeLessThanOrEqual(358);
+    // 329 -> 404: room for the review-routing, early-return and preview rules (1616 chars).
+    expect(guide.length / 4).toBeLessThanOrEqual(404);
     expect(guide).toContain("done/verify/accept/next with the host's maximum shell timeout");
     expect(guide).toContain("scope.allowed");
     expect(guide).toContain("runnable");
@@ -193,6 +193,8 @@ describe("the minimal profile", () => {
     expect(guide).toContain("Before the final answer");
     expect(guide).toContain("word-labeled text");
     expect(guide).toContain("not only canvas/icons");
+    expect(guide).toContain("function and start point");
+    expect(guide).toContain("Do not delete or shrink requested content");
   });
 
   it.each(["codex", "claude-code"] as const)(

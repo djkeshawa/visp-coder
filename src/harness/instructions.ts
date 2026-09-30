@@ -9,6 +9,7 @@ const COMPACT_RULES = `- Keep request with --source-brief; preserve outcomes, ex
 - Before editing run visp work; build runnable behavior. Functional outcomes need tests or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
 - Stateful: act, settle, repeat; test failure and restart.
 - If the request has a UI, show status, counts, errors as word-labeled text (\`Score: 1500\`), not only canvas/icons.
+- UI previews (aim line, predicted path): compute them with the real action's function and start point; check with real input. Do not delete or shrink requested content to pass a check.
 - If visp done runs VISP's reviewer, run or delegate no review; visp next waits. Fix findings, rerun done. Run visp critic/review only when visp next prints it.
 - Run feature/done/verify/accept/next with the host's maximum shell timeout. If it keeps running, poll it; never start feature, done or accept again until that call ends (after a kill or error, rerun once).
 - Sandbox denied access? Rerun with escalation.

@@ -48,3 +48,11 @@ it("routes review through visp next and polls long commands in every guide", () 
   );
   expect(renderAgentGuide()).not.toContain("feedbackLoop");
 });
+
+it("tells every guide that UI previews use the real action's function and start point", () => {
+  for (const guide of [renderAgentGuide(), renderMinimalGuide()]) {
+    expect(guide).toContain(
+      "- UI previews (aim line, predicted path): compute them with the real action's function and start point; check with real input. Do not delete or shrink requested content to pass a check.",
+    );
+  }
+});
