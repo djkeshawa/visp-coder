@@ -38,7 +38,7 @@ Each journey records an initial capture, runs its actions and records the final 
 | --- | --- |
 | `click`, `tap` | Activate a control; optional `position: {x, y}` (0–1, relative to the element's border box) |
 | `move` | Move the pointer to an element or relative `position` |
-| `drag` | `selector`, viewport-pixel `to` and optional `from`, `input: pointer\|touch`, `steps`, `durationMs`, `captureDuring`, `cancel` (touch only) |
+| `drag` | `selector`; end at viewport-pixel `to` or at `by: {x, y}` (−1 to 1, fractions of the element's width and height from the start); start at pixel `from` or `position: {x, y}` (0–1 of the border box), default the element centre; `input: pointer\|touch`, `steps`, `durationMs`, `cancel` (touch only); `captureDuring` captures the held state at full pull before release; `captureAfterMs: [300, 900]` (1–3 increasing offsets, 50–2000) captures again that many ms after release |
 | `scroll` | Bring an offscreen control into view; optional `block: start\|center\|end\|nearest` |
 | `key` | Press a special key or a single letter/digit |
 | `resize` | Change the viewport within the same session, keeping application state |
@@ -48,26 +48,29 @@ Each journey records an initial capture, runs its actions and records the final 
 
 Mark an action with `capture: true` when its rendered state matters. Pointer clicks travel natively from the previous position, so aim changes along the way are exercised.
 
-A drag with an intermediate capture:
+A drag with captures at full pull and after release:
 
 ```yaml
-url: http://localhost:3000/
+url: project:/index.html
 viewport: {width: 1280, height: 720}
 actions:
   - kind: drag
     selector: canvas
-    from: {x: 180, y: 360}
-    to: {x: 100, y: 400}
+    position: {x: 0.2, y: 0.5}
+    by: {x: -0.15, y: 0.1}
     input: pointer
     steps: 12
     durationMs: 300
     captureDuring: true
-    capture: true
+    captureAfterMs: [300, 900]
   - kind: wait-for
     selector: '[role="status"]'
     text: Launched
     timeoutMs: 5000
+    capture: true
 ```
+
+`position` and `by` are fractions of the element's border box, so the drag follows the element if the layout changes; `from` and `to` are viewport pixels. Use one form per end (`from` or `position`, `to` or `by`). `position` and `by` refuse an element that is rotated, skewed, flipped or moved along an `offset-path`, because fractions of such a box are not the box you see; use pixels there. `captureDuring` records the held state at full pull, before release. Each `captureAfterMs` offset records another capture that many milliseconds after release, for motion that plays out after the input ends. Every one of these counts toward the six captures per journey.
 
 A consistency check between two displays:
 

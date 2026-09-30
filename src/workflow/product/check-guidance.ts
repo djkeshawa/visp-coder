@@ -22,7 +22,7 @@ export async function productCheckTemplate(
           : {
               kind: "browser-journey",
               journey: {
-                url: "http://127.0.0.1:3000/",
+                url: "project:/index.html",
                 actions: [
                   { kind: "scroll", selector: "#submit" },
                   { kind: "click", selector: "#submit" },
@@ -34,7 +34,7 @@ export async function productCheckTemplate(
     },
     outcomes: brief.value.outcomes.map(({ id, statement }) => ({ id, statement })),
     guidance:
-      "Adapt the example to the actual executable or UI and add it to the brief's checks. Link only outcomes it exercises, then reference its ID from the relevant slice. VISP allocates omitted IDs. Descriptions of manual checks belong in examples, not executable commands. Empty outcome links are allowed for exploratory checks but provide no declared outcome coverage. Nothing here has run.",
+      "Adapt the example to the actual executable or UI and add it to the brief's checks. For a static page keep `project:/index.html` (VISP serves it); for an app with a backend or build step start your server on a free port you choose and use its URL. Link only outcomes it exercises, then reference its ID from the relevant slice. VISP allocates omitted IDs. Descriptions of manual checks belong in examples, not executable commands. Empty outcome links are allowed for exploratory checks but provide no declared outcome coverage. Nothing here has run.",
   });
 }
 

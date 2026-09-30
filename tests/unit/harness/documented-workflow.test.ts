@@ -59,6 +59,31 @@ it("parses every command-map example and the generated browser journey", () => {
   expect(browserJourneySchema.safeParse(parse(block?.[1] ?? "")).success).toBe(true);
 });
 
+it("documents position/by/captureAfterMs drags and the free-port advice with schema-valid examples", async () => {
+  const guide = commandGuide();
+  const drag = browserJourneySchema.parse(parse(/```yaml\n([\s\S]*?)```/.exec(guide)?.[1] ?? ""));
+  expect(drag.url).toBe("project:/index.html");
+  expect(drag.actions).toContainEqual(
+    expect.objectContaining({
+      kind: "drag",
+      position: expect.any(Object),
+      by: expect.any(Object),
+      captureDuring: true,
+      captureAfterMs: [300, 900],
+    }),
+  );
+  expect(guide).toContain("free port you choose");
+  expect(guide).not.toContain("127.0.0.1:3000");
+  expect(guide).toContain("refuse rotated, skewed, flipped or offset-path elements");
+  const text = await readFile(new URL("../../../docs/product-review.md", import.meta.url), "utf8");
+  const journeys = [...text.matchAll(/```yaml\n(url:[\s\S]*?)```/g)].map((m) => parse(m[1] ?? ""));
+  expect(journeys.length).toBeGreaterThan(0);
+  for (const journey of journeys)
+    expect(browserJourneySchema.safeParse(journey).success).toBe(true);
+  expect(text).toContain("`captureAfterMs`");
+  expect(text).toContain("rotated, skewed, flipped or moved along an `offset-path`");
+});
+
 it("routes saved-history upgrades through the backed-up standalone migration", () => {
   const guide = commandGuide();
   expect(guide).toContain("visp-migrate --project <project> preview");
