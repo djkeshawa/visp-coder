@@ -24,6 +24,7 @@ import { resolvedProductExecutionEnvironment } from "../../core/execution-enviro
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
+import { processIdentity } from "../../core/process-identity.js";
 import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { prepareCommand } from "../../core/windows-command.js";
@@ -131,6 +132,8 @@ const independentTestsRecordSchema = z
     startedAt: z.string(),
     /** The writing process; a host that ends it (Codex's sandbox does) leaves no result. */
     pid: z.number().int().optional(),
+    /** The writer's pid namespace: a pid means nothing to a process in another one. */
+    pidNamespace: z.string().optional(),
     finishedAt: z.string().optional(),
     model: z.string().optional(),
     reason: z.string().optional(),
@@ -357,7 +360,7 @@ export async function independentTestsBeforeWork(
     if (!started.ok) return started;
     record = started.value;
   }
-  return ok(summary(record));
+  return ok(await summary(record));
 }
 
 function unavailableTester(workspace: WorkspaceState): IndependentTestsSummary | undefined {
@@ -488,9 +491,9 @@ async function testerLaunches(workspace: WorkspaceState, record: ProductRecord):
   return policy.ok && policy.value.enabled && policy.value.config?.harness === "codex";
 }
 
-function summary(record: IndependentTestsRecord): IndependentTestsSummary {
+async function summary(record: IndependentTestsRecord): Promise<IndependentTestsSummary> {
   if (record.status === "running")
-    return isStale(record)
+    return (await isStale(record))
       ? {
           status: "failed",
           reason:
@@ -525,7 +528,8 @@ export async function writeIndependentTests(
 ): Promise<Result<IndependentTestsRecord>> {
   const existing = await readTestsRecord(workspace, feature);
   if (!existing.ok) return existing;
-  if (existing.value && !mayRestartTester(existing.value, retryFailed)) return ok(existing.value);
+  if (existing.value && !(await mayRestartTester(existing.value, retryFailed)))
+    return ok(existing.value);
   if (retryFailed && existing.value?.status === "failed") {
     const pending = await retryPendingPin(workspace, feature, existing.value);
     if (pending) return pending;
@@ -550,12 +554,14 @@ export async function writeIndependentTests(
     const saved = await saveTestsRecord(workspace, feature, declined, existing.value);
     return saved.ok ? ok(declined) : saved;
   }
+  const { pidNamespace } = await processIdentity(process.pid);
   const running: IndependentTestsRecord = {
     version: 1,
     status: "running",
     startedAt,
     model,
     pid: process.pid,
+    ...(pidNamespace ? { pidNamespace } : {}),
     sourceDigest,
   };
   const marked = await saveTestsRecord(workspace, feature, running, existing.value);
@@ -633,9 +639,13 @@ async function testerSetup(
   });
 }
 
-function mayRestartTester(record: IndependentTestsRecord, retryFailed: boolean): boolean {
+async function mayRestartTester(
+  record: IndependentTestsRecord,
+  retryFailed: boolean,
+): Promise<boolean> {
   return (
-    (retryFailed && record.status === "failed") || (record.status === "running" && isStale(record))
+    (retryFailed && record.status === "failed") ||
+    (record.status === "running" && (await isStale(record)))
   );
 }
 
@@ -1241,11 +1251,21 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isStale(record: IndependentTestsRecord): boolean {
-  return (
-    (record.pid !== undefined && !processAlive(record.pid)) ||
-    Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS
-  );
+/**
+ * A running record is stale once its writer is gone or it outlived every deadline. Codex
+ * runs each sandboxed command in its own pid namespace, where another command's tester is
+ * invisible (or its pid names an unrelated process): across namespaces liveness cannot be
+ * told, so only the age decides.
+ */
+async function isStale(record: IndependentTestsRecord): Promise<boolean> {
+  if (Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS) return true;
+  if (record.pid === undefined) return false;
+  if (
+    record.pidNamespace &&
+    (await processIdentity(process.pid)).pidNamespace !== record.pidNamespace
+  )
+    return false;
+  return !processAlive(record.pid);
 }
 
 function processAlive(pid: number): boolean {

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
+import { processIdentity } from "../../../../src/core/process-identity.js";
 import { ok } from "../../../../src/core/result.js";
 import { withStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
@@ -510,6 +511,77 @@ it("reports a live tester as running beyond ten minutes", async () => {
     inlineTests(tester(null)),
   );
   expect(work.ok && work.value.independentTests?.status).toBe("running");
+});
+
+// Codex runs every sandboxed command in its own pid namespace; kill(pid, 0) proves nothing there.
+const DEAD_PID = 2 ** 22 + 7;
+async function workWithRunningRecord(record: Record<string, unknown>) {
+  const fixture = await testerWorkspace();
+  await fixture.workspace.write(
+    `.visp/features/${fixture.brief.feature}/acceptance-tests.json`,
+    JSON.stringify({ version: 1, status: "running", ...record }),
+  );
+  const work = await runProductWork(
+    await fixture.workspace.state(),
+    { task: "T001" },
+    inlineTests(tester(null)),
+  );
+  return work.ok ? work.value.independentTests : undefined;
+}
+
+it.skipIf(process.platform !== "linux")(
+  "keeps a tester from another pid namespace running while it is young",
+  async () => {
+    expect(
+      await workWithRunningRecord({
+        startedAt: new Date().toISOString(),
+        pid: DEAD_PID,
+        pidNamespace: "pid:[4026539999]",
+      }),
+    ).toMatchObject({ status: "running" });
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "ends a tester from another pid namespace by age alone",
+  async () => {
+    expect(
+      await workWithRunningRecord({
+        startedAt: new Date(Date.now() - 27 * 60_000).toISOString(),
+        pid: process.pid,
+        pidNamespace: "pid:[4026539999]",
+      }),
+    ).toMatchObject({ status: "failed" });
+  },
+);
+
+it.skipIf(process.platform !== "linux")(
+  "still judges a same-namespace tester by whether its process is alive",
+  async () => {
+    const { pidNamespace } = await processIdentity(process.pid);
+    const startedAt = new Date().toISOString();
+    expect(
+      await workWithRunningRecord({ startedAt, pid: process.pid, pidNamespace }),
+    ).toMatchObject({ status: "running" });
+    await workspace?.destroy();
+    expect(await workWithRunningRecord({ startedAt, pid: DEAD_PID, pidNamespace })).toMatchObject({
+      status: "failed",
+    });
+  },
+);
+
+it.skipIf(process.platform !== "linux")("records the writer's pid namespace", async () => {
+  const fixture = await testerWorkspace();
+  let seen: unknown;
+  await writeIndependentTests(await fixture.workspace.state(), fixture.brief.feature, async () => {
+    seen = await readTestsRecord(await fixture.workspace.state(), fixture.brief.feature);
+    return { file: null, tests: [], notes: "" };
+  });
+  const { pidNamespace } = await processIdentity(process.pid);
+  expect(seen).toMatchObject({
+    ok: true,
+    value: { status: "running", pid: process.pid, pidNamespace },
+  });
 });
 
 it("does not launch a tester unless VISP launches the reviewer", async () => {
