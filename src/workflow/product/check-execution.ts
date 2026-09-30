@@ -16,8 +16,10 @@ import {
   isBrowserCheckCommand,
   validateProductCheckCommand,
 } from "./check-command.js";
+import { browserUnavailable } from "./environment.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
 import {
+  environmentOnly,
   pinnedWaivers,
   WAIVED_TESTS_ENV,
   type Waivers,
@@ -114,7 +116,12 @@ export async function executeProductCheck(
     workspace.paths.root,
     redact,
   );
-  const { status, note } = waivedResult(output, redact(raw), workspace.paths.root, waivers);
+  const full = redact(raw);
+  const decided = waivedResult(output, full, workspace.paths.root, waivers);
+  const environmental = await environmentFailure(workspace, record, decided.status, waivers, full);
+  const { status, note } = environmental
+    ? { status: "environment-failed" as const, note: ENVIRONMENT_NOTE }
+    : decided;
   return {
     execution: {
       ...base,
@@ -154,6 +161,30 @@ export function waivedResult(
   return waivers && status === "failed" && waivedFailure(fullOutput, waivers)
     ? { status: "passed", note: waivedNote(waivers.names) }
     : { status, note: "" };
+}
+
+const ENVIRONMENT_NOTE =
+  "VISP: the pinned suite reported an environment error and no failing test, and VISP's own check finds no browser that starts here, so this is not a product failure; no product behavior was tested.";
+
+/**
+ * A pinned run that failed only by printing `ENVIRONMENT ERROR:` is not a product failure,
+ * but a product can print that line itself, so it needs corroboration the product cannot
+ * forge: the run failed, printed no failing test and no uncaught error of any kind, and VISP
+ * itself finds that no browser starts here (recorded for this environment, or a fresh probe).
+ */
+async function environmentFailure(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  status: ProductExecution["status"],
+  waivers: Waivers | undefined,
+  output: string,
+): Promise<boolean> {
+  return (
+    waivers !== undefined &&
+    status === "failed" &&
+    environmentOnly(output, waivers.declared) &&
+    (await browserUnavailable(workspace.paths.root, record.state.browserCapability))
+  );
 }
 
 function waivedNote(names: readonly string[]): string {

@@ -137,6 +137,30 @@ export function failLineStats(
   return { named: [...named], undeclared };
 }
 
+/**
+ * A suite reports that its environment, not the product, stopped it (a browser that cannot
+ * start) with a line `ENVIRONMENT ERROR: <message>` and no `FAIL:` line for it. Returns the
+ * message of the first such line, uncut: redact it before showing or cutting it.
+ */
+export function environmentErrorLine(output: string): string | undefined {
+  for (const line of output.split(OUTPUT_LINES)) {
+    const match = /^\s*ENVIRONMENT ERROR:\s*(.*)$/.exec(line);
+    if (match) return (match[1] ?? "").trim() || "no message";
+  }
+  return undefined;
+}
+
+/**
+ * The output says the environment stopped the suite and nothing else: an `ENVIRONMENT ERROR:`
+ * line, no failing test, no `FAIL:` line of any kind and no uncaught error or trace. A
+ * product can print that line too, so on its own this proves nothing (see check-execution).
+ */
+export function environmentOnly(output: string, declared: readonly string[]): boolean {
+  if (environmentErrorLine(output) === undefined) return false;
+  const failing = failingTests(output, declared);
+  return failing.names.length === 0 && failing.unattributed === 0;
+}
+
 /** Every failing test of the run is attributed and in `covered`. */
 export function allFailuresIn(
   output: string,

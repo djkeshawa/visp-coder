@@ -22,6 +22,8 @@ import {
 } from "../../../../src/workflow/product/index.js";
 import {
   allFailuresIn,
+  environmentErrorLine,
+  environmentOnly,
   failingTests,
   failLineStats,
   waivedFailure,
@@ -914,6 +916,30 @@ it("attributes FAIL lines to declared tests without counting uncaught errors", (
     named: [],
     undeclared: [],
   });
+});
+
+it("finds the message of an ENVIRONMENT ERROR line only at the start of a line", () => {
+  expect(environmentErrorLine("ok\n  ENVIRONMENT ERROR: Chrome not found\nexit")).toBe(
+    "Chrome not found",
+  );
+  expect(environmentErrorLine("ENVIRONMENT ERROR:")).toBe("no message");
+  expect(environmentErrorLine("FAIL: a: ENVIRONMENT ERROR: x")).toBeUndefined();
+  expect(environmentErrorLine("environment error: x")).toBeUndefined();
+});
+
+it("takes an environment error alone as such only without any failing test or trace", () => {
+  const declared = ["a"];
+  expect(environmentOnly("ENVIRONMENT ERROR: no Chrome\nexit", declared)).toBe(true);
+  expect(environmentOnly("ok\r\nENVIRONMENT ERROR: no Chrome\r\n", declared)).toBe(true);
+  expect(environmentOnly("exit 1", declared)).toBe(false);
+  for (const other of [
+    "FAIL: a: broke",
+    "FAIL: something else: broke",
+    "Traceback (most recent call last):",
+    "TypeError: boom",
+    "    at file:///x.mjs:1:1",
+  ])
+    expect(environmentOnly(`ENVIRONMENT ERROR: no Chrome\n${other}`, declared), other).toBe(false);
 });
 
 it("keeps the reviewer away when a disputed run also crashes outside its tests", async () => {

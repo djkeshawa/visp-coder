@@ -37,9 +37,12 @@ import {
   updateProductBrief,
 } from "./brief.js";
 import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
+import { browserUnavailable } from "./environment.js";
 import { hostRequest } from "./host-prompts.js";
 import {
   disputeSchema,
+  environmentErrorLine,
+  environmentOnly,
   failLineStats,
   TESTS_RECORD,
   WAIVED_TESTS_ENV,
@@ -786,8 +789,14 @@ async function keepFailingTests(
   const { fullOutput, ...stored } = await execute();
   const existing = existingBehavior ? await execute({ VISP_TEST_SCOPE: "existing" }) : undefined;
   const kept = { file: path, command, baseline: stored };
-  const rejection = baselineRejection({ ...stored, fullOutput }, existing, declared, redact);
-  if (rejection) return { status: "rejected", reason: rejection, content: file.content, ...kept };
+  const rejection = await baselineRejection(
+    { ...stored, fullOutput },
+    existing,
+    declared,
+    redact,
+    workspace.paths.root,
+  );
+  if (rejection) return { ...rejection, content: file.content, ...kept };
   // A file with no declared tests skips the name gate, but a failure still needs a FAIL line.
   if (!declared.length && !/^\s*FAIL:/im.test(fullOutput))
     return {
@@ -818,12 +827,41 @@ const NO_NAMED_FAILURE =
 const MAX_LISTED_LINES = 5;
 const MAX_LISTED_CHARS = 300;
 const UNDECLARED_FAILURE = "The suite printed FAIL lines that name no declared test";
+/** A suite that reports an environment error while a browser starts here is repaired. */
+const BROWSER_AVAILABLE =
+  "VISP's own check starts a browser here: the browser is available, so do not print ENVIRONMENT ERROR; print a FAIL line per failing test.";
 
-function baselineRejection(
+async function baselineRejection(
   baseline: Awaited<ReturnType<typeof runBaseline>>,
   existing: Awaited<ReturnType<typeof runBaseline>> | undefined,
   declared: readonly string[],
   redact: (text: string) => string,
+  root: string,
+): Promise<Pick<TestFields, "status" | "reason"> | undefined> {
+  const failure = runFailure(baseline, existing);
+  if (failure) return { status: "rejected", reason: failure };
+  // A suite that says only "environment error" tells nothing about the product, but a suite
+  // can print that line to dodge attribution, so VISP checks the browser itself.
+  const environment = environmentOnly(baseline.fullOutput, declared)
+    ? environmentErrorLine(baseline.fullOutput)
+    : undefined;
+  if (environment !== undefined && (await browserUnavailable(root)))
+    return {
+      status: "failed",
+      reason: `The suite could not run in this environment (${redact(environment).slice(0, MAX_LISTED_CHARS)}) and VISP's own check finds no browser that starts here, so no product behavior was tested and no tests were pinned. Run the tester again where a browser is available.`,
+    };
+  const reason = attributionRejection(baseline.fullOutput, baseline.output, declared, redact);
+  return reason
+    ? {
+        status: "rejected",
+        reason: environment === undefined ? reason : `${reason} ${BROWSER_AVAILABLE}`,
+      }
+    : undefined;
+}
+
+function runFailure(
+  baseline: Awaited<ReturnType<typeof runBaseline>>,
+  existing: Awaited<ReturnType<typeof runBaseline>> | undefined,
 ): string | undefined {
   if (existing && (existing.exitCode !== 0 || existing.timedOut || existing.spawnFailed))
     return `Tests of existing behavior fail on the launch-time repository copy, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`;
@@ -832,21 +870,31 @@ function baselineRejection(
   if (baseline.timedOut) return "The tests did not finish on the unimplemented project";
   if (baseline.exitCode === 0)
     return "The tests pass before any implementation, so they check nothing new";
-  // A later failure must be attributable to a test the reviewer can rule on: a crash before
-  // any test ran, or FAIL lines with other names, would pin a suite nobody can dispute.
-  if (declared.length) {
-    const stats = failLineStats(baseline.fullOutput, declared);
-    if (!stats.named.length)
-      return `${NO_NAMED_FAILURE}, so a later failure cannot be attributed to a test or disputed (a crash, an import or syntax error, or FAIL lines with other names). Declared names: ${declared
-        .slice(0, 12)
-        .map((name) => JSON.stringify(name))
-        .join(", ")}. Output tail: ${baseline.output.slice(-600)}`;
-    if (stats.undeclared.length)
-      return `${UNDECLARED_FAILURE} (${stats.undeclared
-        .slice(0, MAX_LISTED_LINES)
-        .map((line) => JSON.stringify(redact(line).slice(0, MAX_LISTED_CHARS)))
-        .join(", ")}). Every FAIL line must be \`FAIL: <exact name from tests[].name>: <reason>\`.`;
-  }
+  return undefined;
+}
+
+/**
+ * A later failure must be attributable to a test the reviewer can rule on: a crash before
+ * any test ran, or FAIL lines with other names, would pin a suite nobody can dispute.
+ */
+function attributionRejection(
+  full: string,
+  tail: string,
+  declared: readonly string[],
+  redact: (text: string) => string,
+): string | undefined {
+  if (!declared.length) return undefined;
+  const stats = failLineStats(full, declared);
+  if (!stats.named.length)
+    return `${NO_NAMED_FAILURE}, so a later failure cannot be attributed to a test or disputed (a crash, an import or syntax error, or FAIL lines with other names). Declared names: ${declared
+      .slice(0, 12)
+      .map((name) => JSON.stringify(name))
+      .join(", ")}. Output tail: ${tail.slice(-600)}`;
+  if (stats.undeclared.length)
+    return `${UNDECLARED_FAILURE} (${stats.undeclared
+      .slice(0, MAX_LISTED_LINES)
+      .map((line) => JSON.stringify(redact(line).slice(0, MAX_LISTED_CHARS)))
+      .join(", ")}). Every FAIL line must be \`FAIL: <exact name from tests[].name>: <reason>\`.`;
   return undefined;
 }
 

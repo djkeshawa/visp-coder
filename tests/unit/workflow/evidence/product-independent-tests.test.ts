@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { processIdentity } from "../../../../src/core/process-identity.js";
 import { ok } from "../../../../src/core/result.js";
@@ -29,6 +29,15 @@ import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { compactProductReply } from "../../../../src/workflow/product-compact-text.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import { TestWorkspace } from "../../support/workspace.js";
+
+// VISP's own browser probe, so tests decide whether a browser "starts" here.
+const browser = vi.hoisted(() => ({ down: false, probes: 0 }));
+vi.mock("../../../../src/testing/browser-capability.js", () => ({
+  probeBrowserCapability: async () => {
+    browser.probes += 1;
+    if (browser.down) throw new Error("Chrome executable not found");
+  },
+}));
 
 let workspace: TestWorkspace | undefined;
 afterEach(async () => {
@@ -1042,6 +1051,121 @@ it("tells the tester to print a FAIL line per test with a browser carve-out", as
   expect(prompts[0]).toContain("This holds when nothing is implemented yet");
   expect(prompts[0]).toContain("never import or start the product at file top level");
   expect(prompts[0]).toContain("when the browser itself cannot start, print `ENVIRONMENT ERROR:");
+});
+
+// A suite whose browser cannot start says so instead of failing tests. VISP believes it only
+// when its own probe agrees: a product or suite can print the line to dodge attribution.
+const ENVIRONMENT_ONLY = `import assert from "node:assert/strict";
+console.log("ENVIRONMENT ERROR: Chrome executable not found");
+assert.ok(1); assert.ok(1); assert.ok(1);
+process.exit(1);
+`;
+
+async function environmentTester(browserDown: boolean, second?: string) {
+  browser.down = browserDown;
+  browser.probes = 0;
+  const fixture = await testerWorkspace();
+  const prompts: string[] = [];
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async (request) => {
+      prompts.push(request.prompt);
+      return {
+        file: {
+          name: "browser.test.mjs",
+          content: prompts.length > 1 && second ? second : ENVIRONMENT_ONLY,
+        },
+        tests: [{ name: "value", quote: "Return two" }],
+        notes: "",
+      };
+    },
+  );
+  const record = await readProductRecord(await fixture.workspace.state(), {});
+  if (!record.ok) throw new Error(record.error.message);
+  return { result, prompts, pinned: record.value.brief.acceptanceBaseline.length };
+}
+
+it("records a tester failure, without repair or pin, when only the environment stopped the suite", async () => {
+  const { result, prompts, pinned } = await environmentTester(true);
+  expect(prompts).toHaveLength(1);
+  expect(result.ok && result.value.status).toBe("failed");
+  expect(result.ok && result.value.reason).toContain("could not run in this environment");
+  expect(result.ok && result.value.reason).toContain("Chrome executable not found");
+  expect(pinned).toBe(0);
+  expect(browser.probes).toBe(1);
+});
+
+it("repairs a suite that claims an environment error while a browser starts here", async () => {
+  const { result, prompts, pinned } = await environmentTester(false, FAILS_FIRST);
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain("do not print ENVIRONMENT ERROR");
+  expect(prompts[1]).toContain("reported no declared test as failing");
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(pinned).toBe(1);
+  // Still rejected when the repair prints the line again.
+  const again = await environmentTester(false);
+  expect(again.result.ok && again.result.value.status).toBe("rejected");
+  expect(again.pinned).toBe(0);
+});
+
+it("pins a suite that names a failing test even when it also prints an environment error", async () => {
+  browser.down = true;
+  browser.probes = 0;
+  const fixture = await testerWorkspace();
+  const result = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({
+      name: "value.test.mjs",
+      content: `${FAILS_FIRST}console.log("ENVIRONMENT ERROR: teardown noise");\n`,
+    }),
+  );
+  expect(result.ok && result.value.status, JSON.stringify(result)).toBe("pinned");
+  expect(browser.probes).toBe(0);
+});
+
+it("classifies a pinned run as environment-failed only when VISP's own probe agrees", async () => {
+  const fixture = await testerWorkspace();
+  const suite = selfReporting(`  const { value } = await import("../../src/value.mjs");
+  if (value === "env" || value === "mixed") {
+    if (value === "mixed") console.log("FAIL: something else: broke");
+    console.log("ENVIRONMENT ERROR: Chrome executable not found");
+    process.exit(1);
+  }
+  if (value === "trace") {
+    console.log("ENVIRONMENT ERROR: Chrome executable not found");
+    throw new TypeError("boom");
+  }
+  assert.equal(typeof value, "number");
+  assert.ok(Number.isInteger(value));
+  assert.equal(value, 2);`);
+  browser.down = false;
+  const pinned = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    tester({ name: "value.test.mjs", content: suite }),
+  );
+  expect(pinned.ok && pinned.value.status, JSON.stringify(pinned)).toBe("pinned");
+  expect((await runProductWork(await fixture.workspace.state(), { task: "T001" })).ok).toBe(true);
+  const statusWith = async (value: string, down: boolean) => {
+    browser.down = down;
+    await fixture.workspace.write("src/value.mjs", `export const value = ${value};\n`);
+    const done = await runProductDone(await fixture.workspace.state(), { task: "T001" });
+    return done.ok ? done.value.executions.find((run) => run.check === "PINNED_1") : undefined;
+  };
+  const environment = await statusWith('"env"', true);
+  expect(environment?.status).toBe("environment-failed");
+  expect(environment?.output).toContain("ENVIRONMENT ERROR: Chrome executable not found");
+  expect(environment?.output).toContain("not a product failure");
+  // The same output with a browser that starts is a product failure printing the line itself.
+  expect((await statusWith('"env"', false))?.status).toBe("failed");
+  // Any other FAIL line, or an uncaught error, keeps a real failure a failure.
+  expect((await statusWith('"mixed"', true))?.status).toBe("failed");
+  expect((await statusWith('"trace"', true))?.status).toBe("failed");
+  // A named failure is a product failure, and a passing run passes.
+  expect((await statusWith("3", true))?.status).toBe("failed");
+  expect((await statusWith("2", true))?.status).toBe("passed");
 });
 
 // Codex's sandbox ends background processes when a command finishes; the record said
