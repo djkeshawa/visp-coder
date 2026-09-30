@@ -16,7 +16,7 @@ import {
   type ProductSelection,
   readProductRecord,
 } from "./store.js";
-import { productSourceSnapshot } from "./subject.js";
+import { productSourceChanges, productSourceSnapshot } from "./subject.js";
 
 export const productAuthorizationSchema = z
   .object({
@@ -256,15 +256,18 @@ export async function checkProductScope(
     ? await committedChangesSince(workspace.paths.root, auth.value.headCommit)
     : ok([]);
   if (!committed.ok) return committed;
-  const committedPaths = new Set(committed.value);
+  // Pinned acceptance files are VISP's, may be pinned mid-slice, and are hash-checked.
   const pinned = new Set(
     record.brief.acceptanceBaseline.flatMap((entry) => entry.files.map((file) => file.path)),
   );
-  const paths = [...new Set([...Object.keys(current.value), ...Object.keys(auth.value.baseline)])]
-    .filter((path) => current.value[path] !== auth.value?.baseline[path])
-    .filter((path) => !committedPaths.has(path))
-    // Pinned acceptance files are VISP's, may be pinned mid-slice, and are hash-checked.
-    .filter((path) => !pinned.has(path));
+  const changed = await productSourceChanges(
+    workspace,
+    auth.value.baseline,
+    current.value,
+    new Set([...committed.value, ...pinned]),
+  );
+  if (!changed.ok) return changed;
+  const paths = changed.value;
   paths.push(...changedEnv.value.filter((path) => !paths.includes(path)));
   const context = ruleContextFor(workspace, {
     feature: record.brief.feature,

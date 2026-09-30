@@ -21,7 +21,7 @@ import { byproductProtection, skippedByproduct } from "./byproducts.js";
 import { isBrowserCheckCommand } from "./check-command.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
 import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
-import { repositorySourceIdentity } from "./source-git.js";
+import { repositorySourceIdentity, workingSourceIdentity } from "./source-git.js";
 import { sourceInputPatterns } from "./source-inputs.js";
 import { readProductRecord } from "./store.js";
 
@@ -92,6 +92,56 @@ export async function productSourceSnapshot(
     files[path] = hash.value;
   }
   return ok(files);
+}
+
+/** Compare historical identities without letting changed input declarations reset the baseline. */
+export async function productSourceChanges(
+  workspace: WorkspaceState,
+  baseline: Record<string, string>,
+  current: Record<string, string>,
+  excluded: ReadonlySet<string> = new Set(),
+): Promise<Result<string[]>> {
+  const changed: string[] = [];
+  const budget: InputBudget = { entries: 0, bytes: 0 };
+  for (const path of new Set([...Object.keys(current), ...Object.keys(baseline)])) {
+    if (excluded.has(path)) continue;
+    const equal = await sourceIdentitiesEqual(
+      workspace,
+      path,
+      baseline[path],
+      current[path],
+      budget,
+    );
+    if (!equal.ok) return equal;
+    if (!equal.value) changed.push(path);
+  }
+  return ok(changed);
+}
+
+async function sourceIdentitiesEqual(
+  workspace: WorkspaceState,
+  path: string,
+  before: string | undefined,
+  after: string | undefined,
+  budget: InputBudget,
+): Promise<Result<boolean>> {
+  if (before === after) return ok(true);
+  if (
+    before === undefined ||
+    after === undefined ||
+    before.startsWith("git:") === after.startsWith("git:")
+  )
+    return ok(false);
+  // Re-hash only the current entry in the recorded format. The saved identity is
+  // immutable; neither HEAD nor today's worktree can stand in for that baseline.
+  const comparable = before.startsWith("git:")
+    ? await workingSourceIdentity(
+        workspace,
+        path,
+        before.split(":")[2]?.length === 64 ? "sha256" : "sha1",
+      )
+    : await productFileHash(workspace, path, budget);
+  return comparable.ok ? ok(before === comparable.value) : comparable;
 }
 
 async function productFileHash(
