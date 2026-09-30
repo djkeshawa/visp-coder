@@ -192,6 +192,8 @@ export type TestsStarter = (
   workspace: WorkspaceState,
   feature: string,
   waitMs: number,
+  /** Also restart a tester that failed, not only one that stopped without a result. */
+  retryFailed?: boolean,
 ) => Promise<Result<IndependentTestsRecord>>;
 
 /**
@@ -286,7 +288,8 @@ const STALE_TESTER_NAMES = [
 const STALE_TESTER_MS = 2 * 60 * 60_000;
 
 export function inlineTests(tester: IndependentTester): TestsStarter {
-  return (workspace, feature) => writeIndependentTests(workspace, feature, tester);
+  return (workspace, feature, _waitMs, retryFailed) =>
+    writeIndependentTests(workspace, feature, tester, retryFailed);
 }
 
 /**
@@ -294,7 +297,7 @@ export function inlineTests(tester: IndependentTester): TestsStarter {
  * shell commands does not lose it; `work` waits up to its channel's limit for the record.
  */
 export function backgroundTests(cli: string): TestsStarter {
-  return async (workspace, feature, waitMs) => {
+  return async (workspace, feature, waitMs, retryFailed) => {
     const logPath = workspace.paths.featureFile(feature, "tester-process.log");
     const output = openSync(logPath, "w");
     const child = spawn(
@@ -307,6 +310,7 @@ export function backgroundTests(cli: string): TestsStarter {
         "--feature",
         feature,
         "--write-tests",
+        ...(retryFailed ? ["--retry-tests"] : []),
         "--json",
       ],
       { detached: true, stdio: ["ignore", output, output] },
@@ -450,8 +454,24 @@ export async function createProductFeatureWithTests(
       ),
     );
   const created = await createProductFeature(workspace, options);
-  if (created.ok) await startIndependentTests(workspace, created.value.brief.feature, starter);
+  if (!created.ok) return created;
+  // A repeated request returns the earlier feature, which must still end with pinned tests.
+  if (created.value.duplicateOf) await restartTester(workspace, created.value.duplicateOf, starter);
+  else await startIndependentTests(workspace, created.value.brief.feature, starter);
   return created;
+}
+
+/** The tester of an existing feature that has none, failed, or stopped without a result. */
+async function restartTester(
+  workspace: WorkspaceState,
+  feature: string,
+  starter: TestsStarter | undefined,
+): Promise<void> {
+  if (!starter) return;
+  const existing = await readTestsRecord(workspace, feature);
+  if (!existing.ok) return;
+  if (!existing.value) return startIndependentTests(workspace, feature, starter);
+  if (await mayRestartTester(existing.value, true)) await starter(workspace, feature, 0, true);
 }
 
 const SOURCE_FILE =

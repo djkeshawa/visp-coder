@@ -341,6 +341,10 @@ function compactBriefText(name: string, value: unknown, channel: ReplyChannel = 
     .filter((text): text is string => typeof text === "string")
     .map((text) => `\nWarning: ${text}`)
     .join("");
+  const notes = [data.duplicateNote]
+    .filter((text): text is string => typeof text === "string")
+    .map((text) => `\nNote: ${text}`)
+    .join("");
   // The adapter does not choose the next slice; visp_next owns that decision.
   const wording = WORDING[channel];
   const feature = String(brief.feature);
@@ -350,7 +354,7 @@ function compactBriefText(name: string, value: unknown, channel: ReplyChannel = 
       : name.endsWith("feature")
         ? wording.template(feature)
         : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}${warning}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  return `${name}: ${JSON.stringify(summary)}${warning}${notes}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {
