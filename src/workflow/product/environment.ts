@@ -105,13 +105,19 @@ export function failedBrowserCapability(
   };
 }
 
+/** The short recovery a check that could not start records (check-execution.ts). */
+function missingCommandRecovery(evidence: readonly string[]) {
+  const missing = evidence.find((entry) => entry.includes("missing-command:"));
+  return missing?.slice(missing.indexOf("missing-command:")).split("\n")[0];
+}
+
 export function environmentNext(
   feature: string,
   task: string | undefined,
   evidence: string[],
   operation: "work" | "verify" = "work",
 ) {
-  const recovery = executionRecovery(evidence);
+  const recovery = executionRecovery(evidence) ?? missingCommandRecovery(evidence);
   return {
     feature,
     ...(task ? { task } : {}),

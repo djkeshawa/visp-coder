@@ -71,7 +71,7 @@ describe("product command check execution boundary", () => {
         executions: [
           {
             status: "environment-failed",
-            output: expect.stringContaining("No product behavior was tested"),
+            output: expect.stringContaining("nothing about the product was tested"),
           },
         ],
         next: { mayEdit: true, objective: expect.stringContaining("correcting its command") },

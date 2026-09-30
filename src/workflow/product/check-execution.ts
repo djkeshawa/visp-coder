@@ -17,6 +17,7 @@ import {
   isBrowserCheckCommand,
   validateProductCheckCommand,
 } from "./check-command.js";
+import { checkFix, missingAlias } from "./check-executable.js";
 import { browserUnavailable } from "./environment.js";
 import type {
   ProductBrief,
@@ -373,16 +374,35 @@ async function executeCommand(
     );
     if (!result.ok && result.error.details?.errno === "ENOENT")
       return err(
-        vispError(
-          "COMMAND_FAILED",
-          `${result.error.message}. Check ${check.id} could not start executable ${JSON.stringify(argv.value[0])}.${process.platform === "win32" ? " Check PATH and the tool's .cmd/.bat shim." : " Correct the command or recover the installed executable in this environment."} A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples. No product behavior was tested.`,
-          { details: result.error.details },
-        ),
+        vispError("COMMAND_FAILED", missingCommandMessage(check, argv.value[0] ?? ""), {
+          details: result.error.details,
+        }),
       );
     return result;
   } catch (cause) {
     return err(fromUnknown(cause, "COMMAND_FAILED"));
   }
+}
+
+/** Short and specific: the worker's one next action, not a paragraph about environments. */
+function missingCommandMessage(check: ProductCheck, argv0: string): string {
+  const alias = missingAlias(argv0);
+  const action = check.id.startsWith("PINNED_")
+    ? "This pinned test is VISP's: do not edit it; run its command yourself with an installed interpreter and report the missing tool in your final message."
+    : alias
+      ? `Change the check: ${checkFix(check, argv0, alias)}, then run visp done.`
+      : "Use an installed executable in the check (visp brief --patch -), then run visp done.";
+  return [
+    `missing-command: ${JSON.stringify(argv0)} is not installed in this environment${alias ? ` (${JSON.stringify(alias)} is)` : ""}.`,
+    `Check ${check.id} was not run, so nothing about the product was tested.`,
+    action,
+    process.platform === "win32" ? "Check PATH and the tool's .cmd/.bat shim." : "",
+    /\s/.test(argv0)
+      ? 'A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples.'
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**
