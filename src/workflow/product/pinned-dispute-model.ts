@@ -462,9 +462,18 @@ export function reviewerRules(workspace: WorkspaceState): boolean {
   return workspace.config.critic?.launch === "codex-exec";
 }
 
-/** One line for a reply that reports a failing pinned test as a blocking check. */
-export function disputeHint(workspace: WorkspaceState, command: "done" | "accept"): string {
+/**
+ * One line for a reply that reports a failing pinned test as a blocking check. `reviewerCanRule`
+ * is false once VISP's reviewer is out of budget or unavailable: nothing can be waived then.
+ */
+export function disputeHint(
+  workspace: WorkspaceState,
+  command: "done" | "accept",
+  reviewerCanRule = true,
+): string {
+  if (reviewerRules(workspace) && !reviewerCanRule)
+    return "A failing pinned test that contradicts the request: VISP's reviewer cannot rule on a dispute now (its review budget is spent or it is unavailable), so nothing can be waived. Keep the product as the request says, report the request sentence and the test that disagree in your final message, and run visp pr.";
   return reviewerRules(workspace)
-    ? `If a failing pinned test contradicts the request, do not edit it or bend the product: visp ${command} --dispute "<test name>" --reason "<quote the request sentence + why>". The independent reviewer rules; upheld tests are waived.`
+    ? `A failing pinned test that contradicts the request: do not edit it or bend the product. Run visp ${command} --dispute "<test name>" --reason "<request sentence + why>". VISP itself launches the reviewer during that command (about 1-2 minutes), so you delegate nothing. Then run visp next until it rules; upheld tests are waived.`
     : "No independent reviewer runs here, so a pinned test cannot be waived. Satisfy it; if it contradicts the request, keep the product as the request says and tell the user which request sentence and test disagree.";
 }

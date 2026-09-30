@@ -1,5 +1,18 @@
+import type { Command } from "commander";
 import { expect, it } from "vitest";
-import { reviewCommand } from "../../../src/cli/commands/product.js";
+import { acceptCommand, doneCommand, reviewCommand } from "../../../src/cli/commands/product.js";
+
+function helpOf(command: Command) {
+  let output = "";
+  command
+    .configureOutput({
+      writeOut: (text) => {
+        output += text;
+      },
+    })
+    .outputHelp();
+  return output;
+}
 
 it("explains current evidence IDs, JSON submissions and stale draft boundaries", () => {
   let output = "";
@@ -20,3 +33,16 @@ it("explains current evidence IDs, JSON submissions and stale draft boundaries",
   expect(output).toContain("reviewer.context=current");
   expect(output).toContain("Do not submit canned satisfied judgments");
 });
+
+it.each([
+  ["done", doneCommand],
+  ["accept", acceptCommand],
+])(
+  "says VISP launches the reviewer for a dispute on %s, and that the worker delegates nothing",
+  (_name, command) => {
+    const output = helpOf(command());
+    expect(output).toContain("--dispute");
+    expect(output).toContain("VISP starts the independent reviewer during the command");
+    expect(output).toContain("you never delegate it");
+  },
+);

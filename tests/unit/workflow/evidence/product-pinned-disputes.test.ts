@@ -183,6 +183,13 @@ it("still fails the pinned suite and keeps the reviewer away without a dispute",
   expect(starter).not.toHaveBeenCalled();
   // The reply states the dispute command next to the failing test.
   expect(done.value.pinnedTests?.hint).toContain('--dispute "<test name>"');
+  // VISP starts the reviewer during that command; the worker delegates nothing.
+  expect(done.value.pinnedTests?.hint).toContain(
+    "VISP itself launches the reviewer during that command",
+  );
+  expect(done.value.pinnedTests?.hint).toContain("you delegate nothing");
+  expect(done.value.pinnedTests?.hint).toContain("visp done --dispute");
+  expect(done.value.pinnedTests?.hint).not.toContain("The independent reviewer rules");
   const next = await runProductNext(await state(), {
     feature: fixture.brief.feature,
     task: "T001",
@@ -1071,4 +1078,28 @@ it("hands a pending dispute over after the launched reviewer failed twice on thi
   await runProductDoneReviewed(await state(), { task: "T001" });
   const changed = await runProductNext(await state(), { feature, task: "T001" });
   expect(changed.ok && changed.value.completion).not.toBe("handoff");
+});
+
+it("tells the worker no dispute can be ruled once VISP's reviewer cannot run again", async () => {
+  const fixture = await disputeWorkspace({ maxCalls: 1 });
+  const { host } = reviewer(() => []);
+  // A dispute the reviewer leaves unruled spends the feature's only call.
+  await runProductDoneReviewed(
+    await state(),
+    { task: "T001", dispute: [ODD], disputeReason: REASON },
+    inlineReview(host),
+  );
+  const done = await runProductDoneReviewed(await state(), { task: "T001" });
+  expect(done.ok, JSON.stringify(done)).toBe(true);
+  if (!done.ok) return;
+  const hint = done.value.pinnedTests?.hint ?? "";
+  expect(hint).toContain("cannot rule on a dispute now");
+  expect(hint).toContain("visp pr");
+  expect(hint).toContain("Keep the product as the request says");
+  expect(hint).not.toContain("--dispute");
+  const next = await runProductNext(await state(), {
+    feature: fixture.brief.feature,
+    task: "T001",
+  });
+  expect(next.ok && next.value.evidence.join("\n")).toContain("cannot rule on a dispute now");
 });

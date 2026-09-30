@@ -527,14 +527,19 @@ export async function pinnedTestsReport(
 /** The hint under a failing pinned suite: a crash has no test to dispute. */
 function failureHint(
   workspace: WorkspaceState,
-  context: { readonly command: "done" | "accept"; readonly failures?: readonly FailingPinned[] },
+  context: {
+    readonly command: "done" | "accept";
+    readonly failures?: readonly FailingPinned[];
+    readonly capacity?: ReviewerCapacity;
+  },
   declared: readonly string[],
 ): string {
   const failures = context.failures ?? [];
   const crashed =
     failures.length > 0 &&
     failures.every((entry) => suiteCrashed({ ...entry, status: "failed" }, declared));
-  if (!crashed) return disputeHint(workspace, context.command);
+  if (!crashed)
+    return disputeHint(workspace, context.command, context.capacity?.available !== false);
   const line = crashLine(failures[0]?.output ?? "");
   return `The pinned suite crashed before it reported any declared test as failing${line ? ` (${line})` : ""}, so there is nothing to dispute. If that error names something your product must provide (a file, module, server or output), provide it. Never edit or debug the suite under acceptance/.`;
 }

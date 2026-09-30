@@ -203,9 +203,11 @@ async function pinnedView(
     );
     if (!refreshed.ok) return refreshed;
   }
-  // Whether VISP's reviewer can still rule matters only to a dispute, filed now or open.
+  // Whether VISP's reviewer can still rule matters to a failing pinned test and to a dispute.
   const capacity = async (): Promise<ReviewerCapacity> =>
-    dispute !== undefined || (await disputeState(workspace, feature)).all.some(isOpen)
+    dispute !== undefined ||
+    failing.length > 0 ||
+    (await disputeState(workspace, feature)).all.some(isOpen)
       ? reviewerCapacity(
           workspace,
           feature,
