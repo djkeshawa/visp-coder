@@ -301,9 +301,10 @@ const failedAttempt = (state: CriticState, attempt: CriticAttempt, now: number) 
   attempt.status === "unavailable" || expiredPending(state, attempt, now);
 
 /**
- * A failure the host reported (native prepare/submit) is never overridden; VISP's own launches are
- * not. Builds before the `launcher` stamp left none, but they did record adapter-observed
- * execution for what they dispatched; an attempt with no execution record stays blocked.
+ * An attempt the host reported (native prepare/submit) rather than one VISP launched. A worker
+ * can submit a failure of that kind with one call, so it never counts against VISP's own
+ * reviewer. Builds before the `launcher` stamp left none, but they did record adapter-observed
+ * execution for what they dispatched; an attempt with no execution record counts as reported.
  */
 const hostReported = (attempt: CriticAttempt) =>
   (attempt.transport ?? "sampling") === "native" &&
@@ -311,9 +312,10 @@ const hostReported = (attempt: CriticAttempt) =>
   attempt.execution?.provenance !== "adapter-observed";
 
 /**
- * Whether a VISP-launched reviewer must not start another review on this source. A host-reported
- * (native) failure is never overridden; on the same source one automatic second attempt is allowed.
- * A changed source always qualifies; the feature call and time budget still bound everything.
+ * Whether a VISP-launched reviewer must not start another review on this source: two of its own
+ * attempts failed on it. Failures the host reported through prepare/submit are ignored, so a
+ * worker cannot disable VISP's reviewer by submitting one. A changed source always qualifies;
+ * the feature call and time budget still bound everything.
  */
 export function relaunchBlocked(
   state: CriticState,
@@ -321,28 +323,24 @@ export function relaunchBlocked(
   phase: CriticPhase,
   now = Date.now(),
 ): boolean {
-  const last = state.attempts.findLast(
-    (attempt) => (attempt.intent ?? state.intent) === state.intent && samePhase(attempt, phase),
-  );
-  if (!last || !failedAttempt(state, last, now)) return false;
-  if (hostReported(last)) return true;
-  const failures = state.attempts.filter(
+  const own = state.attempts.filter(
     (attempt) =>
       (attempt.intent ?? state.intent) === state.intent &&
       samePhase(attempt, phase) &&
-      attempt.subject === subject &&
-      failedAttempt(state, attempt, now),
+      !hostReported(attempt),
+  );
+  const last = own.at(-1);
+  if (!last || !failedAttempt(state, last, now)) return false;
+  const failures = own.filter(
+    (attempt) => attempt.subject === subject && failedAttempt(state, attempt, now),
   ).length;
   return last.subject === subject && failures >= 2;
 }
 
-function unavailableTail(relaunch: boolean | undefined, last: CriticAttempt) {
-  if (!relaunch)
-    return "Inspect critic recovery when useful; otherwise continue baseline host review and disclose this independent-review limitation.";
-  const ending = "if it stays unavailable say so in your final message.";
-  return hostReported(last)
-    ? `VISP's reviewer does not retry a failure the host reported; ${ending}`
-    : `VISP's reviewer will try again on the next visp done once the source has changed; ${ending}`;
+function unavailableTail(relaunch: boolean | undefined) {
+  return relaunch
+    ? "VISP's reviewer will try again on the next visp done once the source has changed; if it stays unavailable say so in your final message."
+    : "Inspect critic recovery when useful; otherwise continue baseline host review and disclose this independent-review limitation.";
 }
 
 export function stopReason(
@@ -384,7 +382,7 @@ export function stopReason(
     last.id !== retryAfter &&
     !relaunchable
   )
-    return `Previous critic attempt unavailable: ${last.message ?? "review unavailable"}. No new invocation was attempted. ${unavailableTail(options.relaunch, last)}`;
+    return `Previous critic attempt unavailable: ${last.message ?? "review unavailable"}. No new invocation was attempted. ${unavailableTail(options.relaunch)}`;
   return undefined;
 }
 

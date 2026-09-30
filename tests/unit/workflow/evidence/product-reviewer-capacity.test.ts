@@ -174,7 +174,7 @@ describe("VISP's reviewer capacity", () => {
     expect(await capacity(await edit("changed"))).toEqual({ available: true });
   });
 
-  it("counts a failure the host reported through prepare and submit, which VISP never retries", async () => {
+  it("ignores a failure the worker submitted through prepare and submit", async () => {
     await launch("codex-exec");
     await ready();
     const source = await subject();
@@ -190,8 +190,14 @@ describe("VISP's reviewer capacity", () => {
         failure: "The host reviewer became unavailable",
       },
     });
-    expect(await capacity(source)).toMatchObject({ available: false });
-    expect(await capacity(await edit("changed"))).toMatchObject({ available: false });
+    // One call was spent, but a worker-submitted failure never disables VISP's reviewer.
+    expect(await capacity(source)).toEqual({ available: true });
+    await run({ operation: "review" }, failing());
+    await run({ operation: "review" }, failing());
+    expect(await capacity(source)).toMatchObject({
+      available: false,
+      reason: expect.stringContaining("failed twice on this source"),
+    });
   });
 
   it("fails open when the budget cannot be read", async () => {
@@ -247,6 +253,23 @@ describe("VISP's reviewer capacity", () => {
       const again = await next();
       expect(again.completion).toBe("unresolved-product");
       expect(again.command).toContain("visp work");
+    });
+
+    it("keeps open findings on repair when the worker submitted a reviewer failure", async () => {
+      await launch("codex-exec");
+      await ready();
+      await run({ operation: "review" }, working(true));
+      await edit("changed");
+      const prepared = await run({ operation: "prepare", capabilities });
+      if (!prepared.ok) throw new Error(prepared.error.message);
+      const { attempt } = prepared.value as { attempt: string };
+      await run({
+        operation: "submit",
+        result: { attempt, model: config.model, context: "fresh", failure: "Host gave up" },
+      });
+      const step = await next();
+      expect(step.completion).toBe("unresolved-product");
+      expect(step.command).not.toContain("visp pr");
     });
 
     it("keeps today's route for a host-review project whose budget is spent", async () => {
