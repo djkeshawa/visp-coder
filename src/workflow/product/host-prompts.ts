@@ -131,6 +131,10 @@ function promptLines(text: string): string[] {
 /**
  * The user messages of the Codex session running this command: Codex sets CODEX_THREAD_ID
  * for commands and records the session as `sessions/<yyyy>/<mm>/<dd>/rollout-*-<id>.jsonl`.
+ * `codex exec` records `event_msg` items of type UserMessage; Codex Desktop records
+ * `event_msg` payloads `user_message` with a string message, used when no item form exists.
+ * `response_item` messages are never read: they carry injected AGENTS.md and environment
+ * context, which would become the "request".
  */
 export async function codexSessionPrompts(
   environment: NodeJS.ProcessEnv = process.env,
@@ -141,22 +145,43 @@ export async function codexSessionPrompts(
   const file = await findRollout(join(home, "sessions"), thread, 3);
   if (!file) return [];
   const text = await readFile(file, "utf8").catch(() => "");
-  return text.split("\n").flatMap((line) => {
-    try {
-      const event = JSON.parse(line) as {
-        type?: string;
-        payload?: { type?: string; item?: { type?: string; content?: { text?: unknown }[] } };
-      };
-      const item = event.payload?.item;
-      if (event.type !== "event_msg" || item?.type !== "UserMessage") return [];
-      const joined = (item.content ?? [])
-        .map((part) => (typeof part.text === "string" ? part.text : ""))
-        .join("");
-      return joined.trim() ? [joined] : [];
-    } catch {
-      return [];
-    }
-  });
+  const items: string[] = [];
+  const messages: string[] = [];
+  for (const line of text.split("\n")) {
+    const prompt = rolloutUserMessage(line);
+    if (prompt) (prompt.form === "item" ? items : messages).push(prompt.text);
+  }
+  return items.length ? items : messages;
+}
+
+interface RolloutEvent {
+  readonly type?: string;
+  readonly payload?: {
+    readonly type?: string;
+    readonly message?: unknown;
+    readonly item?: { readonly type?: string; readonly content?: { readonly text?: unknown }[] };
+  };
+}
+
+function rolloutUserMessage(line: string): { form: "item" | "message"; text: string } | undefined {
+  let event: RolloutEvent;
+  try {
+    event = JSON.parse(line) as RolloutEvent;
+  } catch {
+    return undefined;
+  }
+  if (event.type !== "event_msg") return undefined;
+  const item = event.payload?.item;
+  if (typeof item?.type === "string" && /^user_?message$/i.test(item.type)) {
+    const joined = (item.content ?? [])
+      .map((part) => (typeof part.text === "string" ? part.text : ""))
+      .join("");
+    return joined.trim() ? { form: "item", text: joined } : undefined;
+  }
+  const message = event.payload?.message;
+  return event.payload?.type === "user_message" && typeof message === "string" && message.trim()
+    ? { form: "message", text: message }
+    : undefined;
 }
 
 async function findRollout(
