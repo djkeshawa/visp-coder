@@ -7,6 +7,7 @@ import { criticSelection, readCriticState } from "../../../../src/workflow/produ
 import { independentReviewTemplate } from "../../../../src/workflow/product/independent-review.js";
 import { runProductVerify, runProductWork } from "../../../../src/workflow/product/index.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS } from "../../../../src/workflow/product/observation-preview.js";
+import { productReviewInstructions } from "../../../../src/workflow/product/review-instructions.js";
 import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
 import { runProductReviewerHandoff } from "../../../../src/workflow/product/reviewer-handoff.js";
 import { recordedProductJourney } from "../../support/product-journey.js";
@@ -89,6 +90,10 @@ it.each(["current", "observation-preview"] as const)(
     expect(packet.instructions).toContain("deliberate, conventional choice");
     expect(packet.instructions).toContain("visual quality");
     expect(packet.instructions).toContain("composition");
+    expect(packet.instructions).toContain(
+      "consecutive images of the same action can show a contradiction",
+    );
+    expect(packet.instructions).toContain("preview's origin and direction");
     expect(packet.instructions.includes(OBSERVATION_REVIEW_INSTRUCTIONS)).toBe(
       reviewMode === "observation-preview",
     );
@@ -120,6 +125,7 @@ it("does not give source-only or design consultations rendered-product instructi
     );
     if (!packet.ok) throw new Error(packet.error.message);
     expect(packet.value.instructions).not.toContain("visual quality");
+    expect(packet.value.instructions).not.toContain("preview's origin");
     expect(packet.value.instructions).toContain("assessments:[]");
     expect(packet.value.instructions).toContain("resolutions:[]");
     expect(packet.value.current).not.toHaveProperty("instructions");
@@ -136,4 +142,16 @@ it("keeps UI-specific advice out of a nonvisual module review", async () => {
   );
   expect(packet.instructions).toEqual(expect.any(String));
   expect(packet.instructions).not.toContain("visual quality");
+  expect(packet.instructions).not.toContain("preview's origin");
+});
+
+it("asks for a preview to be compared across consecutive images and required only on a promise", () => {
+  const visual = productReviewInstructions({ visual: true });
+  expect(visual).toContain("One still image cannot prove motion or interaction");
+  expect(visual).toContain("Name the two images and the visible offset");
+  expect(visual).toContain(
+    "Mark such a finding required only when the request promises the preview",
+  );
+  expect(visual).toContain("list the missing observation instead of inferring a mismatch");
+  expect(productReviewInstructions()).not.toContain("preview's origin");
 });

@@ -21,8 +21,8 @@ Resolve a functional finding as repaired with a matching failed reproduction and
 ${REVIEW_RESPONSE}
 ${REVIEW_BOUNDARIES}`;
 
-export const VISUAL_REVIEW_INSTRUCTIONS =
-  "Inspect the actual images. Judge usability and visual quality separately: composition, hierarchy, scale, spacing, contrast and visual consistency. Identify the image and region for each problem. Working controls do not establish good visual design. Judge against the requested experience; personal style preferences are advisory. A still image cannot prove motion or interaction. If images or states are missing, say what you cannot assess.";
+export const VISUAL_REVIEW_INSTRUCTIONS = `Inspect the actual images. Judge usability and visual quality separately: composition, hierarchy, scale, spacing, contrast and visual consistency. Identify the image and region for each problem. Working controls do not establish good visual design. Judge against the requested experience; personal style preferences are advisory. One still image cannot prove motion or interaction; consecutive images of the same action can show a contradiction. If images or states are missing, say what you cannot assess.
+If the UI shows a preview, guide, aim line, ghost or predicted route before an action, compare it with what the action then does across the consecutive images (before, held, after): the preview's origin and direction must match the actual movement or result, even when each image looks right alone. Name the two images and the visible offset. Mark such a finding required only when the request promises the preview or its accuracy (quote that sentence; see requestPromises); otherwise required: false. If the images do not show both states, list the missing observation instead of inferring a mismatch.
 
 export const UNDERSTANDING_CRITIC_INSTRUCTIONS = `${REVIEW_BASICS}
 Review the proposed approach and the actor's question. Identify misunderstandings, costly assumptions or missing user needs before implementation. Do not ask for screenshots of an unbuilt product, another design review or extra documents.
