@@ -1,5 +1,6 @@
 import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { resolveCommandExecutable } from "../../core/command-executable.js";
+import { HARD_IGNORED_DIRS } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
 import { resolveCommand } from "../../core/exec.js";
 import {
@@ -16,6 +17,7 @@ import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
+import { byproductProtection, skippedByproduct } from "./byproducts.js";
 import { isBrowserCheckCommand } from "./check-command.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
 import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
@@ -41,7 +43,7 @@ function inputLimit(path: string) {
       {
         details: INPUT_LIMITS,
         recovery:
-          "Narrow slice scopes and check file patterns, or reduce oversized declared inputs. Other tracked files use Git identities and do not consume this budget.",
+          "Narrow slice scopes and check file patterns, or reduce oversized declared inputs. A pattern that starts with a wildcard skips tool directories (node_modules, dist, build, .venv and similar) unless it names them. Other tracked files use Git identities and do not consume this budget.",
       },
     ),
   );
@@ -73,7 +75,13 @@ export async function productSourceSnapshot(
   const patterns = sourceInputPatterns(workspace, selected.value);
   const algorithm =
     [...objects.value.entries.values()][0]?.object.length === 64 ? "sha256" : "sha1";
-  const paths = listed.value.filter((path) => path !== ".visp" && !path.startsWith(".visp/"));
+  const protection = byproductProtection(workspace, selected.value);
+  const paths = listed.value.filter(
+    (path) =>
+      path !== ".visp" &&
+      !path.startsWith(".visp/") &&
+      !skippedByproduct(path, objects.value.entries.has(path), protection),
+  );
   const files: Record<string, string> = {};
   const budget: InputBudget = { entries: 0, bytes: 0 };
   for (const path of [...new Set([...paths, ...declared.value])].sort()) {
@@ -271,7 +279,15 @@ async function matchingCheckFiles(
   budget.entries += entries.value.length;
   if (budget.entries > INPUT_LIMITS.entries) return inputLimit(directory);
   const files: string[] = [];
-  for (const entry of entries.value.filter((entry) => entry.name !== ".git")) {
+  const named = literalSegments(pattern);
+  // A wildcard never walks tool directories (`**/x` would list node_modules); a pattern that
+  // names one, or starts inside it, still reaches it.
+  const walked = entries.value.filter(
+    (entry) =>
+      entry.name !== ".git" &&
+      !(entry.type === "directory" && HARD_IGNORED.has(entry.name) && !named.has(entry.name)),
+  );
+  for (const entry of walked) {
     const path = directory === "." ? entry.name : `${directory}/${entry.name}`;
     if (entry.type === "directory") {
       const nested = await matchingCheckFiles(workspace, path, pattern, budget, depth + 1);
@@ -280,6 +296,12 @@ async function matchingCheckFiles(
     } else if (matchesPattern(path, pattern)) files.push(path);
   }
   return ok(files);
+}
+
+const HARD_IGNORED = new Set<string>(HARD_IGNORED_DIRS);
+
+function literalSegments(pattern: string): Set<string> {
+  return new Set(pattern.split("/").filter((segment) => segment && !/[*?[]/.test(segment)));
 }
 
 export function productContractDigest(brief: ProductBrief, slice?: ProductSlice): string {
