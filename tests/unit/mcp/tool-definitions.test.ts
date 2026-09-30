@@ -39,6 +39,14 @@ it("keeps the default profile's resident tool definitions bounded", async () => 
   expect(JSON.stringify(tools).length).toBeLessThan(30_000);
 });
 
+it("limits the critic tool's review restriction to review calls", async () => {
+  const { tools } = await (await connected()).listTools();
+  const description = tools.find((tool) => tool.name === "visp_critic")?.description ?? "";
+  expect(description).toContain(
+    "Review calls: make them only when visp_next returns one; VISP-launched reviews run inside visp_done. set-policy and recovery follow the user's request.",
+  );
+});
+
 it("does not let an MCP caller choose the browser executable", async () => {
   const { tools } = await (await connected()).listTools();
   const capture = tools.find((tool) => tool.name === "visp_capture");

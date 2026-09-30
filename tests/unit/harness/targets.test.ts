@@ -104,7 +104,7 @@ describe("planFor", () => {
     expect(agents?.content).toContain("Missing product evidence stays unresolved");
     expect(agents?.content).toContain("Before the final answer");
     expect(agents?.content).toContain("visp work");
-    expect(agents?.content).toContain("visp review");
+    expect(agents?.content).toContain("visp critic/review");
   });
 
   it("tells Codex to restart after its project instructions are connected", () => {
@@ -182,7 +182,8 @@ describe("the minimal profile", () => {
 
     // chars/4 as a coarse token proxy; the point is an enforced ceiling.
     // 300 -> 329: room for the one-line labeled-text UI rule, with no other rule shortened.
-    expect(guide.length / 4).toBeLessThanOrEqual(329);
+    // 329 -> 404: room for the review-routing, early-return and preview rules (1616 chars).
+    expect(guide.length / 4).toBeLessThanOrEqual(404);
     expect(guide).toContain("done/verify/accept/next with the host's maximum shell timeout");
     expect(guide).toContain("scope.allowed");
     expect(guide).toContain("runnable");
@@ -192,6 +193,8 @@ describe("the minimal profile", () => {
     expect(guide).toContain("Before the final answer");
     expect(guide).toContain("word-labeled text");
     expect(guide).toContain("not only canvas/icons");
+    expect(guide).toContain("function and start point");
+    expect(guide).toContain("Do not delete or shrink requested content");
   });
 
   it.each(["codex", "claude-code"] as const)(
@@ -223,14 +226,26 @@ describe("generated workflow routing", () => {
       const guide = planFor("generic", profile).assets[0]?.content ?? "";
       expect(guide).toContain('kind:"browser-journey"');
       expect(guide).toContain("Browser journeys must not mutate VISP state");
-      expect(guide).toContain("visp review --prepare");
-      expect(guide).toContain("--session <id> --from -");
-      expect(guide).toContain("An accepted critic response records the review");
+      expect(guide).toContain("only when visp next prints it");
+      expect(guide).toContain("run or delegate no review");
+      expect(guide).toContain("never start feature, done or accept again until that call ends");
+      expect(guide).not.toContain("visp review --prepare");
       expect(commandGuide()).toContain("No category declarations, example-coverage ledger");
       expect(guide).toContain("reviewer.context honestly");
       expect(guide).toContain("Do not force extra review rounds");
     },
   );
+
+  it("routes review commands through visp next in the installed command guide", () => {
+    const guide = commandGuide(false, true);
+    expect(guide).toContain("Only when `visp next` prints a review command");
+    expect(guide).toContain("Only when `visp next` prints a critic command");
+    expect(guide).not.toContain("--source-only");
+    expect(guide).toContain(
+      "It can take minutes: wait for it to return; do not start a second one while it runs.",
+    );
+    expect(guide).not.toContain("never run it twice");
+  });
 
   it("keeps dispatch details on demand rather than repeating them in the resident guide", () => {
     const guide = planFor("generic", "standard").assets[0]?.content ?? "";
