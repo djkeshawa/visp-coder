@@ -577,6 +577,12 @@ describe("supported product judgments", () => {
       },
     };
     expect(historicalAcceptanceNext(narrowerPass, selection, { feature })?.action).toBe("refine");
+    // Host projects hand the mismatch to the review handoff; VISP's own reviewer runs at accept.
+    expect(historicalAcceptanceNext(narrowerPass, selection, { feature })?.command).toContain(
+      "visp review --handoff",
+    );
+    const launchedNext = historicalAcceptanceNext(narrowerPass, selection, { feature }, true);
+    expect(launchedNext?.command).toBe(`visp accept --feature ${feature}`);
     const globalPass = {
       ...otherPass,
       task: undefined,

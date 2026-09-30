@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -9,7 +9,10 @@ import { registerWorkflowTools } from "../../../../src/mcp/tools/workflow.js";
 import { productJourneyKey } from "../../../../src/workflow/evidence/product-journey.js";
 import { describeProductCheck } from "../../../../src/workflow/product/check-command.js";
 import { runProductAccept, runProductDone } from "../../../../src/workflow/product/evidence.js";
-import { productCaptureRunSchema } from "../../../../src/workflow/product/evidence-references.js";
+import {
+  currentJourneyFeedback,
+  productCaptureRunSchema,
+} from "../../../../src/workflow/product/evidence-references.js";
 import { outstandingFeedback } from "../../../../src/workflow/product/feedback.js";
 import { findFunctionalRepair } from "../../../../src/workflow/product/functional-resolution.js";
 import { closedSlice } from "../../../../src/workflow/product/model.js";
@@ -728,4 +731,148 @@ it("carries the keep-the-normal-call-passing line on the reviewer-finding fix st
     "first add a test that the request's normal call still succeeds",
   );
   expect(next.value.objective).toContain("do not apply it; say so in your done note");
+});
+
+/** VISP launches the reviewer: routes point at `visp done`, never at a review the worker runs. */
+async function launched() {
+  const raw = parse(await readFile(join(setup.workspace.root, "visp.yml"), "utf8"));
+  raw.critic = { ...raw.critic, harness: "codex", mode: "auto", launch: "codex-exec" };
+  await setup.workspace.write("visp.yml", stringify(raw));
+  setup.workspace.commit("VISP launches the reviewer");
+}
+
+it("routes a successful recheck to visp done when VISP launches the reviewer", async () => {
+  await launched();
+  await arrange({ currentRun: "completed" });
+  const next = await nextAcrossInterfaces(await setup.workspace.state(), { task: "T001" });
+  expect(next).toMatchObject({
+    ok: true,
+    value: {
+      action: "refine",
+      command: expect.stringMatching(/^visp done --feature \S+ --task T001$/),
+      mayEdit: true,
+      completion: "unresolved-product",
+      objective: expect.stringContaining("VISP's independent reviewer reassesses the repaired"),
+    },
+  });
+  expect(next.ok && next.value.evidence.join("\n")).toContain("adjacent regression check");
+  const record = await readProductRecord(await setup.workspace.state(), { task: "T001" });
+  if (!record.ok) throw new Error(record.error.message);
+  expect(outstandingFeedback(record.value)).toHaveLength(1);
+});
+
+it("keeps the worker on repair after a failed journey and says VISP starts the reviewer", async () => {
+  await launched();
+  await arrange({ currentRun: "failed" });
+  const next = await nextAcrossInterfaces(await setup.workspace.state(), { task: "T001" });
+  expect(next).toMatchObject({
+    ok: true,
+    value: {
+      action: "fix",
+      command: expect.stringMatching(/^visp work --feature \S+ --task T001$/),
+      completion: "unresolved-product",
+      mayEdit: true,
+      objective: expect.stringContaining("Then run visp done; VISP starts the reviewer."),
+    },
+  });
+  expect(next.ok && next.value.command).not.toContain("review");
+});
+
+it("tells the worker to delegate nothing while findings are repaired", async () => {
+  await launched();
+  await arrange({ currentRun: "completed", findingSubject: "current" });
+  const next = await nextAcrossInterfaces(await setup.workspace.state(), { task: "T001" });
+  expect(next).toMatchObject({
+    ok: true,
+    value: { action: "fix", completion: "unresolved-product", mayEdit: true },
+  });
+  const objective = next.ok ? next.value.objective : "";
+  expect(objective).toContain(
+    "then run visp done. VISP starts the reviewer itself and you delegate nothing",
+  );
+  expect(objective).toContain("If a fix rejects inputs");
+});
+
+it("hands a successful recheck to the human reviewer when VISP's reviewer has no calls left", async () => {
+  await launched();
+  await arrange({ currentRun: "completed" });
+  const ledger = join(
+    setup.workspace.root,
+    ".visp/features",
+    setup.brief.feature,
+    "critic-budget.json",
+  );
+  await writeFile(
+    ledger,
+    JSON.stringify({
+      version: 1,
+      root: hashValue(setup.workspace.root),
+      feature: setup.brief.feature,
+      maxCalls: 1,
+      maxReservedMs: 1_080_000,
+      entries: [{ key: "spent", phase: "product", reservedMs: 5000 }],
+    }),
+  );
+  const next = await nextAcrossInterfaces(await setup.workspace.state(), { task: "T001" });
+  expect(next).toMatchObject({
+    ok: true,
+    value: {
+      action: "fix",
+      completion: "handoff",
+      command: expect.stringContaining("visp pr"),
+      objective: expect.stringContaining("review budget is spent"),
+    },
+  });
+  // Handoff is disclosure: the finding stays outstanding.
+  const record = await readProductRecord(await setup.workspace.state(), { task: "T001" });
+  if (!record.ok) throw new Error(record.error.message);
+  expect(outstandingFeedback(record.value)).toHaveLength(1);
+});
+
+it("stops promising VISP's reviewer after a failed journey when it cannot run again", async () => {
+  await launched();
+  await arrange({ currentRun: "failed" });
+  const ledger = join(
+    setup.workspace.root,
+    ".visp/features",
+    setup.brief.feature,
+    "critic-budget.json",
+  );
+  await writeFile(
+    ledger,
+    JSON.stringify({
+      version: 1,
+      root: hashValue(setup.workspace.root),
+      feature: setup.brief.feature,
+      maxCalls: 1,
+      maxReservedMs: 1_080_000,
+      entries: [{ key: "spent", phase: "product", reservedMs: 5000 }],
+    }),
+  );
+  const next = await nextAcrossInterfaces(await setup.workspace.state(), { task: "T001" });
+  expect(next).toMatchObject({
+    ok: true,
+    value: { action: "fix", command: expect.stringContaining("visp work") },
+  });
+  const objective = next.ok ? next.value.objective : "";
+  expect(objective).toContain("Then run visp done.");
+  expect(objective).not.toContain("VISP starts the reviewer");
+});
+
+it("keeps the counterevidence-review advice out of a launched worker's journey feedback", async () => {
+  await arrange({ currentRun: "failed" });
+  const loaded = await readProductRecord(await setup.workspace.state(), { task: "T001" });
+  if (!loaded.ok) throw new Error(loaded.error.message);
+  const subject = await productSourceDigest(await setup.workspace.state(), loaded.value.brief);
+  if (!subject.ok) throw new Error(subject.error.message);
+  const recovery = (launchedRun: boolean) =>
+    currentJourneyFeedback(loaded.value, subject.value, "T001", launchedRun).runs.map(
+      (run) => run.recovery,
+    );
+  expect(recovery(false).join("\n")).toContain("review");
+  expect(recovery(false).join("\n")).toContain("--prepare");
+  const text = recovery(true).join("\n");
+  expect(text).not.toContain("--prepare");
+  expect(text).not.toContain("counterevidence");
+  expect(text).toContain("execute that control and observe the actual result");
 });

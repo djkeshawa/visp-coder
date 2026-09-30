@@ -1,5 +1,8 @@
-import { rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parse, stringify } from "yaml";
+import { hashValue } from "../../../../src/core/hash.js";
 import type { Result } from "../../../../src/core/result.js";
 import { applicableExecutions } from "../../../../src/workflow/product/assessment.js";
 import { buildProductContext } from "../../../../src/workflow/product/context.js";
@@ -175,6 +178,109 @@ describe("final executable correction", () => {
       action: "refine",
       task: "T003",
       command: expect.stringContaining("visp review --handoff"),
+    });
+  });
+
+  /** A launched project at T002: an unassessed mandatory documentation outcome, no mapped check. */
+  async function launchedDocs(cycles?: number) {
+    const fixture = await productWorkspace();
+    workspace = fixture.workspace;
+    const raw = parse(await readFile(join(workspace.root, "visp.yml"), "utf8"));
+    raw.critic = { ...raw.critic, harness: "codex", mode: "auto", launch: "codex-exec" };
+    await workspace.write("visp.yml", stringify(raw));
+    workspace.commit("VISP launches the reviewer");
+    value(
+      await updateProductBrief(await workspace.state(), {
+        brief: {
+          ...fixture.brief,
+          ...(cycles === undefined
+            ? {}
+            : { design: { description: "Plain", references: [], refinementCycles: cycles } }),
+          outcomes: [
+            ...fixture.brief.outcomes,
+            {
+              id: "O002",
+              kind: "quality",
+              priority: "must",
+              statement: "The public README explains the API for a new user",
+            },
+          ],
+          slices: [
+            ...fixture.brief.slices,
+            {
+              id: "T002",
+              goal: "Explain the public API",
+              outcomes: ["O001", "O002"],
+              scope: { allowed: ["README.md"] },
+              checks: [],
+            },
+            {
+              id: "T003",
+              goal: "Keep the API documentation self-contained",
+              outcomes: ["O002"],
+              scope: { allowed: ["README.md"] },
+              checks: [],
+            },
+          ],
+        },
+        reason: "Add the documentation slice without an executable check",
+      }),
+    );
+    value(await runProductWork(await workspace.state(), { task: "T001" }));
+    await workspace.write("src/value.mjs", "export const value = 2;\n");
+    value(await runProductVerify(await workspace.state(), { task: "T001" }));
+    value(await runProductWork(await workspace.state(), { task: "T002" }));
+    return { ...fixture, workspace };
+  }
+
+  it("routes an unassessed mandatory outcome to visp done when VISP launches the reviewer", async () => {
+    const { workspace: launched } = await launchedDocs();
+    const next = value(await runProductNext(await launched.state(), { task: "T002" }));
+    expect(next).toMatchObject({
+      action: "refine",
+      task: "T002",
+      command: expect.stringMatching(/^visp done --feature \S+ --task T002$/),
+      objective: "Run visp done: VISP's independent reviewer assesses this slice's outcomes.",
+      mayEdit: true,
+      completion: "unresolved-product",
+    });
+    expect(next.command).not.toContain("review");
+    expect(next.evidence.join()).toContain("O002");
+  });
+
+  it("still routes a launched worker to visp done, never to a review handoff, when refinement is exhausted", async () => {
+    const { workspace: launched } = await launchedDocs(0);
+    const next = value(await runProductNext(await launched.state(), { task: "T002" }));
+    expect(next).toMatchObject({
+      action: "understand",
+      task: "T002",
+      command: expect.stringMatching(/^visp done --feature \S+ --task T002$/),
+      objective: expect.stringContaining("Refinement budget exhausted"),
+      mayEdit: false,
+    });
+    expect(next.command).not.toContain("review");
+  });
+
+  it("hands the slice's assessment to the human reviewer when VISP's reviewer has no calls left", async () => {
+    const fixture = await launchedDocs();
+    const { workspace: launched } = fixture;
+    await writeFile(
+      join(launched.root, ".visp/features", fixture.brief.feature, "critic-budget.json"),
+      JSON.stringify({
+        version: 1,
+        root: hashValue(launched.root),
+        feature: fixture.brief.feature,
+        maxCalls: 1,
+        maxReservedMs: 1_080_000,
+        entries: [{ key: "spent", phase: "product", reservedMs: 5000 }],
+      }),
+    );
+    const next = value(await runProductNext(await launched.state(), { task: "T002" }));
+    expect(next).toMatchObject({
+      action: "fix",
+      completion: "handoff",
+      command: expect.stringContaining("visp pr"),
+      objective: expect.stringContaining("remaining assessment"),
     });
   });
 

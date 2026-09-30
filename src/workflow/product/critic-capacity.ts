@@ -73,3 +73,17 @@ export function reviewerHandoff(
     objective: `${capacity.reason ?? "VISP's independent reviewer cannot run again."} Fix what you can and rerun your checks, then run visp pr to hand the remaining ${remaining} to a human reviewer`,
   };
 }
+
+/**
+ * Where the worker's images go: to the host's reviewer, to VISP's own reviewer (`visp done`), or,
+ * once that reviewer cannot run again, to the human reviewer through `visp pr`.
+ */
+export async function reviewerPointer(
+  workspace: WorkspaceState,
+  feature: string,
+  subject: string,
+  task?: string,
+): Promise<"host" | "visp" | "gone"> {
+  if (!reviewerRules(workspace)) return "host";
+  return (await reviewerCapacity(workspace, feature, subject, task)).available ? "visp" : "gone";
+}

@@ -27,7 +27,7 @@ import { repairRecheck } from "./repair-recheck.js";
 import { findingReproductions } from "./reproduction-bindings.js";
 import type { ProductRecord } from "./store.js";
 import { productContractDigest } from "./subject.js";
-import { visualCheckpoint } from "./visual-checkpoint.js";
+import { type ReviewerPointer, visualCheckpoint } from "./visual-checkpoint.js";
 
 export function feedbackIntentDigest(brief: ProductBrief) {
   return hashValue({
@@ -121,6 +121,7 @@ export function productFeedbackPlan(
   subject: string,
   slice?: ProductSlice,
   reviewMode: "current" | "observation-preview" = "current",
+  options: { readonly reviewer?: ReviewerPointer } = {},
 ) {
   const findings = outstandingFeedback(record).filter((entry) =>
     findingAppliesToSlice(entry, slice),
@@ -145,7 +146,7 @@ export function productFeedbackPlan(
     ),
     probeResponses: [...responses.values()].map(({ kind, status }) => ({ kind, status })),
     checkSetup: productCheckGuidance(record.brief, slice),
-    visualCheckpoint: visualCheckpoint(record, subject, slice, reviewMode),
+    visualCheckpoint: visualCheckpoint(record, subject, slice, reviewMode, options.reviewer),
     focus: feedbackFocus(findings.some((entry) => entry.required) || !!failure, gaps.length > 0),
     research: researchQuestion
       ? {

@@ -80,7 +80,12 @@ export async function nextFromRecord(
   const identity = await getIdentity();
   if (!identity.ok) return identity;
   const subject = ok(identity.value.subject);
-  const historical = historicalAcceptanceNext(record, identity.value, base);
+  const historical = historicalAcceptanceNext(
+    record,
+    identity.value,
+    base,
+    reviewerRules(workspace),
+  );
   if (historical) return ok(historical);
   if (await hasCurrentAcceptance(workspace, record, subject.value))
     return ok({
@@ -310,7 +315,7 @@ async function nextOpenSlice(
   const reviewer = await reviewerState(workspace, record, subject, slice);
   if (failures.length)
     return ok(await failedSliceNext(workspace, record, slice, failures, reviewer));
-  const journeyNext = failedJourneyNext(record, subject, slice);
+  const journeyNext = failedJourneyNext(record, subject, slice, reviewer);
   if (journeyNext) return journeyNext;
   const statuses = outcomeStatuses(record, subject, slice);
   const reviewGaps = statuses.filter(
@@ -335,6 +340,7 @@ async function nextOpenSlice(
     findings,
     reviewGaps.some((entry) => entry.review === "failed") ||
       currentReviewFailure(record, subject, slice),
+    reviewer,
   );
   if (reassess) return ok(reassess);
   if (
@@ -366,7 +372,14 @@ async function nextOpenSlice(
       completion: route.completion,
     });
   }
-  const reviewNext = nextOpenSliceReview(record, subject, slice, statuses, executions.length > 0);
+  const reviewNext = nextOpenSliceReview(
+    record,
+    subject,
+    slice,
+    statuses,
+    executions.length > 0,
+    reviewer,
+  );
   if (reviewNext) return ok(reviewNext);
   return ok({
     ...base,
@@ -576,7 +589,7 @@ export function repairObjective(
   reviewerRechecks = false,
 ) {
   if (reviewerRechecks)
-    return `Fix each reported problem and extend your slice check to exercise it, then run visp done; the independent reviewer re-checks these findings. ${REJECTION_REPAIR}`;
+    return `Fix each reported problem and extend your slice check to exercise it, then run visp done. VISP starts the reviewer itself and you delegate nothing; the independent reviewer re-checks these findings. ${REJECTION_REPAIR}`;
   if (missingReproduction)
     return "Record a failing reproduction of the reported behavior, or fresh executed counterevidence for separate assessment, before claiming a repair";
   return productRefinement(record, slice).exhausted
@@ -604,6 +617,7 @@ function reviewAfterSuccessfulRepair(
   subject: string,
   findings: ReturnType<typeof outstandingFeedback>,
   currentReviewFailed: boolean,
+  reviewer: ReviewerState,
 ): ProductNext | undefined {
   if (currentReviewFailed) return undefined;
   if (!findings.length || findings.some((finding) => finding.subjectDigest === subject))
@@ -634,23 +648,35 @@ function reviewAfterSuccessfulRepair(
     })
   )
     return undefined;
+  const evidence = rechecks.flatMap(({ finding, recheck }) => [
+    recheck?.environmentRepair
+      ? `${finding.id}: ${recheck.environmentRepair.guidance} Observed environments: ${recheck.environmentRepair.from} -> ${recheck.environmentRepair.to}`
+      : `${finding.id}: fresh exact ${recheck?.kind} recheck completed; the retained finding remains unresolved until current review evidence reassesses it`,
+    ...(finding.dimension === "functional"
+      ? [`${finding.id}: ${functionalRegressionRequirement}`]
+      : []),
+  ]);
+  const base = { feature: record.brief.feature, task: slice.id, evidence, mayEdit: true };
+  if (reviewer.runs)
+    return {
+      ...base,
+      ...(reviewer.capacity.available
+        ? {
+            action: "refine",
+            objective:
+              "Run visp done: VISP's independent reviewer reassesses the repaired product from the fresh replay before the retained finding is cleared.",
+            command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
+            completion: "unresolved-product",
+          }
+        : reviewerHandoff(record.brief.feature, reviewer.capacity, "findings")),
+    };
   return {
-    feature: record.brief.feature,
-    task: slice.id,
+    ...base,
     action: "refine",
     objective: rechecks.some(({ recheck }) => recheck?.environmentRepair)
       ? "Assess the observed environment change and successful recheck before deciding whether it repairs the retained finding"
       : "Reassess the repaired product from the fresh successful replay before clearing the retained finding",
     command: `visp review --handoff --feature ${record.brief.feature} --task ${slice.id}`,
-    evidence: rechecks.flatMap(({ finding, recheck }) => [
-      recheck?.environmentRepair
-        ? `${finding.id}: ${recheck.environmentRepair.guidance} Observed environments: ${recheck.environmentRepair.from} -> ${recheck.environmentRepair.to}`
-        : `${finding.id}: fresh exact ${recheck?.kind} recheck completed; the retained finding remains unresolved until current review evidence reassesses it`,
-      ...(finding.dimension === "functional"
-        ? [`${finding.id}: ${functionalRegressionRequirement}`]
-        : []),
-    ]),
-    mayEdit: true,
     completion: "unresolved-product",
   };
 }
@@ -661,6 +687,7 @@ function nextOpenSliceReview(
   slice: ProductSlice,
   statuses: ProductOutcomeStatus[],
   hasExecutions: boolean,
+  reviewer: ReviewerState,
 ): ProductNext | undefined {
   const reviewGaps = statuses.filter(
     (entry) =>
@@ -680,6 +707,14 @@ function nextOpenSliceReview(
   if (!((reviewGaps.length || qualityGaps.length) && hasObservedProduct) && !reviewOnlyGaps.length)
     return undefined;
   const { exhausted } = productRefinement(record, slice);
+  const evidence = [
+    ...reviewGaps.map((entry) => `${entry.id}: ${entry.review}`),
+    ...reviewOnlyGaps.map(
+      (entry) => `${entry.id}: behavior ${entry.behavior}; review ${entry.review}`,
+    ),
+    ...qualityGaps,
+  ];
+  if (reviewer.runs) return launchedSliceReview(record, slice, evidence, exhausted, reviewer);
   return {
     feature: record.brief.feature,
     task: slice.id,
@@ -690,14 +725,30 @@ function nextOpenSliceReview(
         ? "Obtain source-backed review evidence for each mandatory quality outcome before completing the slice"
         : "Inspect rendered states and the interaction journey; correct the most consequential mismatch",
     command: sliceReviewCommand(record, slice, exhausted),
-    evidence: [
-      ...reviewGaps.map((entry) => `${entry.id}: ${entry.review}`),
-      ...reviewOnlyGaps.map(
-        (entry) => `${entry.id}: behavior ${entry.behavior}; review ${entry.review}`,
-      ),
-      ...qualityGaps,
-    ],
+    evidence,
     mayEdit: !exhausted,
+    completion: "unresolved-product",
+  };
+}
+
+/** VISP starts the reviewer during `visp done`; with no capacity left the assessment goes to `visp pr`. */
+function launchedSliceReview(
+  record: ProductRecord,
+  slice: ProductSlice,
+  evidence: string[],
+  exhausted: boolean,
+  reviewer: ReviewerState,
+): ProductNext {
+  const base = { feature: record.brief.feature, task: slice.id, evidence, mayEdit: !exhausted };
+  if (!reviewer.capacity.available)
+    return { ...base, ...reviewerHandoff(record.brief.feature, reviewer.capacity, "assessment") };
+  return {
+    ...base,
+    action: exhausted ? "understand" : "refine",
+    objective: exhausted
+      ? "Refinement budget exhausted; required outcomes remain unresolved. Choose a focused new hypothesis or revise the budget explicitly."
+      : "Run visp done: VISP's independent reviewer assesses this slice's outcomes.",
+    command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
     completion: "unresolved-product",
   };
 }
@@ -793,6 +844,7 @@ function failedJourneyNext(
   record: ProductRecord,
   subject: string,
   slice: ProductSlice,
+  reviewer: ReviewerState,
 ): Result<ProductNext> | undefined {
   const base = { feature: record.brief.feature, task: slice.id };
   const journeys = currentFailedJourneys(record, subject, slice.id);
@@ -820,9 +872,16 @@ function failedJourneyNext(
     return ok({
       ...base,
       action: "fix",
-      objective:
-        "Inspect the failed journey and terminal state. Correct the behavior, or explicitly resolve a mistaken exploratory expectation with current replacement observations; preserve the promised outcome.",
-      command: `visp review --handoff --feature ${record.brief.feature} --task ${slice.id}`,
+      ...(reviewer.runs
+        ? {
+            objective: `A recorded journey failed on the current code (the evidence gives its message). Fix the product; if your own journey was wrong, rerun a corrected one and keep the promised outcome. Then run visp done${reviewer.capacity.available ? "; VISP starts the reviewer." : "."}`,
+            command: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
+          }
+        : {
+            objective:
+              "Inspect the failed journey and terminal state. Correct the behavior, or explicitly resolve a mistaken exploratory expectation with current replacement observations; preserve the promised outcome.",
+            command: `visp review --handoff --feature ${record.brief.feature} --task ${slice.id}`,
+          }),
       evidence: currentJourneyFailures(record, subject, slice.id),
       mayEdit: true,
       completion: "unresolved-product",

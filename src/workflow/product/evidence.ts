@@ -21,6 +21,7 @@ import {
 import { ensureProductCheckpoint } from "./checkpoint.js";
 import { productNeighborhood } from "./context.js";
 import { correctionChecks } from "./corrections.js";
+import { reviewerPointer } from "./critic-capacity.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
 import { environmentNext } from "./environment.js";
 import { currentJourneyFeedback } from "./evidence-references.js";
@@ -36,6 +37,7 @@ import {
   type ProductSlice,
   type ProductState,
 } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
 import { type ProductNext, runProductNext } from "./status.js";
@@ -226,7 +228,12 @@ async function finishExecution(
     executions,
     outcomes: outcomeStatuses(current, after.value, slice),
     gaps: [...new Set(gaps)],
-    journeyFeedback: currentJourneyFeedback(current, after.value, slice?.id),
+    journeyFeedback: currentJourneyFeedback(
+      current,
+      after.value,
+      slice?.id,
+      reviewerRules(workspace),
+    ),
     behaviorChanges: checkBehaviorChanges(
       record.state.executions.filter(
         (before) => !executions.some((entry) => entry.id === before.id),
@@ -235,8 +242,9 @@ async function finishExecution(
     ),
     ...(repeated
       ? {
-          recommendation:
-            "The same product failure recurred. Test a different hypothesis or request a focused review; metadata edits do not constitute progress.",
+          recommendation: reviewerRules(workspace)
+            ? "The same product failure recurred. Test a different hypothesis; metadata edits do not constitute progress."
+            : "The same product failure recurred. Test a different hypothesis or request a focused review; metadata edits do not constitute progress.",
         }
       : {}),
   });
@@ -255,6 +263,7 @@ async function verificationProgress(
     subject,
     slice,
     workspace.config.workflow.reviewMode,
+    { reviewer: await reviewerPointer(workspace, record.brief.feature, subject, slice?.id) },
   );
   return {
     feedbackPlan,
