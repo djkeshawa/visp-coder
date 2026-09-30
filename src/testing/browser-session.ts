@@ -15,6 +15,8 @@ import { measureRenderedLayout } from "./browser-layout.js";
 import { BrowserBehaviorFailure } from "./browser-observations.js";
 import { type ChromeTransport, launchChrome } from "./chrome-transport.js";
 
+const CHROME_ERROR_PAGE = "chrome-error://chromewebdata/";
+
 export interface BrowserOperation {
   readonly id: string;
   readonly kind:
@@ -44,7 +46,8 @@ export interface BrowserSession {
   /** Change the viewport in place; preserves the current document and application state. */
   resize(viewport: { width: number; height: number }): Promise<void>;
   drag(gesture: DragGesture, intermediate?: () => Promise<void>): Promise<void>;
-  capture(): Promise<ProductReviewCapture>;
+  /** `allowErrorPage` is only for a failure image: Chrome's own error page is not product evidence. */
+  capture(options?: { allowErrorPage?: boolean }): Promise<ProductReviewCapture>;
   close(): Promise<void>;
 }
 
@@ -115,31 +118,56 @@ export async function openBrowserSession(options: {
     };
     const errors: string[] = [];
     const unsubscribeErrors = transport.onEvent((event) => {
-      if (event.sessionId !== send.sessionId || event.method !== "Runtime.exceptionThrown") return;
+      // close() is flagged before it unsubscribes; a late event must not throw from record().
+      if (
+        closed ||
+        event.sessionId !== send.sessionId ||
+        event.method !== "Runtime.exceptionThrown"
+      )
+        return;
       const message = redactText(applicationException(event.params), { root: options.fileRoot });
       if (errors.length < 5) {
         errors.push(message);
         record("observe", "Uncaught application exception", message);
       }
     });
+    // Main-document responses by loader; a navigation reads its own entry after load.
+    const documents = new Map<string, { status: number; url: string }>();
+    const unsubscribeDocuments = transport.onEvent((event) => {
+      if (event.sessionId !== send.sessionId || event.method !== "Network.responseReceived") return;
+      const response = event.params.response as { status?: unknown; url?: unknown } | undefined;
+      if (event.params.type !== "Document" || typeof response?.status !== "number") return;
+      if (typeof event.params.loaderId !== "string") return;
+      documents.set(event.params.loaderId, {
+        status: response.status,
+        url: String(response.url),
+      });
+    });
     const assertHealthy = () => {
       if (errors.length) throw new BrowserBehaviorFailure(errors.join("\n"));
     };
     await send("Runtime.enable");
+    await send("Network.enable");
     const pointer = { x: 0, y: 0 };
     const page = interactionPage(inputSend, record, pointer);
     const quietPage = interactionPage(inputSend, () => {});
     const navigate = async (url: string) => {
       await checkNavigation(url, options.fileRoot, options.blockedPaths);
+      documents.clear();
       const response = await inputSend("Page.navigate", { url });
-      if (response.errorText) throw new Error(String(response.errorText));
+      const served =
+        typeof response.loaderId === "string" ? documents.get(response.loaderId) : undefined;
+      if (response.errorText && !(served && served.status >= 400))
+        throw new Error(String(response.errorText));
       await inputSend("Runtime.evaluate", {
         expression:
           "new Promise(resolve => { if (document.readyState === 'complete') resolve(); else addEventListener('load', () => resolve(), {once:true}); })",
         awaitPromise: true,
       });
       await files?.check();
-      record("navigate", `Navigate ${url}`);
+      const note = servedDocumentNote(url, served);
+      record("navigate", `Navigate ${url}${note.suffix}`);
+      if (note.failure) throw new BrowserBehaviorFailure(note.failure);
     };
     return {
       page,
@@ -193,9 +221,11 @@ export async function openBrowserSession(options: {
       get operations() {
         return structuredClone(operations);
       },
-      async capture() {
+      async capture(captureOptions) {
         const route = await page.evaluate(() => location.href, undefined);
-        await checkNavigation(route, options.fileRoot, options.blockedPaths);
+        // Chrome's own error page (an empty 4xx/5xx answer) is a valid failure image, never evidence.
+        if (!(captureOptions?.allowErrorPage && route === CHROME_ERROR_PAGE))
+          await checkNavigation(route, options.fileRoot, options.blockedPaths);
         await files?.check();
         const id = `CAP-${randomUUID()}`;
         const layout = await quietPage.evaluate(measureRenderedLayout, undefined);
@@ -242,6 +272,7 @@ export async function openBrowserSession(options: {
         closing = (async () => {
           await Promise.allSettled([...writes]);
           unsubscribeErrors();
+          unsubscribeDocuments();
           files?.dispose();
           await transport.close();
         })();
@@ -252,6 +283,23 @@ export async function openBrowserSession(options: {
     await transport.close();
     throw cause;
   }
+}
+
+/** What the server answered for the main document; file: documents are fulfilled locally, not served. */
+function servedDocumentNote(
+  url: string,
+  served: { status: number; url: string } | undefined,
+): { suffix: string; failure?: string } {
+  const requested = new URL(url);
+  if (!served || requested.protocol === "file:") return { suffix: "" };
+  requested.hash = "";
+  const redirect = served.url === requested.href ? "" : `, redirected to ${served.url}`;
+  const suffix = ` (HTTP ${served.status}${redirect})`;
+  if (served.status < 400) return { suffix };
+  return {
+    suffix,
+    failure: `${url} answered HTTP ${served.status}. Either the server is serving a different directory or app than this project, or the page does not exist. Serve this project's files and confirm the URL returns 200 before rerunning.`,
+  };
 }
 
 function checkedViewport(viewport: { width: number; height: number }) {

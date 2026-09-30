@@ -17,6 +17,7 @@ vi.mock("../../../src/testing/chrome-transport.js", () => ({
 let root: string;
 beforeEach(async () => {
   vi.clearAllMocks();
+  transport.onEvent.mockImplementation(() => () => {});
   root = await mkdtemp(join(tmpdir(), "visp-session-test-"));
   transport.send.mockImplementation(async (method: string) => {
     if (method === "Target.createTarget") return { targetId: "target" };
@@ -135,6 +136,64 @@ describe("browser session ownership", () => {
     expect(session.operations.length).toBeGreaterThan(0);
     await session.close();
     expect(transport.close).toHaveBeenCalledOnce();
+  });
+  it.each([
+    [200, "http://localhost:1234/a", "Navigate http://localhost:1234/a (HTTP 200)"],
+    [
+      200,
+      "http://localhost:1234/b",
+      "Navigate http://localhost:1234/a (HTTP 200, redirected to http://localhost:1234/b)",
+    ],
+    [404, "http://localhost:1234/a", "Navigate http://localhost:1234/a (HTTP 404)"],
+  ])("records the main document answer %s from %s", async (status, finalUrl, description) => {
+    const listeners = new Set<(event: Record<string, unknown>) => void>();
+    transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as never);
+    const emit = (params: Record<string, unknown>, sessionId = "session") => {
+      for (const listener of listeners)
+        listener({ method: "Network.responseReceived", sessionId, params });
+    };
+    const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
+    transport.send.mockImplementation(async (method: string) => {
+      if (method === "Page.navigate") {
+        // Subresources, other loaders and other sessions never describe this navigation.
+        emit({ type: "Script", loaderId: "L1", response: { status: 500, url: "x" } });
+        emit({ type: "Document", loaderId: "L0", response: { status: 500, url: "x" } });
+        emit({ type: "Document", loaderId: "L1", response: { status, url: finalUrl } }, "other");
+        emit({ type: "Document", loaderId: "L1", response: { status, url: finalUrl } });
+        return { loaderId: "L1" };
+      }
+      return {};
+    });
+    const navigation = session.navigate("http://localhost:1234/a");
+    if (status >= 400) {
+      await expect(navigation).rejects.toThrow(`answered HTTP ${status}`);
+      await expect(navigation).rejects.toBeInstanceOf(BrowserBehaviorFailure);
+    } else await navigation;
+    expect(session.operations.map((entry) => entry.description)).toEqual([description]);
+    await session.close();
+  });
+  it("ignores an application exception event arriving after close began", async () => {
+    const listeners = new Set<(event: Record<string, unknown>) => void>();
+    transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as never);
+    const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
+    const exception = {
+      method: "Runtime.exceptionThrown",
+      sessionId: "session",
+      params: { exceptionDetails: { text: "Uncaught" } },
+    };
+    const closing = session.close();
+    expect(() => {
+      for (const listener of listeners) listener(exception);
+    }).not.toThrow();
+    await closing;
+    expect(session.operations).toEqual([]);
+    expect(() => session.assertHealthy?.()).not.toThrow();
   });
   it("does not record a successful click when browser input fails", async () => {
     const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });

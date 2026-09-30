@@ -343,7 +343,7 @@ async function captureFailureImage(
     if (captures.length < 6)
       captures.push(
         await bounded("Failure capture", Math.max(1, Math.min(10_000, deadline - Date.now())), () =>
-          session.capture(),
+          session.capture({ allowErrorPage: true }),
         ),
       );
     return [];

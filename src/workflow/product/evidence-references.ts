@@ -9,6 +9,7 @@ import {
   exactReplayIdentity,
   historicalFailureIdentity,
   journeyHistoryGroup,
+  journeyIdentityKey,
   legacyFailure,
 } from "../evidence/journey-history.js";
 import { imageDimensions } from "../evidence/observations/media.js";
@@ -541,7 +542,7 @@ export function pendingJourneyReplays(record: ProductRecord, subject: string, ta
         (run) =>
           (legacyFailure(failure)
             ? currentExactReplay(run) && exactReplayIdentity(run) === exactReplayIdentity(failure)
-            : run.journeyKey === failure.journeyKey) &&
+            : journeyIdentityKey(run) === journeyIdentityKey(failure)) &&
           (run.status === "completed" || !unresolved.has(run.id)),
       ) &&
       (legacyFailure(failure) || !evidenceApplies(record, subject, failure)),
