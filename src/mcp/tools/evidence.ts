@@ -73,7 +73,7 @@ const disputeFields = {
     .array(z.string())
     .optional()
     .describe(
-      "Failing pinned acceptance tests that contradict the request; the independent reviewer rules",
+      "Failing pinned acceptance tests that contradict the request; VISP's own independent reviewer rules; you delegate nothing",
     ),
   reason: z
     .string()

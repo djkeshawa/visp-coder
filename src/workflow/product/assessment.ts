@@ -266,6 +266,8 @@ export function finalProductAssessmentGaps(
   record: ProductRecord,
   subject: string,
   slice?: ProductSlice,
+  /** VISP launches the reviewer, so a missing assessment is not the worker's to write. */
+  launched = false,
 ): string[] {
   const latest = new Map(
     applicableReviews(record, subject)
@@ -283,14 +285,15 @@ export function finalProductAssessmentGaps(
       .filter(
         (outcome) => outcome.priority === "must" && (!slice || slice.outcomes.includes(outcome.id)),
       )
-      .flatMap((outcome) => finalOutcomeAssessmentGaps(outcome, latest.get(outcome.id))),
+      .flatMap((outcome) => finalOutcomeAssessmentGaps(outcome, latest.get(outcome.id), launched)),
     ...productFeedbackGaps(record, subject, slice),
   ];
 }
 
 function finalOutcomeAssessmentGaps(
   outcome: ProductOutcome,
-  assessment?: ProductAssessment,
+  assessment: ProductAssessment | undefined,
+  launched: boolean,
 ): string[] {
   const gaps =
     assessment?.status === "satisfied"
@@ -301,7 +304,9 @@ function finalOutcomeAssessmentGaps(
             (assessment?.status ?? "unassessed") +
             (assessment
               ? `: ${assessment.summary}`
-              : "; review the current product against the original request"),
+              : launched
+                ? "; VISP's reviewer has not assessed it yet: run visp next"
+                : "; review the current product against the original request"),
         ];
   for (const expectation of outcome.expectations) {
     const assessed = assessment?.expectations.find((entry) => entry.id === expectation.id);

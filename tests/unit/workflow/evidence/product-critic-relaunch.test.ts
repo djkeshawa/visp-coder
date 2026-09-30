@@ -8,7 +8,9 @@ import {
   runProductCritic,
 } from "../../../../src/workflow/product/critic.js";
 import type { CriticState } from "../../../../src/workflow/product/critic-model.js";
+import { relaunchBlocked } from "../../../../src/workflow/product/critic-status.js";
 import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
+import { inlineReview } from "../../../../src/workflow/product/done-review.js";
 import { runProductVerify } from "../../../../src/workflow/product/index.js";
 import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
@@ -96,6 +98,12 @@ describe("VISP-launched reviewer relaunch", () => {
     change(state);
     await writeFile(path, JSON.stringify(state));
   }
+  const relaunchBlockedNow = async () => {
+    const { state } = await criticFile();
+    const subject = await runProductVerify(await setup.workspace.state(), { task: "T001" });
+    if (!subject.ok) throw new Error(subject.error.message);
+    return relaunchBlocked(state, subject.value.subjectDigest, "product");
+  };
   const statuses = async () => (await criticFile()).state.attempts.map((a) => a.status);
 
   beforeEach(async () => {
@@ -225,7 +233,7 @@ describe("VISP-launched reviewer relaunch", () => {
     expect(host.review).not.toHaveBeenCalled();
   });
 
-  it("never overrides a failure the host reported (native transport)", async () => {
+  it("does not let a failure the host reported (native transport) disable VISP's reviewer", async () => {
     await launch("codex-exec");
     await ready();
     await run({ operation: "review" }, failing());
@@ -237,13 +245,32 @@ describe("VISP-launched reviewer relaunch", () => {
       attempt.execution = { provenance: "host-reported", returned: false };
     });
     const host = working();
-    const retried = await run({ operation: "review" }, host);
-    expect(retried).toMatchObject({
-      ok: false,
-      error: { message: expect.stringContaining("Previous critic attempt unavailable") },
+    expect(await run({ operation: "review" }, host)).toMatchObject({
+      ok: true,
+      value: { callsUsed: 2 },
     });
-    if (retried.ok) throw new Error("expected refusal");
-    expect(retried.error.message).toContain("does not retry a failure the host reported");
+    expect(host.review).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the worker a review in progress is still running, not that the critic failed", async () => {
+    await launch("codex-exec");
+    await ready();
+    await run({ operation: "review" }, failing());
+    await rewrite((state) => {
+      const [attempt] = state.attempts;
+      if (!attempt) throw new Error("attempt");
+      attempt.status = "pending";
+      attempt.startedAt = Date.now();
+    });
+    const host = working();
+    const summary = await inlineReview(host)(await setup.workspace.state(), {
+      feature: setup.brief.feature,
+      task: "T001",
+    });
+    expect(summary).toMatchObject({
+      reviewed: false,
+      reason: "VISP's reviewer is still running. Wait: run visp next.",
+    });
     expect(host.review).not.toHaveBeenCalled();
   });
 
@@ -320,7 +347,7 @@ describe("VISP-launched reviewer relaunch", () => {
       ]);
     });
 
-    it("treats an attempt from before the launcher stamp by its execution provenance", async () => {
+    it("counts an attempt from before the launcher stamp only by its execution provenance", async () => {
       await launch("codex-exec");
       await ready(nativeConfig);
       await run({ operation: "review" }, attached(failing()));
@@ -331,11 +358,10 @@ describe("VISP-launched reviewer relaunch", () => {
           attempt.launcher = undefined;
           attempt.execution = { provenance, claimed: true, returned: false };
         });
+      // Reported by the host: not VISP's failure, so the source is still open to VISP's reviewer.
       await legacy("host-reported");
-      const blockedHost = working();
-      const blocked = await run({ operation: "review" }, attached(blockedHost));
-      expect(blocked).toMatchObject({ ok: true, value: { ready: false } });
-      expect(blockedHost.review).not.toHaveBeenCalled();
+      expect(await relaunchBlockedNow()).toBe(false);
+      // Observed by VISP's adapter: it is VISP's own failure and counts (one of two).
       await legacy("adapter-observed");
       const host = working();
       expect(await run({ operation: "review" }, attached(host))).toMatchObject({
@@ -345,7 +371,7 @@ describe("VISP-launched reviewer relaunch", () => {
       expect(host.review).toHaveBeenCalledTimes(1);
     });
 
-    it("still blocks an attempt a host reported through prepare and submit", async () => {
+    it("lets VISP's reviewer run after a failure the worker submitted through prepare and submit", async () => {
       await launch("codex-exec");
       await ready(nativeConfig);
       const prepared = await run({ operation: "prepare", capabilities: launchedCapabilities });
@@ -364,14 +390,14 @@ describe("VISP-launched reviewer relaunch", () => {
         status: "unavailable",
         transport: "native",
       });
+      // One call on the shared budget is spent, but the failure is not VISP's.
+      expect(await relaunchBlockedNow()).toBe(false);
       const host = working();
-      const retried = await run({ operation: "review" }, attached(host));
-      expect(retried).toMatchObject({ ok: true, value: { ready: false } });
-      if (!retried.ok) throw new Error("expected preflight");
-      expect((retried.value as { gaps: string[] }).gaps.join(" ")).toContain(
-        "does not retry a failure the host reported",
-      );
-      expect(host.review).not.toHaveBeenCalled();
+      expect(await run({ operation: "review" }, attached(host))).toMatchObject({
+        ok: true,
+        value: { callsUsed: 2 },
+      });
+      expect(host.review).toHaveBeenCalledTimes(1);
     });
   });
 });

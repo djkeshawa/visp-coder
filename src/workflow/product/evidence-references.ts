@@ -572,8 +572,25 @@ function focusedTerminalMeasurement(measurement: { json: string; truncated: bool
   return measurement;
 }
 
+function journeyRecovery(
+  record: ProductRecord,
+  run: ReturnType<typeof currentFailedJourneys>[number],
+  task: string | undefined,
+  launched: boolean,
+): string {
+  if (isDeclaredJourney(record, run))
+    return `Rerun or correct the declared journey in the brief; preserve its outcome.${launched ? "" : " After that same check passes, review --prepare can supply counterevidence to diagnose the obsolete assertion without changing intent."}`;
+  return `Keep the original input, route and viewport when checking a suspected test-route error. Scroll to an off-screen control if appropriate, execute that control and observe the actual result.${launched ? "" : ` Then visp review --feature ${record.brief.feature}${task ? ` --task ${task}` : ""} --prepare can offer current counterevidence for your diagnosis; it does not clear failures automatically.`}`;
+}
+
 /** Bounded repair context from the same applicable failures used by completion gates. */
-export function currentJourneyFeedback(record: ProductRecord, subject: string, task?: string) {
+export function currentJourneyFeedback(
+  record: ProductRecord,
+  subject: string,
+  task?: string,
+  /** VISP launches the reviewer, so the worker has no review to prepare. */
+  launched = false,
+) {
   const failures = currentFailedJourneys(record, subject, task);
   return {
     replay: replaySuggestions(record, subject, task),
@@ -589,9 +606,7 @@ export function currentJourneyFeedback(record: ProductRecord, subject: string, t
           runId: run.id,
           status: run.status,
           input: run.failure?.input,
-          recovery: isDeclaredJourney(record, run)
-            ? "Rerun or correct the declared journey in the brief; preserve its outcome. After that same check passes, review --prepare can supply counterevidence to diagnose the obsolete assertion without changing intent."
-            : `Keep the original input, route and viewport when checking a suspected test-route error. Scroll to an off-screen control if appropriate, execute that control and observe the actual result. Then visp review --feature ${record.brief.feature}${task ? ` --task ${task}` : ""} --prepare can offer current counterevidence for your diagnosis; it does not clear failures automatically.`,
+          recovery: journeyRecovery(record, run, task, launched),
           message: (run.failure?.message ?? "Journey did not complete").slice(0, 1000),
           failureOperationId: run.failure?.operationId ?? observed?.id,
           ...(measurement

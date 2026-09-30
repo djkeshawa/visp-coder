@@ -74,7 +74,13 @@ describe("product command check execution boundary", () => {
             output: expect.stringContaining("nothing about the product was tested"),
           },
         ],
-        next: { mayEdit: true, objective: expect.stringContaining("correcting its command") },
+        // The open slice shows the short missing-command recovery, not the general environment text.
+        next: {
+          mayEdit: true,
+          objective: expect.stringContaining(
+            'missing-command: "visp-missing-executable" is not installed',
+          ),
+        },
       },
     });
   });

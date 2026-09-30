@@ -11,6 +11,7 @@ export function visualCheckpoint(
   subject: string,
   slice?: ProductSlice,
   reviewMode: "current" | "observation-preview" = "current",
+  reviewer: ReviewerPointer = "host",
 ) {
   if (!needsBrowser(record.brief, slice)) return undefined;
   const outcomes = record.brief.outcomes.filter(
@@ -86,9 +87,7 @@ export function visualCheckpoint(
           observationInstructions: OBSERVATION_REVIEW_INSTRUCTIONS,
         }
       : {}),
-    imageStatus:
-      "Recorded references only; review handoff verifies and delivers the actual image bytes. Missing, stale or unviewed images cannot establish quality.",
-    command: `visp review --feature ${record.brief.feature}${slice ? ` --task ${slice.id}` : ""} --handoff`,
+    ...reviewPointer(record.brief.feature, slice, reviewer),
     assess:
       "Judge the actual primary activity at each viewport: usable scale, scene composition, hierarchy, contrast, expressive assets/materials and intermediate feedback. Matching the worker's palette or theme is not aesthetic success. A UI can be readable yet visually weak. Give zero to three consequential findings with a concrete visible change and next observation, or explain why the requested experience is already achieved. Use the existing feedback fields.",
     ...(repeated
@@ -97,5 +96,33 @@ export function visualCheckpoint(
             "Repeated captures of this source have not produced a satisfied visual assessment. Diagnose any evidence/host gap once; then inspect the rendered product and address the most consequential visible mismatch. Editing observation attributes or check descriptions is not visual refinement. If no reviewer is available, report that gap instead of repeating capture or inventing approval.",
         }
       : {}),
+  };
+}
+
+/** Who reads the images: the host's reviewer, VISP's own, or the human once VISP's is gone. */
+export type ReviewerPointer = "host" | "visp" | "gone";
+
+function reviewPointer(
+  feature: string,
+  slice: ProductSlice | undefined,
+  reviewer: ReviewerPointer,
+) {
+  const task = slice ? ` --task ${slice.id}` : "";
+  if (reviewer === "visp")
+    return {
+      imageStatus:
+        "Recorded references only; VISP's independent reviewer receives the actual image bytes when you run visp done. Missing, stale or unviewed images cannot establish quality.",
+      command: `visp done --feature ${feature}${task}`,
+    };
+  if (reviewer === "gone")
+    return {
+      imageStatus:
+        "Recorded references only; VISP's independent reviewer cannot run again (its review budget is spent or it is unavailable), so the human reviewer receives the images: run visp pr. Missing, stale or unviewed images cannot establish quality.",
+      command: `visp pr --feature ${feature}`,
+    };
+  return {
+    imageStatus:
+      "Recorded references only; review handoff verifies and delivers the actual image bytes. Missing, stale or unviewed images cannot establish quality.",
+    command: `visp review --feature ${feature}${task} --handoff`,
   };
 }

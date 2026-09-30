@@ -22,6 +22,7 @@ import {
   saveCriticState,
 } from "./critic-store.js";
 import { independentJudgments, independentReviewSchema } from "./independent-review.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { applyDisputeRulings } from "./pinned-disputes.js";
 import { runProductReviewRequest } from "./review-request.js";
 import { productSourceDigest } from "./subject.js";
@@ -479,7 +480,12 @@ async function reviewGaps(
   if (selected.phase === "understanding") return [];
   const gaps = [
     ...(await productEvidenceGaps(workspace, selected.record, subject, selected.slice)),
-    ...finalProductAssessmentGaps(selected.record, subject, selected.slice),
+    ...finalProductAssessmentGaps(
+      selected.record,
+      subject,
+      selected.slice,
+      reviewerRules(workspace),
+    ),
   ];
   if (sourceOnly) gaps.push(SOURCE_ADVICE_LIMITATION);
   if (response.comparison.some((entry) => entry.change === "worse"))

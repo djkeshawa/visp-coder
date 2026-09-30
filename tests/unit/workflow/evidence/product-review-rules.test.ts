@@ -14,8 +14,9 @@ function record(
   slices: Record<string, "closed" | "in-progress" | "pending">,
 ): ProductRecord {
   return {
-    brief: { slices: Object.keys(slices).map((id) => ({ id })), outcomes: [] },
+    brief: { slices: Object.keys(slices).map((id) => ({ id, outcomes: [] })), outcomes: [] },
     state: {
+      executions: [],
       slices: Object.fromEntries(
         Object.entries(slices).map(([id, value]) => [id, { status: value }]),
       ),
@@ -32,10 +33,10 @@ function record(
 // Weak-worker runs: a review after a clean one rarely found anything, at 1–2 min each.
 it("skips a middle slice's review after a clean one, never the slice completing the feature", () => {
   const open = { T001: "closed", T002: "in-progress", T003: "pending" } as const;
-  expect(skippableReview(record("satisfied", open), "T002")).toBe(true);
-  expect(skippableReview(record("failed", open), "T002")).toBe(false);
+  expect(skippableReview(record("satisfied", open), "T002", "current")).toBe(true);
+  expect(skippableReview(record("failed", open), "T002", "current")).toBe(false);
   const last = { T001: "closed", T002: "in-progress" } as const;
-  expect(skippableReview(record("satisfied", last), "T002")).toBe(false);
+  expect(skippableReview(record("satisfied", last), "T002", "current")).toBe(false);
 });
 
 it("sweeps stated rules and ordinary variants before spending findings on unstated limits", () => {
@@ -81,7 +82,7 @@ it.each([false, true])("only required findings prevent skipping middle reviews: 
       },
     ],
   };
-  expect(skippableReview(current, "T002")).toBe(!required);
+  expect(skippableReview(current, "T002", "current")).toBe(!required);
 });
 
 // Workers repair before anyone records a failing reproduction.

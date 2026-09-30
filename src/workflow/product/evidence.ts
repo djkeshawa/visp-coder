@@ -21,6 +21,7 @@ import {
 import { ensureProductCheckpoint } from "./checkpoint.js";
 import { productNeighborhood } from "./context.js";
 import { correctionChecks } from "./corrections.js";
+import { reviewerPointer } from "./critic-capacity.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
 import { environmentNext } from "./environment.js";
 import { currentJourneyFeedback } from "./evidence-references.js";
@@ -36,6 +37,7 @@ import {
   type ProductSlice,
   type ProductState,
 } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
 import { type ProductNext, runProductNext } from "./status.js";
@@ -169,7 +171,10 @@ async function finishExecution(
         .filter((entry) => entry.required && findingAppliesToSlice(entry, slice))
         .map((entry) => `${entry.id}: ${entry.problem}. ${entry.nextCheck}`),
     );
-  if (accept) gaps.push(...finalProductAssessmentGaps(current, after.value));
+  if (accept)
+    gaps.push(
+      ...finalProductAssessmentGaps(current, after.value, undefined, reviewerRules(workspace)),
+    );
   const passed = gaps.length === 0;
   const completion = await completionState(workspace, record, next, {
     slice,
@@ -226,7 +231,12 @@ async function finishExecution(
     executions,
     outcomes: outcomeStatuses(current, after.value, slice),
     gaps: [...new Set(gaps)],
-    journeyFeedback: currentJourneyFeedback(current, after.value, slice?.id),
+    journeyFeedback: currentJourneyFeedback(
+      current,
+      after.value,
+      slice?.id,
+      reviewerRules(workspace),
+    ),
     behaviorChanges: checkBehaviorChanges(
       record.state.executions.filter(
         (before) => !executions.some((entry) => entry.id === before.id),
@@ -235,8 +245,9 @@ async function finishExecution(
     ),
     ...(repeated
       ? {
-          recommendation:
-            "The same product failure recurred. Test a different hypothesis or request a focused review; metadata edits do not constitute progress.",
+          recommendation: reviewerRules(workspace)
+            ? "The same product failure recurred. Test a different hypothesis; metadata edits do not constitute progress."
+            : "The same product failure recurred. Test a different hypothesis or request a focused review; metadata edits do not constitute progress.",
         }
       : {}),
   });
@@ -255,6 +266,7 @@ async function verificationProgress(
     subject,
     slice,
     workspace.config.workflow.reviewMode,
+    { reviewer: await reviewerPointer(workspace, record.brief.feature, subject, slice?.id) },
   );
   return {
     feedbackPlan,
@@ -329,12 +341,16 @@ async function prepareExecution(
   if (!selection.ok) return selection;
   const slice = accept ? undefined : selection.value;
   if (close && !slice) return err(vispError("NO_ACTIVE_TASK", "No slice selected for closure"));
-  if (
-    accept &&
-    record.brief.slices.some((entry) => !closedSlice(record.state.slices[entry.id]?.status))
-  )
+  const open = record.brief.slices.filter(
+    (entry) => !closedSlice(record.state.slices[entry.id]?.status),
+  );
+  if (accept && open.length)
     return err(
-      vispError("STAGE_BLOCKED", "Close the active slices before final product acceptance"),
+      vispError(
+        "STAGE_BLOCKED",
+        `Close the active slices before final product acceptance: ${open.map((entry) => entry.id).join(", ")}`,
+        { recovery: `visp next --feature ${record.brief.feature}` },
+      ),
     );
   let committedChanges: string[] = [];
   if (slice && !closedSlice(record.state.slices[slice.id]?.status)) {
@@ -402,9 +418,11 @@ function executionCommands(
       ),
     ).values(),
   ];
-  // The last open slice completes the product, so the pinned tests should pass there too.
+  // The last open slice completes the product, so the pinned tests should pass there too. A
+  // failed pinned run also selects the suite as a correction check of that slice: run it once.
   if (accept || !slice || lastOpenSlice(record, slice))
-    commands.push(...pinnedAcceptanceChecks(brief));
+    for (const pinned of pinnedAcceptanceChecks(brief))
+      if (!commands.some((command) => command.id === pinned.id)) commands.push(pinned);
   for (const [index, command] of workspace.config.workflow.validationCommands.entries())
     commands.push({
       id: `CONFIG_${index + 1}`,
