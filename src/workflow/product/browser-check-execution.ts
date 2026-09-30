@@ -62,6 +62,7 @@ async function runBrowserCheck(
         record.state.captureRuns,
         base.subjectDigest,
         productJourneyKey(command.journey, base.task),
+        base.comparisonEnvironment,
       )
     : undefined;
   if (prior)
@@ -146,11 +147,14 @@ async function runBrowserCheck(
   };
 }
 
-function reusableRun(
+export function reusableRun(
   runs: readonly unknown[],
   subject: string,
   journeyKey: string,
+  comparisonEnvironment: string | undefined,
 ): { id: string } | undefined {
+  // A capture made under another browser or toolchain is not this run's capture.
+  if (!comparisonEnvironment) return undefined;
   return runs
     .flatMap((candidate) => {
       if (!candidate || typeof candidate !== "object") return [];
@@ -159,7 +163,8 @@ function reusableRun(
         run.provenance === "runner-executed" &&
         run.status === "completed" &&
         run.subjectDigest === subject &&
-        run.journeyKey === journeyKey
+        run.journeyKey === journeyKey &&
+        run.comparisonEnvironment === comparisonEnvironment
         ? [{ id: run.id }]
         : [];
     })

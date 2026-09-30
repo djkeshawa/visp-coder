@@ -1,17 +1,23 @@
 import { browserExecutableIdentity } from "../../core/browser-executable.js";
+import { resolveCommandExecutable } from "../../core/command-executable.js";
 import { vispError } from "../../core/errors.js";
+import { resolveCommand } from "../../core/exec.js";
 import {
+  comparisonEnvironmentParts,
+  declaredEnvironment,
   productExecutionEnvironment,
-  productIdentityEnvironment,
 } from "../../core/execution-environment.js";
 import { repositoryFiles, repositoryGitlinks } from "../../core/git.js";
 import { repositorySourceObjects } from "../../core/git-source.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesAny, matchesPattern } from "../../core/patterns.js";
+import { pythonCacheDirectory } from "../../core/python-cache.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
-import { type ProductBrief, type ProductSlice, sliceDigest } from "./model.js";
+import { acceptanceEnvironment } from "./acceptance-environment.js";
+import { isBrowserCheckCommand } from "./check-command.js";
+import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
 import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
 import { repositorySourceIdentity } from "./source-git.js";
 import { sourceInputPatterns } from "./source-inputs.js";
@@ -97,11 +103,16 @@ async function productFileHash(
   return ok(sourceEntryHash(entry.value.bytes, entry.value.mode, entry.value.symlink));
 }
 
+/**
+ * The subject is what the product is: source, controls, validation commands, the VISP build
+ * and the variables a check declares. The toolchain a check ran under is the comparison
+ * identity below; it gates reuse and repair credit but never makes evidence stale to a
+ * reader whose PATH, node or terminal differs.
+ */
 export async function productSourceDigest(
   workspace: WorkspaceState,
   brief?: ProductBrief,
   snapshot?: Record<string, string>,
-  environment?: Record<string, string>,
 ): Promise<Result<string>> {
   const selected = await subjectBrief(workspace, brief);
   if (!selected.ok) return selected;
@@ -113,34 +124,88 @@ export async function productSourceDigest(
     if (!bytes.ok) return bytes;
     controls[path] = bytes.value === undefined ? null : sha256(bytes.value);
   }
+  const { version, buildId } = runtimeIdentity();
   return ok(
     hashValue({
-      version: 3,
+      version: 4,
       files: files.value,
       controls,
       validationCommands: workspace.config.workflow.validationCommands,
-      runtime: {
-        ...runtimeIdentity(),
-        node: process.version,
-        platform: process.platform,
-        arch: process.arch,
-      },
-      environment:
-        environment ??
-        productIdentityEnvironment(
-          selected.value?.checks.flatMap((check) => check.environmentVariables ?? []),
-        ),
-      browser: await browserExecutableIdentity(),
+      runtime: { version, buildId },
+      declaredEnvironment: declaredEnvironment(
+        selected.value?.checks.flatMap((check) => check.environmentVariables ?? []),
+      ),
     }),
   );
 }
 
-/** Full inherited environment is comparison context, never product freshness or plaintext state. */
-export function productComparisonEnvironmentDigest(
+/**
+ * Identity of the toolchain a check runs under: the executable its argv0 selects, the
+ * browser, injection and locale variables, and declared application variables, hashed as the
+ * check sees them (a pinned check sees the filtered environment). PATH text, terminal and
+ * host session variables are excluded; HOME is included for an ordinary check. Reuse of a passed run and repair credit require
+ * equal identities; browser-journey checks and capture runs pass no check and share the
+ * union of declared variables so a check run and its capture run agree.
+ */
+export async function productComparisonEnvironmentDigest(
   workspace: WorkspaceState,
   brief?: ProductBrief,
-) {
-  return productSourceDigest(workspace, brief, {}, productExecutionEnvironment());
+  options: { check?: ProductCheck; binary?: string } = {},
+): Promise<Result<string>> {
+  const selected = await subjectBrief(workspace, brief);
+  if (!selected.ok) return selected;
+  const inherited = productExecutionEnvironment();
+  const { check } = options;
+  const environment = check?.id.startsWith("PINNED_")
+    ? acceptanceEnvironment(inherited)
+    : inherited;
+  const argv0 =
+    check && !isBrowserCheckCommand(check.command) ? resolveCommand(check.command) : undefined;
+  const root = workspace.paths.root;
+  const tool = argv0?.ok ? await toolIdentity(argv0.value[0] ?? "", root, environment) : undefined;
+  const pinned = check?.id.startsWith("PINNED_") === true;
+  const declared =
+    check?.environmentVariables ??
+    selected.value?.checks.flatMap((entry) => entry.environmentVariables ?? []);
+  const { version, buildId } = runtimeIdentity();
+  return ok(
+    hashValue({
+      version: 1,
+      runtime: { version, buildId },
+      platform: `${process.platform}-${process.arch}`,
+      tool,
+      // Any command can start a grandchild: `sh -c` or `npm test` hides a shimmed node or python.
+      toolchain: await toolchainIdentity(root, environment),
+      browser: await browserExecutableIdentity(options.binary ?? environment.CHROME_BIN),
+      ...comparisonEnvironmentParts(environment, await ownBytecodeCache(environment)),
+      // A pinned run gets a private HOME per run; an ordinary check reads the operator's.
+      home: pinned ? undefined : environment.HOME,
+      declared: declaredEnvironment(declared, environment),
+    }),
+  );
+}
+
+/** The realpath and size of what a name resolves to; on Windows, where nothing resolves, the PATH text. */
+async function toolIdentity(name: string, root: string, environment: Record<string, string>) {
+  const found = await resolveCommandExecutable(name, root, environment);
+  if (found) return found;
+  return process.platform === "win32" ? { name, pathText: environment.PATH ?? null } : null;
+}
+
+async function toolchainIdentity(root: string, environment: Record<string, string>) {
+  return Object.fromEntries(
+    await Promise.all(
+      ["node", "python3", "python"].map(
+        async (name) => [name, await toolIdentity(name, root, environment)] as const,
+      ),
+    ),
+  );
+}
+
+/** The bytecode cache VISP sets for checks, when the environment holds exactly that. */
+async function ownBytecodeCache(environment: Record<string, string>) {
+  if (environment.PYTHONPYCACHEPREFIX === undefined) return undefined;
+  return pythonCacheDirectory().catch(() => undefined);
 }
 
 async function subjectBrief(

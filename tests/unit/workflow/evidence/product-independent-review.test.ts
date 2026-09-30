@@ -789,8 +789,10 @@ it("reuses observed evidence across host thread routing while retaining executio
       response: response(packet),
     }),
   ).toMatchObject({ ok: true, value: { action: "normal-acceptance", callsUsed: 1 } });
+  // Toolchain variables belong to the comparison identity; the capability keeps only the
+  // executable and the host security context.
   vi.stubEnv("NODE_ENV", "different-product-mode");
-  expect(await browserEnvironmentIdentity(p.workspace.root)).not.toBe(environment);
+  expect(await browserEnvironmentIdentity(p.workspace.root)).toBe(environment);
   vi.unstubAllEnvs();
   vi.stubEnv("CODEX_PERMISSION_PROFILE", "different-host-permissions");
   expect(await browserEnvironmentIdentity(p.workspace.root)).not.toBe(environment);

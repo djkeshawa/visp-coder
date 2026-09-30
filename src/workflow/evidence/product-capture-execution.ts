@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
@@ -85,13 +84,10 @@ export async function withProductCapture<T>(
     );
   const before = await productSourceDigest(workspace, record.brief);
   if (!before.ok) return before;
-  const environment = await productComparisonEnvironmentDigest(workspace, record.brief);
-  const comparisonEnvironment = environment.ok
-    ? hashValue({
-        environment: environment.value,
-        browser: await browserExecutableIdentity(options.binary),
-      })
-    : undefined;
+  const environment = await productComparisonEnvironmentDigest(workspace, record.brief, {
+    binary: options.binary,
+  });
+  const comparisonEnvironment = environment.ok ? environment.value : undefined;
   const directory = await mkdtemp(join(tmpdir(), "visp-capture-"));
   try {
     const result = await runBrowserJourney({

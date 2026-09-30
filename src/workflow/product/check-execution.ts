@@ -17,7 +17,13 @@ import {
   validateProductCheckCommand,
 } from "./check-command.js";
 import { browserUnavailable } from "./environment.js";
-import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
+import type {
+  ProductBrief,
+  ProductCheck,
+  ProductExecution,
+  ProductSlice,
+  ProductState,
+} from "./model.js";
 import {
   environmentOnly,
   pinnedWaivers,
@@ -36,6 +42,23 @@ export interface ExecutedProductCheck {
   readonly mutations: FileMutation[];
 }
 
+/**
+ * The comparison identity of one check's run. A command check hashes its own tool and the
+ * environment it runs under; browser-journey checks pass no check, so the check run and its
+ * capture run share one identity.
+ */
+export function checkComparisonEnvironment(
+  workspace: WorkspaceState,
+  brief: ProductBrief,
+  check: ProductCheck,
+) {
+  return productComparisonEnvironmentDigest(
+    workspace,
+    brief,
+    isBrowserCheckCommand(check.command) ? undefined : { check },
+  );
+}
+
 export async function executeProductCheck(
   workspace: WorkspaceState,
   record: ProductRecord,
@@ -47,7 +70,7 @@ export async function executeProductCheck(
   signal?: AbortSignal,
   reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
-  const environment = await productComparisonEnvironmentDigest(workspace, record.brief);
+  const environment = await checkComparisonEnvironment(workspace, record.brief, check);
   const base = {
     id: randomUUID(),
     comparisonEnvironment: environment.ok ? environment.value : undefined,
@@ -299,6 +322,7 @@ export type ExecutionIdentity = Pick<
   | "createdAt"
   | "command"
   | "provenance"
+  | "comparisonEnvironment"
 >;
 
 async function executeCommand(

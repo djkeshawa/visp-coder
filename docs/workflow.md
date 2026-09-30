@@ -97,7 +97,7 @@ checks:
 - **Commands** run as an argument vector, never through a shell. A string is split into arguments; shell syntax such as `&&`, pipes or `VAR=value` prefixes is refused. Use two checks or a script the project owns.
 - **Browser journeys** use `command: {kind: browser-journey, journey: {...}}`. VISP drives an installed Chrome/Chromium with an isolated profile and records operations, measurements and screenshots. See [product review](product-review.md).
 - **`files`** lists the product and test files the check depends on; changes to them make earlier results stale.
-- **`environmentVariables`** optionally lists application environment variable names (for example `[APP_MODE, API_ENDPOINT]`) whose values must affect evidence freshness. Runtime variables (`PATH`, `NODE_*`, `PYTHON*`, `LANG`, `LC_*`, `TZ`, `CI`) are always included; terminal and host session variables are excluded by default.
+- **`environmentVariables`** optionally lists application environment variable names (for example `[APP_MODE, API_ENDPOINT]`) whose values must affect evidence freshness. Declared variables are part of the product identity, so a reader whose shell lacks them sees the evidence as stale: declare only settings that change what the product does, and set them wherever `visp next` runs. Toolchain variables (`PATH`, `NODE_*`, `PYTHON*`, `LANG`, `LC_*`, `TZ`, `CI`) and the browser are not product identity; they decide only whether a passed check may be reused (see Evidence below).
 - **`verifierFiles`** lists the assertion program and its helpers, fixtures and configuration. VISP hashes them separately from the product so a repair can be compared against the same verifier. An explicit Node script, preload, global setup, `--env-file` or `--test-rerun-failures` input must be listed, or the check stops before running with an environment failure. Use repository-relative paths.
 
 A check must exercise behavior to count as functional evidence. Syntax-only or static commands (for example `node --check`) still run but do not establish behavior. A check may not run a VISP workflow command (`visp done`, `visp capture` and similar) against its own workspace.
@@ -159,7 +159,7 @@ After a failure, `work` includes the failing output and says whether it describe
 ## Evidence rules
 
 - An execution record proves that VISP ran a command or journey and what it returned. Whether the assertions test the right thing is still a review judgment.
-- Evidence is bound to the current source, brief contract and environment. Changing any of them makes affected evidence stale.
+- Evidence is bound to the current source, brief contract, VISP build and declared variables. Changing any of them makes affected evidence stale. The toolchain a check ran under (the executable its command selects, `NODE_OPTIONS`, `PYTHON*`, `LD_PRELOAD`, locale, `TZ`, `CI`, the browser) does not make evidence stale to a reader with a different PATH or node, but a passed check is reused only when it ran under the same toolchain: `done` and `accept` run it again otherwise.
 - A failed journey stays unresolved until the same journey passes on the repaired product; a different successful journey does not clear it.
 - Review judgments are attributed to their reviewer. The actor's statements, printed summaries and self-reported results are not evidence.
 - Missing, stale or unavailable evidence keeps an outcome open; it never becomes a pass.
