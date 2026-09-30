@@ -10,6 +10,8 @@ export interface ProductReviewImageGroup {
   readonly runId?: string;
   readonly task?: string;
   readonly runStatus?: string;
+  /** Identity of the journey that produced the run; identical replays share it. */
+  readonly journeyKey?: string;
   readonly viewport: { readonly width: number; readonly height: number };
   readonly captureIds: readonly string[];
 }
@@ -21,11 +23,14 @@ const runSchema = z.object({
   subjectDigest: z.string(),
   contractDigest: z.string().optional(),
   task: z.string().optional(),
+  journeyKey: z.string().optional(),
   status: z.string().optional(),
+  failure: z.object({ kind: z.string() }).optional(),
   createdAt: z.string().optional(),
   captures: z.array(
     z.object({
       id: z.string(),
+      steps: z.array(z.string()).optional(),
       viewport: z.object({ width: z.number().positive(), height: z.number().positive() }),
     }),
   ),
@@ -54,6 +59,10 @@ export function productReviewImageGroups(
       (Date.parse(b.createdAt ?? "") || 0) - (Date.parse(a.createdAt ?? "") || 0) ||
       b.index - a.index,
   );
+  // Runs are newest first. An older group is dropped only for a truly identical replay: same journey,
+  // outcome, failure kind and capture steps at the same viewport. A failed or cancelled run never
+  // stands in for a completed one, and a run with other captures adds a picture.
+  const replays = new Set<string>();
   return runs.flatMap((run) => {
     const viewports = new Map<string, typeof run.captures>();
     for (const capture of run.captures) {
@@ -62,15 +71,71 @@ export function productReviewImageGroups(
       entries.push(capture);
       viewports.set(key, entries);
     }
-    return [...viewports].map(([viewport, captures]) => ({
-      id: `image-group:${run.id ?? hashValue(run.captures).slice(0, 16)}:${viewport}`,
-      runId: run.id,
-      task: run.task,
-      runStatus: run.status,
-      viewport: captures[0]?.viewport ?? { width: 0, height: 0 },
-      captureIds: [...new Set(captures.map((capture) => capture.id))],
-    }));
+    return [...viewports].flatMap(([viewport, captures]) => {
+      if (run.journeyKey !== undefined) {
+        const replay = replayKey(run, viewport, captures);
+        if (replays.has(replay)) return [];
+        replays.add(replay);
+      }
+      return [
+        {
+          id: `image-group:${run.id ?? hashValue(run.captures).slice(0, 16)}:${viewport}`,
+          runId: run.id,
+          task: run.task,
+          runStatus: run.status,
+          ...(run.journeyKey === undefined ? {} : { journeyKey: run.journeyKey }),
+          viewport: captures[0]?.viewport ?? { width: 0, height: 0 },
+          captureIds: [...new Set(captures.map((capture) => capture.id))],
+        },
+      ];
+    });
   });
+}
+
+interface ReplayFacts {
+  readonly journeyKey?: unknown;
+  readonly status?: unknown;
+  readonly failure?: { readonly kind?: unknown };
+}
+
+/** Two runs replay each other only when journey, outcome, failure kind and capture steps all agree. */
+function replayKey(
+  run: ReplayFacts,
+  viewport: string,
+  captures: readonly { readonly steps?: readonly string[] }[],
+): string {
+  return JSON.stringify([
+    run.journeyKey,
+    viewport,
+    run.status ?? null,
+    run.failure?.kind ?? null,
+    captures.map((capture) => capture.steps ?? []),
+  ]);
+}
+
+/** The newest run of each identical replay (else of each run id), so replays do not crowd out other journeys. */
+export function newestRunPerJourney<T>(runs: readonly T[], limit: number): T[] {
+  const seen = new Set<string>();
+  const kept: T[] = [];
+  for (let index = runs.length - 1; index >= 0 && kept.length < limit; index--) {
+    const run = runs[index] as T;
+    const facts = (typeof run === "object" && run !== null ? run : {}) as ReplayFacts & {
+      id?: unknown;
+      captures?: readonly { steps?: readonly string[] }[];
+    };
+    const key =
+      typeof facts.journeyKey === "string"
+        ? replayKey(facts, "", Array.isArray(facts.captures) ? facts.captures : [])
+        : typeof facts.id === "string"
+          ? facts.id
+          : undefined;
+    if (key !== undefined) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    kept.unshift(run);
+  }
+  return kept;
 }
 
 export interface ImageDeliveryCandidate {
@@ -91,11 +156,18 @@ export function imageDeliveryCandidates(
     preferred.get(id) ?? preferred.get(known.get(id)?.path ?? "") ?? preferred.size;
   const grouped = new Set(groups.flatMap((group) => group.captureIds));
   const seenViewports = new Set<string>();
+  const journeysByViewport = new Map<string, Set<string>>();
   const viewportCount = new Set(groups.map((group) => JSON.stringify(group.viewport))).size;
   const ranked = groups.map((group, index) => {
     const key = JSON.stringify(group.viewport);
     const repeatedViewport = seenViewports.has(key);
     seenViewports.add(key);
+    // A later group that shows a journey not yet shown at this viewport is as informative as a primary.
+    const journeys = journeysByViewport.get(key) ?? new Set<string>();
+    journeysByViewport.set(key, journeys);
+    const distinctJourney =
+      repeatedViewport && group.journeyKey !== undefined && !journeys.has(group.journeyKey);
+    if (group.journeyKey !== undefined) journeys.add(group.journeyKey);
     const rank = group.captureIds.reduce(
       (best, id) => Math.min(best, rankCapture(id)),
       preferred.get(group.id) ?? preferred.size,
@@ -107,17 +179,12 @@ export function imageDeliveryCandidates(
       captureIds: selected,
       omittedCaptureIds: group.captureIds.filter((id) => !selected.includes(id)),
       rank,
-      repeatedViewport,
+      priority: repeatedViewport ? (distinctJourney ? 1 : 2) : 0,
       index,
     };
   });
-  ranked.sort(
-    (a, b) =>
-      a.rank - b.rank ||
-      Number(a.repeatedViewport) - Number(b.repeatedViewport) ||
-      a.index - b.index,
-  );
-  if (!preferred.size && viewportCount > 1) balanceViewportSamples(ranked, rankCapture);
+  ranked.sort((a, b) => a.rank - b.rank || a.priority - b.priority || a.index - b.index);
+  if (!preferred.size && ranked.length > 1) balanceJourneySamples(ranked, rankCapture);
   const single = captures
     .filter((capture) => !grouped.has(capture.id))
     .map((capture, index) => ({
@@ -147,27 +214,30 @@ function selectGroupCaptures(
   return ids.filter((id) => selected.has(id));
 }
 
-/** Reserve journey endpoints across viewports before spending spare slots on intermediate states. */
-function balanceViewportSamples(
+/**
+ * Reserve journey endpoints across viewports and distinct journeys before spending spare slots on
+ * intermediate states. Groups that only repeat a journey already shown keep their own sample.
+ */
+function balanceJourneySamples(
   candidates: Array<
     ImageDeliveryCandidate & {
-      repeatedViewport: boolean;
+      priority: number;
       captureIds: string[];
       omittedCaptureIds: string[];
     }
   >,
   rank: (id: string) => number,
 ) {
-  const primary = candidates.filter((entry) => !entry.repeatedViewport);
-  const quotas = new Map<(typeof primary)[number], number>();
+  const participants = candidates.filter((entry) => entry.priority < 2);
+  const quotas = new Map<(typeof participants)[number], number>();
   let remaining = 6;
-  for (const entry of primary) {
+  for (const entry of participants) {
     const minimum = Math.min(2, entry.captureIds.length);
     if (minimum > remaining) continue;
     quotas.set(entry, minimum);
     remaining -= minimum;
   }
-  for (const entry of primary) {
+  for (const entry of participants) {
     const minimum = quotas.get(entry);
     if (minimum === undefined) continue;
     const extra = Math.min(remaining, entry.captureIds.length - minimum);
