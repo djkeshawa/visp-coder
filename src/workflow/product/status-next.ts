@@ -34,6 +34,10 @@ import { reviewerRules } from "./pinned-dispute-model.js";
 import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
 import { repairRecheck } from "./repair-recheck.js";
+import {
+  unavailableClosedReviewerFindingsNext,
+  unavailableReviewerFindingsNext,
+} from "./reviewer-findings-route.js";
 import { readProductAuthorization, selectProductSlice } from "./scopes.js";
 import type { ProductNext } from "./status.js";
 import { historicalAcceptanceNext, type ProductIdentity } from "./status-history.js";
@@ -206,22 +210,16 @@ async function nextClosedProduct(
     ...failures.map((execution) => `${execution.check}: ${execution.status}: ${execution.output}`),
   ];
   const assessmentGaps = finalProductAssessmentGaps(record, subject, undefined, reviewer.runs);
+  const findingsNext = unavailableClosedReviewerFindingsNext(
+    workspace,
+    record,
+    subject,
+    reviewer.capacity,
+  );
+  if (findingsNext) return ok(findingsNext);
   if (route.override)
     return ok(pinnedStep(record.brief.feature, undefined, route, [...gaps, ...assessmentGaps]));
-  const correction =
-    record.brief.slices.find((slice) =>
-      currentFailedJourneys(record, subject).some(
-        (run) => run.task === slice.id && run.failure?.kind === "behavior",
-      ),
-    ) ??
-    record.brief.slices.find(
-      (slice) =>
-        reviewCorrectionOutcomes(record, slice, subject).length > 0 ||
-        requiredFindings(record, slice).length > 0,
-    ) ??
-    failures
-      .map((execution) => failedCheckOwners(record, execution))
-      .find((owners) => owners.length === 1)?.[0];
+  const correction = closedProductCorrection(record, subject, failures);
   if (correction && productRefinement(record, correction).exhausted)
     return exhaustedNext(record, correction, [...gaps, ...assessmentGaps]);
   if (correction)
@@ -257,6 +255,28 @@ async function nextClosedProduct(
     evidence: [...gaps, ...assessmentGaps],
     mayEdit: false,
   });
+}
+
+function closedProductCorrection(
+  record: ProductRecord,
+  subject: string,
+  failures: ReturnType<typeof currentProductFailures>,
+) {
+  return (
+    record.brief.slices.find((slice) =>
+      currentFailedJourneys(record, subject).some(
+        (run) => run.task === slice.id && run.failure?.kind === "behavior",
+      ),
+    ) ??
+    record.brief.slices.find(
+      (slice) =>
+        reviewCorrectionOutcomes(record, slice, subject).length > 0 ||
+        requiredFindings(record, slice).length > 0,
+    ) ??
+    failures
+      .map((execution) => failedCheckOwners(record, execution))
+      .find((owners) => owners.length === 1)?.[0]
+  );
 }
 
 function finalStep(record: ProductRecord, refine: boolean, reviewer: ReviewerState) {
@@ -334,15 +354,17 @@ async function nextOpenSlice(
     hasProductFeedback ||
     latestCurrentJourneys(record, subject, slice.id).length > 0;
   const findings = requiredFindings(record, slice);
-  const reassess = reviewAfterSuccessfulRepair(
-    record,
-    slice,
-    subject,
-    findings,
-    reviewGaps.some((entry) => entry.review === "failed") ||
-      currentReviewFailure(record, subject, slice),
-    reviewer,
-  );
+  const reassess =
+    unavailableReviewerFindingsNext(workspace, record, slice, subject, reviewer.capacity) ??
+    reviewAfterSuccessfulRepair(
+      record,
+      slice,
+      subject,
+      findings,
+      reviewGaps.some((entry) => entry.review === "failed") ||
+        currentReviewFailure(record, subject, slice),
+      reviewer,
+    );
   if (reassess) return ok(reassess);
   if (
     findings.length ||

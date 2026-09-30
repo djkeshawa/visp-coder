@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
-  CRITIC_MAX_CALLS,
+  CRITIC_FEATURE_TIMEOUT_MS,
+  CRITIC_MIN_TIMEOUT_MS,
   criticConfigSchema,
   criticHarnessSchema,
   criticModeSchema,
@@ -204,7 +205,8 @@ export const criticStateSchema = z
     intent: z.string(),
     config: historicalCriticConfigSchema,
     disabled: z.boolean().default(false),
-    attempts: z.array(attemptSchema).max(CRITIC_MAX_CALLS),
+    // No-response retries spend time rather than calls; retain every possible reservation.
+    attempts: z.array(attemptSchema).max(CRITIC_FEATURE_TIMEOUT_MS / CRITIC_MIN_TIMEOUT_MS),
     preferredCandidate: z.string().optional(),
     understandingGap: z
       .object({

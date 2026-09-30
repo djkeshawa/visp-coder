@@ -35,6 +35,8 @@ const budgetSchema = z
           key: z.string(),
           phase: z.enum(["understanding", "product"]),
           reservedMs: z.number().int().positive(),
+          /** The attempt ended without a reviewer response; it keeps its time but not a call. */
+          noResponse: z.boolean().optional(),
         })
         .strict(),
     ),
@@ -126,6 +128,13 @@ function mergeHistory(budget: Budget, scope: string, state: CriticState, adoptLi
       key,
       phase: attempt.phase ?? "product",
       reservedMs: Math.max(previous?.reservedMs ?? 0, state.config.timeoutMs),
+      ...(attempt.launcher === "visp" &&
+      attempt.status === "unavailable" &&
+      attempt.execution?.returned !== true &&
+      !attempt.response &&
+      !attempt.advisoryResponse
+        ? { noResponse: true }
+        : {}),
     });
   }
   return ok({
@@ -135,17 +144,19 @@ function mergeHistory(budget: Budget, scope: string, state: CriticState, adoptLi
   });
 }
 
+/** No-response VISP retries keep their full time reservation, so interruptions cannot reset spending. */
 export function featureCriticCapacity(budget: Budget, timeoutMs = CRITIC_CALL_TIMEOUT_MS) {
   const reservedMs = budget.entries.reduce((sum, entry) => sum + entry.reservedMs, 0);
+  const callsUsed = budget.entries.filter((entry) => !entry.noResponse).length;
   return {
     scope: "feature" as const,
     limit: budget.maxCalls,
-    callsUsed: budget.entries.length,
-    callsRemaining: Math.max(0, budget.maxCalls - budget.entries.length),
+    callsUsed,
+    callsRemaining: Math.max(0, budget.maxCalls - callsUsed),
     reservableCalls: Math.max(
       0,
       Math.min(
-        budget.maxCalls - budget.entries.length,
+        budget.maxCalls - callsUsed,
         Math.floor((budget.maxReservedMs - reservedMs) / timeoutMs),
       ),
     ),
@@ -155,7 +166,7 @@ export function featureCriticCapacity(budget: Budget, timeoutMs = CRITIC_CALL_TI
     understandingCalls: budget.entries.filter((entry) => entry.phase === "understanding").length,
     productCalls: budget.entries.filter((entry) => entry.phase === "product").length,
     accounting:
-      "Full timeout reserved per attempt, including uncertain or interrupted calls; not measured provider time or cost",
+      "Full timeout reserved per attempt, including uncertain or interrupted calls; unavailable VISP attempts without a response spend time only; not measured provider time or cost",
   };
 }
 export function featureCriticBudgetGap(budget: Budget, timeoutMs: number) {

@@ -119,11 +119,18 @@ describe("VISP-launched reviewer relaunch", () => {
     await ready();
     expect(await run({ operation: "review" }, failing())).toMatchObject({
       ok: true,
-      value: { action: "unresolved", callsUsed: 1 },
+      value: {
+        action: "unresolved",
+        callsUsed: 0,
+        featureBudget: { reservedMs: config.timeoutMs },
+      },
     });
     const host = working();
     const second = await run({ operation: "review" }, host);
-    expect(second).toMatchObject({ ok: true, value: { callsUsed: 2 } });
+    expect(second).toMatchObject({
+      ok: true,
+      value: { callsUsed: 1, featureBudget: { reservedMs: 2 * config.timeoutMs } },
+    });
     expect(host.review).toHaveBeenCalledTimes(1);
     expect(await statuses()).toEqual(["unavailable", "reviewed"]);
   });
@@ -150,7 +157,11 @@ describe("VISP-launched reviewer relaunch", () => {
     const status = await run({ operation: "status" });
     expect(status).toMatchObject({
       ok: true,
-      value: { callsUsed: 2, stopped: expect.stringContaining("Previous critic attempt") },
+      value: {
+        callsUsed: 0,
+        stopped: expect.stringContaining("Previous critic attempt"),
+        featureBudget: { reservedMs: 2 * config.timeoutMs },
+      },
     });
   });
 
@@ -164,7 +175,7 @@ describe("VISP-launched reviewer relaunch", () => {
     const host = working();
     expect(await run({ operation: "review" }, host)).toMatchObject({
       ok: true,
-      value: { callsUsed: 3 },
+      value: { callsUsed: 1, featureBudget: { reservedMs: 3 * config.timeoutMs } },
     });
     expect(host.review).toHaveBeenCalledTimes(1);
     expect(await statuses()).toEqual(["unavailable", "unavailable", "reviewed"]);
@@ -185,7 +196,7 @@ describe("VISP-launched reviewer relaunch", () => {
     const host = working();
     expect(await run({ operation: "review" }, host)).toMatchObject({
       ok: true,
-      value: { callsUsed: 2 },
+      value: { callsUsed: 1, featureBudget: { reservedMs: 2 * config.timeoutMs } },
     });
     const { state } = await criticFile();
     expect(state.attempts[0]).toMatchObject({
@@ -235,7 +246,7 @@ describe("VISP-launched reviewer relaunch", () => {
     const host = working();
     expect(await run({ operation: "review" }, host)).toMatchObject({
       ok: true,
-      value: { callsUsed: 3 },
+      value: { callsUsed: 1, featureBudget: { reservedMs: 3 * config.timeoutMs } },
     });
     expect(host.review).toHaveBeenCalledTimes(1);
   });
@@ -311,12 +322,16 @@ describe("VISP-launched reviewer relaunch", () => {
       await ready(nativeConfig);
       expect(await run({ operation: "review" }, attached(failing()))).toMatchObject({
         ok: true,
-        value: { action: "unresolved", callsUsed: 1 },
+        value: {
+          action: "unresolved",
+          callsUsed: 0,
+          featureBudget: { reservedMs: config.timeoutMs },
+        },
       });
       const host = working();
       expect(await run({ operation: "review" }, attached(host))).toMatchObject({
         ok: true,
-        value: { callsUsed: 2 },
+        value: { callsUsed: 1, featureBudget: { reservedMs: 2 * config.timeoutMs } },
       });
       expect(host.review).toHaveBeenCalledTimes(1);
       const { attempts } = (await criticFile()).state;
@@ -325,6 +340,76 @@ describe("VISP-launched reviewer relaunch", () => {
         ["native", "visp"],
         ["native", "visp"],
       ]);
+    });
+
+    it("allows a response after three unavailable attempts but bounds further retries by reserved time", async () => {
+      await launch("codex-exec");
+      const timeoutMs = 150_000;
+      await ready({ ...nativeConfig, maxCalls: 3, timeoutMs });
+      for (let index = 0; index < 7; index++) {
+        await setup.workspace.write(
+          "src/value.mjs",
+          `export const value = 2; // attempt ${index}\n`,
+        );
+        expect((await runProductVerify(await setup.workspace.state(), { task: "T001" })).ok).toBe(
+          true,
+        );
+        const host = index === 3 ? working() : failing();
+        expect(await run({ operation: "review" }, attached(host))).toMatchObject({
+          ok: true,
+          value: {
+            callsUsed: index < 3 ? 0 : 1,
+            callsRemaining: index < 3 ? 3 : 2,
+            featureBudget: { reservedMs: (index + 1) * timeoutMs },
+          },
+        });
+        expect(host.review).toHaveBeenCalledTimes(1);
+      }
+      expect(await statuses()).toEqual([
+        "unavailable",
+        "unavailable",
+        "unavailable",
+        "reviewed",
+        "unavailable",
+        "unavailable",
+        "unavailable",
+      ]);
+      await setup.workspace.write("src/value.mjs", "export const value = 2; // another source\n");
+      expect((await runProductVerify(await setup.workspace.state(), { task: "T001" })).ok).toBe(
+        true,
+      );
+      const host = working();
+      expect(await run({ operation: "review" }, attached(host))).toMatchObject({
+        ok: true,
+        value: {
+          ready: false,
+          gaps: expect.arrayContaining([expect.stringContaining("time budget exhausted")]),
+          callsUsed: 1,
+          featureBudget: { reservedMs: 1_050_000, remainingMs: 30_000, reservableCalls: 0 },
+        },
+      });
+      expect(host.review).not.toHaveBeenCalled();
+      expect(await statuses()).toHaveLength(7);
+    });
+
+    it("charges a returned invalid response even though the review is unavailable", async () => {
+      await launch("codex-exec");
+      await ready(nativeConfig);
+      expect(
+        await run(
+          { operation: "review" },
+          attached({
+            review: async () => ({ model: config.model, response: {} }),
+          }),
+        ),
+      ).toMatchObject({
+        ok: true,
+        value: { callsUsed: 1, featureBudget: { reservedMs: config.timeoutMs } },
+      });
+      expect((await criticFile()).state.attempts[0]).toMatchObject({
+        status: "unavailable",
+        execution: { returned: true },
+      });
     });
 
     it("relaunches after an expired pending attempt and blocks after two failures on a source", async () => {

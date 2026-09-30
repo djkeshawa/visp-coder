@@ -7,6 +7,7 @@ export const CRITIC_MAX_CALLS = 6;
  * doubled the time. Repair gains also flatten after 2–3 rounds in published studies.
  */
 const CRITIC_DEFAULT_CALLS = 3;
+export const CRITIC_MIN_TIMEOUT_MS = 1000;
 export const CRITIC_CALL_TIMEOUT_MS = 180_000;
 export const CRITIC_FEATURE_TIMEOUT_MS = 18 * 60 * 1000;
 
@@ -22,7 +23,7 @@ export const criticConfigSchema = z
     transport: z.enum(["sampling", "native"]).optional(),
     harness: criticHarnessSchema.optional(),
     maxCalls: z.number().int().min(1).max(CRITIC_MAX_CALLS),
-    timeoutMs: z.number().int().min(1000).max(300_000),
+    timeoutMs: z.number().int().min(CRITIC_MIN_TIMEOUT_MS).max(300_000),
     maxImageBytes: z
       .number()
       .int()
