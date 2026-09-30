@@ -150,13 +150,18 @@ describe("product input and source trust boundaries", () => {
     const independent = { ...state, status: undefined };
     expect(value(await productSourceSnapshot(independent))).toHaveProperty("src/value.mjs");
     await workspace.write(".visp/helper.mjs", "export const expected = 2;");
-    const snapshot = value(
-      await productSourceSnapshot(state, {
+    const declare = (pattern: string) =>
+      productSourceSnapshot(state, {
         ...brief,
-        checks: brief.checks.map((check) => ({ ...check, files: ["**/*.mjs"] })),
-      }),
-    );
+        checks: brief.checks.map((check) => ({ ...check, files: [pattern] })),
+      });
+    // A wildcard never walks into the state directory; a pattern that starts inside it does.
+    const broad = value(await declare("**/*.mjs"));
+    expect(broad).toHaveProperty("src/value.mjs");
+    expect(broad).not.toHaveProperty(".visp/helper.mjs");
+    const snapshot = value(await declare(".visp/**/*.mjs"));
     expect(snapshot).toHaveProperty(".visp/helper.mjs");
+    expect(Object.keys(broad).some((path) => path.startsWith(".git/"))).toBe(false);
     expect(Object.keys(snapshot).some((path) => path.startsWith(".git/"))).toBe(false);
   });
   it("returns a clear unsupported result for gitlinks whether initialized or absent", async () => {

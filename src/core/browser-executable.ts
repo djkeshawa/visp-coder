@@ -1,12 +1,13 @@
 import { realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 
-/** Resolve launch aliases without starting a browser or inspecting a user's profile. */
+/**
+ * Resolve launch aliases without starting a browser or inspecting a user's profile. The
+ * identity is the realpath and size: an auto-updating or touched browser keeps its mtime out.
+ */
 export async function browserExecutableIdentity(
   binary = process.env.CHROME_BIN ?? "google-chrome",
-): Promise<
-  { path: string; size: number; mtime: number; mode: number } | { binary: string; missing: true }
-> {
+): Promise<{ path: string; size: number } | { binary: string; missing: true }> {
   const candidates =
     isAbsolute(binary) || binary.includes("/")
       ? [binary]
@@ -15,8 +16,7 @@ export async function browserExecutableIdentity(
     try {
       const path = await realpath(candidate);
       const info = await stat(path);
-      if (info.isFile() && info.mode & 0o111)
-        return { path, size: info.size, mtime: info.mtimeMs, mode: info.mode };
+      if (info.isFile() && info.mode & 0o111) return { path, size: info.size };
     } catch {
       // Missing PATH entries are normal; retain a missing selector if none resolve.
     }

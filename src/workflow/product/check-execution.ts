@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withProductCheckContext } from "../../core/check-context.js";
 import { commandExecutableDigest } from "../../core/command-executable.js";
@@ -9,15 +10,22 @@ import { hashValue } from "../../core/hash.js";
 import { outputRedactor, privatePath } from "../../core/redaction.js";
 import { err, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
-import { acceptanceEnvironment } from "./acceptance-environment.js";
+import { acceptanceEnvironment, privateTemporaryDirectory } from "./acceptance-environment.js";
 import { executeBrowserCheck } from "./browser-check-execution.js";
 import {
   describeProductCheck,
   isBrowserCheckCommand,
   validateProductCheckCommand,
 } from "./check-command.js";
+import { checkFix, missingAlias } from "./check-executable.js";
 import { browserUnavailable } from "./environment.js";
-import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
+import type {
+  ProductBrief,
+  ProductCheck,
+  ProductExecution,
+  ProductSlice,
+  ProductState,
+} from "./model.js";
 import {
   environmentOnly,
   pinnedWaivers,
@@ -36,6 +44,23 @@ export interface ExecutedProductCheck {
   readonly mutations: FileMutation[];
 }
 
+/**
+ * The comparison identity of one check's run. A command check hashes its own tool and the
+ * environment it runs under; browser-journey checks pass no check, so the check run and its
+ * capture run share one identity.
+ */
+export function checkComparisonEnvironment(
+  workspace: WorkspaceState,
+  brief: ProductBrief,
+  check: ProductCheck,
+) {
+  return productComparisonEnvironmentDigest(
+    workspace,
+    brief,
+    isBrowserCheckCommand(check.command) ? undefined : { check },
+  );
+}
+
 export async function executeProductCheck(
   workspace: WorkspaceState,
   record: ProductRecord,
@@ -47,7 +72,7 @@ export async function executeProductCheck(
   signal?: AbortSignal,
   reuseCapture = false,
 ): Promise<ExecutedProductCheck> {
-  const environment = await productComparisonEnvironmentDigest(workspace, record.brief);
+  const environment = await checkComparisonEnvironment(workspace, record.brief, check);
   const base = {
     id: randomUUID(),
     comparisonEnvironment: environment.ok ? environment.value : undefined,
@@ -299,6 +324,7 @@ export type ExecutionIdentity = Pick<
   | "createdAt"
   | "command"
   | "provenance"
+  | "comparisonEnvironment"
 >;
 
 async function executeCommand(
@@ -318,10 +344,10 @@ async function executeCommand(
     const result = await withProductCheckContext(
       workspace.paths.root,
       check.id,
-      async (environment) => {
+      async (environment, directory) => {
         const binary = argv.value[0] ?? "";
         const checkEnvironment = check.id.startsWith("PINNED_")
-          ? { ...acceptanceEnvironment(environment), ...extraEnvironment }
+          ? { ...(await privateAcceptanceEnvironment(environment, directory)), ...extraEnvironment }
           : environment;
         const before = identifyExecutable
           ? await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment)
@@ -348,16 +374,49 @@ async function executeCommand(
     );
     if (!result.ok && result.error.details?.errno === "ENOENT")
       return err(
-        vispError(
-          "COMMAND_FAILED",
-          `${result.error.message}. Check ${check.id} could not start executable ${JSON.stringify(argv.value[0])}.${process.platform === "win32" ? " Check PATH and the tool's .cmd/.bat shim." : " Correct the command or recover the installed executable in this environment."} A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples. No product behavior was tested.`,
-          { details: result.error.details },
-        ),
+        vispError("COMMAND_FAILED", missingCommandMessage(check, argv.value[0] ?? ""), {
+          details: result.error.details,
+        }),
       );
     return result;
   } catch (cause) {
     return err(fromUnknown(cause, "COMMAND_FAILED"));
   }
+}
+
+/** Short and specific: the worker's one next action, not a paragraph about environments. */
+function missingCommandMessage(check: ProductCheck, argv0: string): string {
+  const alias = missingAlias(argv0);
+  const action = check.id.startsWith("PINNED_")
+    ? "This pinned test is VISP's: do not edit it; run its command yourself with an installed interpreter and report the missing tool in your final message."
+    : alias
+      ? `Change the check: ${checkFix(check, argv0, alias)}, then run visp done.`
+      : "Use an installed executable in the check (visp brief --patch -), then run visp done.";
+  return [
+    `missing-command: ${JSON.stringify(argv0)} is not installed in this environment${alias ? ` (${JSON.stringify(alias)} is)` : ""}.`,
+    `Check ${check.id} was not run, so nothing about the product was tested.`,
+    action,
+    process.platform === "win32" ? "Check PATH and the tool's .cmd/.bat shim." : "",
+    /\s/.test(argv0)
+      ? 'A check command is executable argv (for example ["node", "--test", "test/behavior.test.mjs"]), not a manual instruction; browser actions use {kind:"browser-journey", journey:{url, actions}}. Manual behavior descriptions belong in brief examples.'
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * A pinned run gets its own HOME and temporary directory inside the check's private
+ * directory, which the check context removes: concurrent runs share no browser profile lock
+ * and leave nothing behind. Ordinary checks keep the inherited HOME (npm and git need it).
+ */
+async function privateAcceptanceEnvironment(
+  environment: Record<string, string>,
+  directory: string,
+): Promise<Record<string, string>> {
+  const home = join(directory, "home");
+  await mkdir(privateTemporaryDirectory(home), { recursive: true, mode: 0o700 });
+  return acceptanceEnvironment(environment, home);
 }
 
 function commandStatus(output: Result<CommandOutput>, root: string): ProductExecution["status"] {

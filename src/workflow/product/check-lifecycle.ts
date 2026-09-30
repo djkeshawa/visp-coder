@@ -3,7 +3,11 @@ import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
-import { type ExecutedProductCheck, executeProductCheck } from "./check-execution.js";
+import {
+  checkComparisonEnvironment,
+  type ExecutedProductCheck,
+  executeProductCheck,
+} from "./check-execution.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
 import { withProductMutation } from "./runtime.js";
 import {
@@ -87,29 +91,76 @@ export async function executeChecks(
   for (const check of commands) {
     if (options.signal?.aborted) return cancelledExecution();
     const owner = slice?.checks.includes(check.id) ? slice : undefined;
-    if (reuse && existing.get(executionOwnerKey(check.id, owner?.id))?.status === "passed")
+    if (reuse && (await reusable(workspace, record, check, existing.get(key(check, owner)))))
       continue;
-    await options.onProgress?.({ check: check.id, status: "running" });
-    if (options.signal?.aborted) return cancelledExecution();
-    const checked = await executeProductCheck(
-      workspace,
-      current,
-      owner,
+    const ran = await runCheck(workspace, record, current, {
       check,
+      owner,
       source,
-      options.retryEnvironment,
-      verifierSnapshot,
-      options.signal,
+      batch,
       close,
-    );
-    if (options.signal?.aborted) return cancelledExecution();
-    const saved = await publishCheck(workspace, record, current, checked, batch, options.signal);
-    if (!saved.ok) return saved;
-    current = saved.value;
-    executions.push(checked.execution);
-    await options.onProgress?.({ check: check.id, status: checked.execution.status });
+      options,
+      verifierSnapshot,
+    });
+    if (!ran.ok) return ran;
+    current = ran.value.record;
+    executions.push(ran.value.execution);
   }
   return options.signal?.aborted ? cancelledExecution() : ok(executions);
+}
+
+interface CheckRun {
+  readonly check: ProductCheck;
+  readonly owner: ProductSlice | undefined;
+  readonly source: string;
+  readonly batch: string;
+  readonly close: boolean;
+  readonly options: ProductSelection;
+  readonly verifierSnapshot: Record<string, string>;
+}
+
+/** Execute one check and publish its receipt; a cancellation at any step stops the batch. */
+async function runCheck(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  current: ProductRecord,
+  run: CheckRun,
+): Promise<Result<{ record: ProductRecord; execution: ProductExecution }>> {
+  const { check, options } = run;
+  await options.onProgress?.({ check: check.id, status: "running" });
+  if (options.signal?.aborted) return cancelledExecution();
+  const checked = await executeProductCheck(
+    workspace,
+    current,
+    run.owner,
+    check,
+    run.source,
+    options.retryEnvironment,
+    run.verifierSnapshot,
+    options.signal,
+    run.close,
+  );
+  if (options.signal?.aborted) return cancelledExecution();
+  const saved = await publishCheck(workspace, record, current, checked, run.batch, options.signal);
+  if (!saved.ok) return saved;
+  await options.onProgress?.({ check: check.id, status: checked.execution.status });
+  return ok({ record: saved.value, execution: checked.execution });
+}
+
+/**
+ * The subject no longer carries the toolchain, so a pass earned under another PATH, node,
+ * injected NODE_OPTIONS, locale or browser must run again. This gates every reuse trigger:
+ * closing, accept's second pass, and a pending verification of the same batch.
+ */
+async function reusable(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  check: ProductCheck,
+  prior: ProductExecution | undefined,
+) {
+  if (prior?.status !== "passed" || !prior.comparisonEnvironment?.trim()) return false;
+  const current = await checkComparisonEnvironment(workspace, record.brief, check);
+  return current.ok && current.value === prior.comparisonEnvironment;
 }
 
 function publishCheck(
@@ -137,6 +188,10 @@ function publishCheck(
       ? readProductRecord(workspace, { feature: record.brief.feature })
       : published;
   });
+}
+
+function key(check: ProductCheck, owner?: ProductSlice) {
+  return executionOwnerKey(check.id, owner?.id);
 }
 
 export function executionOwnerKey(check: string, task?: string) {

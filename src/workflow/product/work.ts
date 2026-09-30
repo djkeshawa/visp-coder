@@ -8,6 +8,7 @@ import { requireImplementationFoundation } from "../gates/readiness.js";
 import type { WorkspaceState } from "../state.js";
 import { updateProductBrief } from "./brief.js";
 import { validateProductCheckCommand } from "./check-command.js";
+import { uninstalledAlias } from "./check-executable.js";
 import { buildProductContext } from "./context.js";
 import type { ProductWorkContext } from "./context-types.js";
 import { correctionReasons } from "./corrections.js";
@@ -400,7 +401,26 @@ function readyProductSlice(
       }),
     );
   const ready = validateReadySlice(record, slice);
-  return ready.ok ? ok(slice) : ready;
+  if (!ready.ok) return ready;
+  const missing = uninstalledInterpreter(record, slice);
+  return missing ? err(missing) : ok(slice);
+}
+
+/**
+ * A check that runs `python` where only `python3` exists fails at its first `done` as an
+ * environment failure. Say so before edits begin, with the patch that fixes it; never
+ * rewrite the check here.
+ */
+function uninstalledInterpreter(record: ProductRecord, slice: ProductSlice) {
+  for (const check of checksFor(record.brief, slice)) {
+    const found = uninstalledAlias(check);
+    if (found)
+      return vispError(
+        "STAGE_BLOCKED",
+        `Check ${check.id} runs "${found.argv0}", which is not installed here; "${found.alias}" is. ${found.fix}`,
+      );
+  }
+  return undefined;
 }
 
 function workingState(

@@ -25,10 +25,10 @@ import { matchesPattern } from "../../core/patterns.js";
 import { processIdentity } from "../../core/process-identity.js";
 import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
-import { sweepStaleTempDirectories } from "../../core/stale-temp.js";
+import { removeTreeBestEffort, sweepStaleTempDirectories } from "../../core/stale-temp.js";
 import { prepareCommand } from "../../core/windows-command.js";
 import type { WorkspaceState } from "../state.js";
-import { acceptanceEnvironment } from "./acceptance-environment.js";
+import { acceptanceEnvironment, privateTemporaryDirectory } from "./acceptance-environment.js";
 import {
   createProductFeature,
   type ProductFeatureOptions,
@@ -279,6 +279,8 @@ const STALE_TESTER_NAMES = [
   /^visp-tester-[A-Za-z0-9]{6}$/,
   // The launch-time source copy and each baseline run's copy (tester-snapshot.ts).
   /^visp-tester-(?:source|baseline)-[A-Za-z0-9]{6}$/,
+  // The private HOME of one baseline run (runBaseline).
+  /^visp-baseline-[A-Za-z0-9]{6}$/,
 ];
 /** A tester is bounded by its deadline plus the baseline run; older copies are abandoned. */
 const STALE_TESTER_MS = 2 * 60 * 60_000;
@@ -1088,13 +1090,22 @@ async function runBaseline(
   const [file, ...args] = command as [string, ...string[]];
   const redact = options.redact ?? (await outputRedactor(root));
   const env = await resolvedProductExecutionEnvironment();
-  const result = await run(file, args, {
-    cwd: root,
-    env: { ...acceptanceEnvironment(env), VISP_ACCEPTANCE_BASELINE: "1", ...extra },
-    replaceEnv: true,
-    timeoutMs: options.timeoutMs ?? BASELINE_TIMEOUT_MS,
-    signal: options.signal,
-  });
+  // Its own HOME and temporary directory, as a pinned check gets: two baselines that run
+  // together share no browser profile lock.
+  const home = await mkdtemp(join(tmpdir(), "visp-baseline-"));
+  let result: Awaited<ReturnType<typeof run>>;
+  try {
+    await mkdir(privateTemporaryDirectory(home), { recursive: true, mode: 0o700 });
+    result = await run(file, args, {
+      cwd: root,
+      env: { ...acceptanceEnvironment(env, home), VISP_ACCEPTANCE_BASELINE: "1", ...extra },
+      replaceEnv: true,
+      timeoutMs: options.timeoutMs ?? BASELINE_TIMEOUT_MS,
+      signal: options.signal,
+    });
+  } finally {
+    await removeTreeBestEffort(home);
+  }
   if (!result.ok) {
     const output = redact(result.error.message);
     return { exitCode: -1, timedOut: false, spawnFailed: true, output, fullOutput: output };

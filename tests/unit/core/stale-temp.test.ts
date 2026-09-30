@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { sweepStaleTempDirectories } from "../../../src/core/stale-temp.js";
+import { removeTreeBestEffort, sweepStaleTempDirectories } from "../../../src/core/stale-temp.js";
 
 const HOUR = 60 * 60_000;
 let dir: string;
@@ -88,4 +88,31 @@ it("ignores a missing directory and an empty list of names", async () => {
   const old = await withAuth("visp-critic-aBc123", 2);
   await sweepStaleTempDirectories([], HOUR, dir);
   expect(existsSync(old)).toBe(true);
+});
+
+async function readOnlyTree(root: string) {
+  await mkdir(join(root, "home", "mod", "deep"), { recursive: true });
+  await writeFile(join(root, "home", "mod", "deep", "file"), "x");
+  await chmod(join(root, "home", "mod", "deep"), 0o500);
+  await chmod(join(root, "home", "mod"), 0o500);
+}
+
+it("removes a tree that holds read-only directories", async () => {
+  const root = join(dir, "run");
+  await readOnlyTree(root);
+  await removeTreeBestEffort(root);
+  expect(existsSync(root)).toBe(false);
+});
+
+it("never throws for a missing or unremovable path", async () => {
+  await expect(removeTreeBestEffort(join(dir, "absent"))).resolves.toBeUndefined();
+  await expect(removeTreeBestEffort("/proc/1/nonexistent")).resolves.toBeUndefined();
+});
+
+it("sweeps an abandoned baseline home even when it holds read-only directories", async () => {
+  const path = join(dir, "visp-baseline-aBc123");
+  await readOnlyTree(path);
+  await age(path, 3);
+  await sweepStaleTempDirectories([/^visp-baseline-[A-Za-z0-9]{6}$/], HOUR, dir);
+  expect(existsSync(path)).toBe(false);
 });

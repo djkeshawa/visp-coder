@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  comparisonEnvironmentParts,
+  declaredEnvironment,
   productExecutionEnvironment,
-  productIdentityEnvironment,
   resolvedProductExecutionEnvironment,
 } from "../../../src/core/execution-environment.js";
 
@@ -21,29 +22,72 @@ it.each([
   "CLAUDE_CODE_SESSION_ID",
   "CLAUDE_PID",
   "UNRELATED_SETTING",
-])("excludes incidental %s from product identity while passing it to checks", (name) => {
+  "PATH",
+])("keeps incidental %s out of comparison components while passing it to checks", (name) => {
   vi.stubEnv(name, "first");
-  const before = productIdentityEnvironment();
+  const before = comparisonEnvironmentParts(productExecutionEnvironment());
   vi.stubEnv(name, "second");
-  expect(productIdentityEnvironment()).toEqual(before);
+  expect(comparisonEnvironmentParts(productExecutionEnvironment())).toEqual(before);
   expect(productExecutionEnvironment()[name]).toBe("second");
 });
 
-it.each(["PATH", "NODE_OPTIONS", "PYTHONPATH", "LANG", "LC_ALL", "TZ", "CI"])(
-  "includes behavior-affecting %s in product identity",
-  (name) => {
-    vi.stubEnv(name, "first");
-    const before = productIdentityEnvironment();
-    vi.stubEnv(name, "second");
-    expect(productIdentityEnvironment()).not.toEqual(before);
-  },
-);
+it.each([
+  "NODE_OPTIONS",
+  "PYTHONPATH",
+  "DYLD_INSERT_LIBRARIES",
+  "LD_PRELOAD",
+  "LD_AUDIT",
+  "BASH_ENV",
+  "SHELLOPTS",
+  "BASHOPTS",
+  "PYTEST_ADDOPTS",
+  "PYTEST_PLUGINS",
+  "npm_config_registry",
+  "NPM_CONFIG_PREFIX",
+  "JAVA_TOOL_OPTIONS",
+  "JDK_JAVA_OPTIONS",
+  "_JAVA_OPTIONS",
+  "RUBYOPT",
+  "RUBYLIB",
+  "PERL5LIB",
+  "PERL5OPT",
+  "GOFLAGS",
+  "PLAYWRIGHT_BROWSERS_PATH",
+  "LANG",
+  "LC_ALL",
+  "LC_TIME",
+  "TZ",
+  "CI",
+])("includes behavior-affecting %s in comparison components", (name) => {
+  vi.stubEnv(name, "first");
+  const before = comparisonEnvironmentParts(productExecutionEnvironment());
+  vi.stubEnv(name, "second");
+  expect(comparisonEnvironmentParts(productExecutionEnvironment())).not.toEqual(before);
+});
 
-it("includes explicitly declared application variables", () => {
+it("leaves the bytecode prefix VISP sets itself out of the comparison, but not an operator's", () => {
+  vi.stubEnv("PYTHONPYCACHEPREFIX", "/visp/own-cache");
+  const own = comparisonEnvironmentParts(productExecutionEnvironment(), "/visp/own-cache");
+  vi.stubEnv("PYTHONPYCACHEPREFIX", "/operator/cache");
+  const operator = comparisonEnvironmentParts(productExecutionEnvironment(), "/visp/own-cache");
+  expect(operator).not.toEqual(own);
+  vi.stubEnv("PYTHONPYCACHEPREFIX", "/operator/other");
+  expect(comparisonEnvironmentParts(productExecutionEnvironment(), "/visp/own-cache")).not.toEqual(
+    operator,
+  );
+  vi.stubEnv("PYTHONPYCACHEPREFIX", undefined);
+  expect(comparisonEnvironmentParts(productExecutionEnvironment(), "/visp/own-cache")).toEqual(own);
+});
+
+it("includes explicitly declared application variables and nothing else", () => {
   vi.stubEnv("APP_MODE", "first");
-  const before = productIdentityEnvironment(["APP_MODE"]);
+  vi.stubEnv("PATH", "/first");
+  const before = declaredEnvironment(["APP_MODE"]);
+  vi.stubEnv("PATH", "/second");
+  expect(declaredEnvironment(["APP_MODE"])).toEqual(before);
   vi.stubEnv("APP_MODE", "second");
-  expect(productIdentityEnvironment(["APP_MODE"])).not.toEqual(before);
+  expect(declaredEnvironment(["APP_MODE"])).not.toEqual(before);
+  expect(declaredEnvironment()).toEqual({});
 });
 
 async function isolatedCache() {
