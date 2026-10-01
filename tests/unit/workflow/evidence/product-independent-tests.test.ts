@@ -1136,6 +1136,10 @@ it("tells the tester to print a FAIL line per test with a browser carve-out", as
   expect(prompts[0]).toContain("This holds when nothing is implemented yet");
   expect(prompts[0]).toContain("never import or start the product at file top level");
   expect(prompts[0]).toContain("when the browser itself cannot start, print `ENVIRONMENT ERROR:");
+  expect(prompts[0]).toContain("PASS: <exact name from tests[].name>");
+  expect(prompts[0]).toContain("print the qualifying event count");
+  expect(prompts[0]).toContain("NOT OBSERVED: <exact name from tests[].name>");
+  expect(prompts[0]).toContain("informational coverage gap, not a failure or pass");
 });
 
 // A suite whose browser cannot start says so instead of failing tests. VISP believes it only
@@ -1530,8 +1534,14 @@ it.each([
     expect(prompts).toHaveLength(1);
     const prompt = prompts[0] as string;
     expect(prompt).toContain(
-      "- For each invariant the request states (something never happens: never passes through, never exceeds, never negative), include one bounded check that tries to break it (a small sweep of inputs or a simulated run) and fails if it ever happens.",
+      "sample during the run, not only terminal snapshots, and include every named moving actor",
     );
+    expect(prompt).toContain("test each named context once");
+    expect(prompt).toContain("direct reference, operator, function argument, range");
+    expect(prompt).toContain("happens as soon as (or immediately when) a trigger holds");
+    expect(prompt).toContain("stop at the FIRST state where the trigger or state holds");
+    expect(prompt).toContain("Where the request states a delay, check within that delay");
+    expect(prompt).toContain("never assert an immediacy the request does not state");
     expect(prompt).not.toContain(TESTER_BROWSER_KIT.trim());
     expect(prompt.includes("openPage(url,")).toBe(kit);
     expect(prompt.includes("BrowserUnavailable")).toBe(kit);

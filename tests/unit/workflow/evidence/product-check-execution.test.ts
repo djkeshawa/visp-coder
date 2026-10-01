@@ -121,12 +121,46 @@ describe("product command check execution boundary", () => {
     expect(kept.names).toHaveLength(60);
     expect(kept.unattributed).toBe(0);
   });
+  it("keeps a real FAIL below the evidence limit when many coverage gaps precede the tail", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const text = [
+      "FAIL: real assertion: wrong value",
+      ...Array.from(
+        { length: 40 },
+        (_, index) => `NOT OBSERVED: conditional interaction ${index}: 0 qualifying events`,
+      ),
+      "x".repeat(5300),
+    ].join("\n");
+    expect(text.length).toBeLessThan(7998);
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [
+            process.execPath,
+            "-e",
+            `console.log(${JSON.stringify(text)}); process.exit(1)`,
+          ],
+        })),
+      },
+      reason: "Exercise a failure among many coverage gaps",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output.length).toBeLessThanOrEqual(8000);
+    expect(output).toContain("FAIL: real assertion: wrong value");
+  });
   it("retains undisputed failures across the final assertion-result tail boundary", async () => {
     const { workspace, brief } = await productWorkspace();
     workspaces.push(workspace);
     const lines = [
       "FAIL: disputed A",
       ...Array.from({ length: 100 }, (_, index) => `PASS: assertion ${index}`),
+      "NOT OBSERVED: conditional contact: 0 qualifying events",
       "x".repeat(10000),
       "FAIL: undisputed B",
       "x".repeat(3500),
@@ -152,6 +186,9 @@ describe("product command check execution boundary", () => {
     );
     expect(execution.output).toContain("FAIL: disputed A");
     expect(execution.output).toContain("FAIL: undisputed B");
+    expect(execution.output).toContain("PASS: assertion 0");
+    expect(execution.output).toContain("NOT OBSERVED: conditional contact: 0 qualifying events");
+    expect(execution.status).toBe("failed");
     expect(execution.output.length).toBeLessThanOrEqual(8000);
     expect(
       disputedFailure(execution, {

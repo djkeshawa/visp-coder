@@ -926,6 +926,21 @@ it("attributes FAIL lines to declared tests without counting uncaught errors", (
   });
 });
 
+it("keeps PASS and NOT OBSERVED informational without masking failures or uncaught errors", () => {
+  const declared = ["Error: value", "at rest", "collision"];
+  const information = "PASS: Error: value\r\n  NOT OBSERVED: at rest: 0 qualifying events\r\n";
+  expect(failLineStats(information, declared)).toEqual({ named: [], undeclared: [] });
+  expect(failingTests(information, declared)).toEqual({ names: [], unattributed: 0 });
+  expect(allFailuresIn(information, declared, declared)).toBe(false);
+  const output = `${information}FAIL: collision: broken\nFAIL: unknown: broken\nError: uncaught`;
+  expect(failLineStats(output, declared)).toEqual({
+    named: ["collision"],
+    undeclared: ["unknown: broken"],
+  });
+  expect(failingTests(output, declared)).toEqual({ names: ["collision"], unattributed: 2 });
+  expect(allFailuresIn(output, declared, ["collision"])).toBe(false);
+});
+
 it("finds the message of an ENVIRONMENT ERROR line only at the start of a line", () => {
   expect(environmentErrorLine("ok\n  ENVIRONMENT ERROR: Chrome not found\nexit")).toBe(
     "Chrome not found",

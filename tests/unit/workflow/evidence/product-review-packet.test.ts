@@ -183,62 +183,72 @@ it("puts the explicit executed entry ahead of broad declared application inputs"
   );
 });
 
-it("delivers an executed check's source and early named result through a prepared reviewer packet", async () => {
-  const { productWorkspace } = await import("../../support/product-workspace.js");
-  const { updateProductBrief, runProductWork, runProductVerify } = await import(
-    "../../../../src/workflow/product/index.js"
-  );
-  const { runProductReviewRequest } = await import(
-    "../../../../src/workflow/product/review-request.js"
-  );
-  const p = await productWorkspace();
-  try {
-    const script =
-      "import assert from 'node:assert/strict';\nimport {value} from '../src/value.mjs';\nassert.equal(value, 2);\nconsole.log('PASS: the promised value is two');\nconsole.log('verbose setup noise\\n'.repeat(2000));\n";
-    await p.workspace.write("test/check.mjs", script);
-    const updated = await updateProductBrief(await p.workspace.state(), {
-      brief: {
-        ...p.brief,
-        checks: [
-          { ...p.brief.checks[0], command: [process.execPath, "test/check.mjs"], files: [] },
-        ],
-        slices: [
-          {
-            ...p.brief.slices[0],
-            scope: { allowed: ["src/value.mjs", "test/check.mjs"], expected: [], forbidden: [] },
-          },
-        ],
-      },
-      reason: "Use the executed assertion entry without file hints",
-    });
-    expect(updated.ok).toBe(true);
-    expect((await runProductWork(await p.workspace.state(), { task: "T001" })).ok).toBe(true);
-    await p.workspace.write("src/value.mjs", "export const value = 2;\n");
-    const verified = await runProductVerify(await p.workspace.state(), { task: "T001" });
-    expect(verified.ok).toBe(true);
-    const state = await p.workspace.state();
-    const prepared = await runProductReviewRequest(state, { prepare: true, task: "T001" });
-    if (!prepared.ok) throw new Error(prepared.error.message);
-    const packetPath = (prepared.value as { packetPath: string }).packetPath;
-    const read = await state.files.readText(packetPath);
-    if (!read.ok) throw new Error(read.error.message);
-    const packet = JSON.parse(read.value);
-    expect(
-      packet.sources.find((source: { reference: string }) => source.reference === "test/check.mjs")
-        ?.excerpt,
-    ).toContain("assert.equal(value, 2)");
-    expect(
-      packet.sources.find((source: { kind: string }) => source.kind === "executed-check")?.excerpt,
-    ).toContain("PASS: the promised value is two");
-    expect(
-      packet.evidence
-        .filter((entry: { kind: string; status: string }) => entry.kind === "execution")
-        .some((entry: { status: string }) => entry.status === "available"),
-    ).toBe(true);
-  } finally {
-    await p.workspace.destroy();
-  }
-});
+it.each([0, 2000])(
+  "delivers named results and coverage gaps through a reviewer packet (%i noise lines)",
+  async (noiseLines) => {
+    const { productWorkspace } = await import("../../support/product-workspace.js");
+    const { updateProductBrief, runProductWork, runProductVerify } = await import(
+      "../../../../src/workflow/product/index.js"
+    );
+    const { runProductReviewRequest } = await import(
+      "../../../../src/workflow/product/review-request.js"
+    );
+    const p = await productWorkspace();
+    try {
+      const script = `import assert from 'node:assert/strict';\nimport {value} from '../src/value.mjs';\nassert.equal(value, 2);\nconsole.log('PASS: the promised value is two');\nconsole.log('NOT OBSERVED: retry after error: 0 qualifying events');\nconsole.log('verbose setup noise\\n'.repeat(${noiseLines}));\n`;
+      await p.workspace.write("test/check.mjs", script);
+      const updated = await updateProductBrief(await p.workspace.state(), {
+        brief: {
+          ...p.brief,
+          checks: [
+            { ...p.brief.checks[0], command: [process.execPath, "test/check.mjs"], files: [] },
+          ],
+          slices: [
+            {
+              ...p.brief.slices[0],
+              scope: { allowed: ["src/value.mjs", "test/check.mjs"], expected: [], forbidden: [] },
+            },
+          ],
+        },
+        reason: "Use the executed assertion entry without file hints",
+      });
+      expect(updated.ok).toBe(true);
+      expect((await runProductWork(await p.workspace.state(), { task: "T001" })).ok).toBe(true);
+      await p.workspace.write("src/value.mjs", "export const value = 2;\n");
+      const verified = await runProductVerify(await p.workspace.state(), { task: "T001" });
+      expect(verified.ok).toBe(true);
+      const state = await p.workspace.state();
+      const prepared = await runProductReviewRequest(state, { prepare: true, task: "T001" });
+      if (!prepared.ok) throw new Error(prepared.error.message);
+      const packetPath = (prepared.value as { packetPath: string }).packetPath;
+      const read = await state.files.readText(packetPath);
+      if (!read.ok) throw new Error(read.error.message);
+      const packet = JSON.parse(read.value);
+      expect(
+        packet.sources.find(
+          (source: { reference: string }) => source.reference === "test/check.mjs",
+        )?.excerpt,
+      ).toContain("assert.equal(value, 2)");
+      expect(
+        packet.sources.find((source: { kind: string }) => source.kind === "executed-check")
+          ?.excerpt,
+      ).toContain("PASS: the promised value is two");
+      const result = packet.sources.find(
+        (source: { kind: string }) => source.kind === "executed-check",
+      )?.excerpt;
+      expect(result).toContain("NOT OBSERVED: retry after error: 0 qualifying events");
+      expect(result).toMatch(/coverage gap/i);
+      expect(result).toContain("passed; exit 0");
+      expect(
+        packet.evidence
+          .filter((entry: { kind: string; status: string }) => entry.kind === "execution")
+          .some((entry: { status: string }) => entry.status === "available"),
+      ).toBe(true);
+    } finally {
+      await p.workspace.destroy();
+    }
+  },
+);
 
 it.each([
   ["node", "--test", "tests/api.test.mjs"],
