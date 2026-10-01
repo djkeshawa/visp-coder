@@ -83,7 +83,7 @@ export function reviewCheckResult(execution: ProductExecution, check?: ProductCh
     "Recorded assertion results/output (names are supplied only when the check emitted them):",
     ...(/^\s*NOT OBSERVED:/im.test(execution.output)
       ? [
-          "Coverage gap: NOT OBSERVED means zero qualifying events; it establishes neither a passing assertion nor a product failure.",
+          "Coverage gap: NOT OBSERVED means zero qualifying events or a goal the tester's bounded search never reached; it establishes neither a passing assertion nor a product failure. An unreached goal the request defines (winning a level, completing a flow) is a consequential open question: check from source and evidence whether a player can reach it before rating its outcome satisfied.",
         ]
       : []),
     execution.output ||

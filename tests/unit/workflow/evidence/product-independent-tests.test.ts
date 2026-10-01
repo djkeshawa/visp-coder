@@ -693,6 +693,13 @@ it("runs the pinned tests when the last open slice is done", async () => {
     inlineTests(tester({ name: "value.test.mjs", content: FAILS_FIRST })),
   );
   expect(work.ok && work.value.independentTests?.status).toBe("pinned");
+  // Pinned tests point the worker at done, which records each failure without spending a review.
+  expect(work.ok && work.value.independentTests?.instructions).toContain(
+    "run it as soon as the slice works instead of waiting for every test to pass by hand",
+  );
+  expect(work.ok && work.value.independentTests?.instructions).toContain(
+    "No review call is spent while a check fails, unless the only failures are pinned tests you disputed.",
+  );
   await fixture.workspace.write("src/value.mjs", "export const value = 3;\n");
   await fixture.workspace.write(
     "test/value.test.mjs",
@@ -1536,7 +1543,20 @@ it.each([
     expect(prompt).toContain(
       "sample during the run, not only terminal snapshots, and include every named moving actor",
     );
-    expect(prompt).toContain("test each named context once");
+    expect(prompt).toContain(
+      "include one case for each value kind whose behavior the request defines there",
+    );
+    expect(prompt).toContain("Apply the stated rules together");
+    expect(prompt).toContain(
+      "Angles and directions are bounded (one full turn, or the range the request names)",
+    );
+    expect(prompt).toContain(
+      "print `NOT OBSERVED: <exact name>: <attempts> attempts` instead of FAIL",
+    );
+    expect(prompt).toContain("Only a truly open domain goes to `ambiguities`.");
+    expect(prompt).toContain(
+      "put the case and its conventional reading in `ambiguities`, not a test",
+    );
     expect(prompt).toContain("direct reference, operator, function argument, range");
     expect(prompt).toContain("happens as soon as (or immediately when) a trigger holds");
     expect(prompt).toContain("stop at the FIRST state where the trigger or state holds");

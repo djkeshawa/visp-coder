@@ -350,7 +350,7 @@ export function unreportedTests(
   const reported = new Set<string>();
   let hasPass = false;
   for (const line of output.split(OUTPUT_LINES)) {
-    const match = /^\s*(PASS|FAIL):\s*(.*)$/i.exec(line);
+    const match = /^\s*(PASS|FAIL|NOT OBSERVED):\s*(.*)$/i.exec(line);
     if (!match) continue;
     const name = declaredName(match[2] ?? "", declared);
     if (!name) continue;

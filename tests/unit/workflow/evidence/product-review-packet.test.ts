@@ -238,6 +238,7 @@ it.each([0, 2000])(
       )?.excerpt;
       expect(result).toContain("NOT OBSERVED: retry after error: 0 qualifying events");
       expect(result).toMatch(/coverage gap/i);
+      expect(result).toContain("check from source and evidence whether a player can reach it");
       expect(result).toContain("passed; exit 0");
       expect(
         packet.evidence
