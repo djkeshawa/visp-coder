@@ -76,6 +76,7 @@ export function prepareReviewSession(
         bundle.evidence,
         bundle.interactionEvidence,
         sources.value,
+        bundle.experiments,
       ),
     };
     const saved = await applyFileTransaction(workspace.paths.root, "prepare-review-session", [

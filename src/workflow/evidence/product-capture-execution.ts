@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import type { z } from "zod";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
@@ -23,6 +24,11 @@ import {
   supportedHostCaptureRecovery,
 } from "../product/environment-model.js";
 import type { inspectProductImages } from "../product/images.js";
+import {
+  isDeclaredJourney,
+  isExploratoryJourney,
+  type journeyExpectationSchema,
+} from "../product/journey-ownership.js";
 import type { productObservationPlan } from "../product/observation-plan.js";
 import type { ProductRecord } from "../product/store.js";
 import {
@@ -35,6 +41,8 @@ import { productJourneyKey } from "./product-journey.js";
 import type { ProductReviewCapture } from "./product-review.js";
 
 export interface ProductCaptureResult {
+  readonly expectation?: z.infer<typeof journeyExpectationSchema>;
+  readonly information?: string;
   readonly behaviorChange?: ReturnType<typeof captureBehaviorChange>;
   readonly captures: ProductReviewCapture[];
   readonly operations: number;
@@ -56,6 +64,7 @@ export interface PreparedProductCapture {
 
 interface CaptureExecutionOptions {
   readonly journey: unknown;
+  readonly outcomes?: readonly string[];
   readonly task?: string;
   readonly binary?: string;
   readonly signal?: AbortSignal;
@@ -118,6 +127,7 @@ export async function withProductCapture<T>(
       options.task,
       comparisonEnvironment,
       options.binary,
+      options.outcomes,
     );
     return await publish(prepared);
   } catch (cause) {
@@ -136,6 +146,7 @@ async function prepareCaptures(
   task?: string,
   comparisonEnvironment?: string,
   binary?: string,
+  outcomes: readonly string[] = [],
 ): Promise<PreparedProductCapture> {
   const captures: ProductReviewCapture[] = [],
     mutations: FileMutation[] = [];
@@ -163,7 +174,16 @@ async function prepareCaptures(
     "captures",
     `run-${id}.json`,
   );
+  const expectation = {
+    basis:
+      outcomes.length ||
+      isDeclaredJourney(record, { task, journeyKey: productJourneyKey(journey, task) })
+        ? ("declared" as const)
+        : ("agent-proposed" as const),
+    outcomes: [...outcomes],
+  };
   const run = {
+    expectation,
     id,
     version: 2,
     provenance: "runner-executed",
@@ -223,6 +243,13 @@ async function prepareCaptures(
     },
     mutations,
     result: {
+      expectation,
+      ...(isExploratoryJourney(record, run) && result.failure?.kind === "behavior"
+        ? {
+            information:
+              "Exploratory expectation failed. This is information, not required replay. Preserve this receipt; retire the hypothesis with capture --retire and a one-line --reason if unsupported. The independent reviewer can retain a real defect.",
+          }
+        : {}),
       captures,
       operations: result.operations.length,
       status: result.status,
@@ -246,6 +273,7 @@ function captureFailure(cause: unknown, record: ProductRecord, options: CaptureE
       feature: record.brief.feature,
       task: options.task,
       journey: options.journey,
+      outcomes: options.outcomes,
       binary: options.binary,
     });
     return err(

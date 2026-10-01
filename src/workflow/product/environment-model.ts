@@ -21,6 +21,7 @@ export interface SupportedHostCaptureInput {
   readonly task?: string;
   readonly journey?: unknown;
   readonly replay?: string;
+  readonly outcomes?: readonly string[];
   readonly binary?: string;
 }
 
@@ -76,6 +77,7 @@ function supportedHostCaptureOption(input: SupportedHostCaptureInput) {
       : input.journey !== undefined
         ? { journey: input.journey }
         : {}),
+    ...(input.outcomes ? { outcomes: input.outcomes } : {}),
     ...(input.binary ? { binary: input.binary } : {}),
   };
   return {

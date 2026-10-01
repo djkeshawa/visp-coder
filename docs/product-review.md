@@ -108,13 +108,19 @@ actions:
 YAML
 ```
 
+New ad hoc captures record an agent-proposed exploratory expectation unless they match a declared browser check or you link declared outcomes with `--outcome O001` (MCP `outcomes: ["O001"]`). A failed unlinked expectation is reported once as information and stays in history; it is not required replay work. Declared checks, outcome-linked journeys and independent reviewer-required defects retain their obligations. Legacy receipts without ownership metadata retain their existing semantics.
+
+Retire your own unlinked exploratory hypothesis with `visp capture --retire <run-id> --reason "Ordinary missed aim; winning was only a hypothesis"` (MCP `retire`, `reason`). The one-line reason is recorded separately and shown to the independent reviewer alongside the original failure. Retirement never changes a failed receipt to a pass. A reviewer can still require repair by citing its operation or image evidence in a required finding.
+
 After a repair, `visp capture --replay <run-id>` reruns a recorded journey against the current code and compares observations; a shallower new capture cannot erase a known failure. MCP `visp_capture` accepts the same journey object, or `replay`.
+
+`visp capture --replay-batch <run-id>` (MCP `replayBatch`) replays the canonical saved input plus distinct saved neighbouring transitions on the same route and control targets in one result. It excludes unsupported failed exploratory hypotheses and retired exploratory journeys. Each journey starts fresh, preserves its actions and assertions, and returns its own receipt and status, including failures. No new neighbour is invented; add one explicitly when relevant coverage is missing.
 
 `visp observations --outcome <id>` lists an outcome's captured output, freshness and image paths. MCP `visp_observations` delivers the actual images.
 
 ## Failed journeys
 
-A failed journey keeps its completed operations and the last observation: expected state, actual state, elapsed time and diagnostics, plus any partial images. Partial images never count as a successful journey. Uncaught application exceptions are recorded as behavioral failures. A failure stays open until the same journey passes on the repaired product; an unrelated successful capture does not clear it.
+A failed journey keeps its completed operations and the last observation: expected state, actual state, elapsed time and diagnostics, plus any partial images. Partial images never count as a successful journey. Uncaught application exceptions are recorded as behavioral failures. A retained failure stays open until the same journey passes on the repaired product; an unrelated successful capture does not clear it.
 
 Browser startup and permission problems are environment failures, not product failures. For slices with browser checks, `visp work` first confirms that an isolated browser can start and capture. If it cannot, implementation may continue inside scope, but browser checks and experience review stay unresolved until the host environment is fixed (install a browser, set `CHROME_BIN`, or grant the host's permission) and `--retry-environment` succeeds.
 

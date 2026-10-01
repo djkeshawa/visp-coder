@@ -233,6 +233,9 @@ function reviewEvidenceDigest(
       .map(({ kind, status, summary, measurement }) => ({ kind, status, summary, measurement })),
     ...(disputes ? { disputes } : {}),
     reproductions: reproductionContextDigest(record),
+    journeyRetirements: record.state.journeyRetirements?.filter(
+      (entry) => !slice || !entry.task || entry.task === slice.id,
+    ),
   });
 }
 

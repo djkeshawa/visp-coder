@@ -1,3 +1,4 @@
+import { historicalFindingJourney } from "./exploratory-history.js";
 import { type FunctionalFinding, findFunctionalRepair } from "./functional-resolution.js";
 import { findingReproductions } from "./reproduction-bindings.js";
 import type { ProductRecord } from "./store.js";
@@ -29,11 +30,14 @@ export function selectRepairReproduction(
       : undefined;
   const witnessed = witness && observations.find((entry) => entry.id === witness.reproductionId);
   const attached = findingReproductions(record, finding).at(-1);
+  const historical = historicalFindingJourney(record, finding.evidence);
   return witnessed
     ? { subjectDigest: witnessed.subjectDigest, evidence: [witnessed.id] }
     : attached
       ? { subjectDigest: attached.subjectDigest, evidence: [attached.execution] }
-      : finding;
+      : historical
+        ? { subjectDigest: historical.subjectDigest, evidence: finding.evidence }
+        : finding;
 }
 
 /** Search observed identities only; a candidate still needs explicit environment assessment. */
