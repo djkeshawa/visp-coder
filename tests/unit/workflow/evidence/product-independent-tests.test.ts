@@ -1542,6 +1542,13 @@ it.each([
     );
     expect(prompt).toContain("test each named context once with each value kind the rules mention");
     expect(prompt).toContain("Where two stated rules meet in one case");
+    expect(prompt).toContain(
+      "Angles and directions are bounded (one full turn, or the range the request names)",
+    );
+    expect(prompt).toContain(
+      "print `NOT OBSERVED: <exact name>: <attempts> attempts` instead of FAIL",
+    );
+    expect(prompt).toContain("Only a truly open domain goes to `ambiguities`.");
     expect(prompt).toContain("list the case in `ambiguities` with its conventional reading");
     expect(prompt).toContain("direct reference, operator, function argument, range");
     expect(prompt).toContain("happens as soon as (or immediately when) a trigger holds");

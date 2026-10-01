@@ -27,6 +27,7 @@ import {
   environmentOnly,
   failingTests,
   failLineStats,
+  unreportedTests,
   waivedFailure,
 } from "../../../../src/workflow/product/pinned-dispute-model.js";
 import {
@@ -1479,3 +1480,14 @@ it.each(["\n", "\n\n"])(
     expect(allFailuresIn(output, ["a"], ["a"])).toBe(false);
   },
 );
+
+it("counts a NOT OBSERVED goal search as reported, so it never blocks an upheld waiver", () => {
+  const declared = ["a", "level 2 can be won", "c"];
+  const output = "PASS: a\nNOT OBSERVED: level 2 can be won: 400 attempts\nFAIL: c: contradicted";
+  expect(unreportedTests(output, declared)).toEqual([]);
+  expect(allFailuresIn(output, declared, ["c"])).toBe(true);
+  // A test with no line at all is still unreported.
+  expect(unreportedTests("PASS: a\nFAIL: c: contradicted", declared)).toEqual([
+    "level 2 can be won",
+  ]);
+});
