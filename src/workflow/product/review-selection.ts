@@ -7,13 +7,38 @@ import type { WorkspaceState } from "../state.js";
 import { isBrowserCheckCommand } from "./check-command.js";
 import type { productReviewImageGroups } from "./image-groups.js";
 import { captureSchema, inspectProductImages } from "./images.js";
-import { assessmentSchema, checksFor, type ProductOutcome, type ProductSlice } from "./model.js";
+import {
+  assessmentSchema,
+  checksFor,
+  closedSlice,
+  type ProductOutcome,
+  type ProductSlice,
+} from "./model.js";
 import { observationSequence } from "./observation-preview.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { reproductionContextDigest } from "./reproduction-bindings.js";
 import type { ProductReviewOptions } from "./review.js";
 import { preferredReviewCaptures } from "./review-context.js";
 import type { ProductRecord } from "./store.js";
 import { productContractDigest } from "./subject.js";
+
+/** Closing this slice leaves no unfinished slice in the feature. */
+export function completesFeature(record: ProductRecord, task?: string): boolean {
+  return record.brief.slices.every(
+    (slice) => slice.id === task || closedSlice(record.state.slices[slice.id]?.status),
+  );
+}
+
+/** An implicit completing review assesses the assembled feature, even before closure. */
+export function reviewSlice(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  selected: ProductSlice | undefined,
+  explicit?: string,
+): ProductSlice | undefined {
+  const completing = reviewerRules(workspace) && completesFeature(record, selected?.id);
+  return explicit === undefined && (completing || completesFeature(record)) ? undefined : selected;
+}
 
 /** A bounded, reproducible selection, not authentication of a reviewer or proof of image viewing. */
 export const reviewSelectionSchema = z

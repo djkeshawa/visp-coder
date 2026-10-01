@@ -371,7 +371,7 @@ async function prepareExecution(
   if (!snapshot.ok) return snapshot;
   const source = await productSourceDigest(workspace, record.brief, snapshot.value);
   if (!source.ok) return source;
-  const commands = executionCommands(workspace, record, slice, accept, source.value);
+  const commands = executionCommands(workspace, record, slice, close, accept, source.value);
   return ok({
     record,
     slice,
@@ -407,15 +407,20 @@ function executionCommands(
   workspace: WorkspaceState,
   record: ProductRecord,
   slice: ProductSlice | undefined,
+  close: boolean,
   accept: boolean,
   subject: string,
 ): ProductCheck[] {
   const { brief } = record;
+  // The completing VISP review needs current receipts for earlier outcomes too. Checks
+  // outside this slice retain feature ownership and the full feature contract.
+  const completing = close && slice && reviewerRules(workspace) && lastOpenSlice(record, slice);
   const commands = [
     ...new Map(
-      [...checksFor(brief, slice), ...(slice ? correctionChecks(record, slice, subject) : [])].map(
-        (check) => [check.id, check],
-      ),
+      [
+        ...checksFor(brief, completing ? undefined : slice),
+        ...(slice ? correctionChecks(record, slice, subject) : []),
+      ].map((check) => [check.id, check]),
     ).values(),
   ];
   // The last open slice completes the product, so the pinned tests should pass there too. A

@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
+import { CRITIC_MAX_CALLS } from "../../../../src/config/critic.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import {
   type CriticPacket,
@@ -134,9 +135,12 @@ describe("VISP's reviewer capacity", () => {
 
   it("is available before any review, and for a selection with no reviewer configured", async () => {
     await launch("codex-exec");
-    expect(await capacity()).toEqual({ available: true });
+    expect(await capacity()).toMatchObject({ available: true, callsRemaining: CRITIC_MAX_CALLS });
     await ready();
-    expect(await capacity(await subject())).toEqual({ available: true });
+    expect(await capacity(await subject())).toMatchObject({
+      available: true,
+      callsRemaining: config.maxCalls,
+    });
   });
 
   it("is gone when the feature's calls are spent", async () => {
@@ -168,13 +172,19 @@ describe("VISP's reviewer capacity", () => {
     await ready();
     const source = await subject();
     await run({ operation: "review" }, failing());
-    expect(await capacity(source)).toEqual({ available: true });
+    expect(await capacity(source)).toMatchObject({
+      available: true,
+      callsRemaining: config.maxCalls,
+    });
     await run({ operation: "review" }, failing());
     expect(await capacity(source)).toMatchObject({
       available: false,
       reason: expect.stringContaining("failed twice"),
     });
-    expect(await capacity(await edit("changed"))).toEqual({ available: true });
+    expect(await capacity(await edit("changed"))).toMatchObject({
+      available: true,
+      callsRemaining: config.maxCalls,
+    });
   });
 
   it("ignores a failure the worker submitted through prepare and submit", async () => {
@@ -194,7 +204,10 @@ describe("VISP's reviewer capacity", () => {
       },
     });
     // One call was spent, but a worker-submitted failure never disables VISP's reviewer.
-    expect(await capacity(source)).toEqual({ available: true });
+    expect(await capacity(source)).toMatchObject({
+      available: true,
+      callsRemaining: config.maxCalls - 1,
+    });
     await run({ operation: "review" }, failing());
     await run({ operation: "review" }, failing());
     expect(await capacity(source)).toMatchObject({

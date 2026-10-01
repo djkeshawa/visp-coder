@@ -16,14 +16,12 @@ import { productReviewImageGroups } from "./image-groups.js";
 import type { DeliveredProductImageGroup } from "./images.js";
 import { readTestsRecord } from "./independent-tests.js";
 import {
-  closedSlice,
   type PRODUCT_REVIEW_POLICY,
   type ProductAssessment,
   type ProductCoverageAssessment,
   type ProductExecution,
   type ProductOutcome,
   type ProductReviewerContext,
-  type ProductSlice,
   reviewerContextSchema,
 } from "./model.js";
 import type { observationSequence } from "./observation-preview.js";
@@ -39,13 +37,14 @@ import {
   inspectSelectedImages,
   type ReviewSelection,
   reviewImageGaps,
+  reviewSlice,
   suppliedCaptures,
 } from "./review-selection.js";
 import { submitReview } from "./review-submission.js";
 import { withProductMutation } from "./runtime.js";
 import { selectProductSlice } from "./scopes.js";
 import type { ProductSource, sourceClaims } from "./sources.js";
-import { type ProductRecord, type ProductSelection, readProductRecord } from "./store.js";
+import { type ProductSelection, readProductRecord } from "./store.js";
 import {
   productContractDigest,
   productImplementationDigest,
@@ -130,7 +129,7 @@ async function review(
   let record = loaded.value;
   const selected = selectProductSlice(workspace, record, options);
   if (!selected.ok) return selected;
-  const slice = reviewSlice(record, selected.value, options.task);
+  const slice = reviewSlice(workspace, record, selected.value, options.task);
   const snapshot = await productSourceSnapshot(workspace, record.brief);
   if (!snapshot.ok) return snapshot;
   const subject = await productSourceDigest(workspace, record.brief, snapshot.value);
@@ -258,15 +257,4 @@ function reviewerInput(options: ProductReviewOptions, previous?: ProductReviewer
     options.reviewer ??
     (options.assessments === undefined ? previous : undefined) ?? { context: "unspecified" }
   );
-}
-
-function reviewSlice(
-  record: ProductRecord,
-  selected: ProductSlice | undefined,
-  explicit?: string,
-): ProductSlice | undefined {
-  if (explicit !== undefined) return selected;
-  return record.brief.slices.every((entry) => closedSlice(record.state.slices[entry.id]?.status))
-    ? undefined
-    : selected;
 }

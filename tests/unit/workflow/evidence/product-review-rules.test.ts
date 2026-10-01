@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { skippableReview } from "../../../../src/workflow/product/done-review.js";
+import { reviewOwed, skippableReview } from "../../../../src/workflow/product/done-review.js";
 import { reviewerVerifiedRepair } from "../../../../src/workflow/product/feedback.js";
 import {
   CRITIC_INSTRUCTIONS,
@@ -8,13 +8,21 @@ import {
 } from "../../../../src/workflow/product/review-instructions.js";
 import { repairObjective } from "../../../../src/workflow/product/status-next.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
+import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 
 function record(
   status: "satisfied" | "failed",
   slices: Record<string, "closed" | "in-progress" | "pending">,
 ): ProductRecord {
   return {
-    brief: { slices: Object.keys(slices).map((id) => ({ id, outcomes: [] })), outcomes: [] },
+    brief: {
+      slices: Object.keys(slices).map((id) => ({ id, outcomes: [], checks: [] })),
+      outcomes: [],
+      checks: [],
+      examples: [],
+      decisions: [],
+      acceptanceBaseline: [],
+    },
     state: {
       executions: [],
       slices: Object.fromEntries(
@@ -38,6 +46,39 @@ it("skips a middle slice's review after a clean one, never the slice completing 
   const last = { T001: "closed", T002: "in-progress" } as const;
   expect(skippableReview(record("satisfied", last), "T002", "current")).toBe(false);
 });
+
+it("reserves the last call even without a clean predecessor, but allows an earlier optional review", () => {
+  const current = record("failed", { T001: "closed", T002: "in-progress", T003: "pending" });
+  expect(skippableReview(current, "T002", "current", false)).toBe(false);
+  expect(skippableReview(current, "T002", "current", true)).toBe(true);
+});
+
+it.each(["failed", "unassessed"] as const)(
+  "does not reserve away a must quality assessment needed for closure: %s",
+  (review) => {
+    const current = record("satisfied", { T001: "closed", T002: "in-progress", T003: "pending" });
+    current.brief.outcomes = [
+      { id: "O001", kind: "quality", priority: "must", reviewRequired: false, expectations: [] },
+    ] as unknown as ProductRecord["brief"]["outcomes"];
+    current.brief.checks = [];
+    const slice = current.brief.slices.find((entry) => entry.id === "T002");
+    if (!slice) throw new Error("Missing slice");
+    slice.outcomes = ["O001"];
+    const previous = current.state.reviews[0];
+    if (!previous) throw new Error("Missing review");
+    previous.subjectDigest = "current";
+    previous.contractDigest = productContractDigest(current.brief);
+    previous.assessments =
+      review === "failed"
+        ? ([
+            { outcome: "O001", status: "failed", expectations: [] },
+          ] as unknown as typeof previous.assessments)
+        : [];
+    // No execution can satisfy this quality outcome: the review is needed to close it.
+    expect(reviewOwed(current, "T002", "current")).toBe(true);
+    expect(skippableReview(current, "T002", "current", true)).toBe(false);
+  },
+);
 
 it("sweeps stated rules and ordinary variants before spending findings on unstated limits", () => {
   expect(CRITIC_INSTRUCTIONS).toContain("every stated rule one by one");
