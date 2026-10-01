@@ -83,7 +83,7 @@ const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
  * The declared tests a run reports as failing: lines that start `FAIL:` followed by the exact
  * declared name. A `FAIL:` line naming anything else, or an uncaught error or traceback
  * outside a `FAIL:` line, counts as unattributed. A name that only appears in passing or
- * verbose lines is not failing.
+ * verbose lines is not failing. PASS and NOT OBSERVED records are never failure evidence.
  */
 export function failingTests(
   output: string,

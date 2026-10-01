@@ -26,3 +26,34 @@ it("discloses omitted names without manufacturing results for silent checks", ()
   expect(result.length).toBeLessThanOrEqual(700);
   expect(earlierAssertionResults("no named assertions\n".repeat(1000), 3000)).toBe("");
 });
+
+it("prioritizes unobserved coverage gaps over passing names in bounded output", () => {
+  const text = [
+    ...Array.from({ length: 100 }, (_, i) => `PASS: assertion ${i}`),
+    "  NOT OBSERVED: low-power contact: 0 qualifying events",
+    "FAIL: damage: wrong amount",
+    "noise\n".repeat(3000),
+  ].join("\r\n");
+  const result = earlierAssertionResults(text, 2000, 700, true);
+  expect(result).toContain("NOT OBSERVED: low-power contact: 0 qualifying events");
+  expect(result).toContain("coverage gap");
+  expect(result).toContain("PASS: assertion 0");
+  expect(result).not.toContain("FAIL: damage");
+  expect(result.length).toBeLessThanOrEqual(700);
+});
+
+it("keeps a real failure ahead of coverage gaps and passes when no separate failure block exists", () => {
+  const text = [
+    ...Array.from({ length: 30 }, (_, i) => `PASS: assertion ${i}`),
+    "FAIL: real assertion: wrong value",
+    ...Array.from(
+      { length: 40 },
+      (_, i) => `NOT OBSERVED: conditional interaction ${i}: 0 qualifying events`,
+    ),
+    "x".repeat(5300),
+  ].join("\n");
+  const result = earlierAssertionResults(text, 2000);
+  expect(result).toContain("FAIL: real assertion: wrong value");
+  expect(result.indexOf("FAIL: real assertion")).toBeLessThan(result.indexOf("NOT OBSERVED:"));
+  expect(result.length).toBeLessThanOrEqual(2000);
+});

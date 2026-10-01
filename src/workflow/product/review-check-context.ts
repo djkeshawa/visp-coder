@@ -81,6 +81,11 @@ export function reviewCheckResult(execution: ProductExecution, check?: ProductCh
       ? [`Executed journey/check source: ${JSON.stringify(check.command)}`]
       : []),
     "Recorded assertion results/output (names are supplied only when the check emitted them):",
+    ...(/^\s*NOT OBSERVED:/im.test(execution.output)
+      ? [
+          "Coverage gap: NOT OBSERVED means zero qualifying events; it establishes neither a passing assertion nor a product failure.",
+        ]
+      : []),
     execution.output ||
       "No named assertion results or output were emitted; the exit status alone does not establish individual assertions.",
   ].join("\n");

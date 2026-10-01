@@ -96,6 +96,9 @@ describe("tester browser kit gating", () => {
     expect(prompt).toContain(
       "- Cover the request's screen flow through the visible controls (for example win → next level/next screen, loss → retry, restart) and each stated effect over time (damage, burning, timers) at least once; and for drag input assert the vertical direction as well as the horizontal one.",
     );
+    expect(prompt).toContain(
+      "Always-available controls: check in every state, including won, lost, game over and error",
+    );
   });
 
   it("tells the tester to let BrowserUnavailable escape the per-test catch", () => {
