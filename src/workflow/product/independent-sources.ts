@@ -3,7 +3,7 @@ import { sha256 } from "../../core/hash.js";
 import { err, ok } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import type { ProductSource } from "./sources.js";
-/** Deliver the selected source bytes intact, verifying they still match the evidence identity. */
+/** Verify current file identity, preserving bounded review excerpts and their cutoff disclosures. */
 export async function independentSources(
   workspace: WorkspaceState,
   input: readonly ProductSource[],
@@ -14,7 +14,7 @@ export async function independentSources(
     if (source.kind === "authored-brief") {
       sources.push({ ...source, excerpt: "The proposed design is supplied once in design.brief." });
     } else if (source.available && ["implementation-file", "pinned-file"].includes(source.kind)) {
-      const delivered = await sourceBytes(workspace, source);
+      const delivered = await sourceBytes(workspace, source, understanding);
       if (!delivered.ok) return delivered;
       sources.push(delivered.value);
     } else sources.push(source);
@@ -22,16 +22,31 @@ export async function independentSources(
   return ok(sources);
 }
 
-async function sourceBytes(workspace: WorkspaceState, source: ProductSource) {
+async function sourceBytes(
+  workspace: WorkspaceState,
+  source: ProductSource,
+  understanding: boolean,
+) {
   const content = await workspace.files.readBytesIfExists(source.reference);
   if (!content.ok) return content;
   if (!content.value || sha256(content.value) !== source.sha256)
     return err(
       vispError("EVIDENCE_FAILED", `Source changed while preparing review: ${source.reference}`),
     );
+  const fullText = Buffer.from(content.value).toString("utf8");
+  if (!understanding)
+    return ok({
+      ...source,
+      truncated: source.excerpt.length < fullText.length,
+      omittedRegions:
+        source.omittedRegions ??
+        (source.excerpt.length < fullText.length
+          ? ["Source outside the bounded excerpt was omitted; inspect the file before judging it"]
+          : []),
+    });
   return ok({
     ...source,
-    excerpt: Buffer.from(content.value).toString("utf8"),
+    excerpt: fullText,
     truncated: false,
     omittedRegions: [],
     nextRead: undefined,

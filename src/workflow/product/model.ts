@@ -408,6 +408,11 @@ export const executionSchema = z
     exitCode: z.number(),
     durationMs: z.number(),
     output: z.string(),
+    /** Complete runner-derived failure attribution, independent of the displayed output budget. */
+    pinnedFailures: z
+      .object({ names: z.array(z.string()), unattributed: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
     provenance: z.enum(["supervisor-executed", "supervisor-reused"]),
     assertions: z.enum(["agent-reported", "runner-observed"]),
     captureRunId: z.string().optional(),

@@ -75,7 +75,7 @@ it("keeps three complete journey pairs when unrelated images would split the six
   expect(result.availability.find((entry) => entry.id === "omitted-before")?.status).toBe(
     "not-delivered",
   );
-  expect(result.gaps).toEqual([]);
+  expect(result.gaps.join()).toContain("3 intact current capture(s) omitted");
 });
 
 it("selects requested groups and preserves endpoints when sampling desktop and mobile journeys", async () => {
@@ -102,7 +102,7 @@ it("selects requested groups and preserves endpoints when sampling desktop and m
     deliveredCaptureIds: ["desktop-0", "desktop-4", "desktop-7"],
   });
   expect(result.groups.find((entry) => entry.id === "mobile")?.status).toBe("delivered");
-  expect(result.images).toHaveLength(5);
+  expect(result.images).toHaveLength(6);
   const requested = await inspectProductImages(
     workspace,
     subject,
@@ -195,7 +195,7 @@ it("enforces the total byte budget atomically and avoids reading oversized files
   expect(read).not.toHaveBeenCalled();
 });
 
-it("rechecks bytes at delivery and withholds the complete group if one image changes", async () => {
+it("rechecks bytes at delivery and only delivers an intact representative if another frame changes", async () => {
   const reads = new Map<string, number>();
   const changing = {
     files: {
@@ -213,9 +213,10 @@ it("rechecks bytes at delivery and withholds the complete group if one image cha
     [],
     [group("journey", ["before", "after"])],
   );
-  expect(result.images).toEqual([]);
-  expect(result.groups[0]?.status).toBe("unavailable");
-  expect(result.availability.find((entry) => entry.id === "before")?.status).toBe("not-delivered");
+  expect(result.images.map((image) => image.id)).toEqual(["before"]);
+  expect(result.groups[0]?.status).toBe("delivered");
+  expect(result.groups[0]?.omittedCaptureIds).toEqual(["after"]);
+  expect(result.availability.find((entry) => entry.id === "before")?.status).toBe("delivered");
   expect(result.availability.find((entry) => entry.id === "after")?.status).toBe("unavailable");
   expect(result.gaps.join()).toContain("during delivery");
 });
@@ -365,12 +366,18 @@ it("reserves endpoints for three viewports instead of dropping the older journey
   );
   expect(roundtrip.images.map((i) => i.id)).toEqual(ids);
   const explicit = await inspectProductImages(workspace, subject, captures, ["desktop"], groups);
-  expect(explicit.groups.find((g) => g.id === "desktop")?.deliveredCaptureIds).toEqual(
-    groups[2]?.captureIds,
+  expect(explicit.groups.find((g) => g.id === "desktop")?.deliveredCaptureIds).toEqual([
+    "d0",
+    "d1",
+    "d2",
+    "d4",
+  ]);
+  expect(new Set(explicit.images.map((image) => image.viewport.width))).toEqual(
+    new Set([844, 390, 1280]),
   );
 });
 
-it("reports a viewport that cannot fit without splitting its journey endpoints", async () => {
+it("uses representatives when four viewport journeys cannot all fit in full", async () => {
   const groups = [320, 640, 960, 1280].map((width) =>
     group(String(width), [`${width}-start`, `${width}-end`], width),
   );
@@ -383,9 +390,12 @@ it("reports a viewport that cannot fit without splitting its journey endpoints",
   );
   expect(result.images).toHaveLength(6);
   expect(result.groups.find((g) => g.id === "1280")).toMatchObject({
-    status: "not-delivered",
-    omittedCaptureCount: 2,
+    status: "delivered",
+    omittedCaptureCount: 1,
   });
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(
+    new Set([320, 640, 960, 1280]),
+  );
 });
 
 const keyed = (id: string, journeyKey: string, captureIds: string[], width = 1280) => ({
@@ -590,4 +600,101 @@ it("keeps an older failed group when a newer cancelled run has one image, and ru
   };
   const ids = productReviewImageGroups(record, subject).map((entry) => entry.runId);
   expect(ids).toEqual(["done-b-again", "done-a", "cancelled", "failed"]);
+});
+
+it("reserves every available viewport before a preferred desktop journey spends the slots", async () => {
+  const desktop = group(
+    "desktop",
+    Array.from({ length: 6 }, (_, i) => `d${i}`),
+  );
+  const groups = [
+    desktop,
+    ...[320, 640, 960].map((width) =>
+      group(String(width), [`${width}-start`, `${width}-end`], width),
+    ),
+  ];
+  const result = await inspectProductImages(
+    workspace,
+    subject,
+    groups.flatMap((g) => g.captureIds.map((id) => capture(id, g.viewport.width))),
+    ["desktop"],
+    groups,
+  );
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(
+    new Set([1280, 320, 640, 960]),
+  );
+  expect(result.images).toHaveLength(6);
+  expect(result.gaps.join()).toContain("omitted");
+});
+
+it("samples across viewport byte costs and reports viewports that cannot fit", async () => {
+  const large = Buffer.alloc(3 * 1024 * 1024);
+  bytes.copy(large);
+  const groups = [1280, 390, 844].map((width) =>
+    group(String(width), [`${width}-before`, `${width}-after`], width),
+  );
+  const captures = groups.flatMap((g) =>
+    g.captureIds.map((id) => ({ ...capture(id, g.viewport.width), sha256: sha256(large) })),
+  );
+  const limited = {
+    files: { readBytesIfExists: async () => ok(large) },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(limited, subject, captures, ["1280"], groups);
+  expect(new Set(result.images.map((image) => image.viewport.width)).size).toBe(2);
+  expect(
+    result.images.reduce((sum, image) => sum + Buffer.from(image.data, "base64").length, 0),
+  ).toBeLessThanOrEqual(8 * 1024 * 1024);
+  expect(result.gaps.join()).toContain("no current representative delivered");
+  expect(result.gaps.join()).toContain("omitted");
+});
+
+it("uses a smaller representative when full endpoints would exclude a phone viewport", async () => {
+  const large = Buffer.alloc(3 * 1024 * 1024);
+  bytes.copy(large);
+  const groups = [group("desktop", ["before", "middle", "after"]), group("phone", ["phone"], 390)];
+  const captures = groups.flatMap((g) =>
+    g.captureIds.map((id) => ({
+      ...capture(id, g.viewport.width),
+      sha256: sha256(id === "middle" ? bytes : large),
+    })),
+  );
+  const limited = {
+    files: { readBytesIfExists: async (path: string) => ok(path === "middle.png" ? bytes : large) },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(limited, subject, captures, ["desktop"], groups);
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(new Set([1280, 390]));
+  expect(result.images.length).toBeLessThanOrEqual(6);
+});
+
+it("uses an intact viewport representative when another journey state is corrupt", async () => {
+  const groups = [group("desktop", ["bad", "intact"]), group("phone", ["phone"], 390)];
+  const captures = groups.flatMap((g) => g.captureIds.map((id) => capture(id, g.viewport.width)));
+  const partial = {
+    files: {
+      readBytesIfExists: async (path: string) =>
+        ok(path === "bad.png" ? Buffer.from("corrupt") : bytes),
+    },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(partial, subject, captures, [], groups);
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(new Set([1280, 390]));
+  expect(result.gaps.join()).toContain("image changed since capture");
+  expect(result.groups.find((g) => g.id === "desktop")?.omittedCaptureCount).toBe(1);
+});
+
+it("delivers an intact current representative when the only journey has a missing frame", async () => {
+  const partial = {
+    files: {
+      readBytesIfExists: async (path: string) => ok(path === "missing.png" ? undefined : bytes),
+    },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(
+    partial,
+    subject,
+    [capture("missing"), capture("intact")],
+    [],
+    [group("journey", ["missing", "intact"])],
+  );
+  expect(result.images.map((image) => image.id)).toEqual(["intact"]);
+  expect(result.gaps.join()).toContain("missing");
+  expect(result.groups[0]?.omittedCaptureCount).toBe(1);
 });

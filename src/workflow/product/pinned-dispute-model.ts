@@ -327,8 +327,17 @@ export function allFailuresIn(
   output: string,
   declared: readonly string[],
   covered: readonly string[],
+  summary?: ProductExecution["pinnedFailures"],
 ): boolean {
-  const failing = failingTests(output, declared);
+  // Older receipts lack complete attribution; a disclosed cutoff cannot prove full coverage.
+  if (
+    !summary &&
+    /VISP: (?:\d+ more FAIL lines? (?:is|are) left out|earlier output omitted|output shortened)/.test(
+      output,
+    )
+  )
+    return false;
+  const failing = summary ?? failingTests(output, declared);
   return (
     failing.unattributed === 0 &&
     failing.names.length > 0 &&

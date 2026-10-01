@@ -740,3 +740,73 @@ it.each([false, true])(
     expect(JSON.stringify(input.state)).toBe(before);
   },
 );
+
+it.each(["passed", "failed", "environment-failed"] as const)(
+  "keeps CHECK aliases bound to the canonical execution's %s status",
+  async (status) => {
+    const input = record();
+    input.state.executions = [execution(input, { status })];
+    const source = {
+      id: "CHECK-EXEC-1",
+      kind: "executed-check" as const,
+      reference: "Executed C001",
+      sha256: "digest",
+      available: true,
+      excerpt: "Recorded results",
+    };
+    const catalogue = await buildCatalogue(workspace, input, subject, [], [], [source]);
+    const canonical = catalogue.entries.find((entry) => entry.id === "EXEC-1");
+    expect(catalogue.aliases.get(source.id)).toBe("EXEC-1");
+    expect(catalogue.entries.find((entry) => entry.id === source.id)).toEqual({
+      ...canonical,
+      id: source.id,
+    });
+    expect(
+      resolveAssessmentEvidence(
+        {
+          outcome: "O001",
+          provenance: "agent-reported",
+          status: "satisfied",
+          summary: "Executed",
+          evidence: [source.id],
+          expectations: [],
+        },
+        catalogue,
+      ),
+    ).toMatchObject({ ok: true, value: { evidence: ["EXEC-1"] } });
+  },
+);
+
+it("preserves stale, out-of-slice and syntax-only eligibility for CHECK aliases", async () => {
+  const input = record();
+  const slice = input.brief.slices[0];
+  if (!slice) throw new Error("Missing slice");
+  const check = input.brief.checks[0];
+  if (!check) throw new Error("Missing check");
+  check.command = ["node", "--check", "app.mjs"];
+  input.state.executions = [execution(input, { subjectDigest: "old", task: "T001" })];
+  const source = {
+    id: "CHECK-EXEC-1",
+    kind: "executed-check" as const,
+    reference: "Executed C001",
+    sha256: "digest",
+    available: true,
+    excerpt: "Recorded results",
+  };
+  const catalogue = await buildCatalogue(workspace, input, subject, [], [], [source], slice);
+  expect(catalogue.entries.find((entry) => entry.id === source.id)).toMatchObject({
+    status: "stale",
+    supportsBehavior: false,
+  });
+  expect(evidenceSupportGaps([source.id], catalogue, "O001", true)).not.toHaveLength(0);
+  const unbound = await buildCatalogue(
+    workspace,
+    input,
+    subject,
+    [],
+    [],
+    [{ ...source, id: "CHECK-invented" }],
+  );
+  expect(unbound.entries.find((entry) => entry.id === "CHECK-invented")?.kind).toBe("source");
+  expect(evidenceSupportGaps(["CHECK-invented"], unbound, "O001", true)).not.toHaveLength(0);
+});

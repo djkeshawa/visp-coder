@@ -7,10 +7,15 @@ import { hashValue } from "../../../../src/core/hash.js";
 import { inspectStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { validateProductCheckCommand } from "../../../../src/workflow/product/check-command.js";
-import { waivedResult } from "../../../../src/workflow/product/check-execution.js";
+import {
+  executeProductCheck,
+  waivedResult,
+} from "../../../../src/workflow/product/check-execution.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { executionSchema, productCheckSchema } from "../../../../src/workflow/product/model.js";
 import { failingTests } from "../../../../src/workflow/product/pinned-dispute-model.js";
+import { disputedFailure } from "../../../../src/workflow/product/pinned-disputes.js";
+import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
@@ -116,6 +121,46 @@ describe("product command check execution boundary", () => {
     expect(kept.names).toHaveLength(60);
     expect(kept.unattributed).toBe(0);
   });
+  it("retains undisputed failures across the final assertion-result tail boundary", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const lines = [
+      "FAIL: disputed A",
+      ...Array.from({ length: 100 }, (_, index) => `PASS: assertion ${index}`),
+      "x".repeat(10000),
+      "FAIL: undisputed B",
+      "x".repeat(3500),
+    ];
+    await workspace.write(
+      "test/boundary.mjs",
+      `console.log(${JSON.stringify(lines.join("\n"))}); process.exitCode = 1;`,
+    );
+    const state = await workspace.state();
+    const record = await readProductRecord(state, {});
+    if (!record.ok) throw new Error(record.error.message);
+    const check = productCheckSchema.parse({
+      ...brief.checks[0],
+      id: "PINNED_boundary",
+      command: [process.execPath, "test/boundary.mjs"],
+    });
+    const { execution } = await executeProductCheck(
+      state,
+      record.value,
+      brief.slices[0],
+      check,
+      "current",
+    );
+    expect(execution.output).toContain("FAIL: disputed A");
+    expect(execution.output).toContain("FAIL: undisputed B");
+    expect(execution.output.length).toBeLessThanOrEqual(8000);
+    expect(
+      disputedFailure(execution, {
+        declared: ["disputed A", "undisputed B"],
+        pending: [{ test: "disputed A" }] as Parameters<typeof disputedFailure>[1]["pending"],
+      }),
+    ).toBe(false);
+  });
+
   it("never lets the shortened record decide that a failing run was entirely waived", () => {
     const waived = Array.from({ length: 12 }, (_, index) => `waived test ${index}`);
     const waivers = { names: waived, declared: [...waived, "real bug"], suiteSkips: false };
@@ -610,4 +655,33 @@ ${masked ? "process.exitCode = 0;" : "process.stdout.write(child.stdout); proces
       });
     },
   );
+});
+
+it("uses complete pinned failure metadata when the displayed failures were cut", () => {
+  const execution = {
+    check: "PINNED_boundary",
+    status: "failed",
+    output: "FAIL: disputed A",
+    pinnedFailures: { names: ["disputed A", "undisputed B"], unattributed: 0 },
+  };
+  const state = {
+    declared: ["disputed A", "undisputed B"],
+    pending: [{ test: "disputed A" }] as Parameters<typeof disputedFailure>[1]["pending"],
+  };
+  expect(disputedFailure(execution, state)).toBe(false);
+  execution.pinnedFailures.names = ["disputed A"];
+  expect(disputedFailure(execution, state)).toBe(true);
+  execution.pinnedFailures.unattributed = 1;
+  expect(disputedFailure(execution, state)).toBe(false);
+  expect(
+    disputedFailure(
+      {
+        check: execution.check,
+        status: execution.status,
+        output:
+          "FAIL: disputed A\nVISP: output shortened for review; full output remains in the local log.",
+      },
+      state,
+    ),
+  ).toBe(false);
 });

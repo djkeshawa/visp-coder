@@ -65,6 +65,7 @@ async function sourceRegions(path: string, source: string): Promise<Region[]> {
     }
   }
   if (html) regions.push(...htmlRegions(lines));
+  if (/\.(?:md|mdx|txt|rst|adoc|json|ya?ml)$/i.test(path)) regions.push(...textRegions(lines));
   return regions;
 }
 
@@ -146,16 +147,27 @@ function selectLineIndexes(
   let remaining = limit;
   const selected = new Set<number>();
   const coveredNames = new Set<string>();
-  let rerank = true;
-  while (ranked.length) {
-    if (rerank)
+  ranked.sort(
+    (a, b) =>
+      regionScore(b, mentions, coveredNames) - regionScore(a, mentions, coveredNames) ||
+      a.start - b.start,
+  );
+  // Rank the whole input once, then bound diversity selection independently of file size.
+  ranked = ranked.slice(0, 512);
+  let rerank = false;
+  let index = 0;
+  while (index < ranked.length) {
+    if (rerank) {
+      ranked = ranked.slice(index);
+      index = 0;
       ranked.sort(
         (a, b) =>
           regionScore(b, mentions, coveredNames) - regionScore(a, mentions, coveredNames) ||
           a.start - b.start,
       );
+    }
     rerank = false;
-    const item = ranked.shift();
+    const item = ranked[index++];
     if (!item) break;
     const cost = incrementalRegionCost(item, lines, selected, remaining);
     if (cost > remaining) continue;
@@ -234,4 +246,21 @@ function nodeRegion(node: SyntaxNode | null): Region | undefined {
 
 function region(node: SyntaxNode, name: string, test: boolean): Region {
   return { start: node.startPosition.row, end: node.endPosition.row, text: node.text, name, test };
+}
+
+function textRegions(lines: string[]): Region[] {
+  const regions: Region[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    const start = Math.max(0, index - 1);
+    const end = Math.min(lines.length - 1, index + 2);
+    regions.push({
+      start,
+      end,
+      name: line,
+      text: lines.slice(start, end + 1).join("\n"),
+      test: /(?:\bFAIL(?:ED)?\b|not ok|\.\.\. (?:ok|FAIL|ERROR)|^(?:ok|PASS):?)/.test(line),
+    });
+  }
+  return regions;
 }

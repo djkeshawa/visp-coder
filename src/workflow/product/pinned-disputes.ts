@@ -9,6 +9,7 @@ import {
   readTestsRecord,
   saveTestsRecord,
 } from "./independent-tests.js";
+import type { ProductExecution } from "./model.js";
 import {
   allFailuresIn,
   crashLine,
@@ -131,7 +132,12 @@ export async function disputeState(
  * failing has a dispute awaiting a ruling; any other failing test still blocks.
  */
 export function disputedFailure(
-  execution: { check: string; status: string; output: string },
+  execution: {
+    check: string;
+    status: string;
+    output: string;
+    pinnedFailures?: ProductExecution["pinnedFailures"];
+  },
   state: Pick<DisputeState, "declared" | "pending">,
 ): boolean {
   return (
@@ -141,6 +147,7 @@ export function disputedFailure(
       execution.output,
       state.declared,
       state.pending.map((entry) => entry.test),
+      execution.pinnedFailures,
     )
   );
 }
@@ -585,7 +592,12 @@ export async function pinnedRoute(
   workspace: WorkspaceState,
   feature: string,
   task: string | undefined,
-  failures: readonly { check: string; status: string; output: string }[],
+  failures: readonly {
+    check: string;
+    status: string;
+    output: string;
+    pinnedFailures?: ProductExecution["pinnedFailures"];
+  }[],
   command: "done" | "accept",
   history: readonly PinnedHistoryRun[],
   capacity: ReviewerCapacity,
@@ -608,14 +620,20 @@ export async function pinnedRoute(
   ];
   const only = failures.length === pinned.length;
   const settled =
-    only && pinned.every((entry) => allFailuresIn(entry.output, state.declared, waivers.names));
+    only &&
+    pinned.every((entry) =>
+      allFailuresIn(entry.output, state.declared, waivers.names, entry.pinnedFailures),
+    );
   if (settled) return { evidence, override: upheldOverride(command, feature, task) };
   // Without a reviewer that can still rule, a dispute awaiting one goes to the human too.
   const cannotRule = !capacity.available && state.pending.length > 0;
   const handOff = cannotRule ? [...state.handedOff, ...state.pending] : state.handedOff;
   const covered = [...handOff.map((entry) => entry.test), ...waivers.names];
   const allSettled =
-    only && pinned.every((entry) => allFailuresIn(entry.output, state.declared, covered));
+    only &&
+    pinned.every((entry) =>
+      allFailuresIn(entry.output, state.declared, covered, entry.pinnedFailures),
+    );
   if (handOff.length && allSettled)
     return { evidence, override: handedOffOverride(feature, handOff, cannotRule) };
   const stuck = await pinnedHandoff(workspace, feature, failures, history);

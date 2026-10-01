@@ -3,7 +3,7 @@ import { err, ok, type Result } from "../../core/result.js";
 import type { ProductReviewImage } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableReviews } from "./assessment.js";
-import { reviewCodeSources } from "./code-context.js";
+import { reviewChangedPaths, reviewCodeSources } from "./code-context.js";
 import {
   currentCoverage,
   type ProductReviewChallenge,
@@ -172,7 +172,16 @@ async function review(
   const outcomes = record.brief.outcomes.filter(
     (outcome) => !slice || slice.outcomes.includes(outcome.id),
   );
-  const codeSources = await reviewCodeSources(workspace, record, snapshot.value);
+  const changes = await reviewChangedPaths(workspace, record, snapshot.value, slice);
+  if (!changes.ok) return changes;
+  const codeSources = await reviewCodeSources(
+    workspace,
+    record,
+    snapshot.value,
+    subject.value,
+    slice,
+    changes.value,
+  );
   const catalogue = await productEvidenceCatalogue(
     workspace,
     record,
