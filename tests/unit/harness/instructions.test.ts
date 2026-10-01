@@ -29,15 +29,20 @@ it("tells every guide to show user-readable information as labeled text", () => 
   }
 });
 
-it("routes review through visp next and polls long commands in every guide", () => {
+it("routes review through visp next and starts work while feature writes tests", () => {
   for (const guide of [renderAgentGuide(), renderMinimalGuide()]) {
     expect(guide).toContain(
       "If visp done runs VISP's reviewer, run or delegate no review; visp next waits.",
     );
     expect(guide).toContain("Run visp critic/review only when visp next prints it.");
     expect(guide).toContain(
-      "Run feature/done/verify/accept/next with the host's maximum shell timeout. If it keeps running, poll it; never start feature, done or accept again until that call ends (after a kill or error, rerun once).",
+      "Run feature/done/verify/accept/next with the host's maximum shell timeout.",
     );
+    expect(guide).toContain(
+      "Leave feature running; background it on blocking hosts. At its id, run visp work.",
+    );
+    expect(guide).toContain("Poll; never duplicate; after kill/error recover by id.");
+    expect(guide).not.toContain("Retain and poll the command handle");
     expect(guide).not.toContain("delegate nothing");
   }
   expect(renderAgentGuide()).toContain(

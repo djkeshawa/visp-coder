@@ -184,7 +184,11 @@ describe("the minimal profile", () => {
     // 300 -> 329: room for the one-line labeled-text UI rule, with no other rule shortened.
     // 329 -> 404: room for the review-routing, early-return and preview rules (1616 chars).
     expect(guide.length / 4).toBeLessThanOrEqual(404);
-    expect(guide).toContain("done/verify/accept/next with the host's maximum shell timeout");
+    expect(guide).toContain("At its id, run visp work");
+    expect(guide).toContain("Leave feature running; background it on blocking hosts");
+    expect(guide).toContain(
+      "feature/done/verify/accept/next with the host's maximum shell timeout",
+    );
     expect(guide).toContain("scope.allowed");
     expect(guide).toContain("runnable");
     expect(guide).toContain("execution refusals");
@@ -228,7 +232,8 @@ describe("generated workflow routing", () => {
       expect(guide).toContain("Browser journeys must not mutate VISP state");
       expect(guide).toContain("only when visp next prints it");
       expect(guide).toContain("run or delegate no review");
-      expect(guide).toContain("never start feature, done or accept again until that call ends");
+      expect(guide).toContain("Poll; never duplicate");
+      expect(guide).toContain("At its id, run visp work");
       expect(guide).not.toContain("visp review --prepare");
       expect(commandGuide()).toContain("No category declarations, example-coverage ledger");
       expect(guide).toContain("reviewer.context honestly");
@@ -242,8 +247,13 @@ describe("generated workflow routing", () => {
     expect(guide).toContain("Only when `visp next` prints a critic command");
     expect(guide).not.toContain("--source-only");
     expect(guide).toContain(
-      "It can take minutes: wait for it to return; do not start a second one while it runs.",
+      "on a blocking shell (Claude Code Bash) start it with run_in_background:true and read its output for the id",
     );
+    expect(guide).toContain(
+      'Once it prints the feature id, run visp work --feature <id> --check "<test command>" for one slice.',
+    );
+    expect(guide).toContain("Never start feature again: a repeat can create a second feature.");
+    expect(guide).not.toContain("wait for it to return");
     expect(guide).not.toContain("never run it twice");
   });
 
