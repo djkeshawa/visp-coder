@@ -693,6 +693,10 @@ it("runs the pinned tests when the last open slice is done", async () => {
     inlineTests(tester({ name: "value.test.mjs", content: FAILS_FIRST })),
   );
   expect(work.ok && work.value.independentTests?.status).toBe("pinned");
+  // Pinned tests point the worker at done, which records each failure without spending a review.
+  expect(work.ok && work.value.independentTests?.instructions).toContain(
+    "run it as soon as the slice works instead of waiting for every test to pass by hand",
+  );
   await fixture.workspace.write("src/value.mjs", "export const value = 3;\n");
   await fixture.workspace.write(
     "test/value.test.mjs",
@@ -1536,7 +1540,9 @@ it.each([
     expect(prompt).toContain(
       "sample during the run, not only terminal snapshots, and include every named moving actor",
     );
-    expect(prompt).toContain("test each named context once");
+    expect(prompt).toContain("test each named context once with each value kind the rules mention");
+    expect(prompt).toContain("Where two stated rules meet in one case");
+    expect(prompt).toContain("list the case in `ambiguities` with its conventional reading");
     expect(prompt).toContain("direct reference, operator, function argument, range");
     expect(prompt).toContain("happens as soon as (or immediately when) a trigger holds");
     expect(prompt).toContain("stop at the FIRST state where the trigger or state holds");
