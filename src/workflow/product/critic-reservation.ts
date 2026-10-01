@@ -26,7 +26,9 @@ import { executionSchema, type ProductSlice, productStateSchema } from "./model.
 import { reviewerRules } from "./pinned-dispute-model.js";
 import { disputeSetKey, disputeState } from "./pinned-disputes.js";
 import { reproductionContextDigest } from "./reproduction-bindings.js";
-import { runProductReviewerHandoff } from "./reviewer-handoff.js";
+import { deliveredReviewEvidenceIds } from "./review-context.js";
+import { generatedSourceReferences } from "./review-delivery-validation.js";
+import { reviewerHandoffCandidates } from "./reviewer-handoff.js";
 import type { ProductRecord } from "./store.js";
 import { productImplementationDigest } from "./subject.js";
 
@@ -52,7 +54,7 @@ const historicalHandoff = z
   })
   .passthrough();
 type Handoff = Extract<
-  Awaited<ReturnType<typeof runProductReviewerHandoff>>,
+  Awaited<ReturnType<typeof reviewerHandoffCandidates>>,
   { ok: true }
 >["value"];
 
@@ -80,6 +82,7 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
       : undefined;
   if (delivery && !delivery.ok) return delivery;
   const delivered = delivery?.value;
+  const sources = delivered?.sources ?? packet.value.current.sources;
   const startedAt = Date.now(); // Context, snapshots and image encoding are prepared before the clock starts.
   const next: CriticState = {
     ...state,
@@ -102,6 +105,13 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
         evidenceDigest,
         selectionDigest: hashValue(packet.value.selection),
         selection: packet.value.selection,
+        deliveredEvidenceIds: deliveredReviewEvidenceIds(
+          packet.value.current.evidence,
+          packet.value.current.interactionEvidence,
+          sources,
+          packet.value.current.experiments,
+        ),
+        deliveredGeneratedReferences: generatedSourceReferences(sources, handoff.value.sources),
         requiresImages: packetHasImages(packet.value),
         ...(request.sourceOnly ? { sourceOnly: true } : {}),
         // Rulings count only for the disputes the reviewer was asked about here.
@@ -337,7 +347,7 @@ async function reviewContext(workspace: WorkspaceState, request: CriticRequest) 
   if (transportGap) return err(vispError("CONFIG_INVALID", transportGap));
   const retryError = criticRetryError(state, request, selected.value.phase);
   if (retryError) return err(vispError("STATE_BUSY", retryError));
-  const handoff = await runProductReviewerHandoff(workspace, selected.value.selection);
+  const handoff = await reviewerHandoffCandidates(workspace, selected.value.selection);
   if (!handoff.ok) return handoff;
   const reason = stopReason(
     state,

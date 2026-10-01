@@ -158,7 +158,10 @@ function reviewer(rule: (packet: CriticPacket) => Ruling[], model = CONFIG.model
             outcome: outcome.id,
             status: "satisfied",
             summary: "The public value is two",
-            evidence: ["C001"],
+            evidence: packet.current.evidence
+              .filter((entry) => entry.kind === "execution" && entry.status === "available")
+              .slice(0, 1)
+              .map((entry) => entry.id),
             expectations: [],
           })),
           findings: [],

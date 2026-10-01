@@ -677,21 +677,25 @@ describe("supported product judgments", () => {
     value(await runProductVerify(await workspace.state()));
     const bundle = value(await runProductReview(await workspace.state()));
     const oldReference = reviewed.assessments[0]?.evidence ?? [];
-    const result = value(
-      await runProductReview(await workspace.state(), {
-        subjectDigest: bundle.subjectDigest,
-        feedback: moduleFeedback(bundle),
-        assessments: [
-          {
-            outcome: "O001",
-            status: "satisfied",
-            summary: "Claims old check is enough",
-            evidence: oldReference,
-          },
-        ],
-      }),
-    );
-    expect(result.assessments[0]?.status).toBe("unavailable");
+    const result = await runProductReview(await workspace.state(), {
+      subjectDigest: bundle.subjectDigest,
+      feedback: moduleFeedback(bundle),
+      assessments: [
+        {
+          outcome: "O001",
+          status: "satisfied",
+          summary: "Claims old check is enough",
+          evidence: oldReference,
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "EVIDENCE_FAILED",
+        message: expect.stringContaining("Unknown evidence reference"),
+      },
+    });
     expect(value(await runProductAccept(await workspace.state())).passed).toBe(false);
   });
 });

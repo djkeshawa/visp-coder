@@ -1,10 +1,13 @@
-import { ok } from "../../core/result.js";
+import { vispError } from "../../core/errors.js";
+import { err, ok } from "../../core/result.js";
 import { reviewInputTemplate } from "../product-inputs.js";
 import type { WorkspaceState } from "../state.js";
 import { type ProductFeedback, QUALITY_DIMENSIONS } from "./feedback-model.js";
+import { independentSources } from "./independent-sources.js";
 import { reviewerContextSchema } from "./model.js";
 import { type ProductReviewBundle, type ProductReviewOptions, runProductReview } from "./review.js";
 import { REQUEST_PROMISES_GUIDANCE } from "./review-context.js";
+import { deliveredSourceEvidence, reviewPacketBudgetGap } from "./review-source-delivery.js";
 
 const findingExample: ProductFeedback["findings"][number] = {
   dimension: "functional",
@@ -17,6 +20,28 @@ const findingExample: ProductFeedback["findings"][number] = {
 
 /** The host owns reviewer dispatch and model selection; preparing a handoff never starts a model. */
 export async function runProductReviewerHandoff(
+  workspace: WorkspaceState,
+  options: ProductReviewOptions = {},
+) {
+  const candidates = await reviewerHandoffCandidates(workspace, options);
+  if (!candidates.ok) return candidates;
+  const sources = await independentSources(workspace, candidates.value.sources, false, true);
+  if (!sources.ok) return sources;
+  const handoff = {
+    ...candidates.value,
+    sources: sources.value,
+    evidence: deliveredSourceEvidence(
+      candidates.value.evidence,
+      candidates.value.sources,
+      sources.value,
+    ),
+  };
+  const gap = reviewPacketBudgetGap(handoff);
+  return gap ? err(vispError("STAGE_BLOCKED", gap)) : ok(handoff);
+}
+
+/** Internal candidates stay intact until the caller selects its product/design packet contract. */
+export async function reviewerHandoffCandidates(
   workspace: WorkspaceState,
   options: ProductReviewOptions = {},
 ) {

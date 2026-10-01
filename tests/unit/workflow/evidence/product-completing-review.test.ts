@@ -218,6 +218,22 @@ it.each([false, true])(
       selection: { task: undefined },
       current: { outcomes: [{ id: "O001" }, { id: "O002" }] },
     });
+    for (const [index, task] of ["T001", "T002", undefined].entries()) {
+      const packet = vi.mocked(reviewer.review).mock.calls[index]?.[0];
+      const source = packet?.current.sources.find((entry) => entry.reference === "src/value.mjs");
+      expect(source?.excerpt).toContain(`revision ${index}`);
+      const workspace = await setup.workspace.state();
+      const selected = await criticSelection(
+        workspace,
+        { feature: setup.brief.feature, task },
+        index === 2,
+      );
+      if (!selected.ok) throw new Error(selected.error.message);
+      const stored = await readCriticState(workspace, selected.value);
+      if (!stored.ok) throw new Error(stored.error.message);
+      expect(stored.value.state?.attempts.at(-1)?.deliveredEvidenceIds).toContain(source?.id);
+      expect(stored.value.state?.attempts.at(-1)?.deliveredSourceManifest).toBeUndefined();
+    }
     const record = await readProductRecord(await setup.workspace.state());
     if (!record.ok) throw new Error(record.error.message);
     expect(record.value.state.reviews.at(-1)).toMatchObject({

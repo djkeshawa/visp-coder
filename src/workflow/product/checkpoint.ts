@@ -4,7 +4,7 @@ import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
 import { prepareCandidate } from "./candidate.js";
 import { criticSelection } from "./critic-store.js";
-import { runProductReviewerHandoff } from "./reviewer-handoff.js";
+import { reviewerHandoffCandidates } from "./reviewer-handoff.js";
 import { type ProductSelection, saveProductState } from "./store.js";
 import { productSourceDigest } from "./subject.js";
 
@@ -30,7 +30,7 @@ export async function ensureProductCheckpoint(workspace: WorkspaceState, input: 
     )
   )
     return ok(undefined);
-  const handoff = await runProductReviewerHandoff(workspace, selection);
+  const handoff = await reviewerHandoffCandidates(workspace, selection);
   if (!handoff.ok) return handoff;
   const visual = record.brief.outcomes.some(
     (outcome) =>

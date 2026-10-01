@@ -186,7 +186,7 @@ function reviewFindings(
     .slice(0, 3);
 }
 
-function reviewEvidence(
+export function reviewEvidence(
   catalogue: ProductEvidenceCatalogue,
   assessments: readonly ProductAssessment[],
   outcomes: readonly ProductOutcome[],

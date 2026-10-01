@@ -226,9 +226,13 @@ describe("product work authorization boundaries", () => {
       ],
     };
     const submitted = await runProductReview(await workspace.state(), input);
-    expect(submitted.ok).toBe(true);
-    if (!submitted.ok) return;
-    expect(submitted.value.assessments[0]?.status).not.toBe("satisfied");
+    expect(submitted).toMatchObject({
+      ok: false,
+      error: {
+        code: "EVIDENCE_FAILED",
+        message: expect.stringContaining("Unknown evidence reference"),
+      },
+    });
     const { task: _task, ...draft } = input;
     await workspace.write(".visp/drafts/wrong-slice.json", JSON.stringify(draft));
     const cli = await runJson<{ assessments: { status: string }[] }>(
@@ -239,8 +243,9 @@ describe("product work authorization boundaries", () => {
       "--from",
       ".visp/drafts/wrong-slice.json",
     );
-    expect(cli.exitCode, JSON.stringify(cli.envelope)).toBe(0);
-    expect(cli.envelope.data?.assessments[0]?.status).toBe(submitted.value.assessments[0]?.status);
+    expect(cli.exitCode, JSON.stringify(cli.envelope)).toBe(1);
+    expect(cli.envelope.ok).toBe(false);
+    expect(JSON.stringify(cli.envelope)).toContain("Unknown evidence reference");
     type Handler = (args: Record<string, unknown>) => Promise<CallToolResult>;
     let handler: Handler | undefined;
     registerEvidenceTools(
@@ -253,9 +258,8 @@ describe("product work authorization boundaries", () => {
     );
     if (!handler) throw new Error("Missing review tool");
     const response = await handler(input);
-    expect(response.isError).not.toBe(true);
-    const mcp = response.structuredContent as { data: { assessments: { status: string }[] } };
-    expect(mcp.data.assessments[0]?.status).toBe(submitted.value.assessments[0]?.status);
+    expect(response.isError).toBe(true);
+    expect(JSON.stringify(response.structuredContent)).toContain("Unknown evidence reference");
   });
 
   it("does not carry another slice's assessment into the selected slice", async () => {

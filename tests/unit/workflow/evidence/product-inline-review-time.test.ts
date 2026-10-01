@@ -45,7 +45,10 @@ const host = (): ProductCriticHost => ({
           outcome: outcome.id,
           status: "satisfied",
           summary: "Executed the module and observed the promised value",
-          evidence: ["C001"],
+          evidence: packet.current.evidence
+            .filter((entry) => entry.kind === "execution")
+            .slice(0, 1)
+            .map((entry) => entry.id),
           expectations: [],
         })),
         feedback: moduleFeedback(packet.current as unknown as ProductReviewBundle),

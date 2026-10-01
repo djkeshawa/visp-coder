@@ -32,6 +32,7 @@ import {
   type productReviewAgenda,
   type reviewInteractionEvidence,
 } from "./review-context.js";
+import type { DeliveredReviewEvidence } from "./review-delivery-validation.js";
 import type { ProductReviewRecurrence } from "./review-recurrence.js";
 import {
   inspectSelectedImages,
@@ -114,15 +115,17 @@ export interface ProductReviewBundle {
 export function runProductReview(
   workspace: WorkspaceState,
   options: ProductReviewOptions = {},
+  deliveredEvidence?: DeliveredReviewEvidence,
 ): Promise<Result<ProductReviewBundle>> {
   return options.assessments === undefined
-    ? review(workspace, options)
-    : withProductMutation(workspace, () => review(workspace, options));
+    ? review(workspace, options, deliveredEvidence)
+    : withProductMutation(workspace, () => review(workspace, options, deliveredEvidence));
 }
 
 async function review(
   workspace: WorkspaceState,
   options: ProductReviewOptions,
+  deliveredEvidence?: DeliveredReviewEvidence,
 ): Promise<Result<ProductReviewBundle>> {
   const loaded = await readProductRecord(workspace, options);
   if (!loaded.ok) return loaded;
@@ -207,6 +210,7 @@ async function review(
       record,
       slice,
       options,
+      deliveredEvidence,
       subject: subject.value,
       implementation: implementationDigest,
       contractDigest,

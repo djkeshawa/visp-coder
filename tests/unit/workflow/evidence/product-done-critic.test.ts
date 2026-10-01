@@ -36,7 +36,10 @@ function review(status: "satisfied" | "failed") {
           status === "satisfied"
             ? "Executed the module and observed the promised value"
             : "The module returns three, not the promised two",
-        evidence: ["C001"],
+        evidence: packet.current.evidence
+          .filter((entry) => entry.kind === "execution")
+          .slice(0, 1)
+          .map((entry) => entry.id),
         expectations: [],
       })),
       feedback: moduleFeedback(packet.current as unknown as ProductReviewBundle),
@@ -103,7 +106,10 @@ it("reports advisory findings without reopening, repair routing or blocking acce
         nextCheck: "Consider a huge number",
         outcomes: ["O001"],
         required: false,
-        evidence: ["C001"],
+        evidence: packet.current.evidence
+          .filter((entry) => entry.kind === "execution")
+          .slice(0, 1)
+          .map((entry) => entry.id),
       },
     ];
     return response;

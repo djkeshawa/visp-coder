@@ -8,6 +8,7 @@ import type { WorkspaceState } from "../state.js";
 import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import { productBehaviorProbes } from "./behavior-probes.js";
 import { isBrowserCheckCommand } from "./check-command.js";
+import { coreReviewPaths } from "./core-review-sources.js";
 import {
   latestExecutionsByOwner,
   type ProductCheck,
@@ -59,6 +60,7 @@ export async function reviewCodeSources(
         excerpt: snapshot.error.message,
       },
     ];
+  const readSource = reviewSourceReader(workspace);
   const { candidates, declarations } = await sourceCandidates(
     workspace,
     record,
@@ -66,15 +68,20 @@ export async function reviewCodeSources(
     subject,
     slice,
     changedPaths,
+    readSource,
   );
   const question = reviewQuestion(record);
   const sources: ProductSource[] = [];
   let remaining = 31000; // Reserve space within the existing 32k budget for cutoff disclosures.
-  const selected = candidates.slice(0, 8);
+  const core = candidates.filter((candidate) => candidate.coreOutcomes !== undefined);
+  const secondary = candidates.filter((candidate) => candidate.coreOutcomes === undefined);
+  const results = secondary.filter((candidate) => candidate.execution);
+  const files = secondary.filter((candidate) => !candidate.execution);
+  const selected = [...core, ...results, ...files.slice(0, 8)];
   for (const [index, candidate] of selected.entries()) {
-    const limit = Math.min(6000, Math.floor(remaining / (selected.length - index)));
+    const limit = Math.max(0, Math.min(6000, Math.floor(remaining / (selected.length - index))));
     const source = await readReviewSource(
-      workspace,
+      readSource,
       candidate,
       snapshot.value,
       declarations,
@@ -85,7 +92,7 @@ export async function reviewCodeSources(
     sources.push(source);
   }
   if (candidates.length > selected.length) {
-    const omitted = candidates.slice(selected.length);
+    const omitted = files.slice(8);
     sources.push({
       id: "CODE-OMITTED",
       kind: "implementation-file",
@@ -111,6 +118,19 @@ function isReviewablePath(path: string) {
   );
 }
 
+/** Dependency discovery and excerpts share one observation, never cached across reviews. */
+function reviewSourceReader(workspace: WorkspaceState) {
+  const reads = new Map<string, ReturnType<WorkspaceState["files"]["readTextIfExists"]>>();
+  return (path: string) => {
+    let read = reads.get(path);
+    if (!read) {
+      read = workspace.files.readTextIfExists(path);
+      reads.set(path, read);
+    }
+    return read;
+  };
+}
+
 /** A named file or a requested class of documents; scope keeps unrelated project docs out. */
 function requestedDocument(path: string, request: string): number {
   if (!/\.(md|mdx|txt|rst|adoc|json|ya?ml)$/i.test(path)) return 0;
@@ -132,6 +152,7 @@ interface SourceCandidate {
   execution?: ProductExecution;
   category: string;
   sourceUnresolved?: boolean;
+  coreOutcomes?: string[];
 }
 
 async function sourceCandidates(
@@ -141,6 +162,7 @@ async function sourceCandidates(
   subject?: string,
   slice?: ProductSlice,
   changedPaths: ReadonlySet<string> = new Set(),
+  readSource = workspace.files.readTextIfExists.bind(workspace.files),
 ) {
   const scope = (slice ? [slice] : record.brief.slices).flatMap((entry) => entry.scope.allowed);
   const application = Object.keys(snapshot).filter(
@@ -161,17 +183,33 @@ async function sourceCandidates(
     executions.some((execution) => execution.check === check.id),
   );
   const checkPaths = await Promise.all(
-    executedChecks.map(async (check) => ({
+    declarations.map(async (check) => ({
       check,
       paths: await reviewCheckPaths(workspace, [check], snapshot),
+      observedPaths: await reviewCheckPaths(
+        workspace,
+        [{ ...check, files: [], verifierFiles: [] }],
+        snapshot,
+      ),
     })),
+  );
+  const core = await coreReviewPaths(
+    workspace,
+    record,
+    snapshot,
+    checkPaths.map(({ check, observedPaths }) => ({ check, paths: observedPaths })),
+    slice,
+    changedPaths,
+    readSource,
   );
   const unresolvedChecks = new Set(
     checkPaths
       .filter(({ check, paths }) => !paths.length && !isBrowserCheckCommand(check.command))
       .map(({ check }) => check.id),
   );
-  const checks = checkPaths.flatMap(({ paths }) => paths);
+  const checks = checkPaths
+    .filter(({ check }) => executedChecks.includes(check))
+    .flatMap(({ paths }) => paths);
   // Preserve declared check inputs in read-only packets before a check has run as well.
   checks.push(
     ...Object.keys(snapshot).filter(
@@ -195,6 +233,14 @@ async function sourceCandidates(
           requestedDocument(a, record.brief.originalRequest) ||
         Number(changedPaths.has(b)) - Number(changedPaths.has(a)),
     );
+  const requiredOutcomes = record.brief.outcomes
+    .filter(
+      (outcome) => outcome.priority === "must" && (!slice || slice.outcomes.includes(outcome.id)),
+    )
+    .map((outcome) => outcome.id);
+  documents.forEach((path) => {
+    core.set(path, requiredOutcomes);
+  });
   const classes = [
     {
       name: "executed check results",
@@ -207,8 +253,8 @@ async function sourceCandidates(
     { name: "requested deliverables", entries: documents.map((path) => ({ path })) },
     { name: "implementation", entries: application.map((path) => ({ path })) },
   ];
-  const candidates: SourceCandidate[] = [];
-  const seen = new Set<string>();
+  const candidates = coreCandidates(core, requiredOutcomes);
+  const seen = new Set(core.keys());
   for (let index = 0; classes.some((entry) => entry.entries.length > index); index++)
     for (const category of classes) {
       const entry = category.entries[index];
@@ -219,6 +265,18 @@ async function sourceCandidates(
       candidates.push({ ...entry, category: category.name });
     }
   return { candidates, declarations };
+}
+
+function coreCandidates(core: ReadonlyMap<string, string[]>, required: string[]) {
+  const candidates: SourceCandidate[] = [...core].map(([path, coreOutcomes]) => ({
+    path,
+    category: "implementation",
+    coreOutcomes,
+  }));
+  const resolved = new Set([...core.values()].flat());
+  const unresolved = required.filter((outcome) => !resolved.has(outcome));
+  if (unresolved.length) candidates.push({ category: "implementation", coreOutcomes: unresolved });
+  return candidates;
 }
 
 function reviewQuestion(record: ProductRecord) {
@@ -247,13 +305,23 @@ function reviewQuestion(record: ProductRecord) {
 }
 
 async function readReviewSource(
-  workspace: WorkspaceState,
+  readSource: WorkspaceState["files"]["readTextIfExists"],
   candidate: SourceCandidate,
   snapshot: Record<string, string>,
   declarations: ProductCheck[],
   question: string,
   limit: number,
 ): Promise<ProductSource> {
+  if (!candidate.path && !candidate.execution)
+    return {
+      id: "CODE-CORE-UNRESOLVED",
+      kind: "implementation-file",
+      reference: "Unresolved required implementation",
+      sha256: "",
+      available: false,
+      coreOutcomes: candidate.coreOutcomes,
+      excerpt: `No implementation source could be resolved from scope, checks or changed files for outcomes: ${candidate.coreOutcomes?.join(", ")}. Their implementation cannot be assessed from delivered source.`,
+    };
   if (candidate.execution) {
     const execution = candidate.execution;
     const text = reviewCheckResult(
@@ -263,19 +331,19 @@ async function readReviewSource(
     const gap = candidate.sourceUnresolved
       ? "Evidence gap: executed verifier/check source is unresolved or unavailable. Inspect the runner's selected assertion sources before judging coverage.\n"
       : "";
-    const selection = await reviewExcerpt("check-results.txt", text, question, limit - gap.length);
+
     return {
       id: `CHECK-${execution.id}`,
       kind: "executed-check",
       reference: `Executed ${execution.check} at ${execution.subjectDigest}`,
       sha256: sha256(text),
       available: true,
-      excerpt: gap + selection.excerpt,
-      omittedRegions: selection.omitted,
+      excerpt: gap + text,
+      omittedRegions: [],
     };
   }
   const path = candidate.path as string;
-  const read = await workspace.files.readTextIfExists(path);
+  const read = await readSource(path);
   if (!read.ok || read.value === undefined || read.value.includes("\0")) {
     return {
       id: `CODE-${sha256(path).slice(0, 16)}`,
@@ -283,10 +351,10 @@ async function readReviewSource(
       reference: path,
       sha256: snapshot[path] ?? "",
       available: false,
-      excerpt: (read.ok
+      ...(candidate.coreOutcomes !== undefined ? { coreOutcomes: candidate.coreOutcomes } : {}),
+      excerpt: read.ok
         ? "Source is missing or binary; inspect with an appropriate reader"
-        : read.error.message
-      ).slice(0, limit),
+        : read.error.message,
       truncated: true,
     };
   }
@@ -299,6 +367,7 @@ async function readReviewSource(
     sha256: digest,
     available: true,
     excerpt: selection.excerpt,
+    ...(candidate.coreOutcomes !== undefined ? { coreOutcomes: candidate.coreOutcomes } : {}),
     truncated: selection.omitted.length > 0,
     omittedRegions: selection.omitted,
     ...(selection.omitted.length

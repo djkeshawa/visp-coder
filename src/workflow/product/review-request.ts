@@ -11,6 +11,7 @@ import { independentJudgments, independentReviewSchema } from "./independent-rev
 import { assessmentSchema, coverageAssessmentSchema, reviewerContextSchema } from "./model.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
 import { type ProductReviewOptions, runProductReview } from "./review.js";
+import type { DeliveredReviewEvidence } from "./review-delivery-validation.js";
 import { reviewSelectionSchema } from "./review-selection.js";
 import { runProductReviewerHandoff } from "./reviewer-handoff.js";
 
@@ -70,6 +71,7 @@ export async function runProductReviewRequest(
   workspace: WorkspaceState,
   options: ProductReviewRequest = {},
   host?: ProductFeedbackHost,
+  deliveredEvidence?: DeliveredReviewEvidence,
 ): Promise<Result<unknown>> {
   const valid = validateProductReviewRequest(options);
   if (!valid.ok) return valid;
@@ -86,7 +88,7 @@ export async function runProductReviewRequest(
   if (options.template) return productInputTemplate(workspace, "review", options);
   if (options.handoff)
     return withReviewNotice(workspace, await runProductReviewerHandoff(workspace, options));
-  const result = await runProductReview(workspace, options);
+  const result = await runProductReview(workspace, options, deliveredEvidence);
   return result.ok && options.assessments !== undefined && !options.detail
     ? ok(productReviewReceipt(result.value))
     : result;
