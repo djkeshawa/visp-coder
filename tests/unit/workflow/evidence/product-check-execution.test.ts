@@ -722,3 +722,68 @@ it("uses complete pinned failure metadata when the displayed failures were cut",
     ),
   ).toBe(false);
 });
+
+it.each([true, false])(
+  "persists full-output completion before shortening (complete=%s)",
+  async (complete) => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const current = await workspace.state();
+    await workspace.write(
+      `.visp/features/${brief.feature}/acceptance-tests.json`,
+      JSON.stringify({ tests: [{ name: "a" }, { name: "b" }, { name: "c" }] }),
+    );
+    const text = [
+      "PASS: a",
+      "FAIL: b: wrong test",
+      ...(complete ? ["PASS: c"] : []),
+      "diagnostic noise\n".repeat(1000),
+    ].join("\n");
+    const record = await readProductRecord(current, {});
+    expect(record.ok).toBe(true);
+    if (!record.ok) return;
+    const result = await executeProductCheck(
+      current,
+      record.value,
+      undefined,
+      {
+        id: "PINNED_completion",
+        environment: "node",
+        outcomes: ["O001"],
+        command: [process.execPath, "-e", `console.log(${JSON.stringify(text)}); process.exit(1)`],
+        files: [],
+      },
+      "subject",
+    );
+    expect(result.execution.pinnedFailures).toEqual({
+      names: ["b"],
+      unattributed: 0,
+      unreported: complete ? [] : ["c"],
+    });
+    const saved = executionSchema.parse(result.execution);
+    const pending = {
+      declared: ["a", "b", "c"],
+      pending: [{ test: "b" }] as Parameters<typeof disputedFailure>[1]["pending"],
+    };
+    // Replacing the display cannot change the decision made from the full execution output.
+    expect(disputedFailure({ ...saved, output: "FAIL: b" }, pending)).toBe(complete);
+  },
+);
+
+it("keeps old pinned summaries readable but refuses incomplete or shortened waiver evidence", () => {
+  const pending = {
+    declared: ["a", "b", "c"],
+    pending: [{ test: "b" }] as Parameters<typeof disputedFailure>[1]["pending"],
+  };
+  const old = {
+    check: "PINNED_old",
+    status: "failed",
+    output: "PASS: a\nFAIL: b",
+    pinnedFailures: { names: ["b"], unattributed: 0 },
+  };
+  expect(disputedFailure(old, pending)).toBe(false);
+  expect(disputedFailure({ ...old, output: `${old.output}\nPASS: c` }, pending)).toBe(true);
+  expect(
+    disputedFailure({ ...old, output: "FAIL: b\nVISP: earlier output omitted" }, pending),
+  ).toBe(false);
+});

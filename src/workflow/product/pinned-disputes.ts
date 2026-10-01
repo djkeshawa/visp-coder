@@ -16,6 +16,7 @@ import {
   type DisputeRulingRecord,
   disputeHint,
   failingTests,
+  incompleteSuiteNote,
   MAX_FILINGS_PER_TEST,
   MAX_OPEN_DISPUTES,
   MAX_REVIEWS_PER_FILING,
@@ -26,6 +27,7 @@ import {
   pinnedWaivers,
   reviewerRules,
   suiteCrashed,
+  unreportedPinnedTests,
   WAIVED_TESTS_ENV,
 } from "./pinned-dispute-model.js";
 import { readProductRecord } from "./store.js";
@@ -34,6 +36,7 @@ import { readProductRecord } from "./store.js";
 export interface FailingPinned {
   readonly check: string;
   readonly output: string;
+  readonly pinnedFailures?: ProductExecution["pinnedFailures"];
 }
 export interface DisputeInput {
   readonly tests: readonly string[];
@@ -90,11 +93,16 @@ export function disputeInput(options: {
 
 /** The pinned runs that failed as blocking checks in this call. */
 export function failingPinned(
-  executions: readonly { check: string; status: string; output: string }[],
+  executions: readonly {
+    check: string;
+    status: string;
+    output: string;
+    pinnedFailures?: ProductExecution["pinnedFailures"];
+  }[],
 ): FailingPinned[] {
   return executions
     .filter((entry) => entry.check.startsWith("PINNED_") && entry.status === "failed")
-    .map((entry) => ({ check: entry.check, output: entry.output }));
+    .map(({ check, output, pinnedFailures }) => ({ check, output, pinnedFailures }));
 }
 
 /** Whether the call ran the pinned suite as a blocking check, passing or not. */
@@ -206,7 +214,7 @@ export async function fileDisputes(
     outcomes.push({
       test: verdict.name,
       status: "filed",
-      detail: "Sent to the independent reviewer; the pinned test stays required until it rules.",
+      detail: "Dispute filed; the pinned test stays required until the independent reviewer rules.",
     });
   }
   if (outcomes.some((entry) => entry.status === "filed")) {
@@ -268,12 +276,15 @@ function disputable(
 ): { name: string; check: string } | { refusal: string } {
   const name = declaredName(declared, requested);
   if (name === undefined) return { refusal: unknownTest(record, requested) };
-  const check = failing.find((entry) =>
-    failingTests(entry.output, declared).names.includes(name),
-  )?.check;
+  const check = failing.find((entry) => failureNames(entry, declared).includes(name))?.check;
   if (check === undefined) return { refusal: notFailing(requested, name, failing, declared) };
   const refusal = priorDispute(disputes, verified, name, subject);
   return refusal ? { refusal } : { name, check };
+}
+
+/** Complete saved attribution takes precedence over the diagnostic output excerpt. */
+function failureNames(run: FailingPinned, declared: readonly string[]): readonly string[] {
+  return (run.pinnedFailures ?? failingTests(run.output, declared)).names;
 }
 
 function declaredName(declared: readonly string[], requested: string): string | undefined {
@@ -353,9 +364,7 @@ export async function refreshDisputes(
   const declared = (record.tests ?? []).map((entry) => entry.name);
   const disputes = (record.disputes ?? []).map((entry): PinnedDispute => {
     if (!stale.includes(entry)) return entry;
-    const run = failing.find((item) =>
-      failingTests(item.output, declared).names.includes(entry.test),
-    );
+    const run = failing.find((item) => failureNames(item, declared).includes(entry.test));
     return run
       ? { ...entry, subject, failure: boundedFailure(failing, run.check), reviews: 0 }
       : { ...entry, status: "expired" };
@@ -542,6 +551,8 @@ function failureHint(
   declared: readonly string[],
 ): string {
   const failures = context.failures ?? [];
+  const unreported = missingResults(failures, declared);
+  if (unreported.length) return incompleteSuiteNote(unreported);
   const crashed =
     failures.length > 0 &&
     failures.every((entry) => suiteCrashed({ ...entry, status: "failed" }, declared));
@@ -564,7 +575,7 @@ function disputeNote(
   if (entry.status === "open" && !reviewerCanRule)
     return "the independent reviewer cannot rule on this (its review budget is spent or it is unavailable); hand it to the human reviewer: run visp pr, which lists it";
   if (entry.status === "open")
-    return `awaiting the independent reviewer; run visp ${command}, which launches it`;
+    return `awaiting the independent reviewer; run visp ${command}, which launches it when the blocking checks pass or their failures are fully disputed`;
   if (entry.status === "rejected")
     return `${reasoning} The product must satisfy this test; change the product${entry.filings < MAX_FILINGS_PER_TEST ? ", then dispute again only with a new reason" : " (it cannot be disputed again)"}.`;
   if (!verified)
@@ -609,7 +620,7 @@ export async function pinnedRoute(
   const report = await pinnedTestsReport(workspace, feature, {
     failing: true,
     command,
-    failures: pinned.map(({ check, output }) => ({ check, output })),
+    failures: pinned,
     capacity,
   });
   const evidence = [
@@ -618,6 +629,8 @@ export async function pinnedRoute(
       (entry) => `Pinned test ${JSON.stringify(entry.test)} dispute ${entry.status}: ${entry.note}`,
     ),
   ];
+  const unreported = missingResults(pinned, state.declared);
+  if (unreported.length) return { evidence, objective: incompleteSuiteNote(unreported) };
   const only = failures.length === pinned.length;
   const settled =
     only &&
@@ -641,6 +654,16 @@ export async function pinnedRoute(
   const crashed =
     only && pinned.every((entry) => suiteCrashed({ ...entry, status: "failed" }, state.declared));
   return { evidence, ...(crashed ? { objective: CRASH_OBJECTIVE } : {}) };
+}
+
+function missingResults(failures: readonly FailingPinned[], declared: readonly string[]): string[] {
+  return [
+    ...new Set(
+      failures.flatMap((entry) =>
+        unreportedPinnedTests(entry.output, declared, entry.pinnedFailures),
+      ),
+    ),
+  ];
 }
 
 function upheldOverride(

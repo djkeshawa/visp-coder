@@ -411,7 +411,12 @@ export const executionSchema = z
     output: z.string(),
     /** Complete runner-derived failure attribution, independent of the displayed output budget. */
     pinnedFailures: z
-      .object({ names: z.array(z.string()), unattributed: z.number().int().nonnegative() })
+      .object({
+        names: z.array(z.string()),
+        unattributed: z.number().int().nonnegative(),
+        /** Full-output missing results after verified intentional skips; absent on old receipts. */
+        unreported: z.array(z.string()).optional(),
+      })
       .strict()
       .optional(),
     provenance: z.enum(["supervisor-executed", "supervisor-reused"]),

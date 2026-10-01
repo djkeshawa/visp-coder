@@ -69,7 +69,14 @@ export type PinnedDispute = z.infer<typeof disputeSchema>;
 
 /** Lines that show an uncaught error or a stack trace rather than a reported test failure. */
 const UNCAUGHT =
-  /^\s*(?:Traceback \(most recent call last\)|Uncaught\b|Unhandled\b|[\w.$]*(?:Error|Exception)(?:\s*\[[^\]]*\])?:|at\s+\S)/;
+  /^\s*(?:Traceback \(most recent call last\)|Uncaught\b|Unhandled\b|[\w.$]*(?:Error|Exception)(?:\s*\[[^\]]*\])?:|at\s+\S|File\s+"[^"]+", line \d+)/;
+/** Column-0 error headers always start an independent crash, never a FAIL continuation. */
+const ERROR_HEADER =
+  /^(?:Traceback \(most recent call last\):|Uncaught\b|Unhandled\b|[\w.$]*(?:Error|Exception)(?:\s*\[[^\]]*\])?:)/;
+const RESULT_LINE = /^\s*(?:PASS:|FAIL:|NOT OBSERVED:|ENVIRONMENT ERROR:)/i;
+/** Node ends every default uncaught-exception report with its version, even for `throw new Error()`. */
+const NODE_CRASH_TRAILER = /^Node\.js v\d+\.\d+\.\d+\s*$/;
+const FAILURE_DETAIL = /^\s+\S/;
 
 /** Windows suites end lines with CRLF; a stray `\r` must not hide a `FAIL:` line. */
 const OUTPUT_LINES = /\r?\n/;
@@ -82,8 +89,10 @@ const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 /**
  * The declared tests a run reports as failing: lines that start `FAIL:` followed by the exact
  * declared name. A `FAIL:` line naming anything else, or an uncaught error or traceback
- * outside a `FAIL:` line, counts as unattributed. A name that only appears in passing or
- * verbose lines is not failing. PASS and NOT OBSERVED records are never failure evidence.
+ * outside a named failure record, counts as unattributed. Only indented details attach;
+ * blank lines and plain diagnostic text preserve the record. Result lines and column-0
+ * error headers end it, so independent crashes cannot be explained by a preceding FAIL.
+ * A name that only appears in passing or verbose lines is not failing.
  */
 export function failingTests(
   output: string,
@@ -91,16 +100,24 @@ export function failingTests(
 ): { names: string[]; unattributed: number } {
   const names = new Set<string>();
   let unattributed = 0;
+  let attached = false;
   for (const line of output.split(OUTPUT_LINES)) {
     const match = /^\s*FAIL:\s*(.*)$/i.exec(line);
-    if (!match) {
-      // An uncaught error or trace outside a FAIL line is a failure no test name explains.
-      if (UNCAUGHT.test(line)) unattributed += 1;
+    if (match) {
+      const found = declaredName(match[1] ?? "", declared);
+      attached = found !== undefined;
+      if (found) names.add(found);
+      else unattributed += 1;
       continue;
     }
-    const found = declaredName(match[1] ?? "", declared);
-    if (found) names.add(found);
-    else unattributed += 1;
+    if (RESULT_LINE.test(line)) {
+      attached = false;
+      continue;
+    }
+    if (ERROR_HEADER.test(line) || NODE_CRASH_TRAILER.test(line)) attached = false;
+    if (attached && FAILURE_DETAIL.test(line)) continue;
+    // A crash outside a named failure record has no test to explain it.
+    if (UNCAUGHT.test(line) || NODE_CRASH_TRAILER.test(line)) unattributed += 1;
   }
   return { names: [...names], unattributed };
 }
@@ -180,13 +197,15 @@ export interface PinnedRun {
  * names, its failures cannot be told from a crash, and none of them is ever called one.
  */
 export function suiteCrashed(
-  run: Pick<PinnedRun, "status" | "output">,
+  run: Pick<PinnedRun, "status" | "output"> & {
+    readonly pinnedFailures?: ProductExecution["pinnedFailures"];
+  },
   declared: readonly string[],
 ): boolean {
   return (
     declared.length > 0 &&
     run.status === "failed" &&
-    failingTests(run.output, declared).names.length === 0
+    (run.pinnedFailures ?? failingTests(run.output, declared)).names.length === 0
   );
 }
 
@@ -322,6 +341,38 @@ export function persistentPinnedFailure(
   return { count: streak.length, status: kind, ...(line ? { line } : {}) };
 }
 
+/** Missing results restrict waivers only when the suite reports a declared PASS. */
+export function unreportedTests(
+  output: string,
+  declared: readonly string[],
+  skipped: readonly string[] = [],
+): string[] {
+  const reported = new Set<string>();
+  let hasPass = false;
+  for (const line of output.split(OUTPUT_LINES)) {
+    const match = /^\s*(PASS|FAIL):\s*(.*)$/i.exec(line);
+    if (!match) continue;
+    const name = declaredName(match[2] ?? "", declared);
+    if (!name) continue;
+    reported.add(name);
+    if (match[1]?.toUpperCase() === "PASS") hasPass = true;
+  }
+  return hasPass ? declared.filter((name) => !reported.has(name) && !skipped.includes(name)) : [];
+}
+
+/** New receipts retain full-output completion; old receipts can only prove what they show. */
+export function unreportedPinnedTests(
+  output: string,
+  declared: readonly string[],
+  summary?: ProductExecution["pinnedFailures"],
+): string[] {
+  return summary?.unreported ?? unreportedTests(output, declared);
+}
+
+export function incompleteSuiteNote(names: readonly string[]): string {
+  return `The pinned suite stopped before reporting these declared tests: ${names.map((name) => JSON.stringify(name)).join(", ")}. Look for the crash; an upheld dispute cannot waive it.`;
+}
+
 /** Every failing test of the run is attributed and in `covered`. */
 export function allFailuresIn(
   output: string,
@@ -331,7 +382,7 @@ export function allFailuresIn(
 ): boolean {
   // Older receipts lack complete attribution; a disclosed cutoff cannot prove full coverage.
   if (
-    !summary &&
+    summary?.unreported === undefined &&
     /VISP: (?:\d+ more FAIL lines? (?:is|are) left out|earlier output omitted|output shortened)/.test(
       output,
     )
@@ -339,6 +390,7 @@ export function allFailuresIn(
     return false;
   const failing = summary ?? failingTests(output, declared);
   return (
+    unreportedPinnedTests(output, declared, summary).length === 0 &&
     failing.unattributed === 0 &&
     failing.names.length > 0 &&
     failing.names.every((name) => covered.includes(name))

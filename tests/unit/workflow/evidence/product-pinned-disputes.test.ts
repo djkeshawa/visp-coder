@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
 import {
   inlineReview,
   runProductAcceptReviewed,
@@ -77,9 +78,21 @@ const NATIVE = balancedCritic("codex") ?? { model: "missing" };
 const CONFIG = { model: "test-critic", maxCalls: 4, timeoutMs: 5000, maxImageBytes: 4194304 };
 
 const testerOf =
-  (checks: readonly (readonly [string, string])[], skips = true): IndependentTester =>
+  (
+    checks: readonly (readonly [string, string])[],
+    skips = true,
+    stack?: string,
+  ): IndependentTester =>
   async () => ({
-    file: { name: "value.test.mjs", content: buildSuite(checks, skips) },
+    file: {
+      name: "value.test.mjs",
+      content: stack
+        ? buildSuite(checks, skips).replace(
+            "error.message",
+            `error.message.replace(/\\s+/g, " ") + ${JSON.stringify(`\n${stack}`)}`,
+          )
+        : buildSuite(checks, skips),
+    },
     tests: checks.map(([name]) => ({ name, quote: "Return two" })),
     notes: "",
   });
@@ -93,6 +106,8 @@ async function disputeWorkspace(
     value?: number;
     maxCalls?: number;
     native?: boolean;
+    stack?: string;
+    custom?: IndependentTester;
   } = {},
 ) {
   const fixture = await productWorkspace({ critic: true });
@@ -109,7 +124,9 @@ async function disputeWorkspace(
   const work = await runProductWork(
     await workspace.state(),
     { task: "T001" },
-    inlineTests(testerOf(options.checks ?? CHECKS, options.skips ?? true)),
+    inlineTests(
+      options.custom ?? testerOf(options.checks ?? CHECKS, options.skips ?? true, options.stack),
+    ),
   );
   expect(work.ok && work.value.independentTests?.status, JSON.stringify(work)).toBe("pinned");
   const configured = await runProductCritic(await workspace.state(), {
@@ -127,13 +144,13 @@ async function disputeWorkspace(
 type Ruling = { test: string; ruling: "upheld" | "rejected"; reasoning: string };
 
 /** An independent-format review response that rules on whatever disputes the packet holds. */
-function reviewer(rule: (packet: CriticPacket) => Ruling[]) {
+function reviewer(rule: (packet: CriticPacket) => Ruling[], model = CONFIG.model) {
   const packets: CriticPacket[] = [];
   const host = {
     review: vi.fn(async (packet: CriticPacket) => {
       packets.push(packet);
       return {
-        model: CONFIG.model,
+        model,
         response: {
           summary: "Executed the module and observed the promised value",
           assessments: packet.current.outcomes.map((outcome) => ({
@@ -885,14 +902,122 @@ it("does not count a run with an uncaught error as all-waived or all-disputed", 
     "Uncaught TypeError: x is undefined",
     "Error: ENOTEMPTY: directory not empty, rmdir '/tmp/profile'",
     "AssertionError [ERR_ASSERTION]: boom",
-    "    at file:///tmp/suite.mjs:9:1",
   ]) {
-    expect(waivedFailure(`${fail}\n${noise}`, waivers), noise).toBe(false);
-    expect(allFailuresIn(`${fail}\n${noise}`, declaredNames, ["a"]), noise).toBe(false);
+    for (const separator of ["\n", "\n\n"]) {
+      expect(waivedFailure(`${fail}${separator}${noise}`, waivers), noise).toBe(false);
+      expect(allFailuresIn(`${fail}${separator}${noise}`, declaredNames, ["a"]), noise).toBe(false);
+    }
   }
+  expect(
+    allFailuresIn(`${fail}\nPASS: b\n    at file:///tmp/suite.mjs:9:1`, declaredNames, ["a"]),
+  ).toBe(false);
   // A reason on a FAIL line may mention an error; a non-zero exit with no FAIL line is no test.
   expect(allFailuresIn("FAIL: a: TypeError: nope", declaredNames, ["a"])).toBe(true);
   expect(allFailuresIn("exit 1, no FAIL line", declaredNames, ["a"])).toBe(false);
+});
+
+const STACKS = [
+  "    at evaluate (file:///tmp/suite.mjs:9:1)\n    at check (file:///tmp/suite.mjs:3:2)",
+  '  File "suite.py", line 9, in check\n    assert value == 3',
+];
+
+it.each(STACKS)("attributes an attached stack to its named FAIL: %s", (stack) => {
+  const output = `FAIL: a: expected 3\n${stack}\nPASS: b`;
+  expect(failingTests(output, ["a", "b"])).toEqual({ names: ["a"], unattributed: 0 });
+  expect(allFailuresIn(output, ["a", "b"], ["a"])).toBe(true);
+  expect(waivedFailure(output, { declared: ["a", "b"], names: ["a"], suiteSkips: false })).toBe(
+    true,
+  );
+  for (const independent of [
+    `${stack}\n${output}`,
+    `${output}\n${stack}`,
+    `FAIL: a\nTypeError: independent crash\n${stack}`,
+  ]) {
+    expect(failingTests(independent, ["a", "b"]).unattributed).toBeGreaterThan(0);
+    expect(allFailuresIn(independent, ["a", "b"], ["a"])).toBe(false);
+  }
+  expect(failingTests(stack, ["a"]).names).toEqual([]);
+});
+
+it("counts Node's default crash report after a FAIL even when the error has no message", () => {
+  // Real Node output for `throw new Error()` and `throw "boom"` after a FAIL line, as VISP
+  // joins stdout and stderr: no header with a colon, but always the version trailer.
+  const fail = "PASS: a\nFAIL: b: expected odd\n";
+  for (const crash of [
+    "\nfile:///tmp/s.mjs:3\nthrow new Error();\n      ^\n\nError\n    at file:///tmp/s.mjs:3:7\n    at ModuleJob.run (node:internal/modules/esm/module_job:569:25)\n\nNode.js v26.7.0\n",
+    '\nfile:///tmp/t.mjs:2\nsetTimeout(() => { throw "boom"; }, 1);\n                   ^\nboom\n(Use `node --trace-uncaught ...` to show where the exception was thrown)\n\nNode.js v26.7.0\n',
+  ]) {
+    const output = `${fail}${crash}`;
+    expect(failingTests(output, ["a", "b", "c"]).unattributed).toBeGreaterThan(0);
+    expect(allFailuresIn(output, ["a", "b", "c"], ["b"])).toBe(false);
+    expect(
+      failingTests(`FAIL: b: expected odd\n${crash}`, ["b", "c"]).unattributed,
+    ).toBeGreaterThan(0);
+  }
+});
+
+it.each(STACKS)(
+  "routes a saved named failure with attached stack to a native review: %s",
+  async (stack) => {
+    const fixture = await disputeWorkspace({ native: true, stack });
+    const { host, packets } = reviewer(() => [], NATIVE.model);
+    const done = await runProductDoneReviewed(
+      await state(),
+      { task: "T001", dispute: [ODD], disputeReason: REASON },
+      inlineReview(launched(host)),
+    );
+    expect(done.ok, JSON.stringify(done)).toBe(true);
+    expect(host.review).toHaveBeenCalledTimes(1);
+    expect(packets[0]?.disputes?.[0]?.failureOutput).toContain(stack);
+    const record = await readProductRecord(await state(), {});
+    expect(
+      record.ok &&
+        record.value.state.executions.findLast((entry) => entry.check.startsWith("PINNED_"))
+          ?.pinnedFailures,
+    ).toMatchObject({ names: [ODD], unattributed: 0, unreported: [] });
+    const selected = await criticSelection(await state(), { feature: fixture.brief.feature });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const critic = await readCriticState(await state(), selected.value);
+    expect(critic.ok && critic.value.state?.attempts).toEqual([
+      expect.objectContaining({
+        transport: "native",
+        launcher: "visp",
+        status: "reviewed",
+        execution: expect.objectContaining({ provenance: "adapter-observed" }),
+      }),
+    ]);
+    expect(await disputes(await state(), fixture.brief.feature)).toEqual([
+      expect.objectContaining({ status: "open", reviews: 1 }),
+    ]);
+  },
+);
+
+it("files and refreshes disputes from complete saved attribution when the FAIL name is cut", async () => {
+  const name = `odd ${"value ".repeat(65)}`.trim();
+  const fixture = await disputeWorkspace({
+    checks: [
+      [TWO, "value === 2"],
+      [name, "value % 2 === 1"],
+    ],
+    stack: `${STACKS[0]}\n${"diagnostic output\n".repeat(800)}`,
+  });
+  const input = { task: "T001", dispute: [name], disputeReason: REASON };
+  const first = await runProductDoneReviewed(await state(), input);
+  expect(first.ok && first.value.pinnedTests?.filed?.[0]).toMatchObject({ status: "filed" });
+  expect(
+    first.ok && first.value.executions.find((entry) => entry.check.startsWith("PINNED_"))?.output,
+  ).not.toContain(name);
+  await workspace?.write("src/value.mjs", "export const value = 2; // new source\n");
+  const { host } = reviewer(upholdAll);
+  const second = await runProductDoneReviewed(await state(), { task: "T001" }, inlineReview(host));
+  expect(second.ok, JSON.stringify(second)).toBe(true);
+  expect(host.review).toHaveBeenCalledTimes(1);
+  expect(await disputes(await state(), fixture.brief.feature)).toEqual([
+    expect.objectContaining({ test: name, status: "upheld" }),
+  ]);
+  const next = await runProductNext(await state(), { feature: fixture.brief.feature });
+  expect(next.ok && next.value.action).not.toBe("fix");
 });
 
 it("attributes FAIL lines to declared tests without counting uncaught errors", () => {
@@ -991,6 +1116,7 @@ it("keeps the reviewer away when a disputed run also crashes outside its tests",
   );
   expect(done.ok, JSON.stringify(done)).toBe(true);
   expect(starter).not.toHaveBeenCalled();
+  expect(JSON.stringify(done)).not.toContain("Sent to the independent reviewer");
 });
 
 it("hands off only when every failing test is handed off or waived", async () => {
@@ -1028,6 +1154,7 @@ function launched(host: { review: (packet: CriticPacket) => Promise<unknown> }) 
     }),
     review: async (packet: CriticPacket) => ({
       context: "fresh" as const,
+      reasoningEffort: "high" as const,
       ...((await host.review(packet)) as object),
     }),
   } as unknown as Parameters<typeof inlineReview>[0];
@@ -1119,3 +1246,236 @@ it("tells the worker no dispute can be ruled once VISP's reviewer cannot run aga
   });
   expect(next.ok && next.value.evidence.join("\n")).toContain("cannot rule on a dispute now");
 });
+
+it.each(["Node", "Python"])(
+  "R6a rejects a waiver when later declared tests never ran (%s)",
+  async (language) => {
+    const nodeContent = `import assert from "node:assert/strict";
+import { value } from "../../src/value.mjs";
+process.on("uncaughtException", e => { console.error(e.stack); process.exit(1); });
+let failed = false;
+function check(name, run) {
+  try { run(); console.error("PASS: " + name); }
+  catch(e) { failed = true; console.error("FAIL: " + name + ": " + e.message.replace(/\\s+/g," ")); }
+}
+check("value is a number", () => assert.equal(typeof value, "number"));
+check("value is odd", () => assert.ok(value % 2 === 1));
+if (value === 2) throw new TypeError("next test crashed outside its try/catch");
+check("value is two", () => assert.equal(value, 2));
+process.exitCode = failed ? 1 : 0;
+`;
+    const pythonContent = `import sys, re
+from pathlib import Path
+value = int(re.search(r"value = ([0-9]+)", Path("src/value.mjs").read_text()).group(1))
+failed = False
+def check(name, run):
+    global failed
+    try:
+        run()
+        print("PASS: " + name, file=sys.stderr)
+    except Exception as e:
+        failed = True
+        print("FAIL: " + name + ": " + str(e), file=sys.stderr)
+def number():
+    assert isinstance(value, int)
+def odd():
+    assert value % 2 == 1
+def two():
+    assert value == 2
+check("value is a number", number)
+check("value is odd", odd)
+if value == 2:
+    raise TypeError("next test crashed outside its try/catch")
+check("value is two", two)
+sys.exit(1 if failed else 0)
+`;
+    const content = language === "Python" ? pythonContent : nodeContent;
+    const fixture = await disputeWorkspace({
+      native: true,
+      custom: async () => ({
+        file: { name: language === "Python" ? "crash.py" : "crash.mjs", content },
+        tests: CHECKS.map(([name]) => ({ name, quote: "Return two" })),
+        notes: "",
+      }),
+    });
+    const { host } = reviewer(upholdAll, NATIVE.model);
+    const done = await runProductDoneReviewed(
+      await state(),
+      { task: "T001", dispute: [ODD], disputeReason: REASON },
+      inlineReview(launched(host)),
+    );
+    expect(done.ok, JSON.stringify(done)).toBe(true);
+    expect(done.ok && done.value.closed).toBe(false);
+    expect(host.review).not.toHaveBeenCalled();
+    expect(done.ok && done.value.pinnedTests?.hint).toContain(TWO);
+    expect(done.ok && done.value.pinnedTests?.hint).toContain("suite stopped before reporting");
+    const accepted = await runProductAcceptReviewed(
+      await state(),
+      {},
+      inlineReview(launched(host)),
+    );
+    expect(accepted.ok && accepted.value.passed).toBe(false);
+    const record = await readProductRecord(await state(), {});
+    expect(record.ok && record.value.state.status).not.toBe("accepted");
+    expect(
+      record.ok &&
+        record.value.state.executions.findLast((entry) => entry.check.startsWith("PINNED_"))
+          ?.pinnedFailures,
+    ).toMatchObject({ names: [ODD], unreported: [TWO], unattributed: expect.any(Number) });
+    const next = await runProductNext(await state(), { feature: fixture.brief.feature });
+    expect(next.ok && next.value.action).toBe("fix");
+    expect(next.ok && next.value.objective).toContain(TWO);
+  },
+);
+
+const BOMB = "bomb fuse removes the bomb at one second when it has not impacted first";
+const BENCHMARK_FAILURE = `FAIL: ${BOMB}: ReferenceError: assert is not defined\n    at <anonymous>:3:7\n    at <anonymous>:8:7\n`;
+
+it("attributes the exact benchmark failure to its named test", () => {
+  expect(failingTests(BENCHMARK_FAILURE, [BOMB])).toEqual({ names: [BOMB], unattributed: 0 });
+});
+
+it("routes the exact benchmark failure to the native reviewer and closes when upheld", async () => {
+  const checks = [
+    [TWO, "value === 2"],
+    [BOMB, "value % 2 === 1"],
+  ] as const;
+  const fixture = await disputeWorkspace({
+    native: true,
+    custom: async () => ({
+      file: {
+        name: "benchmark.mjs",
+        content: buildSuite(checks, false).replace(
+          "error.message",
+          JSON.stringify(
+            "ReferenceError: assert is not defined\n    at <anonymous>:3:7\n    at <anonymous>:8:7",
+          ),
+        ),
+      },
+      tests: checks.map(([name]) => ({ name, quote: "Return two" })),
+      notes: "",
+    }),
+  });
+  const { host, packets } = reviewer(upholdAll, NATIVE.model);
+  const done = await runProductDoneReviewed(
+    await state(),
+    { task: "T001", dispute: [BOMB], disputeReason: REASON },
+    inlineReview(launched(host)),
+  );
+  expect(done.ok && done.value.closed, JSON.stringify(done)).toBe(true);
+  expect(packets[0]?.disputes?.[0]?.failureOutput).toContain(BENCHMARK_FAILURE.trimEnd());
+  const selected = await criticSelection(await state(), { feature: fixture.brief.feature });
+  expect(selected.ok).toBe(true);
+  if (!selected.ok) return;
+  const critic = await readCriticState(await state(), selected.value);
+  expect(critic.ok && critic.value.state?.attempts).toEqual([
+    expect.objectContaining({
+      transport: "native",
+      launcher: "visp",
+      status: "reviewed",
+      execution: expect.objectContaining({ provenance: "adapter-observed" }),
+    }),
+  ]);
+  const accepted = await runProductAcceptReviewed(await state(), {}, inlineReview(launched(host)));
+  expect(accepted.ok && accepted.value.passed, JSON.stringify(accepted)).toBe(true);
+});
+
+it("closes a complete PASS-line suite after an upheld dispute but blocks it if a test stops reporting", async () => {
+  const suite = buildSuite(CHECKS, false)
+    .replace(
+      'import { value } from "../../src/value.mjs";',
+      'import * as product from "../../src/value.mjs";\nconst value = product.value;',
+    )
+    .replace(`check(${JSON.stringify(TWO)},`, `if (!product.omit) check(${JSON.stringify(TWO)},`);
+  const fixture = await disputeWorkspace({
+    native: true,
+    custom: async () => ({
+      file: { name: "completion.mjs", content: suite },
+      tests: CHECKS.map(([name]) => ({ name, quote: "Return two" })),
+      notes: "",
+    }),
+  });
+  const { host } = reviewer(upholdAll, NATIVE.model);
+  const done = await runProductDoneReviewed(
+    await state(),
+    { task: "T001", dispute: [ODD], disputeReason: REASON },
+    inlineReview(launched(host)),
+  );
+  expect(done.ok && done.value.closed, JSON.stringify(done)).toBe(true);
+  expect((await disputes(await state(), fixture.brief.feature))[0]?.status).toBe("upheld");
+  await workspace?.write("src/value.mjs", "export const value = 2; export const omit = true;\n");
+  const incomplete = await runProductDoneReviewed(
+    await state(),
+    { task: "T001" },
+    inlineReview(launched(host)),
+  );
+  expect(incomplete.ok && incomplete.value.closed, JSON.stringify(incomplete)).toBe(false);
+  expect(incomplete.ok && incomplete.value.pinnedTests?.hint).toContain(TWO);
+  expect(
+    incomplete.ok &&
+      incomplete.value.executions.find((entry) => entry.check.startsWith("PINNED_"))?.output,
+  ).toContain("an upheld dispute cannot waive it");
+  expect(host.review).toHaveBeenCalledTimes(1);
+  const accepted = await runProductAcceptReviewed(await state(), {}, inlineReview(launched(host)));
+  expect(accepted.ok && accepted.value.passed).toBe(false);
+});
+
+it("attributes Node assert multiline messages and keeps result and error boundaries blocking", () => {
+  const message =
+    "FAIL: a: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n1 !== 2\n\n    at check (suite.mjs:3:7)\nPASS: b";
+  expect(failingTests(message, ["a", "b"])).toEqual({ names: ["a"], unattributed: 0 });
+  expect(allFailuresIn(message, ["a", "b"], ["a"])).toBe(true);
+  for (const boundary of [
+    "PASS: b",
+    "FAIL: unknown",
+    "NOT OBSERVED: b",
+    "ENVIRONMENT ERROR: no Chrome",
+    "TypeError: crash",
+    "Traceback (most recent call last):",
+    "Uncaught TypeError",
+    "Unhandled rejection",
+  ]) {
+    expect(
+      failingTests(`FAIL: a\n${boundary}\n    at <anonymous>:3:7`, ["a", "b"]).unattributed,
+      boundary,
+    ).toBeGreaterThan(0);
+  }
+});
+
+it("closes after reviewing a real Node assert e.stack with blank lines and a column-0 comparison", async () => {
+  const checks = [
+    [TWO, "value === 2"],
+    [ODD, "value === 1"],
+  ] as const;
+  const suite = buildSuite(checks, false)
+    .replace("error.message", "error.stack")
+    .replace("assert.ok(value === 1)", "assert.equal(value, 1)");
+  await disputeWorkspace({
+    native: true,
+    custom: async () => ({
+      file: { name: "assert-stack.mjs", content: suite },
+      tests: checks.map(([name]) => ({ name, quote: "Return two" })),
+      notes: "",
+    }),
+  });
+  const { host, packets } = reviewer(upholdAll, NATIVE.model);
+  const done = await runProductDoneReviewed(
+    await state(),
+    { task: "T001", dispute: [ODD], disputeReason: REASON },
+    inlineReview(launched(host)),
+  );
+  expect(done.ok && done.value.closed, JSON.stringify(done)).toBe(true);
+  expect(packets[0]?.disputes?.[0]?.failureOutput).toContain("\n\n2 !== 1\n\n");
+  expect(packets[0]?.disputes?.[0]?.failureOutput).toContain("\n    at ");
+});
+
+it.each(["\n", "\n\n"])(
+  "keeps an independent Node location, excerpt and error unattributed (separator=%j)",
+  (separator) => {
+    const crash =
+      "file:///tmp/suite.mjs:9\nnull.value;\n     ^\n\nTypeError: Cannot read properties of null\n    at file:///tmp/suite.mjs:9:6\nNode.js v22.16.0";
+    const output = `FAIL: a: expected 1${separator}${crash}`;
+    expect(failingTests(output, ["a"])).toEqual({ names: ["a"], unattributed: 3 });
+    expect(allFailuresIn(output, ["a"], ["a"])).toBe(false);
+  },
+);
