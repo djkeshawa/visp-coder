@@ -31,7 +31,7 @@ export const VISP_COMMANDS = [
     command: "feature",
     when: "New request",
     example: 'visp feature "<goal>" --source-brief -',
-    next: "Pass the request with a quoted heredoc, then run work --check for one slice; use brief --template for several usable slices. It can take minutes: wait for it to return; do not start a second one while it runs.",
+    next: 'Pass the request with a quoted heredoc and the host\'s maximum timeout. It keeps running while VISP writes acceptance tests: on Codex keep its session open and poll it; on a blocking shell (Claude Code Bash) start it with run_in_background:true and read its output for the id; if the host can do neither, wait for it. Once it prints the feature id, run visp work --feature <id> --check "<test command>" for one slice. Never start feature again: a repeat can create a second feature. After a kill or error, run visp work --feature <id>; add --retry-tests only when work reports the acceptance tests failed or stopped. Use brief --template for several usable slices.',
   },
   {
     command: "brief",

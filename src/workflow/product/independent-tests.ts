@@ -500,9 +500,6 @@ function startFeatureTester(
 /** How long `visp feature` waits for the tester's record before it prints. */
 const RECORD_WAIT_MS = 3000;
 
-const TESTS_NOTE =
-  "Acceptance tests are being written in this process (3-10 min). Keep working; do not re-run visp feature. visp done reports them once pinned.";
-
 /**
  * Starts the tester without waiting for it, so `visp feature` can print first. It waits only
  * until the tests record shows running (or the start settled), so that `visp work` in another command
@@ -536,7 +533,10 @@ export async function beginFeatureTester(
   for (;;) {
     const record = await readTestsRecord(workspace, feature);
     if (record.ok && record.value?.status === "running" && started && watched?.inProcess)
-      return { finished, testsNote: TESTS_NOTE };
+      return {
+        finished,
+        testsNote: `Run visp work --feature ${feature} now; this command keeps running only to write VISP's acceptance tests — leave it running and do not run visp feature again.`,
+      };
     if (settled || Date.now() >= deadline) return { finished };
     await sleep(100);
   }
