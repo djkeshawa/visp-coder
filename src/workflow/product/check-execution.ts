@@ -29,7 +29,9 @@ import type {
 import {
   environmentOnly,
   failingTests,
+  incompleteSuiteNote,
   pinnedWaivers,
+  unreportedTests,
   WAIVED_TESTS_ENV,
   type Waivers,
   waivedFailure,
@@ -126,6 +128,8 @@ export async function executeProductCheck(
     signal,
     waiverEnvironment(waivers),
   );
+  // Capture joins stdout and stderr without chronological ordering. Attribution depends on
+  // indentation and explicit error/result headers, not blank lines at that stream join.
   const raw = output.ok ? `${output.value.stdout}\n${output.value.stderr}` : output.error.message;
   const commandVerifier =
     base.verifierDigest && output.ok && output.value.executableDigest
@@ -159,7 +163,7 @@ export async function executeProductCheck(
       exitCode: output.ok ? output.value.exitCode : -1,
       durationMs: output.ok ? output.value.durationMs : Date.now() - started,
       output: [note, evidence].filter(Boolean).join("\n"),
-      ...(waivers ? { pinnedFailures: failingTests(full, waivers.declared) } : {}),
+      ...(waivers ? { pinnedFailures: pinnedFailureSummary(full, waivers) } : {}),
     },
     state: record.state,
     mutations: [
@@ -171,6 +175,16 @@ export async function executeProductCheck(
         expectedBefore: { existed: false },
       },
     ],
+  };
+}
+
+function pinnedFailureSummary(
+  output: string,
+  waivers: Waivers,
+): ProductExecution["pinnedFailures"] {
+  return {
+    ...failingTests(output, waivers.declared),
+    unreported: unreportedTests(output, waivers.declared, waivers.suiteSkips ? waivers.names : []),
   };
 }
 
@@ -186,6 +200,11 @@ export function waivedResult(
   waivers: Waivers | undefined,
 ): { status: ProductExecution["status"]; note: string } {
   const status = commandStatus(output, root);
+  const unreported = waivers
+    ? unreportedTests(fullOutput, waivers.declared, waivers.suiteSkips ? waivers.names : [])
+    : [];
+  if (status === "failed" && unreported.length)
+    return { status, note: incompleteSuiteNote(unreported) };
   return waivers && status === "failed" && waivedFailure(fullOutput, waivers)
     ? { status: "passed", note: waivedNote(waivers.names) }
     : { status, note: "" };
