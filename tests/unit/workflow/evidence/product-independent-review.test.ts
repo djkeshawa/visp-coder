@@ -937,9 +937,9 @@ it("delivers scoped stylesheet bytes alongside implementation without changing g
   expect(stylesheet?.excerpt.length).toBeLessThanOrEqual(6000);
   expect(delivered.value.find((source) => source.reference === "styles.css")).toMatchObject({
     available: true,
-    excerpt: stylesheet?.excerpt,
-    truncated: stylesheet?.truncated,
-    omittedRegions: stylesheet?.omittedRegions,
+    excerpt: css,
+    truncated: false,
+    omittedRegions: [],
   });
   expect(delivered.value.some((source) => source.reference === "outside.css")).toBe(false);
   expect(delivered.value.find((source) => source.reference === "src/main.mjs")).toMatchObject({

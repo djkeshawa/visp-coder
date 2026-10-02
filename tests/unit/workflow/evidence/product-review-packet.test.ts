@@ -125,10 +125,10 @@ it("reserves requested documentation and verifier excerpts when application file
   expect(sources.some((source) => source.reference === "docs/contract.md")).toBe(true);
   expect(sources.some((source) => source.reference === "tests/test_api.py")).toBe(true);
   expect(sources.some((source) => source.id === "CHECK-EXEC-current")).toBe(true);
-  expect(sources.some((source) => source.reference === "docs/unrelated.md")).toBe(false);
-  expect(sources.find((source) => source.id === "CODE-OMITTED")?.excerpt).toContain(
-    "implementation",
-  );
+  expect(sources.find((source) => source.reference === "docs/unrelated.md")?.coreOutcomes).toEqual([
+    "O001",
+  ]);
+  expect(sources.filter((source) => source.reference.startsWith("src/"))).toHaveLength(12);
   expect(sources.reduce((sum, source) => sum + source.excerpt.length, 0)).toBeLessThanOrEqual(
     32000,
   );
@@ -282,7 +282,7 @@ it.each([
   ["yarn", "exec", "vitest", "run", "tests/api"],
   ["bun", "x", "vitest", "run", "tests/api"],
 ])(
-  "delivers wrapped runner assertion sources and respects selected roots: %j",
+  "delivers wrapped runner assertions and retains other scoped candidates: %j",
   async (...command) => {
     const wrappedBrief = productBriefSchema.parse({
       ...brief,
@@ -314,7 +314,15 @@ it.each([
     expect(
       sources.find((source) => source.reference === "tests/api/retirement.test.ts")?.excerpt,
     ).toContain("expect(retire()).toBe(410)");
-    expect(sources.some((source) => source.reference === "tests/other.test.ts")).toBe(false);
+    expect(
+      sources.find((source) => source.reference === "tests/other.test.ts")?.coreOutcomes,
+    ).toEqual(["O001"]);
+    const { reviewCheckPaths } = await import(
+      "../../../../src/workflow/product/review-check-context.js"
+    );
+    expect(await reviewCheckPaths(workspace, wrappedBrief.checks, snapshot)).toEqual([
+      "tests/api/retirement.test.ts",
+    ]);
   },
 );
 
@@ -479,4 +487,283 @@ it("prioritizes documents changed under the slice's authorization in prepared pa
   } finally {
     await workspace.destroy();
   }
+});
+
+it("delivers every CLI must-outcome implementation before large verifier sources", async () => {
+  const cliBrief = productBriefSchema.parse({
+    ...brief,
+    originalRequest: "Build a CLI that evaluates formulas and saves cells",
+    outcomes: [
+      { id: "O001", kind: "functional", statement: "Evaluates formulas" },
+      { id: "O002", kind: "functional", statement: "Saves cells" },
+    ],
+    slices: [
+      {
+        ...brief.slices[0],
+        outcomes: ["O001", "O002"],
+        scope: { allowed: ["src/**", "tests/**"] },
+      },
+    ],
+  });
+  const contents = Object.fromEntries(
+    Array.from({ length: 12 }, (_, i) => [
+      `src/module${i}.py`,
+      `def formula${i}():\n    return ${i}\n`,
+    ]),
+  );
+  contents["src/cli.py"] = "from module11 import formula11\nprint(formula11())\n";
+  for (let i = 0; i < 12; i++)
+    contents[`tests/test_${i}.py`] = "def test_formula():\n    assert True\n".repeat(2000);
+  const { workspace, snapshot } = fixture(contents);
+  const sources = await reviewCodeSources(
+    workspace,
+    { ...record, brief: cliBrief },
+    snapshot,
+    "current",
+  );
+  const delivered = await independentSources(workspace, sources);
+  if (!delivered.ok) throw new Error(delivered.error.message);
+  const serialized = JSON.parse(JSON.stringify(delivered.value));
+  for (const path of Object.keys(contents).filter((path) => path.startsWith("src/"))) {
+    expect(
+      serialized.find((source: { reference: string }) => source.reference === path)?.excerpt,
+      path,
+    ).toBe(contents[path]);
+  }
+  expect(JSON.stringify(serialized).length).toBeLessThanOrEqual(32000);
+});
+
+it("delivers relevant symbols and outcome limitations when a UI core file exceeds the packet", async () => {
+  const uiBrief = productBriefSchema.parse({
+    ...brief,
+    originalRequest: "Show the retirement result in a single page UI",
+    checks: [],
+    slices: [{ ...brief.slices[0], checks: [], scope: { allowed: ["index.html"] } }],
+  });
+  const content = `<main>Retirement</main><script>\n${"// unrelated setup\n".repeat(3000)}function retirementResult() {\n${"  const padding = 'large';\n".repeat(2000)}  return 410;\n}\n</script>`;
+  const { workspace, snapshot } = fixture({ "index.html": content });
+  const sources = await reviewCodeSources(
+    workspace,
+    { ...record, brief: uiBrief },
+    snapshot,
+    "current",
+  );
+  const delivered = await independentSources(workspace, sources);
+  if (!delivered.ok) throw new Error(delivered.error.message);
+  const serialized = JSON.parse(JSON.stringify(delivered.value));
+  const core = serialized.find(
+    (source: { reference: string }) => source.reference === "index.html",
+  );
+  expect(core.excerpt).toContain("function retirementResult()");
+  expect(core.truncated).toBe(true);
+  expect(
+    serialized.find((source: { id: string }) => source.id === "CODE-CORE-GAPS")?.excerpt,
+  ).toContain("O001");
+  expect(JSON.stringify(serialized).length).toBeLessThanOrEqual(32000);
+});
+
+it("resolves unchanged product entry and transitive dependencies from executed verifier commands outside the slice", async () => {
+  const scoped = productBriefSchema.parse({
+    ...brief,
+    checks: [{ ...brief.checks[0], command: ["node", "tests/check.mjs"], files: [] }],
+    slices: [{ ...brief.slices[0], scope: { allowed: ["tests/**"] } }],
+  });
+  const { workspace, snapshot } = fixture({
+    "tests/check.mjs": "import {run} from '../cli.mjs'; run();",
+    "cli.mjs": "import {retire} from './lib/api.mjs'; export const run = retire;",
+    "lib/api.mjs": "export function retire() { return 410; }",
+    "unrelated.mjs": "export const secret = 'unrelated';",
+  });
+  const sources = await reviewCodeSources(
+    workspace,
+    { ...record, brief: scoped },
+    snapshot,
+    "current",
+    scoped.slices[0],
+  );
+  const delivered = await independentSources(workspace, sources);
+  if (!delivered.ok) throw new Error(delivered.error.message);
+  expect(
+    delivered.value
+      .filter((source) => source.coreOutcomes !== undefined)
+      .map((source) => source.reference),
+  ).toEqual(["cli.mjs", "lib/api.mjs", "tests/check.mjs"]);
+  expect(delivered.value.some((source) => source.reference === "unrelated.mjs")).toBe(false);
+});
+
+it("compacts identical verifier excerpts and check output while retaining their separate identities", async () => {
+  const { deliveredSources } = await import(
+    "../../../../src/workflow/product/review-source-delivery.js"
+  );
+  const verifier = "test('retired', () => assert.equal(retire(), 410));\n".repeat(100);
+  const sources = ["A", "B"].flatMap((id) => [
+    {
+      id: `CODE-${id}`,
+      kind: "implementation-file" as const,
+      reference: `tests/${id}.mjs`,
+      sha256: sha256(verifier),
+      available: true,
+      excerpt: verifier,
+    },
+    {
+      id: `CHECK-${id}`,
+      kind: "executed-check" as const,
+      reference: `Execution ${id}`,
+      sha256: sha256(id),
+      available: true,
+      excerpt: `Check ${id}; execution ${id}; passed; exit 0\nCommand executed: same\nPASS: retirement returns 410\n`,
+    },
+  ]);
+  const delivered = await deliveredSources(sources, new Map());
+  expect(delivered.map((source) => source.id).sort()).toEqual(
+    sources.map((source) => source.id).sort(),
+  );
+  expect(delivered.find((source) => source.id === "CODE-B")?.excerpt).toContain("CODE-A");
+  expect(delivered.find((source) => source.id === "CHECK-B")?.excerpt).toContain("CHECK-A");
+  expect(delivered.find((source) => source.id === "CHECK-B")?.excerpt).toContain("passed; exit 0");
+  expect(delivered.reduce((cost, source) => cost + source.excerpt.length, 0)).toBeLessThan(
+    verifier.length + 1000,
+  );
+});
+
+it("keeps changed implementation core when source scope hints do not identify it", async () => {
+  const { workspace, snapshot } = fixture({
+    "src/api.py": "def retire(): return 410",
+    "shared/status.py": "def retired_status(): return 410",
+  });
+  const sources = await reviewCodeSources(
+    workspace,
+    record,
+    snapshot,
+    "current",
+    brief.slices[0],
+    new Set(["shared/status.py"]),
+  );
+  expect(sources.find((source) => source.reference === "shared/status.py")).toMatchObject({
+    coreOutcomes: ["O001"],
+    available: true,
+    excerpt: "def retired_status(): return 410",
+  });
+});
+
+it("delivers full core whenever it fits the serialized budget without reserving an unnecessary gap", async () => {
+  const { deliveredSources } = await import(
+    "../../../../src/workflow/product/review-source-delivery.js"
+  );
+  const text = `function core() { return '${"x".repeat(31500)}'; }`;
+  const source = {
+    id: "CORE",
+    kind: "implementation-file" as const,
+    reference: "app.js",
+    sha256: sha256(text),
+    available: true,
+    coreOutcomes: ["O001"],
+    excerpt: text.slice(0, 100),
+    truncated: true,
+  };
+  const delivered = await deliveredSources([source], new Map([["CORE", text]]));
+  expect(delivered.find((entry) => entry.id === "CORE")?.excerpt).toBe(text);
+  expect(delivered.some((entry) => entry.id === "CODE-CORE-GAPS")).toBe(false);
+  expect(JSON.stringify(delivered).length).toBeLessThanOrEqual(32000);
+});
+
+it("resolves emitted JavaScript import paths to the TypeScript implementation", async () => {
+  const scoped = productBriefSchema.parse({
+    ...brief,
+    checks: [],
+    slices: [{ ...brief.slices[0], checks: [], scope: { allowed: ["src/main.ts"] } }],
+  });
+  const { workspace, snapshot } = fixture({
+    "src/main.ts": "import { retire } from '../shared/api.js'; export const result = retire();",
+    "shared/api.ts": "export function retire() { return 410; }",
+  });
+  const sources = await reviewCodeSources(
+    workspace,
+    { ...record, brief: scoped },
+    snapshot,
+    "current",
+  );
+  expect(sources.find((source) => source.reference === "shared/api.ts")).toMatchObject({
+    available: true,
+    coreOutcomes: ["O001"],
+    excerpt: "export function retire() { return 410; }",
+  });
+});
+
+it("retains observed verifier candidates with nonstandard filenames and discloses limited core", async () => {
+  const scoped = productBriefSchema.parse({
+    ...brief,
+    originalRequest: "Build a formula CLI",
+    checks: [
+      {
+        ...brief.checks[0],
+        command: ["node", "verify.mjs"],
+        files: ["**"],
+        verifierFiles: ["verify.mjs"],
+      },
+    ],
+    slices: [{ ...brief.slices[0], scope: { allowed: ["**"] } }],
+  });
+  const engine = `def evaluate(): return 410\n${"# implementation context\n".repeat(900)}`;
+  const { workspace, snapshot } = fixture({
+    "cli.py": "from engine import evaluate\nprint(evaluate())\n",
+    "engine.py": engine,
+    "verify.mjs": `import assert from 'node:assert/strict';\n${"assert.equal(410, 410);\n".repeat(5000)}`,
+  });
+  const sources = await reviewCodeSources(
+    workspace,
+    { ...record, brief: scoped },
+    snapshot,
+    "current",
+  );
+  expect(sources.find((source) => source.reference === "verify.mjs")?.coreOutcomes).toEqual([
+    "O001",
+  ]);
+  const delivered = await independentSources(workspace, sources);
+  if (!delivered.ok) throw new Error(delivered.error.message);
+  expect(delivered.value.find((source) => source.reference === "engine.py")?.excerpt).toContain(
+    "def evaluate()",
+  );
+  expect(delivered.value.find((source) => source.id === "CODE-CORE-GAPS")?.excerpt).toContain(
+    "O001",
+  );
+});
+
+it("keeps failed receipts linked to their failure source when stdout matches a passing receipt", async () => {
+  const { deliveredSourceEvidence } = await import(
+    "../../../../src/workflow/product/review-source-delivery.js"
+  );
+  const sources = ["failed", "passed"].map((status) => ({
+    id: `CHECK-${status}`,
+    kind: "executed-check" as const,
+    reference: status,
+    sha256: sha256(status),
+    available: true,
+    excerpt: `Check ${status}; no output`,
+  }));
+  const evidence = [
+    {
+      id: "CHECK-failed",
+      kind: "execution" as const,
+      status: "failed" as const,
+      summary: "C001: same command\n",
+      outcomes: ["O001"],
+    },
+    {
+      id: "CHECK-passed",
+      kind: "execution" as const,
+      status: "available" as const,
+      summary: "C001: same command\n",
+      outcomes: ["O001"],
+    },
+  ];
+  const delivered = deliveredSourceEvidence(evidence, sources, sources);
+  expect(delivered[0]).toMatchObject({
+    status: "failed",
+    summary: expect.stringContaining("CHECK-failed"),
+  });
+  expect(delivered[1]).toMatchObject({
+    status: "available",
+    summary: expect.stringContaining("CHECK-passed"),
+  });
 });

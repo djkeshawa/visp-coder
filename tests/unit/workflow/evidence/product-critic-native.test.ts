@@ -67,6 +67,48 @@ async function prepare() {
   return { ...value, packet };
 }
 
+it("persists delivered IDs from the serialized CLI packet, including core beyond eight files", async () => {
+  const updated = await updateProductBrief(await setup.workspace.state(), {
+    brief: {
+      ...setup.brief,
+      checks: [{ ...setup.brief.checks[0], files: ["src/**", "test/**"] }],
+      slices: [{ ...setup.brief.slices[0], scope: { allowed: ["src/**", "test/**"] } }],
+    },
+    reason: "Review a multi-file CLI with large verifier inputs",
+  });
+  if (!updated.ok) throw new Error(updated.error.message);
+  for (let index = 0; index < 12; index++) {
+    await setup.workspace.write(
+      `src/module${index}.mjs`,
+      `export function value${index}() { return 2; }\n${index === 0 ? "// CLI implementation notes\n".repeat(300) : ""}`,
+    );
+    await setup.workspace.write(`test/extra${index}.mjs`, "// verifier setup\n".repeat(4000));
+  }
+  await ready();
+  const prepared = await prepare();
+  const workspace = await setup.workspace.state();
+  const selection = await criticSelection(workspace, { task: "T001" });
+  if (!selection.ok) throw new Error(selection.error.message);
+  const stored = await readCriticState(workspace, selection.value);
+  if (!stored.ok) throw new Error(stored.error.message);
+  const ids = stored.value.state?.attempts.at(-1)?.deliveredEvidenceIds;
+  expect(stored.value.state?.attempts.at(-1)?.deliveredSourceManifest).toBeUndefined();
+  for (let index = 0; index < 12; index++) {
+    const source = prepared.packet.current.sources.find(
+      (entry) => entry.reference === `src/module${index}.mjs`,
+    );
+    expect(source?.excerpt).toContain(`function value${index}()`);
+    expect(source).toMatchObject({ coreOutcomes: ["O001"], available: true });
+    expect(ids).toContain(source?.id);
+  }
+  expect(
+    prepared.packet.current.evidence
+      .filter((entry) => entry.kind === "execution")
+      .every((entry) => entry.summary.includes("supplied once at CHECK-")),
+  ).toBe(true);
+  expect(JSON.stringify(prepared.packet.current.sources).length).toBeLessThanOrEqual(32000);
+});
+
 it("executes the advertised stdin preparation without invalidating verified product evidence", async () => {
   await ready();
   const workspace = await setup.workspace.state();
@@ -122,7 +164,10 @@ function answer(packet: CriticPacket) {
         outcome: o.id,
         status: "satisfied",
         summary: "Observed the promised value through execution",
-        evidence: ["C001"],
+        evidence: packet.current.evidence
+          .filter((entry) => entry.kind === "execution" && entry.status === "available")
+          .slice(0, 1)
+          .map((entry) => entry.id),
         expectations: [],
       })),
       feedback: moduleFeedback(packet.current as unknown as ProductReviewBundle),

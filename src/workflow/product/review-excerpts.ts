@@ -36,7 +36,26 @@ interface RankedRegion extends Region {
 export async function reviewExcerpt(path: string, source: string, question: string, limit = 6000) {
   if (source.length <= limit) return { excerpt: source, omitted: [] as string[] };
   const regions = await sourceRegions(path, source);
-  return selectRegions(source, regions, question, limit);
+  const lines = source.split("\n");
+  // Oversized symbols still need their signature and relevant body/tail, rather than a file prefix.
+  const bounded = regions.flatMap((region) => {
+    const renderedCost =
+      region.text.length + (region.end - region.start + 1) * (String(region.end + 1).length + 4);
+    if (renderedCost <= limit) return [region];
+    const windows = new Set([region.start, Math.max(region.start, region.end - 4)]);
+    const terms = words(question);
+    for (let index = region.start; index <= region.end; index++)
+      if ([...words(lines[index] ?? "")].some((word) => terms.has(word))) windows.add(index);
+    return [...windows].slice(0, 64).map((index) => ({
+      ...region,
+      start: Math.max(region.start, index - 1),
+      end: Math.min(region.end, index + 4),
+      text: lines
+        .slice(Math.max(region.start, index - 1), Math.min(region.end + 1, index + 5))
+        .join("\n"),
+    }));
+  });
+  return selectRegions(source, bounded, question, limit);
 }
 
 async function sourceRegions(path: string, source: string): Promise<Region[]> {

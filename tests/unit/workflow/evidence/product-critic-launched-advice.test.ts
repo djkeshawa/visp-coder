@@ -42,7 +42,10 @@ function answer(packet: CriticPacket, required = false) {
         nextCheck: "Exercise the alternate invocation before changing its handler",
         outcomes: ["O001"],
         required: true,
-        evidence: ["C001"],
+        evidence: packet.current.evidence
+          .filter((entry) => entry.kind === "execution")
+          .slice(0, 1)
+          .map((entry) => entry.id),
       },
     ];
   return {
@@ -52,7 +55,10 @@ function answer(packet: CriticPacket, required = false) {
         outcome: o.id,
         status: "satisfied",
         summary: "Executed the module and observed the promised value",
-        evidence: ["C001"],
+        evidence: packet.current.evidence
+          .filter((entry) => entry.kind === "execution")
+          .slice(0, 1)
+          .map((entry) => entry.id),
         expectations: [],
       })),
       feedback,

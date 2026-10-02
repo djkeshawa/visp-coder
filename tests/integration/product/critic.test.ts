@@ -317,7 +317,10 @@ it("shares native preflight, reservation and submission between MCP and CLI", as
         outcome: o.id,
         status: "satisfied",
         summary: "Observed module execution",
-        evidence: ["C001"],
+        evidence: packet.current.evidence
+          .filter((entry: { kind: string; id: string }) => entry.kind === "execution")
+          .slice(0, 1)
+          .map((entry: { id: string }) => entry.id),
         expectations: [],
       })),
       feedback: moduleFeedback(packet.current),

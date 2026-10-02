@@ -11,12 +11,15 @@ import {
   independentReviewTemplate,
 } from "./independent-review.js";
 import { independentSources } from "./independent-sources.js";
+import { deliveredReviewEvidenceIds } from "./review-context.js";
+import { generatedSourceReferences, reviewCitationGap } from "./review-delivery-validation.js";
 import { productReviewSubmissionSchema, runProductReviewRequest } from "./review-request.js";
-import { independentReviewerContext, runProductReviewerHandoff } from "./reviewer-handoff.js";
+import { deliveredSourceEvidence, reviewPacketBudgetGap } from "./review-source-delivery.js";
+import { independentReviewerContext, reviewerHandoffCandidates } from "./reviewer-handoff.js";
 import { type ProductSelection, readProductRecord } from "./store.js";
 
 type ReviewRequest = Extract<
-  Awaited<ReturnType<typeof runProductReviewerHandoff>>,
+  Awaited<ReturnType<typeof reviewerHandoffCandidates>>,
   { ok: true }
 >["value"];
 export const DEFAULT_HOST_FEEDBACK_TIMEOUT_MS = 120_000;
@@ -65,7 +68,7 @@ export async function runProductHostFeedback(
     return err(
       vispError("CONFIG_INVALID", "Host feedback timeout must be between 1 and 600000 ms"),
     );
-  const handoff = await runProductReviewerHandoff(workspace, selection);
+  const handoff = await reviewerHandoffCandidates(workspace, selection);
   if (!handoff.ok) return handoff;
   const request = handoff.value;
   const question = request.feedbackPlan.research?.question;
@@ -75,23 +78,36 @@ export async function runProductHostFeedback(
 
   const sources = await independentSources(workspace, request.sources);
   if (!sources.ok) return sources;
+  const context = independentReviewerContext(request);
+  const evidence = deliveredSourceEvidence(context.evidence, request.sources, sources.value);
+  const ids = deliveredReviewEvidenceIds(
+    evidence,
+    context.interactionEvidence,
+    sources.value,
+    context.experiments,
+  );
+  const packet = {
+    ...context,
+    sources: sources.value,
+    evidence,
+    submission: independentReviewTemplate(),
+    responseSchema: independentReviewJsonSchema(ids),
+  };
+  const deliveredEvidence = {
+    ids,
+    generatedReferences: generatedSourceReferences(sources.value, request.sources),
+  };
+  const packetGap = reviewPacketBudgetGap(packet, ids);
+  if (packetGap) return err(vispError("STAGE_BLOCKED", packetGap));
   const reviewed = host.review
     ? await bounded(
         (signal) =>
-          host.review?.(
-            {
-              ...independentReviewerContext(request),
-              sources: sources.value,
-              submission: independentReviewTemplate(),
-              responseSchema: independentReviewJsonSchema(),
-            },
-            {
-              model: host.model,
-              signal,
-              context: "fresh-preferred",
-              timeoutMs: timeout,
-            },
-          ) as Promise<unknown>,
+          host.review?.(packet, {
+            model: host.model,
+            signal,
+            context: "fresh-preferred",
+            timeoutMs: timeout,
+          }) as Promise<unknown>,
         timeout,
       )
     : err(
@@ -106,27 +122,32 @@ export async function runProductHostFeedback(
       );
   if (!reviewed.ok) {
     const template = request.submission;
-    return runProductReviewRequest(workspace, {
-      ...selection,
-      ...template,
-      assessments: request.outcomes.map((outcome) => ({
-        outcome: outcome.id,
-        status: "unavailable",
-        summary: reviewed.error.message,
-        evidence: [],
-        expectations: [],
-      })),
-      coverage: [],
-      reviewer: { context: "unavailable", model: host.model, reason: reviewed.error.message },
-      feedback: {
-        ...template.feedback,
-        dimensions: template.feedback.dimensions.map((entry) => ({
-          ...entry,
+    return runProductReviewRequest(
+      workspace,
+      {
+        ...selection,
+        ...template,
+        assessments: request.outcomes.map((outcome) => ({
+          outcome: outcome.id,
           status: "unavailable",
-          reason: reviewed.error.message,
+          summary: reviewed.error.message,
+          evidence: [],
+          expectations: [],
         })),
+        coverage: [],
+        reviewer: { context: "unavailable", model: host.model, reason: reviewed.error.message },
+        feedback: {
+          ...template.feedback,
+          dimensions: template.feedback.dimensions.map((entry) => ({
+            ...entry,
+            status: "unavailable",
+            reason: reviewed.error.message,
+          })),
+        },
       },
-    });
+      undefined,
+      deliveredEvidence,
+    );
   }
   const independent = independentReviewSchema.safeParse(reviewed.value);
   const parsed = productReviewSubmissionSchema.safeParse(
@@ -152,15 +173,21 @@ export async function runProductHostFeedback(
         "Host review does not identify the supplied product; request a fresh review",
       ),
     );
-  return runProductReviewRequest(workspace, {
-    ...selection,
-    ...parsed.data,
-    reviewer: {
-      ...parsed.data.reviewer,
-      context: parsed.data.reviewer?.context ?? "unspecified",
-      model: host.model,
+  const citationGap = reviewCitationGap(parsed.data, ids);
+  if (citationGap) return err(vispError("EVIDENCE_FAILED", citationGap));
+  return runProductReviewRequest(
+    workspace,
+    {
+      ...selection,
+      ...parsed.data,
+      reviewer: {
+        ...hostReviewer(parsed.data.reviewer),
+        model: host.model,
+      },
     },
-  });
+    undefined,
+    deliveredEvidence,
+  );
 }
 
 async function bounded(
@@ -246,4 +273,8 @@ async function consumeResearch(
     check: check.id,
     command: `visp work --feature ${brief.feature}${selection.task ? ` --task ${selection.task}` : ""}`,
   });
+}
+
+function hostReviewer(reviewer: z.infer<typeof productReviewSubmissionSchema>["reviewer"]) {
+  return { ...reviewer, context: reviewer?.context ?? ("unspecified" as const) };
 }

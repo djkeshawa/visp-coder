@@ -31,7 +31,18 @@ function satisfied(packet: CriticPacket) {
         outcome: outcome.id,
         status: "satisfied",
         summary: "Executed the module and observed the promised value",
-        evidence: [outcome.id === "O002" ? "C002" : "C001"],
+        evidence: [
+          packet.current.evidence.find(
+            (entry) =>
+              entry.kind === "execution" &&
+              entry.status === "available" &&
+              entry.outcomes.includes(outcome.id),
+          )?.id ??
+            packet.current.sources.find(
+              (source) => source.kind === "implementation-file" && source.available,
+            )?.id ??
+            "SRC-REQUEST",
+        ],
         expectations: [],
       })),
       feedback: moduleFeedback(packet.current as unknown as ProductReviewBundle),

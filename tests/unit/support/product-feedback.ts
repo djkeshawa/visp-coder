@@ -3,6 +3,9 @@ import type { ProductReviewBundle } from "../../../src/workflow/product/review.j
 
 /** Explicit reviewer fixture for small non-UI modules; never used by production code. */
 export function moduleFeedback(bundle: ProductReviewBundle): ProductFeedback {
+  const implementation = bundle.sources.filter(
+    (entry) => entry.kind === "implementation-file" && entry.available,
+  );
   return {
     phase: "product",
     probes: (bundle.agenda?.behavioralProbes.probes ?? []).map((probe) => ({
@@ -18,9 +21,7 @@ export function moduleFeedback(bundle: ProductReviewBundle): ProductFeedback {
         probe.kind === "repeat-and-recover" ? ("not-applicable" as const) : ("satisfied" as const),
       evidence:
         probe.kind === "repeat-and-recover"
-          ? bundle.sources
-              .filter((entry) => entry.kind === "implementation-file")
-              .map((entry) => entry.id)
+          ? implementation.map((entry) => entry.id)
           : bundle.evidence
               .filter((entry) => entry.kind === "execution" && entry.status === "available")
               .slice(0, 1)
@@ -59,14 +60,10 @@ export function moduleFeedback(bundle: ProductReviewBundle): ProductFeedback {
       },
       {
         dimension: "code",
-        status: bundle.sources.some((entry) => entry.kind === "implementation-file")
-          ? "satisfied"
-          : "not-applicable",
+        status: implementation.length ? "satisfied" : "not-applicable",
         reason:
           "The supplied module has a single explicit public value and no lifecycle or duplicated state ownership.",
-        evidence: bundle.sources
-          .filter((entry) => entry.kind === "implementation-file")
-          .map((entry) => entry.id),
+        evidence: implementation.map((entry) => entry.id),
       },
     ],
     findings: [],

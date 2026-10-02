@@ -18,6 +18,8 @@ export interface ProductSource {
   readonly truncated?: boolean;
   readonly omittedRegions?: readonly string[];
   readonly nextRead?: string;
+  /** Conservative scope/dependency mapping, not proof that an outcome is satisfied. */
+  readonly coreOutcomes?: readonly string[];
 }
 
 /** Source identity is observed by VISP. Authorship and human approval are not authenticated. */

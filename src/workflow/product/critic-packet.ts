@@ -16,10 +16,11 @@ import {
   SOURCE_ADVICE_INSTRUCTIONS,
   UNDERSTANDING_CRITIC_INSTRUCTIONS,
 } from "./review-instructions.js";
-import { independentReviewerContext, type runProductReviewerHandoff } from "./reviewer-handoff.js";
+import { deliveredSourceEvidence, reviewPacketBudgetGap } from "./review-source-delivery.js";
+import { independentReviewerContext, type reviewerHandoffCandidates } from "./reviewer-handoff.js";
 
 type Handoff = Extract<
-  Awaited<ReturnType<typeof runProductReviewerHandoff>>,
+  Awaited<ReturnType<typeof reviewerHandoffCandidates>>,
   { ok: true }
 >["value"];
 export interface CriticPacket {
@@ -105,7 +106,7 @@ export async function criticPacket(
   // Product-review guidance must not leak into design or source-only consultations.
   const { instructions: _instructions, ...independent } = independentReviewerContext(current);
   // Select usable references once, before generating the provider schema.
-  const evidence = current.evidence.filter(
+  const evidence = deliveredSourceEvidence(current.evidence, current.sources, sources.value).filter(
     (entry) =>
       entry.status !== "not-delivered" &&
       (!entry.id.startsWith("BRIEF-") || understanding) &&
@@ -164,6 +165,14 @@ export async function criticPacket(
       disputes.map((dispute) => dispute.test),
     ),
   };
+  const ids = deliveredReviewEvidenceIds(
+    evidence,
+    independent.interactionEvidence,
+    sources.value,
+    independent.experiments,
+  );
+  const gap = reviewPacketBudgetGap(packet, ids);
+  if (gap) return err(vispError("STAGE_BLOCKED", gap));
   if (
     packet.current.images.reduce(
       (bytes, image) => bytes + Buffer.byteLength(image.data, "base64"),

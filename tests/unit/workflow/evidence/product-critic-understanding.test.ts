@@ -382,7 +382,10 @@ it("closes a correct implemented slice after its second call without using the d
           outcome: "O001",
           status: "satisfied",
           summary: "The public module returned two under an actual Node test",
-          evidence: ["C001"],
+          evidence: product.packet.current.evidence
+            .filter((entry) => entry.kind === "execution")
+            .slice(0, 1)
+            .map((entry) => entry.id),
           expectations: [],
         },
       ],
@@ -673,7 +676,10 @@ it("keeps the final call after validated example revisions and never treats old 
             outcome: "O001",
             status: "satisfied",
             summary: "Actual public module test returned two",
-            evidence: ["C001"],
+            evidence: product.packet.current.evidence
+              .filter((entry) => entry.kind === "execution")
+              .slice(0, 1)
+              .map((entry) => entry.id),
             expectations: [],
           },
         ],
@@ -681,7 +687,10 @@ it("keeps the final call after validated example revisions and never treats old 
           id: challenge.id,
           status: "satisfied",
           reason: "The actual module test exercises the promised value",
-          evidence: ["C001"],
+          evidence: product.packet.current.evidence
+            .filter((entry) => entry.kind === "execution")
+            .slice(0, 1)
+            .map((entry) => entry.id),
         })),
         feedback: moduleFeedback(product.packet.current as unknown as ProductReviewBundle),
       },

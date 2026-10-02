@@ -147,8 +147,15 @@ it.each(["id", "path"] as const)(
 
     // Prioritizing a reference never bypasses integrity validation.
     await workspace.write(retained[0]?.path ?? "missing", "changed image bytes");
-    const corrupted = value(await runProductReview(await workspace.state(), options));
-    expect(corrupted.assessments[0]?.status).toBe("unavailable");
+    const rejected = await runProductReview(await workspace.state(), options);
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: {
+        code: "EVIDENCE_FAILED",
+        message: expect.stringContaining("Unknown evidence reference"),
+      },
+    });
+    const corrupted = value(await runProductReview(await workspace.state()));
     expect(corrupted.gaps.join("\n")).toContain("image changed since capture");
     expect(corrupted.images.some((image) => image.id === retained[0]?.id)).toBe(false);
   },

@@ -42,7 +42,10 @@ function answer(packet: CriticPacket, finding = false) {
         outcome: o.id,
         status: finding ? "failed" : "satisfied",
         summary: "Executed the module and observed the value",
-        evidence: ["C001"],
+        evidence: packet.current.evidence
+          .filter((entry) => entry.kind === "execution")
+          .slice(0, 1)
+          .map((entry) => entry.id),
         expectations: [],
       })),
       feedback: finding

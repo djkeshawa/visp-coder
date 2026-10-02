@@ -7,6 +7,7 @@ import { sha256 } from "../../core/hash.js";
 import { err, ok } from "../../core/result.js";
 import type { CriticPacket } from "./critic.js";
 import type { nativeCapabilitySchema } from "./critic-model.js";
+import { reviewPacketBudgetGap } from "./review-source-delivery.js";
 
 type Capability = z.infer<typeof nativeCapabilitySchema>;
 
@@ -139,6 +140,8 @@ export function nativePacket(packet: CriticPacket, directory: string, config: Cr
         "Native packet exceeds the configured image budget; no attempt reserved",
       ),
     );
+  const gap = reviewPacketBudgetGap(JSON.parse(text));
+  if (gap) return err(vispError("STAGE_BLOCKED", gap));
   const schemaPath = join(directory, "response-schema.json");
   mutations.push({
     kind: "write",
@@ -175,6 +178,7 @@ export function nativePacket(packet: CriticPacket, directory: string, config: Cr
   });
   return ok({
     mutations,
+    sources: (JSON.parse(text) as CriticPacket).current.sources,
     handoff: {
       delegation: {
         ...criticDelegation(config, images.length > 0),
@@ -223,7 +227,7 @@ export function nativePacket(packet: CriticPacket, directory: string, config: Cr
       images,
       model: config.model,
       reasoningEffort: config.reasoningEffort,
-      textAndTokens: "No VISP character or token ceiling; host/model context limits still apply",
+      textAndTokens: "VISP bounds review text; host/model context limits also apply",
       instructions:
         "Delegate once in a fresh context with the returned model/effort, packet, actual images and responseSchema. Use the exact generated argument list where the host permits it; Codex fallback includes --output-schema. Read only supplied evidence: no edits, execution, research, custom skills or further delegation. Save JSON unchanged at responsePath and immediately use submission.command. VISP constructs identity. Report actual host capabilities and failures honestly. Cancel at expiresAt; never automatically retry a pending invocation. Host authorization remains required.",
     },

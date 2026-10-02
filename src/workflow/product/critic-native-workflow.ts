@@ -18,7 +18,7 @@ import { observedProduct, stopReason } from "./critic-status.js";
 import { criticSelection, readCriticState, saveCriticState } from "./critic-store.js";
 import { phaseReviewGap } from "./critic-understanding.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
-import { runProductReviewerHandoff } from "./reviewer-handoff.js";
+import { reviewerHandoffCandidates } from "./reviewer-handoff.js";
 import { withProductMutation } from "./runtime.js";
 
 export function prepareNative(
@@ -199,7 +199,7 @@ export async function nativePreflight(workspace: WorkspaceState, request: Critic
     return unavailablePreflight(workspace, selected.value);
   const retryError = criticRetryError(state, request, selected.value.phase);
   if (retryError) return err(vispError("STATE_BUSY", retryError));
-  const handoff = await runProductReviewerHandoff(workspace, selected.value.selection);
+  const handoff = await reviewerHandoffCandidates(workspace, selected.value.selection);
   if (!handoff.ok) return handoff;
   const packet = await criticPacket(
     workspace,

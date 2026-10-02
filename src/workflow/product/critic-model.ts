@@ -9,6 +9,10 @@ import {
 } from "../../config/critic.js";
 import { historicalCriticConfigSchema } from "../../config/critic-history.js";
 import { qualityDimensionSchema } from "./feedback-model.js";
+import {
+  deliveredEvidenceIdsSchema,
+  generatedSourceReferencesSchema,
+} from "./review-delivery-validation.js";
 import { productReviewSubmissionSchema } from "./review-request.js";
 
 export { type CriticConfig, criticConfigSchema } from "../../config/critic.js";
@@ -147,6 +151,27 @@ const attemptSchema = z
     evidenceDigest: z.string(),
     selectionDigest: z.string(),
     selection: productReviewSubmissionSchema.shape.selection,
+    deliveredEvidenceIds: deliveredEvidenceIdsSchema.optional(),
+    deliveredGeneratedReferences: generatedSourceReferencesSchema.optional(),
+    // Read-only compatibility for attempts written before delivered IDs replaced manifests.
+    deliveredSourceManifest: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            reference: z.string(),
+            sha256: z.string(),
+            candidateExcerptSha256: z.string(),
+            coreOutcomes: z.array(z.string()).optional(),
+            delivered: z.boolean(),
+            available: z.boolean(),
+            excerptSha256: z.string().optional(),
+            excerptChars: z.number().int().nonnegative(),
+            truncated: z.boolean(),
+          })
+          .strict(),
+      )
+      .optional(),
     comparisonCandidate: z.string().optional(),
     transport: z.enum(["sampling", "native"]).optional(),
     /** VISP started this review itself; only then may a failure be retried automatically. */
