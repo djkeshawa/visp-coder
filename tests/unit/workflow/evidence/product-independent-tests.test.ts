@@ -168,7 +168,10 @@ it.each([true, false])(
         work.value,
         channel,
       );
-      expect(text).toContain("Decide explicitly");
+      expect(text).toContain("default reading (advice, not a requirement)");
+      expect(text).toContain(
+        "Use it unless the request, a pinned test or an explicit user decision says otherwise",
+      );
       expect(text).toContain(ambiguity.quote);
       expect(text).toContain(ambiguity.conventionalReading);
     }
@@ -1547,6 +1550,7 @@ it.each([
       "include one case for each value kind whose behavior the request defines there",
     );
     expect(prompt).toContain("Apply the stated rules together");
+    expect(prompt).toContain("as one plain statement without caveats");
     expect(prompt).toContain(
       "Angles and directions are bounded (one full turn, or the range the request names)",
     );
