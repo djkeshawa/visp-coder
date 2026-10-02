@@ -7,6 +7,7 @@ import type { ProductAssessment, ProductBrief, ProductSlice } from "./model.js";
 import type { ProductNext } from "./status.js";
 
 export interface ProductContextContent {
+  readonly next?: ProductNext;
   /** Current product-review routing, after any recorded observations. */
   readonly criticAdvice?: ProductNext["criticAdvice"];
   readonly criticUnderstanding?: Extract<

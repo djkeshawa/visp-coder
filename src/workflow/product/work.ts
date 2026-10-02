@@ -15,6 +15,7 @@ import { correctionReasons } from "./corrections.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
 import { criticUnderstanding } from "./critic-understanding.js";
 import { prepareWorkEnvironment } from "./environment.js";
+import { firstDoneAdvice, withFirstDoneAdvice } from "./first-done-advice.js";
 import { currentHostSession } from "./host-prompts.js";
 import { independentTestsBeforeWork, type TestsStarter } from "./independent-tests.js";
 import {
@@ -222,18 +223,24 @@ async function runWorkAndReviewRoute(
   );
   if (!worked.ok) return worked;
   const next = await runProductNext(workspace, {
-    feature: worked.value.feature,
-    task: worked.value.task,
+    feature: worked.value.context.feature,
+    task: worked.value.context.task,
   });
-  return next.ok && next.value.criticAdvice
-    ? ok({ ...worked.value, criticAdvice: next.value.criticAdvice })
-    : worked;
+  return ok({
+    ...worked.value.context,
+    ...(next.ok
+      ? {
+          next: withFirstDoneAdvice(next.value, worked.value.advice),
+          ...(next.value.criticAdvice ? { criticAdvice: next.value.criticAdvice } : {}),
+        }
+      : {}),
+  });
 }
 
 async function runProductWorkLocked(
   workspace: WorkspaceState,
   options: ProductSelection,
-): Promise<Result<ProductWorkContext>> {
+): Promise<Result<{ context: ProductWorkContext; advice?: string }>> {
   const record = await readProductRecord(workspace, options);
   if (!record.ok) return record;
   const selected = readyProductSlice(workspace, record.value, options);
@@ -282,7 +289,7 @@ async function runProductWorkLocked(
     timestamp,
   );
   if (!granted.ok) return granted;
-  const auth = granted.value;
+  const auth = granted.value.authorization;
   const status = await statusMutation(workspace, record.value.brief.feature, slice.id, "work");
   if (!status.ok) return status;
   const next = workingState(current, slice, auth, timestamp, reopen, subject.value, findings);
@@ -295,9 +302,12 @@ async function runProductWorkLocked(
   ]);
   return saved.ok
     ? ok({
-        ...context.value,
-        notes: [...context.value.notes, ...staleTaskNote(workspace, record.value)],
-        criticUnderstanding: understanding.value,
+        context: {
+          ...context.value,
+          notes: [...context.value.notes, ...staleTaskNote(workspace, record.value)],
+          criticUnderstanding: understanding.value,
+        },
+        advice: firstDoneAdvice(record.value, slice, granted.value.prior, subject.value),
       })
     : saved;
 }
@@ -312,7 +322,7 @@ async function grantAuthorization(
   slice: ProductSlice,
   snapshot: Record<string, string>,
   createdAt: string,
-): Promise<Result<ProductAuthorization>> {
+): Promise<Result<{ authorization: ProductAuthorization; prior?: ProductAuthorization }>> {
   const prior = await readProductAuthorization(workspace, record);
   if (!prior.ok) return prior;
   const retained = await workspace.files.readTextIfExists(
@@ -341,17 +351,20 @@ async function grantAuthorization(
   const head = await headCommit(workspace.paths.root);
   if (!head.ok) return head;
   return ok({
-    version: 2,
-    feature: record.brief.feature,
-    task: slice.id,
-    createdAt,
-    root: hashValue(workspace.paths.root),
-    contractDigest: sliceDigest(record.brief, slice),
-    baseline: grant?.baseline ?? snapshot,
-    blockedPaths: grant?.blockedPaths ?? workspace.config.workflow.blockedPaths,
-    envBaseline: grant?.envBaseline ?? protectedEnv.value,
-    headCommit: grant?.headCommit ?? head.value,
-    ...(session.value ? { session: session.value } : {}),
+    prior: prior.value,
+    authorization: {
+      version: 2,
+      feature: record.brief.feature,
+      task: slice.id,
+      createdAt,
+      root: hashValue(workspace.paths.root),
+      contractDigest: sliceDigest(record.brief, slice),
+      baseline: grant?.baseline ?? snapshot,
+      blockedPaths: grant?.blockedPaths ?? workspace.config.workflow.blockedPaths,
+      envBaseline: grant?.envBaseline ?? protectedEnv.value,
+      headCommit: grant?.headCommit ?? head.value,
+      ...(session.value ? { session: session.value } : {}),
+    },
   });
 }
 

@@ -31,6 +31,7 @@ import {
   latestCurrentJourneys,
 } from "./evidence-references.js";
 import { findingAppliesToSlice, outstandingFeedback, productFeedbackGaps } from "./feedback.js";
+import { firstDoneAdvice, withFirstDoneAdvice } from "./first-done-advice.js";
 import { functionalRegressionRequirement } from "./functional-regression.js";
 import { findFunctionalRepair } from "./functional-resolution.js";
 import { checksFor, closedSlice, type ProductSlice } from "./model.js";
@@ -409,14 +410,19 @@ async function nextOpenSlice(
     reviewer,
   );
   if (reviewNext) return ok(reviewNext);
-  return ok({
-    ...base,
-    action: "implement",
-    objective: slice.goal,
-    command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
-    evidence: await productEvidenceGaps(workspace, record, subject, slice),
-    mayEdit: true,
-  });
+  return ok(
+    withFirstDoneAdvice(
+      {
+        ...base,
+        action: "implement",
+        objective: slice.goal,
+        command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
+        evidence: await productEvidenceGaps(workspace, record, subject, slice),
+        mayEdit: true,
+      },
+      firstDoneAdvice(record, slice, auth.value, subject),
+    ),
+  );
 }
 
 /** A failed check's environment: recover it, or hand a pinned suite that never runs to the human. */
