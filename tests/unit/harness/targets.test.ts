@@ -183,11 +183,10 @@ describe("the minimal profile", () => {
     // chars/4 as a coarse token proxy; the point is an enforced ceiling.
     // 300 -> 329: room for the one-line labeled-text UI rule, with no other rule shortened.
     // 329 -> 404: room for the review-routing, early-return and preview rules (1616 chars).
-    // 404 -> 432: proving each stated goal (every level won) through the request's own
-    // interfaces; unwinnable levels were VISP's largest catapult loss in the October final
-    // comparison. 432 -> 435: a per-kind count example (`Stone: 2`); VISP games put hints
-    // between a kind's name and its count.
-    expect(guide.length / 4).toBeLessThanOrEqual(435);
+    // A goal-replay rule (ceiling 432) was reverted after it sent a game worker into building
+    // per-level win replays for the whole hour; the per-kind count example (`Stone: 2`) fits
+    // within 404 with the shorter preview rule.
+    expect(guide.length / 4).toBeLessThanOrEqual(404);
     expect(guide).toContain("At its id, run visp work");
     expect(guide).toContain("Leave feature running; background it on blocking hosts");
     expect(guide).toContain(
@@ -373,16 +372,4 @@ describe("hook templates", () => {
     expect(matcher).toContain("Edit");
     expect(matcher).toContain("Write");
   });
-});
-
-it("asks every guide to prove each stated goal through the request's own interfaces", () => {
-  for (const harness of HARNESSES)
-    for (const profile of ["minimal", "standard"] as const) {
-      const guide =
-        planFor(harness, profile).assets.find((asset) => asset.path === "AGENTS.visp.md")
-          ?.content ?? "";
-      expect(guide, `${harness}/${profile}`).toContain(
-        "Prove each stated goal (every level won) with a check replaying it through the request's own interfaces; no test-only shortcuts.",
-      );
-    }
 });
