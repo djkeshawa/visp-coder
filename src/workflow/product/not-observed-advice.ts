@@ -20,9 +20,10 @@ export function withNotObservedAdvice(
   const names = [
     ...new Set(
       (execution?.output ?? "").split(/\r?\n/).flatMap((line) => {
+        // Names may contain colons, so the whole payload (name and any detail) is shown.
         const match = /^\s*NOT OBSERVED:\s*(.*)$/i.exec(line);
-        const name = match?.[1]?.split(":", 1)[0]?.trim();
-        return name ? [name] : [];
+        const payload = match?.[1]?.trim().slice(0, 120);
+        return payload ? [payload] : [];
       }),
     ),
   ];
