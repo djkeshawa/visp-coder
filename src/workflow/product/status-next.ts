@@ -35,6 +35,7 @@ import { firstDoneAdvice, withFirstDoneAdvice } from "./first-done-advice.js";
 import { functionalRegressionRequirement } from "./functional-regression.js";
 import { findFunctionalRepair } from "./functional-resolution.js";
 import { checksFor, closedSlice, type ProductSlice } from "./model.js";
+import { withNotObservedAdvice } from "./not-observed-advice.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
 import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
@@ -119,7 +120,10 @@ export async function nextFromRecord(
       evidence: [],
       mayEdit: false,
     });
-  return nextOpenSlice(workspace, record, slice, subject.value);
+  const next = await nextOpenSlice(workspace, record, slice, subject.value);
+  return next.ok && next.value.action === "implement"
+    ? ok(withNotObservedAdvice(next.value, record, subject.value))
+    : next;
 }
 
 async function hasCurrentAcceptance(
@@ -255,12 +259,18 @@ async function nextClosedProduct(
     assessmentGaps.length > 0 ||
     journeys.length > 0 ||
     (await productImageEvidenceGaps(workspace, record, subject)).length > 0;
-  return ok({
-    feature: record.brief.feature,
-    ...finalStep(record, refine, reviewer),
-    evidence: [...gaps, ...assessmentGaps],
-    mayEdit: false,
-  });
+  return ok(
+    withNotObservedAdvice(
+      {
+        feature: record.brief.feature,
+        ...finalStep(record, refine, reviewer),
+        evidence: [...gaps, ...assessmentGaps],
+        mayEdit: false,
+      },
+      record,
+      subject,
+    ),
+  );
 }
 
 function closedProductCorrection(
