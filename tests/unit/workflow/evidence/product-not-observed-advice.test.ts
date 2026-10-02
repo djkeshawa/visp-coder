@@ -24,6 +24,7 @@ type Handler = (args: Record<string, unknown>, extra: object) => Promise<CallToo
 type Channel = "cli" | "mcp";
 const PREFIX = "VISP's tester never observed: ";
 const GOAL = "Observed wins expose the correct next-screen control";
+const SHOWN = `${GOAL}: 5000 attempts`;
 const advice = (names = GOAL) =>
   `${PREFIX}${names}. If one is a goal the request defines (such as winning a level), make sure it can be reached through the request's interfaces; if it cannot, change the product.`;
 let workspace: TestWorkspace;
@@ -82,7 +83,7 @@ async function reply(channel: Channel, operation: string, task?: string) {
         .filter((entry) => entry.type === "text")
         .map((entry) => entry.text)
         .join("\n"),
-    ).toContain(advice());
+    ).toContain(next.evidence.find((line) => line.startsWith(PREFIX)));
   return data;
 }
 
@@ -118,13 +119,13 @@ describe.each(["cli", "mcp"] as const)("NOT OBSERVED advice through %s", (channe
     await recordExecution(`NOT OBSERVED: ${GOAL}: 4000 attempts\nPASS: public value`);
     expect(await reply(channel, "next", "T001")).toEqual({
       ...before,
-      evidence: [advice(), ...(before.evidence as string[])],
+      evidence: [advice(`${GOAL}: 4000 attempts`), ...(before.evidence as string[])],
     });
     for (const operation of ["work", "next", "work"]) {
       const data = await reply(channel, operation, "T001");
       const next = (operation === "next" ? data : data.next) as ProductNext;
       expect(next.action).toBe("implement");
-      expect(next.evidence[0]).toBe(advice());
+      expect(next.evidence[0]).toBe(advice(`${GOAL}: 4000 attempts`));
       expect(next.evidence.filter((line) => line.startsWith(PREFIX))).toHaveLength(1);
     }
   });
@@ -188,19 +189,19 @@ console.log('log tail\\n'.repeat(4000));
     await workspace.write("src/value.mjs", "export const value = 2;\n");
     const done = await reply(channel, "done", "T001");
     expect(done).toMatchObject({ passed: true, closed: true, gaps: [] });
-    expect((done.next as ProductNext).evidence[0]).toBe(advice());
+    expect((done.next as ProductNext).evidence[0]).toBe(advice(SHOWN));
     expect(
       (done.executions as ProductExecution[]).find((entry) => entry.check === "PINNED_1")?.output,
     ).toContain(`NOT OBSERVED: ${GOAL}: 5000 attempts`);
     const final = await reply(channel, "next");
     expect(final).toMatchObject({ action: "refine", mayEdit: false });
-    expect((final.evidence as string[])[0]).toBe(advice());
+    expect((final.evidence as string[])[0]).toBe(advice(SHOWN));
     expect((final.evidence as string[]).filter((line) => line.startsWith(PREFIX))).toHaveLength(1);
     if (channel === "cli") {
       const text = await runCli(workspace.root, "next", "--feature", feature);
       expect(text.exitCode, text.stderr).toBe(0);
       expect(text.stdout.match(/VISP's tester never observed:/g)).toHaveLength(1);
-      expect(text.stdout).toContain(advice());
+      expect(text.stdout).toContain(advice(SHOWN));
     }
     const bundle = value(await runProductReview(await workspace.state(), { feature }));
     value(
@@ -219,7 +220,7 @@ console.log('log tail\\n'.repeat(4000));
       }),
     );
     const ready = await reply(channel, "next");
-    expect(ready).toMatchObject({ action: "accept", evidence: [advice()] });
+    expect(ready).toMatchObject({ action: "accept", evidence: [advice(SHOWN)] });
     expect(await reply(channel, "accept")).toMatchObject({ passed: true, gaps: [] });
     const accepted = await reply(channel, "next");
     expect(accepted).toMatchObject({ action: "complete", evidence: [] });
@@ -243,7 +244,7 @@ it("puts the coverage line after first-done advice and keeps it visible in CLI t
   }
 });
 
-it("deduplicates saved lines, strips optional details, and limits the names to four", async () => {
+it("deduplicates saved lines, keeps colon-bearing names whole, and limits the list to four", async () => {
   await recordExecution(
     [
       "VISP: NOT OBSERVED marks an informational coverage gap",
@@ -259,7 +260,9 @@ it("deduplicates saved lines, strips optional details, and limits the names to f
   );
   const next = await reply("cli", "next");
   expect((next.evidence as string[])[0]).toBe(
-    advice("first goal, second goal, third goal, fourth goal, and 2 more"),
+    advice(
+      "first goal: 4000 attempts, second goal, third goal: no events, fourth goal, and 2 more",
+    ),
   );
 });
 
@@ -281,4 +284,14 @@ it("does not insert the advice twice or advise accepted features", async () => {
       subject,
     ),
   ).toEqual(plain);
+});
+
+it("keeps distinct colon-bearing names that share a prefix", async () => {
+  await recordExecution(
+    ["NOT OBSERVED: Level: win: 4000 attempts", "NOT OBSERVED: Level: next-screen"].join("\r\n"),
+  );
+  const next = await reply("cli", "next");
+  expect((next.evidence as string[])[0]).toBe(
+    advice("Level: win: 4000 attempts, Level: next-screen"),
+  );
 });
