@@ -126,7 +126,7 @@ function ambiguityText(tests: unknown): string {
   return ambiguities
     .map((entry) => {
       const ambiguity = object(entry);
-      return `\nDecide explicitly: "${short(ambiguity.quote)}" — usual reading: ${short(ambiguity.conventionalReading)}. Record your choice; alternatives are in the full result.`;
+      return `\nAmbiguous: "${short(ambiguity.quote)}" — default reading (advice, not a requirement): ${short(ambiguity.conventionalReading)}. Use it unless the request, a pinned test or an explicit user decision says otherwise; report such a conflict instead of overriding it. Record your choice; alternatives are in the full result.`;
     })
     .join("");
 }
