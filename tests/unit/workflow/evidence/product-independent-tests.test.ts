@@ -1553,6 +1553,7 @@ it.each([
       "include one case for each value kind whose behavior the request defines there",
     );
     expect(prompt).toContain("Apply the stated rules together");
+    expect(prompt).toContain("sample one allowed value near each end and one in the middle");
     expect(prompt).toContain("as one plain statement without caveats");
     expect(prompt).toContain(
       "Angles and directions are bounded (one full turn, or the range the request names)",
