@@ -1547,6 +1547,9 @@ it.each([
       "sample during the run, not only terminal snapshots, and include every named moving actor",
     );
     expect(prompt).toContain(
+      "check only those objects over bounded idle simulation through the stated interfaces",
+    );
+    expect(prompt).toContain(
       "include one case for each value kind whose behavior the request defines there",
     );
     expect(prompt).toContain("Apply the stated rules together");

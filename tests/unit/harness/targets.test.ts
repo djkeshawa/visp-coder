@@ -185,8 +185,9 @@ describe("the minimal profile", () => {
     // 329 -> 404: room for the review-routing, early-return and preview rules (1616 chars).
     // 404 -> 432: proving each stated goal (every level won) through the request's own
     // interfaces; unwinnable levels were VISP's largest catapult loss in the October final
-    // comparison.
-    expect(guide.length / 4).toBeLessThanOrEqual(432);
+    // comparison. 432 -> 435: a per-kind count example (`Stone: 2`); VISP games put hints
+    // between a kind's name and its count.
+    expect(guide.length / 4).toBeLessThanOrEqual(435);
     expect(guide).toContain("At its id, run visp work");
     expect(guide).toContain("Leave feature running; background it on blocking hosts");
     expect(guide).toContain(
@@ -210,7 +211,7 @@ describe("the minimal profile", () => {
       const guide = planFor(harness, "minimal").assets.find(
         (asset) => asset.path === "AGENTS.visp.md",
       )?.content;
-      expect(guide).toContain("word-labeled text (`Score: 1500`)");
+      expect(guide).toContain("word-labeled text (`Score: 1500`, `Stone: 2`)");
     },
   );
 
