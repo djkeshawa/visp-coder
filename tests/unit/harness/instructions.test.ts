@@ -57,7 +57,7 @@ it("routes review through visp next and starts work while feature writes tests",
 it("tells every guide that UI previews use the real action's function and start point", () => {
   for (const guide of [renderAgentGuide(), renderMinimalGuide()]) {
     expect(guide).toContain(
-      "- UI previews (aim line, predicted path): compute them with the real action's function and start point; check with real input. Do not delete or shrink requested content to pass a check.",
+      "- UI previews (aim line, predicted path): use the real action's function and start point; check with real input. Do not delete or shrink requested content to pass a check.",
     );
   }
 });
