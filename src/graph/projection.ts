@@ -191,40 +191,6 @@ function propagateReexportedTests(
   }
 }
 
-/**
- * The changed files and every importer reachable by repeatedly following
- * dependency edges backwards. Re-export sources are imports edges too, so a
- * barrel remains part of the same closure. The visited set makes cycles
- * finite; sorting both the walk and result keeps refreshes reproducible.
- */
-export function reverseImportClosure(
-  projection: GraphProjection,
-  seeds: Iterable<string>,
-): string[] {
-  const reverseImporters = new Map<string, string[]>();
-  for (const edge of collapseToFileGraph(projection).dependencyEdges) {
-    const importers = reverseImporters.get(edge.to);
-    if (importers) importers.push(edge.from);
-    else reverseImporters.set(edge.to, [edge.from]);
-  }
-
-  const closure = new Set(seeds);
-  let frontier = [...closure].sort(compareCodeUnits);
-  while (frontier.length > 0) {
-    const next: string[] = [];
-    for (const path of frontier) {
-      for (const importer of reverseImporters.get(path) ?? []) {
-        if (closure.has(importer)) continue;
-        closure.add(importer);
-        next.push(importer);
-      }
-    }
-    frontier = next.sort(compareCodeUnits);
-  }
-
-  return [...closure].sort(compareCodeUnits);
-}
-
 /** Refresh only direct importers, following re-export chains that carry changed names. */
 export function refreshDependencySet(
   projection: GraphProjection,

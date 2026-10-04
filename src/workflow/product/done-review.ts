@@ -490,17 +490,6 @@ export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
     );
 }
 
-/** The caller's signal, also aborted at `deadline` (epoch ms, possibly fractional). */
-export function deadlineSignal(
-  deadline: number | undefined,
-  signal: AbortSignal | undefined,
-): AbortSignal | undefined {
-  if (deadline === undefined) return signal;
-  // AbortSignal.timeout accepts only whole milliseconds.
-  const timeout = AbortSignal.timeout(Math.max(1, Math.ceil(deadline - Date.now())));
-  return signal ? AbortSignal.any([timeout, signal]) : timeout;
-}
-
 /**
  * Run the review in a detached VISP process that records its own result. Agent hosts
  * kill a long shell command or its process group when a turn ends; a review that lived
