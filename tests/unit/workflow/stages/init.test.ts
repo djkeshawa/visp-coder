@@ -16,6 +16,19 @@ afterEach(async () => {
 });
 
 describe("runInit trust boundary", () => {
+  it("writes the Python preset for a tracked Python majority with JavaScript tooling", async () => {
+    const root = await fixture();
+    await write(root, "app.py", "");
+    await write(root, "models.py", "");
+    await write(root, "lint.js", "");
+    execFileSync("git", ["add", "."], { cwd: root });
+
+    const result = await runInit({ root, harness: "generic" });
+
+    expect(result.ok && result.value.preset).toBe("python");
+    expect(await readFile(join(root, "visp.yml"), "utf8")).toContain("preset: python");
+  });
+
   it("initializes a root containing only empty coordination ancestry", async () => {
     const root = await fixture();
     expect(await withStateLock(root, async () => ok(undefined))).toEqual(ok(undefined));
