@@ -15,6 +15,7 @@ import {
 } from "../../graph/index.js";
 import { resolveQueryInput } from "../../graph/query/arguments.js";
 import { queryFreshnessNote } from "../../graph/query/index.js";
+import { type AnswerStyle, renderQueryAnswer } from "../../graph/query/render.js";
 import { recordActivity, recordActivityLater } from "../../orchestrate/session.js";
 import { loadWorkspace, loadWorkspaceForMutation } from "../../workflow/state.js";
 import { TOOL } from "../constants.js";
@@ -113,41 +114,17 @@ async function runQuery(
   }
 }
 
+const MCP_ANSWER: AnswerStyle = {
+  indent: "",
+  summaryLine: (key, value) => `${key}: ${JSON.stringify(value)}`,
+  truncationHint: (answer) =>
+    answer.receipt.work?.truncated
+      ? "Traversal incomplete; increase nodes or edges to investigate further."
+      : "Truncated by the result budget.",
+};
+
 function renderAnswer(answer: QueryEnvelope): string {
-  const lines: string[] = [];
-
-  if (answer.summary) {
-    for (const [key, value] of Object.entries(answer.summary)) {
-      lines.push(`${key}: ${JSON.stringify(value)}`);
-    }
-  }
-
-  for (const row of answer.rows) {
-    const where = row.startLine === undefined ? row.path : `${row.path}:${row.startLine}`;
-    lines.push(`${where}  ${row.name}${row.detail ? `  ${row.detail}` : ""}`);
-  }
-
-  if (lines.length === 0) lines.push("no results");
-
-  // Unknowns survive truncation, so an agent can tell a gap from an absence.
-  if (answer.unknowns.length > 0) {
-    lines.push(
-      "",
-      "Not determined:",
-      ...answer.unknowns.map((unknown) => `  ${unknown.kind} at ${unknown.path}`),
-    );
-  }
-
-  for (const note of answer.notes) lines.push("", note);
-  if (answer.receipt.truncated)
-    lines.push(
-      "",
-      answer.receipt.work?.truncated
-        ? "Traversal incomplete; increase nodes or edges to investigate further."
-        : "Truncated by the result budget.",
-    );
-
-  return lines.join("\n");
+  return renderQueryAnswer(answer, MCP_ANSWER);
 }
 
 function registerIndex(server: McpServer, root: string): void {
