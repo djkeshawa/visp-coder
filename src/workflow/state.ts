@@ -1,6 +1,6 @@
 import { resolveCriticDefault } from "../config/critic-defaults.js";
 import { loadConfig } from "../config/load.js";
-import { defaultConfig, type VispConfig } from "../config/schema.js";
+import type { VispConfig } from "../config/schema.js";
 import { DIR, FILE, STATE_DIR } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { RecoveringProjectFileSystem, recoverFileTransactions } from "../core/file-transaction.js";
@@ -414,5 +414,3 @@ function markerFor(feature: string, task: Task): ImplementMarker {
     forbiddenFiles: task.forbiddenFiles,
   };
 }
-
-export { defaultConfig };

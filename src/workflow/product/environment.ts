@@ -12,7 +12,6 @@ import {
 import { checksFor, type ProductBrief, type ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
 
-export { environmentRecovery } from "./environment-model.js";
 export function needsBrowser(brief: ProductBrief, slice?: ProductSlice) {
   if (checksFor(brief, slice).some((check) => isBrowserCheckCommand(check.command))) return true;
   const outcomes = brief.outcomes.filter((entry) => !slice || slice.outcomes.includes(entry.id));

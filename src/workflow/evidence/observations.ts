@@ -123,8 +123,6 @@ export function reproductionSignature(receipt: ObservationReceipt): string {
   });
 }
 
-export { observationReproductionState } from "./observations/identity.js";
-
 async function readOneLog(
   state: WorkspaceState,
   feature: string,

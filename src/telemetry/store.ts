@@ -7,12 +7,9 @@ import type { Attempt, CheckEvent, CheckStage, Telemetry, UsageReceipt } from ".
 export type {
   Attempt,
   CheckEvent,
-  CheckSource,
-  CheckStage,
   Telemetry,
   UsageReceipt,
 } from "./schema.js";
-export { usageReceiptSchema } from "./schema.js";
 
 export async function readTelemetry(state: WorkspaceState): Promise<Result<Telemetry>> {
   return readTelemetryJournal(state);

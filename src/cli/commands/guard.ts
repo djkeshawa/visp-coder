@@ -6,7 +6,7 @@ import { ok, type Result } from "../../core/result.js";
 import { inspectSettledTransactions } from "../../core/transaction-inspection.js";
 import { type RuntimeIdentity, runtimeIdentity } from "../../core/version.js";
 import { requireInstalledRuntime } from "../../harness/runtime.js";
-import { checkPaths, decideScope } from "../../orchestrate/guard.js";
+import { checkPaths } from "../../orchestrate/guard.js";
 import { evaluateGuardPaths, type GuardViolation } from "../../orchestrate/guard-evaluation.js";
 import type { ImplementMarker } from "../../workflow/artifacts/evidence.js";
 import { branchFeatures, branchScopes } from "../../workflow/product/branch-scope.js";
@@ -451,8 +451,6 @@ async function resolvePaths(
     value: diff.value.files.map((file) => file.path).filter((path) => !isStatePath(path)),
   };
 }
-
-export { decideScope };
 
 /** Enough to see the shape of a refusal without scrolling past it. */
 const SHOWN_VIOLATIONS = 20;
