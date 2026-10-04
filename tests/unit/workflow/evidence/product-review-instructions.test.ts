@@ -7,7 +7,10 @@ import { criticSelection, readCriticState } from "../../../../src/workflow/produ
 import { independentReviewTemplate } from "../../../../src/workflow/product/independent-review.js";
 import { runProductVerify, runProductWork } from "../../../../src/workflow/product/index.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS } from "../../../../src/workflow/product/observation-preview.js";
-import { productReviewInstructions } from "../../../../src/workflow/product/review-instructions.js";
+import {
+  CRITIC_INSTRUCTIONS,
+  productReviewInstructions,
+} from "../../../../src/workflow/product/review-instructions.js";
 import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
 import { runProductReviewerHandoff } from "../../../../src/workflow/product/reviewer-handoff.js";
 import { recordedProductJourney } from "../../support/product-journey.js";
@@ -172,4 +175,10 @@ it("asks for one optional finish finding that can never fail an outcome", () => 
     "Finish findings are always required: false; never mark one required and never let one fail an outcome.",
   );
   expect(productReviewInstructions()).not.toContain("judge finish once");
+});
+
+it("lets a specific request statement govern a case a general rule also covers", () => {
+  expect(CRITIC_INSTRUCTIONS).toContain(
+    "an implementation that makes it impossible for that option to match or apply under those conditions is a required finding",
+  );
 });

@@ -86,7 +86,7 @@ it("captures rules stated for later work and puts them in every later feature", 
   const work = await workOn("002-add-prices");
   expect(work.exitCode, work.stdout + work.stderr).toBe(0);
   expect(work.stdout).toContain(
-    `Project rules the user stated for all later work on this project (they apply here too):\n${moneyRule} Money is an integer number of cents`,
+    `Project rules the user stated for all later work on this project (they apply here too; only where a specific statement in the current request conflicts with a project rule for the same case does that statement take precedence, and only for the conflicting requirement; all compatible rules and rules about cases the request does not address still apply):\n${moneyRule} Money is an integer number of cents`,
   );
 });
 

@@ -241,7 +241,7 @@ export function withRules(request: string, rules: string): string {
 export function projectRulesText(rules: readonly Pick<ProjectRule, "id" | "text">[]): string {
   if (rules.length === 0) return "";
   return [
-    "Project rules the user stated for all later work on this project (they apply here too):",
+    "Project rules the user stated for all later work on this project (they apply here too; only where a specific statement in the current request conflicts with a project rule for the same case does that statement take precedence, and only for the conflicting requirement; all compatible rules and rules about cases the request does not address still apply):",
     ...rules.map((rule) => `${rule.id} ${rule.text}`),
   ].join("\n");
 }

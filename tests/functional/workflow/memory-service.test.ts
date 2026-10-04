@@ -105,7 +105,7 @@ it("keeps prose before a list and each item's wrapped lines", () => {
 it("does not record the blocks VISP appended to a request", () => {
   expect(
     requestChunks(
-      "Add prices to items, stored in integer cents.\n\nProject rules the user stated for all later work on this project (they apply here too):\nR001 Money is integer cents.",
+      "Add prices to items, stored in integer cents.\n\nProject rules the user stated for all later work on this project (they apply here too; only where a specific statement in the current request conflicts with a project rule for the same case does that statement take precedence, and only for the conflicting requirement; all compatible rules and rules about cases the request does not address still apply):\nR001 Money is integer cents.",
     ),
   ).toEqual(["Add prices to items, stored in integer cents."]);
 });
