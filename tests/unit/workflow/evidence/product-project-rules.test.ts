@@ -122,7 +122,7 @@ describe("project rules", () => {
   it("renders rules as plain numbered lines that say where they came from", () => {
     const { rules } = mergeProjectRules([], ["Money is integer cents."], "001-a", at);
     expect(projectRulesText(rules)).toBe(
-      `Project rules the user stated for all later work on this project (they apply here too):\n${rules[0]?.id} Money is integer cents.`,
+      `Project rules the user stated for all later work on this project (they apply here too; only where a specific statement in the current request conflicts with a project rule for the same case does that statement take precedence, and only for the conflicting requirement; all compatible rules and rules about cases the request does not address still apply):\n${rules[0]?.id} Money is integer cents.`,
     );
     expect(projectRulesText([])).toBe("");
   });
