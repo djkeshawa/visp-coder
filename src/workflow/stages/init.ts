@@ -1,6 +1,10 @@
 import { basename } from "node:path";
 import { detectPreset, readPackageJson } from "../../config/detect.js";
-import { renderConfigTemplate, suggestedValidationCommands } from "../../config/template.js";
+import { renderConfigTemplate } from "../../config/template.js";
+import {
+  availableValidationCommands,
+  type SkippedValidationCommand,
+} from "../../config/validation.js";
 import {
   HARNESSES,
   type Harness,
@@ -45,6 +49,7 @@ export interface InitOutcome {
   readonly configPath: string;
   readonly createdConfig: boolean;
   readonly hasGit: boolean;
+  readonly skippedValidationCommands: readonly SkippedValidationCommand[];
 }
 
 interface InitPlan {
@@ -52,6 +57,7 @@ interface InitPlan {
   readonly harness: Harness;
   readonly configExists: boolean;
   readonly mutations: FileMutation[];
+  readonly skippedValidationCommands: readonly SkippedValidationCommand[];
 }
 
 /**
@@ -94,6 +100,7 @@ export async function runInit(
     configPath: paths.config,
     createdConfig: !plan.value.configExists || Boolean(options.force),
     hasGit: true,
+    skippedValidationCommands: plan.value.skippedValidationCommands,
   });
 }
 
@@ -167,6 +174,7 @@ async function planInit(
     preset,
     harness,
     configExists: config.value.exists,
+    skippedValidationCommands: config.value.skipped,
     mutations: [
       projectMutation.value,
       statusMutation.value,
@@ -182,18 +190,23 @@ async function plannedConfigMutation(
   preset: Preset,
   harness: Harness,
   force: boolean,
-): Promise<Result<{ exists: boolean; mutation?: FileMutation }>> {
+): Promise<
+  Result<{ exists: boolean; mutation?: FileMutation; skipped: readonly SkippedValidationCommand[] }>
+> {
   const configPresent = await files.exists(paths.config);
   if (!configPresent.ok) return configPresent;
-  if (configPresent.value && !force) return ok({ exists: true });
+  if (configPresent.value && !force) return ok({ exists: true, skipped: [] });
   const manifest = await readPackageJson(paths.root, files);
+  const validation = await availableValidationCommands(paths.root, preset, manifest?.scripts ?? {});
   const template = renderConfigTemplate({
     preset,
     harness,
-    validationCommands: suggestedValidationCommands(preset, manifest?.scripts ?? {}),
+    validationCommands: validation.commands,
   });
   const mutation = await plannedWrite(files, paths.config, template);
-  return mutation.ok ? ok({ exists: configPresent.value, mutation: mutation.value }) : mutation;
+  return mutation.ok
+    ? ok({ exists: configPresent.value, mutation: mutation.value, skipped: validation.skipped })
+    : mutation;
 }
 
 async function plannedWrite(
