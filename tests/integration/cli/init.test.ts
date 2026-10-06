@@ -50,9 +50,10 @@ describe("init validation suggestions", () => {
     const config = parseConfig(await project.read("visp.yml"), "visp.yml");
     expect(config.ok && config.value.workflow.validationCommands).toEqual([]);
 
+    // Importable and passing now: adopted on a forced re-run.
     await project.write(
       ".venv/bin/python",
-      '#!/bin/sh\ntest "$1" = "-c" && test "$2" = "import pytest"\n',
+      '#!/bin/sh\ncase "$1 $2" in "-c import pytest"|"-m pytest") exit 0;; esac\nexit 1\n',
     );
     const recovered = project.json<InitOutcome>("init", "--harness", "generic", "--force");
     expect(recovered.result.exitCode).toBe(0);
@@ -86,6 +87,26 @@ describe("init validation suggestions", () => {
     expect(config.ok && config.value.workflow.validationCommands).toEqual([]);
   });
 
+  it("adopts a whole-project check only when it passes here now", async () => {
+    project = await TestProject.create({
+      "package.json": JSON.stringify({
+        scripts: { test: 'node -e "process.exit(0)"', lint: 'node -e "process.exit(3)"' },
+      }),
+    });
+
+    const { result, envelope } = project.json<InitOutcome>("init", "--harness", "generic");
+
+    expect(result.exitCode).toBe(0);
+    expect(envelope.data?.skippedValidationCommands).toEqual([
+      {
+        command: "npm run lint",
+        reason: "it fails here now (exit 3), so it would block every change",
+      },
+    ]);
+    const config = parseConfig(await project.read("visp.yml"), "visp.yml");
+    expect(config.ok && config.value.workflow.validationCommands).toEqual(["npm run test"]);
+  });
+
   it("uses the Python majority and its project interpreter even with root JS scripts", async () => {
     project = await TestProject.create({
       "app.py": "",
@@ -95,7 +116,7 @@ describe("init validation suggestions", () => {
     });
     await project.write(
       ".venv/bin/python",
-      '#!/bin/sh\ntest "$1" = "-c" && test "$2" = "import pytest"\n',
+      '#!/bin/sh\ncase "$1 $2" in "-c import pytest"|"-m pytest") exit 0;; esac\nexit 1\n',
     );
     await chmod(join(project.root, ".venv/bin/python"), 0o755);
 

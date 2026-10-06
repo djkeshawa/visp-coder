@@ -8,7 +8,9 @@ import { emit, emitError } from "../output.js";
 
 export function initCommand(): Command {
   return new Command("init")
-    .description("Set up visp in this project")
+    .description(
+      "Set up visp in this project; suggested project checks run once and are adopted only if they pass",
+    )
     .option("--harness <name>", `AI coder to configure for (${HARNESSES.join(", ")})`)
     .option("--force", "Rewrite existing configuration")
     .action(async (_flags: unknown, command: Command) => {
@@ -23,6 +25,10 @@ export function initCommand(): Command {
         root: resolve(opts.project ?? process.cwd()),
         ...(harness?.ok ? { harness: harness.value } : {}),
         ...(opts.force ? { force: true } : {}),
+        onVerifyChecks: (commands, budgetMs) =>
+          process.stderr.write(
+            `visp init: running ${commands.join(", ")} once (up to ${Math.round(budgetMs / 1000)} s in total) to confirm each passes here before adopting it as a project check. Project scripts and their pre/post hooks run as usual and may modify files.\n`,
+          ),
       });
 
       process.exitCode = emit("init", result, {
