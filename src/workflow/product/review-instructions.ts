@@ -56,3 +56,6 @@ export function productReviewInstructions(
     .filter(Boolean)
     .join("\n");
 }
+
+export const REVIEW_DIFF_INSTRUCTIONS =
+  "The supplied unified diff is the change under review against the work-authorization baseline. Use the other sources for context. Omitted hunks and files marked not shown remain unassessed; source changes alone are not passing execution evidence.";

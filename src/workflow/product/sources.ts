@@ -9,6 +9,7 @@ export interface ProductSource {
     | "preserved-request"
     | "pinned-file"
     | "implementation-file"
+    | "implementation-diff"
     | "authored-brief"
     | "executed-check";
   readonly reference: string;

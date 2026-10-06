@@ -28,7 +28,7 @@ import { hasRequiredFindings, productRefinement } from "./refinement.js";
 import { reproductionContextDigest } from "./reproduction-bindings.js";
 import type { ProductReviewBundle } from "./review.js";
 import { productReviewAgenda, reviewInteractionEvidence } from "./review-context.js";
-import { productReviewInstructions } from "./review-instructions.js";
+import { productReviewInstructions, REVIEW_DIFF_INSTRUCTIONS } from "./review-instructions.js";
 import { productReviewRecurrence } from "./review-recurrence.js";
 import type { ProductRecord } from "./store.js";
 
@@ -150,7 +150,11 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
     imageGroupsOmitted: images.groupsOmitted,
     reviewer: reviewer,
     recurrence: productReviewRecurrence(record, implementationDigest, slice),
-    reviewerInstructions: reviewInstructions(workspace, record, slice, images.images.length),
+    reviewerInstructions:
+      reviewInstructions(workspace, record, slice, images.images.length) +
+      (catalogue.sources.some((source) => source.kind === "implementation-diff")
+        ? `\n${REVIEW_DIFF_INSTRUCTIONS}`
+        : ""),
   };
 }
 

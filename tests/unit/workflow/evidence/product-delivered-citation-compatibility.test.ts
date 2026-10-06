@@ -163,10 +163,15 @@ it.each(["session", "native", "legacy-native", "attached", "legacy-attached"])(
         -1,
       );
       expect(attempt?.status, attempt?.message).toBe("reviewed");
-      if (!mode.startsWith("legacy-"))
-        expect(attempt?.deliveredGeneratedReferences?.map((entry) => entry.id)).toEqual([
+      if (!mode.startsWith("legacy-")) {
+        const references = attempt?.deliveredGeneratedReferences ?? [];
+        expect(references.filter((entry) => !entry.sourceKind).map((entry) => entry.id)).toEqual([
           "CODE-CORE-GAPS",
         ]);
+        const diffs = references.filter((entry) => entry.sourceKind === "implementation-diff");
+        expect(diffs).toHaveLength(1);
+        for (const diff of diffs) expect(attempt?.deliveredEvidenceIds).toContain(diff.id);
+      }
     } finally {
       await p.workspace.destroy();
     }

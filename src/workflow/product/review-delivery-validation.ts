@@ -13,6 +13,7 @@ export const generatedSourceReferencesSchema = z
       .object({
         id: z.string().min(1).max(200),
         kind: z.literal("source"),
+        sourceKind: z.literal("implementation-diff").optional(),
         outcomes: z.array(z.string()),
         status: z.enum(["available", "unavailable"]),
         summary: z.string(),
@@ -25,20 +26,26 @@ export const generatedSourceReferencesSchema = z
     "Generated source references exceed the metadata budget",
   );
 
-/** Preserve references created by final fitting, without storing all candidate source text. */
+/** Preserve final-fitting references and delivered diff identities without candidate text. */
 export function generatedSourceReferences(
   sources: readonly ProductSource[],
   candidates: readonly { id: string }[],
 ) {
   const known = new Set(candidates.map((entry) => entry.id));
   return sources
-    .filter((source) => !known.has(source.id))
+    .filter((source) => source.kind === "implementation-diff" || !known.has(source.id))
     .map((source) => ({
       id: source.id,
       kind: "source" as const,
       outcomes: [],
       status: source.available ? ("available" as const) : ("unavailable" as const),
-      summary: source.excerpt,
+      summary:
+        source.kind === "implementation-diff"
+          ? `${source.reference}: ${source.sha256}`
+          : source.excerpt,
+      ...(source.kind === "implementation-diff"
+        ? { sourceKind: "implementation-diff" as const }
+        : {}),
     }));
 }
 

@@ -15,6 +15,7 @@ import {
   type ProductRecord,
   type ProductSelection,
   readProductRecord,
+  reviewBaselinePath,
 } from "./store.js";
 import { productSourceChanges, productSourceSnapshot } from "./subject.js";
 
@@ -102,7 +103,11 @@ export async function readProductAuthorization(
   workspace: WorkspaceState,
   record: ProductRecord,
 ): Promise<Result<ProductAuthorization | undefined>> {
-  const retained = await readProductAuthorizationBaseline(workspace, record);
+  const retained = await readProductAuthorizationBaseline(
+    workspace,
+    record,
+    authorizationPath(workspace, record.brief.feature),
+  );
   if (!retained.ok || !retained.value) return retained;
   return ok(
     closedSlice(record.state.slices[retained.value.task]?.status) ? undefined : retained.value,
@@ -113,9 +118,15 @@ export async function readProductAuthorization(
 export async function readProductAuthorizationBaseline(
   workspace: WorkspaceState,
   record: ProductRecord,
-  path = authorizationPath(workspace, record.brief.feature),
+  path?: string,
 ): Promise<Result<ProductAuthorization | undefined>> {
-  const content = await workspace.files.readTextIfExists(path);
+  let content = await workspace.files.readTextIfExists(
+    path ?? authorizationPath(workspace, record.brief.feature),
+  );
+  if (content.ok && content.value === undefined && path === undefined)
+    content = await workspace.files.readTextIfExists(
+      reviewBaselinePath(workspace, record.brief.feature),
+    );
   if (!content.ok || content.value === undefined) return content.ok ? ok(undefined) : content;
   let input: unknown;
   try {

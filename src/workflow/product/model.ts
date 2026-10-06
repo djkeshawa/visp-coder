@@ -18,6 +18,7 @@ import { experimentResolutionsSchema } from "./experiment-model.js";
 import { productFeedbackSchema } from "./feedback-model.js";
 import { journeyRetirementSchema } from "./journey-ownership.js";
 import { reproductionSchema } from "./reproduction-model.js";
+import { generatedSourceReferencesSchema } from "./review-delivery-validation.js";
 import { userFeedbackRecordSchema } from "./user-feedback-model.js";
 
 const id = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
@@ -546,6 +547,7 @@ export const productStateSchema = z
               .union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
               .optional(),
             findingIdentityVersion: z.literal(2).optional(),
+            deliveredDiffReferences: generatedSourceReferencesSchema.optional(),
             subjectDigest: z.string(),
             implementationDigest: z.string().optional(),
             contractDigest: z.string(),

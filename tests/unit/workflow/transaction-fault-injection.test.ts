@@ -28,6 +28,7 @@ import {
   authorizationPath,
   briefPath,
   productStatePath,
+  reviewBaselinePath,
 } from "../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../src/workflow/product/work.js";
 import { runInit } from "../../../src/workflow/stages/init.js";
@@ -184,6 +185,7 @@ describe("workflow transaction fault injection", () => {
             ...(phase === "check publication"
               ? [expect.stringMatching(/^\.visp\/session\/check-output\/[^/]+\.log$/)]
               : [
+                  relativeMutationPath(workspace.root, reviewBaselinePath(state, brief.feature)),
                   relativeMutationPath(workspace.root, authorizationPath(state, brief.feature)),
                   ".visp/status.json",
                 ]),
@@ -196,7 +198,7 @@ describe("workflow transaction fault injection", () => {
           await workspace.destroy();
         }
       }
-      expect(mutationCount).toBe(phase === "check publication" ? 3 : 4);
+      expect(mutationCount).toBe(phase === "check publication" ? 3 : 5);
     },
   );
 });

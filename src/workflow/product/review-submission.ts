@@ -140,6 +140,7 @@ export async function submitReview(context: ReviewSubmissionContext) {
     reviewer,
     feedback.value,
     resolutions.value,
+    catalogue.deliveredDiffReferences,
   );
   return saved.ok ? ok({ record: saved.value, assessments, coverage }) : saved;
 }
@@ -185,6 +186,7 @@ async function publishReview(
   reviewer: ProductReviewerContext,
   feedback?: ProductFeedback,
   experimentResolutions: ExperimentResolution[] = [],
+  deliveredDiffReferences: DeliveredReviewEvidence["generatedReferences"] = [],
 ): Promise<Result<ProductRecord>> {
   const timestamp = new Date().toISOString();
   const next = {
@@ -205,6 +207,9 @@ async function publishReview(
         reviewer,
         ...(experimentResolutions.length ? { experimentResolutions } : {}),
         ...(feedback ? { feedback, feedbackIntentDigest: feedbackIntentDigest(record.brief) } : {}),
+        ...(deliveredDiffReferences.length
+          ? { deliveredDiffReferences: [...deliveredDiffReferences] }
+          : {}),
         captures: images.map(({ data: _data, mimeType: _mimeType, ...capture }) => capture),
       },
     ],
@@ -280,6 +285,9 @@ function validateDeliveredCatalogue(
   if (gap) return err(vispError("EVIDENCE_FAILED", gap));
   return ok({
     ...catalogue,
+    deliveredDiffReferences: delivered.generatedReferences.filter(
+      (entry) => entry.sourceKind === "implementation-diff" && ids.has(entry.id),
+    ),
     sources: catalogue.sources.filter((source) => ids.has(source.id)),
     entries: [
       ...catalogue.entries.filter((entry) => ids.has(entry.id)),
