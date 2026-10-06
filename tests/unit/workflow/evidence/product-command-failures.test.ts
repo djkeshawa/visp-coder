@@ -10,24 +10,60 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   await workspace?.destroy();
 });
-async function execute(message: string, timeoutMs?: number) {
+async function execute(message: string, timeoutMs?: number, configured = false, exitCode = 1) {
   ({ workspace } = await productWorkspace());
   const state = await workspace.state();
   const record = await readProductRecord(state);
   if (!record.ok) throw new Error(record.error.message);
   const check = productCheckSchema.parse({
-    id: "C001",
+    id: configured ? "CONFIG_1" : "C001",
     command: [
       process.execPath,
       "-e",
       timeoutMs
         ? "setInterval(() => {}, 1000)"
-        : `console.error(${JSON.stringify(message)});process.exit(1)`,
+        : `console.error(${JSON.stringify(message)});process.exit(${exitCode})`,
     ],
     ...(timeoutMs ? { timeoutMs } : {}),
   });
-  return executeProductCheck(state, record.value, undefined, check, "subject");
+  return executeProductCheck(
+    configured
+      ? {
+          ...state,
+          config: {
+            ...state.config,
+            workflow: {
+              ...state.config.workflow,
+              validationCommands: [check.command as [string, ...string[]]],
+            },
+          },
+        }
+      : state,
+    record.value,
+    undefined,
+    check,
+    "subject",
+  );
 }
+
+it.each([
+  ["sh: 1: eslint: not found", "eslint", 127],
+  ["sh: 1: ./node_modules/.bin/karma: not found", "./node_modules/.bin/karma", 1],
+  ["bash: ruff: command not found", "ruff", 1],
+  ['npm error Missing script: "test"', "test", 1],
+  ["", process.execPath, 127],
+])("classifies a configured missing tool: %s", async (message, tool, exitCode) => {
+  const result = await execute(message as string, undefined, true, exitCode as number);
+  expect(result.execution.status).toBe("environment-failed");
+  expect(result.execution.output).toContain(tool);
+  expect(result.execution.output).toContain("workflow.validationCommands");
+  expect(result.execution.output).toContain("missing-command:");
+});
+
+it("keeps worker-declared missing-tool output a product failure", async () => {
+  const result = await execute("sh: 1: eslint: not found", undefined, false, 127);
+  expect(result.execution.status).toBe("failed");
+});
 
 it("records a per-check timeout separately from a product assertion failure", async () => {
   const result = await execute("", 100);

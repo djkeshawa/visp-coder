@@ -18,6 +18,11 @@ import {
   validateProductCheckCommand,
 } from "./check-command.js";
 import { checkFix, missingAlias } from "./check-executable.js";
+import {
+  configuredMissingTool,
+  configuredToolRecovery,
+  isConfiguredCheck,
+} from "./configured-checks.js";
 import { browserUnavailable } from "./environment.js";
 import type {
   ProductBrief,
@@ -149,10 +154,15 @@ export async function executeProductCheck(
   );
   const full = redact(raw);
   const decided = waivedResult(output, full, workspace.paths.root, waivers);
-  const environmental = await environmentFailure(workspace, record, decided.status, waivers, full);
-  const { status, note } = environmental
-    ? { status: "environment-failed" as const, note: ENVIRONMENT_NOTE }
-    : decided;
+  const { status, note } = await commandDecision(
+    workspace,
+    record,
+    check,
+    decided,
+    waivers,
+    full,
+    output,
+  );
   return {
     execution: {
       ...base,
@@ -176,6 +186,31 @@ export async function executeProductCheck(
       },
     ],
   };
+}
+
+async function commandDecision(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  check: ProductCheck,
+  decided: { status: ProductExecution["status"]; note: string },
+  waivers: Waivers | undefined,
+  full: string,
+  output: Result<CommandOutput>,
+) {
+  const missingTool =
+    (decided.status === "failed" || decided.status === "environment-failed") &&
+    isConfiguredCheck(workspace, record, check)
+      ? configuredMissingTool(check, full, output.ok ? output.value.exitCode : -1)
+      : undefined;
+  if (missingTool)
+    return {
+      status: "environment-failed" as const,
+      note: configuredToolRecovery(check, missingTool),
+    };
+  const environmental = await environmentFailure(workspace, record, decided.status, waivers, full);
+  return environmental
+    ? { status: "environment-failed" as const, note: ENVIRONMENT_NOTE }
+    : decided;
 }
 
 function pinnedFailureSummary(
