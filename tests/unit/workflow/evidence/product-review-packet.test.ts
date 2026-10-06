@@ -767,3 +767,52 @@ it("keeps failed receipts linked to their failure source when stdout matches a p
     summary: expect.stringContaining("CHECK-passed"),
   });
 });
+
+it("prepares a review when a check reads a non-UTF-8 fixture file", async () => {
+  const { productWorkspace } = await import("../../support/product-workspace.js");
+  const { updateProductBrief, runProductWork, runProductVerify } = await import(
+    "../../../../src/workflow/product/index.js"
+  );
+  const { runProductReviewRequest } = await import(
+    "../../../../src/workflow/product/review-request.js"
+  );
+  const p = await productWorkspace();
+  try {
+    // Repositories keep encoding fixtures such as Django's tests/i18n/commands/not_utf8.sample.
+    const latin1 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+    await p.workspace.write("test/latin1.sample", latin1);
+    await p.workspace.write(
+      "test/check.mjs",
+      "import assert from 'node:assert/strict';\nimport {readFileSync} from 'node:fs';\nimport {value} from '../src/value.mjs';\nassert.equal(readFileSync('test/latin1.sample').length, 5);\nassert.equal(value, 2);\n",
+    );
+    p.workspace.commit("encoding fixture");
+    const updated = await updateProductBrief(await p.workspace.state(), {
+      brief: {
+        ...p.brief,
+        checks: [
+          {
+            ...p.brief.checks[0],
+            command: [process.execPath, "test/check.mjs", "test/latin1.sample"],
+            files: [],
+          },
+        ],
+        slices: [
+          {
+            ...p.brief.slices[0],
+            scope: { allowed: ["src/value.mjs", "test/**"], expected: [], forbidden: [] },
+          },
+        ],
+      },
+      reason: "Check reads an encoding fixture",
+    });
+    expect(updated.ok).toBe(true);
+    expect((await runProductWork(await p.workspace.state(), { task: "T001" })).ok).toBe(true);
+    await p.workspace.write("src/value.mjs", "export const value = 2;\n");
+    expect((await runProductVerify(await p.workspace.state(), { task: "T001" })).ok).toBe(true);
+    const state = await p.workspace.state();
+    const prepared = await runProductReviewRequest(state, { prepare: true, task: "T001" });
+    expect(prepared.ok, JSON.stringify(prepared)).toBe(true);
+  } finally {
+    await p.workspace.destroy();
+  }
+});

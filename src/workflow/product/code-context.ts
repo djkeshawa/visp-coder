@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { sha256 } from "../../core/hash.js";
 import { matchesAny } from "../../core/patterns.js";
 import { privatePath } from "../../core/redaction.js";
@@ -119,14 +120,23 @@ function isReviewablePath(path: string) {
 }
 
 /** Dependency discovery and excerpts share one observation, never cached across reviews. */
+/**
+ * Review sources are verified later by hashing their bytes, so text is read only from bytes that
+ * are valid UTF-8 (decoding keeps them identical). Other files (Latin-1 fixtures, binaries) are
+ * delivered as unavailable instead of being hashed as replacement-character text that never
+ * matches the file and makes every review fail as "source changed".
+ */
 function reviewSourceReader(workspace: WorkspaceState) {
   const reads = new Map<string, ReturnType<WorkspaceState["files"]["readTextIfExists"]>>();
-  return (path: string) => {
-    let read = reads.get(path);
-    if (!read) {
-      read = workspace.files.readTextIfExists(path);
-      reads.set(path, read);
-    }
+  return (path: string): ReturnType<WorkspaceState["files"]["readTextIfExists"]> => {
+    const cached = reads.get(path);
+    if (cached) return cached;
+    const read = workspace.files.readBytesIfExists(path).then((bytes) => {
+      if (!bytes.ok) return bytes;
+      const value = bytes.value;
+      return ok(value && isUtf8(value) ? Buffer.from(value).toString("utf8") : undefined);
+    });
+    reads.set(path, read);
     return read;
   };
 }
