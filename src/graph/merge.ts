@@ -1,4 +1,5 @@
 import { compareCodeUnits } from "../core/hash.js";
+import { appendAll } from "./append.js";
 import { isExternalRef } from "./constants.js";
 import type { ExtractionOutcome } from "./extract/index.js";
 import { compareUnknowns } from "./extract/unknowns.js";
@@ -36,14 +37,14 @@ export function mergeFacts(
       entities.push(entity);
       if (entity.kind === "file") reusedParsedPaths.add(entity.path);
     }
-    relations.push(...reusable(previous.relations, reusablePaths));
-    unknowns.push(...reusable(previous.unknowns, reusablePaths));
-    entrypoints.push(...reusable(previous.entrypoints, reusablePaths));
+    appendAll(relations, reusable(previous.relations, reusablePaths));
+    appendAll(unknowns, reusable(previous.unknowns, reusablePaths));
+    appendAll(entrypoints, reusable(previous.entrypoints, reusablePaths));
   }
 
   const known = new Set(entities.map((entity) => entity.id));
   const kept = relations.filter((relation) => isLive(relation, known));
-  unknowns.push(...danglingUnknowns(relations, known, livePaths));
+  appendAll(unknowns, danglingUnknowns(relations, known, livePaths));
 
   return {
     entities: dedupeEntities(entities),
