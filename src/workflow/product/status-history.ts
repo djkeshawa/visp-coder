@@ -10,6 +10,7 @@ import { legacyFeatureContractDigest, productContractDigest } from "./subject.js
 export interface ProductIdentity {
   subject: string;
   implementation: string;
+  sourceSnapshot?: Record<string, string>;
 }
 
 export function historicalAcceptanceNext(

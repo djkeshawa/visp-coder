@@ -9,6 +9,12 @@ import {
 import type { WorkspaceState } from "../state.js";
 
 const MAX_CONTEXT_PATHS = 4;
+const OBSERVED_CURRENCY = new WeakMap<WorkspaceState, Map<string, { gap?: string }>>();
+
+/** Advice may reuse a reply's observation; gates still perform their own currency checks. */
+export function observedProductGraphCurrency(workspace: WorkspaceState, snapshotId: string) {
+  return OBSERVED_CURRENCY.get(workspace)?.get(snapshotId);
+}
 
 /** Both context and skill selection require facts from this checkout's current inputs. */
 export async function productGraphCurrencyGap(
@@ -17,9 +23,15 @@ export async function productGraphCurrencyGap(
 ): Promise<string | undefined> {
   if (snapshot.root !== workspace.paths.root) return "index belongs to another checkout";
   const currency = await checkCurrency(workspace.paths.root, snapshot, workspace.config.graph);
-  if (!currency.ok) return currency.error.message;
-  if (currency.value.state !== "current") return `index is ${currency.value.state}`;
-  return undefined;
+  const gap = !currency.ok
+    ? currency.error.message
+    : currency.value.state !== "current"
+      ? `index is ${currency.value.state}`
+      : undefined;
+  const observations = OBSERVED_CURRENCY.get(workspace) ?? new Map();
+  observations.set(snapshot.id, { gap });
+  OBSERVED_CURRENCY.set(workspace, observations);
+  return gap;
 }
 
 export async function queryCurrentProductPaths(

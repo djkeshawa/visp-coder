@@ -102,9 +102,20 @@ export async function readProductAuthorization(
   workspace: WorkspaceState,
   record: ProductRecord,
 ): Promise<Result<ProductAuthorization | undefined>> {
-  const content = await workspace.files.readTextIfExists(
-    authorizationPath(workspace, record.brief.feature),
+  const retained = await readProductAuthorizationBaseline(workspace, record);
+  if (!retained.ok || !retained.value) return retained;
+  return ok(
+    closedSlice(record.state.slices[retained.value.task]?.status) ? undefined : retained.value,
   );
+}
+
+/** Read-only baseline context, including closed slices; this never grants editing authority. */
+export async function readProductAuthorizationBaseline(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  path = authorizationPath(workspace, record.brief.feature),
+): Promise<Result<ProductAuthorization | undefined>> {
+  const content = await workspace.files.readTextIfExists(path);
   if (!content.ok || content.value === undefined) return content.ok ? ok(undefined) : content;
   let input: unknown;
   try {
@@ -116,10 +127,9 @@ export async function readProductAuthorization(
   if (!parsed.success) return err(vispError("ARTIFACT_INVALID", "Invalid product authorization"));
   const auth = parsed.data;
   const slice = record.brief.slices.find((entry) => entry.id === auth.task);
-  // Old markers and copied worktree markers never grant current authorization.
+  // Old or copied baselines do not describe this checkout and contract.
   if (
     !slice ||
-    closedSlice(record.state.slices[auth.task]?.status) ||
     auth.feature !== record.brief.feature ||
     auth.root !== hashValue(workspace.paths.root) ||
     auth.contractDigest !== sliceDigest(record.brief, slice)
