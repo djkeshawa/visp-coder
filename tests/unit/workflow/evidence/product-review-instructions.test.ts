@@ -182,3 +182,10 @@ it("lets a specific request statement govern a case a general rule also covers",
     "an implementation that makes it impossible for that option to match or apply under those conditions is a required finding",
   );
 });
+
+it("requires findings for weakened existing tests unless the request changes their behavior", () => {
+  expect(CRITIC_INSTRUCTIONS).toContain(
+    "Edits that weaken, skip, delete or deselect existing tests, whether in test files or check commands, are required findings unless the request changes that behavior",
+  );
+  expect(CRITIC_INSTRUCTIONS).toContain("when it does, quote the request sentence");
+});
