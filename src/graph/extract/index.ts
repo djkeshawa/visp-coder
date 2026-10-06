@@ -1,6 +1,7 @@
 import type { Language } from "../../core/constants.js";
 import { compareCodeUnits } from "../../core/hash.js";
 import { ok, type Result } from "../../core/result.js";
+import { appendAll } from "../append.js";
 import { GRAMMAR_BY_EXTENSION, UNPARSED_SOURCE_EXTENSIONS } from "../constants.js";
 import {
   extensionOf,
@@ -122,7 +123,7 @@ class ExtractionRun {
 
     if (isPackageManifest(file.path)) {
       const manifest = extractManifest(file.path, source.value);
-      this.entrypoints.push(...manifest.entrypoints);
+      appendAll(this.entrypoints, manifest.entrypoints);
       this.unknowns.addAll(manifest.unknowns);
       return;
     }
@@ -144,9 +145,9 @@ class ExtractionRun {
 
   private async parseHtml(file: FileEntry, source: string): Promise<void> {
     const page = extractHtml(file.path, source, this.context);
-    this.entities.push(...page.entities);
-    this.relations.push(...page.relations);
-    this.entrypoints.push(...page.entrypoints);
+    appendAll(this.entities, page.entities);
+    appendAll(this.relations, page.relations);
+    appendAll(this.entrypoints, page.entrypoints);
     this.unknowns.addAll(page.unknowns);
     if (page.relations.length > 0) this.parsedPaths.add(file.path);
     if (this.enabled.has("javascript")) {
@@ -200,10 +201,11 @@ class ExtractionRun {
       importedModules: imports.importedModules,
     });
 
-    this.entities.push(...entities.entities);
-    this.relations.push(...entities.relations, ...imports.relations);
-    this.relations.push(...extractTestRelations(file.path, imports.relations));
-    this.entrypoints.push(...entrypoints);
+    appendAll(this.entities, entities.entities);
+    appendAll(this.relations, entities.relations);
+    appendAll(this.relations, imports.relations);
+    appendAll(this.relations, extractTestRelations(file.path, imports.relations));
+    appendAll(this.entrypoints, entrypoints);
     this.unknowns.addAll(imports.unknowns);
     this.parsedPaths.add(file.path);
     this.facts.push({
@@ -274,7 +276,7 @@ class ExtractionRun {
         reexports,
         enclosing: file.entities,
       });
-      this.relations.push(...resolved.relations);
+      appendAll(this.relations, resolved.relations);
       this.unknowns.addAll(resolved.unknowns);
     }
   }
