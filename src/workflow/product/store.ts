@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import { parse, stringify } from "yaml";
 import { PRODUCT_STATE_VERSION } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
@@ -47,6 +48,21 @@ export const productStatePath = (state: WorkspaceState, feature: string): string
 export const authorizationPath = (state: WorkspaceState, feature: string): string =>
   state.paths.stateFile(`state/product-authorizations/${feature}.json`);
 export const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
+/**
+ * YAML whose strings read back exactly. Folded block scalars cannot represent some pasted
+ * text (whitespace-only lines with tabs between long folded lines), and a request that reads
+ * back changed fails VISP's own contract check; fall back to styles that preserve every byte.
+ */
+export function exactYaml(value: unknown): string {
+  const expected = JSON.parse(JSON.stringify(value));
+  let text = "";
+  for (const options of [undefined, { blockQuote: "literal" as const }, { blockQuote: false }]) {
+    text = stringify(value, options);
+    if (isDeepStrictEqual(parse(text), expected)) return text;
+  }
+  return text;
+}
 
 export async function readProductRecord(
   workspace: WorkspaceState,
@@ -210,7 +226,7 @@ export function recordMutations(
     {
       kind: "write",
       path: briefPath(workspace, brief.feature),
-      content: stringify(brief),
+      content: exactYaml(brief),
       expectedBefore: filePrecondition(record?.briefText),
     },
     {
