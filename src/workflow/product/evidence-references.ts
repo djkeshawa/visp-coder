@@ -202,7 +202,7 @@ function recordedDiffReferences(
     const applicable =
       evidenceApplies(record, subject, review) && evidenceInSlice(review.task, slice);
     const references = (review.deliveredDiffReferences ?? []).filter(
-      (reference) => reference.sourceKind === "implementation-diff" && !known.has(reference.id),
+      (reference) => reference.sourceKind !== undefined && !known.has(reference.id),
     );
     for (const reference of references) {
       if (applicable || !retained.has(reference.id))

@@ -23,6 +23,9 @@ export interface ProductSource {
   readonly coreOutcomes?: readonly string[];
 }
 
+/** Disclosure that a broad scope's review is anchored on the change (see core-review-sources). */
+export const BROAD_SCOPE_SOURCE_ID = "CODE-SCOPE";
+
 /** Source identity is observed by VISP. Authorship and human approval are not authenticated. */
 export async function productSources(workspace: WorkspaceState, record: ProductRecord) {
   const request = record.state.intentSnapshot.originalRequest;

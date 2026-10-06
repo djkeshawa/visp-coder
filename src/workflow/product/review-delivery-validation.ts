@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ProductSource } from "./sources.js";
+import { BROAD_SCOPE_SOURCE_ID, type ProductSource } from "./sources.js";
 
 /** Internal delivery metadata; reviewer-authored submissions cannot supply this authority. */
 export interface DeliveredReviewEvidence {
@@ -13,7 +13,7 @@ export const generatedSourceReferencesSchema = z
       .object({
         id: z.string().min(1).max(200),
         kind: z.literal("source"),
-        sourceKind: z.literal("implementation-diff").optional(),
+        sourceKind: z.enum(["implementation-diff", "implementation-file"]).optional(),
         outcomes: z.array(z.string()),
         status: z.enum(["available", "unavailable"]),
         summary: z.string(),
@@ -26,27 +26,35 @@ export const generatedSourceReferencesSchema = z
     "Generated source references exceed the metadata budget",
   );
 
-/** Preserve final-fitting references and delivered diff identities without candidate text. */
+/**
+ * Preserve final-fitting references and delivered identities that a later catalogue cannot
+ * re-derive, without candidate text: diffs, and a broad scope's file sources, whose selection
+ * depends on the change set at review time.
+ */
 export function generatedSourceReferences(
   sources: readonly ProductSource[],
   candidates: readonly { id: string }[],
 ) {
   const known = new Set(candidates.map((entry) => entry.id));
+  const broad = sources.some((source) => source.id === BROAD_SCOPE_SOURCE_ID);
   return sources
-    .filter((source) => source.kind === "implementation-diff" || !known.has(source.id))
-    .map((source) => ({
-      id: source.id,
-      kind: "source" as const,
-      outcomes: [],
-      status: source.available ? ("available" as const) : ("unavailable" as const),
-      summary:
-        source.kind === "implementation-diff"
-          ? `${source.reference}: ${source.sha256}`
-          : source.excerpt,
-      ...(source.kind === "implementation-diff"
-        ? { sourceKind: "implementation-diff" as const }
-        : {}),
-    }));
+    .filter((source) => recordedKind(source, broad) || !known.has(source.id))
+    .map((source) => {
+      const sourceKind = recordedKind(source, broad);
+      return {
+        id: source.id,
+        kind: "source" as const,
+        outcomes: [],
+        status: source.available ? ("available" as const) : ("unavailable" as const),
+        summary: sourceKind ? `${source.reference}: ${source.sha256}` : source.excerpt,
+        ...(sourceKind ? { sourceKind } : {}),
+      };
+    });
+}
+
+function recordedKind(source: ProductSource, broad: boolean) {
+  if (source.kind === "implementation-diff") return source.kind;
+  return broad && source.kind === "implementation-file" && source.sha256 ? source.kind : undefined;
 }
 
 /** Complete delivered identities, bounded independently of the number of candidates. */

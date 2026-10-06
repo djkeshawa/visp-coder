@@ -9,7 +9,7 @@ import type { WorkspaceState } from "../state.js";
 import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import { productBehaviorProbes } from "./behavior-probes.js";
 import { isBrowserCheckCommand } from "./check-command.js";
-import { coreReviewPaths } from "./core-review-sources.js";
+import { type CoreReviewPaths, coreReviewPaths } from "./core-review-sources.js";
 import {
   latestExecutionsByOwner,
   type ProductCheck,
@@ -20,7 +20,7 @@ import { reviewCheckPaths, reviewCheckResult } from "./review-check-context.js";
 import { reviewDiffSource } from "./review-diff.js";
 import { reviewExcerpt } from "./review-excerpts.js";
 import { readProductAuthorizationBaseline } from "./scopes.js";
-import type { ProductSource } from "./sources.js";
+import { BROAD_SCOPE_SOURCE_ID, type ProductSource } from "./sources.js";
 import type { ProductRecord } from "./store.js";
 import { productSourceChanges, productSourceDigest, productSourceSnapshot } from "./subject.js";
 
@@ -67,7 +67,7 @@ export async function reviewCodeSources(
       },
     ];
   const readSource = reviewSourceReader(workspace);
-  const { candidates, declarations } = await sourceCandidates(
+  const { candidates, declarations, broad } = await sourceCandidates(
     workspace,
     record,
     snapshot.value,
@@ -79,6 +79,7 @@ export async function reviewCodeSources(
   const question = reviewQuestion(record);
   const diff = await reviewDiffSource(workspace, record, changedPaths, slice);
   const sources: ProductSource[] = diff ? [diff] : [];
+  if (broad) sources.push(broadScopeSource(broad, candidates));
   let remaining = 31000; // Reserve space within the existing 32k budget for cutoff disclosures.
   const core = candidates.filter((candidate) => candidate.coreOutcomes !== undefined);
   const secondary = candidates.filter((candidate) => candidate.coreOutcomes === undefined);
@@ -181,11 +182,6 @@ async function sourceCandidates(
   readSource = workspace.files.readTextIfExists.bind(workspace.files),
 ) {
   const scope = (slice ? [slice] : record.brief.slices).flatMap((entry) => entry.scope.allowed);
-  const application = Object.keys(snapshot).filter(
-    (path) =>
-      (isApplicationSource(path) || /\.(?:css|scss|sass|less)$/i.test(path)) &&
-      matchesAny(path, scope),
-  );
   const { applicableExecutions } = await import("./assessment.js");
   const digest =
     subject === undefined
@@ -209,7 +205,7 @@ async function sourceCandidates(
       ),
     })),
   );
-  const core = await coreReviewPaths(
+  const { core, broad } = await coreReviewPaths(
     workspace,
     record,
     snapshot,
@@ -236,27 +232,19 @@ async function sourceCandidates(
         ) && isReviewablePath(path),
     ),
   );
-  const documents = Object.keys(snapshot)
-    .filter(
-      (path) =>
-        matchesAny(path, scope) &&
-        isReviewablePath(path) &&
-        requestedDocument(path, record.brief.originalRequest),
-    )
-    .sort(
-      (a, b) =>
-        requestedDocument(b, record.brief.originalRequest) -
-          requestedDocument(a, record.brief.originalRequest) ||
-        Number(changedPaths.has(b)) - Number(changedPaths.has(a)),
-    );
+  const documents = requestedDocuments(
+    snapshot,
+    scope,
+    record.brief.originalRequest,
+    changedPaths,
+    broad !== undefined,
+  );
   const requiredOutcomes = record.brief.outcomes
     .filter(
       (outcome) => outcome.priority === "must" && (!slice || slice.outcomes.includes(outcome.id)),
     )
     .map((outcome) => outcome.id);
-  documents.forEach((path) => {
-    core.set(path, requiredOutcomes);
-  });
+  addDocumentCore(core, documents, requiredOutcomes, broad !== undefined);
   const classes = [
     {
       name: "executed check results",
@@ -267,7 +255,10 @@ async function sourceCandidates(
     },
     { name: "verifier/check source", entries: [...new Set(checks)].map((path) => ({ path })) },
     { name: "requested deliverables", entries: documents.map((path) => ({ path })) },
-    { name: "implementation", entries: application.map((path) => ({ path })) },
+    {
+      name: "implementation",
+      entries: implementationContext(snapshot, scope, broad).map((path) => ({ path })),
+    },
   ];
   const candidates = coreCandidates(core, requiredOutcomes);
   const seen = new Set(core.keys());
@@ -280,7 +271,78 @@ async function sourceCandidates(
       seen.add(key);
       candidates.push({ ...entry, category: category.name });
     }
-  return { candidates, declarations };
+  return { candidates, declarations, broad };
+}
+
+/** In-scope application files, or only what the change imports when the scope is too broad. */
+function implementationContext(
+  snapshot: Record<string, string>,
+  scope: string[],
+  broad: CoreReviewPaths["broad"],
+) {
+  if (broad) return [...broad.neighbors];
+  return Object.keys(snapshot).filter(
+    (path) =>
+      (isApplicationSource(path) || /\.(?:css|scss|sass|less)$/i.test(path)) &&
+      matchesAny(path, scope),
+  );
+}
+
+/** With a broad scope the change is the core and documents the request names are context. */
+function addDocumentCore(
+  core: Map<string, string[]>,
+  documents: string[],
+  outcomes: string[],
+  broad: boolean,
+) {
+  if (broad) return;
+  documents.forEach((path) => {
+    core.set(path, outcomes);
+  });
+}
+
+/** Requested documents in scope; with a broad scope, only changed or explicitly named ones. */
+function requestedDocuments(
+  snapshot: Record<string, string>,
+  scope: string[],
+  request: string,
+  changedPaths: ReadonlySet<string>,
+  broad: boolean,
+) {
+  return Object.keys(snapshot)
+    .filter(
+      (path) =>
+        matchesAny(path, scope) &&
+        isReviewablePath(path) &&
+        requestedDocument(path, request) > (broad && !changedPaths.has(path) ? 1 : 0),
+    )
+    .sort(
+      (a, b) =>
+        requestedDocument(b, request) - requestedDocument(a, request) ||
+        Number(changedPaths.has(b)) - Number(changedPaths.has(a)),
+    );
+}
+
+/** Disclose that the change, not the whole scope, is the core of this review. */
+function broadScopeSource(
+  broad: NonNullable<CoreReviewPaths["broad"]>,
+  candidates: readonly SourceCandidate[],
+): ProductSource {
+  const changed = candidates.filter((entry) => entry.path && entry.coreOutcomes !== undefined);
+  const deleted = broad.deleted.length
+    ? ` ${broad.deleted.length} changed paths no longer exist (deleted or renamed); the change diff shows them: ${broad.deleted
+        .slice(0, 8)
+        .map((path) => path.slice(0, 160))
+        .join(", ")}.`
+    : "";
+  return {
+    id: BROAD_SCOPE_SOURCE_ID,
+    kind: "implementation-file",
+    reference: "Review source selection",
+    sha256: "",
+    available: false,
+    excerpt: `The reviewed scope covers ${broad.scoped} project files, more than one review can deliver, so core sources are the ${changed.length} files changed since the work authorization${broad.neighbors.length ? ", with unchanged files they import as context" : ""}.${deleted} Unchanged in-scope files were not delivered and are not evidence either way; read them in the repository where a judgment depends on them.`,
+  };
 }
 
 function coreCandidates(core: ReadonlyMap<string, string[]>, required: string[]) {

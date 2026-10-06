@@ -85,8 +85,12 @@ it.each(["session", "native", "legacy-native", "attached", "legacy-attached"])(
           reason: "Exercise bounded citation metadata and legacy attempts",
         }),
       );
-      for (let index = 0; index < 200; index++)
-        await p.workspace.write(`src/module${index}.mjs`, `export const x${index}=${index};\n`);
+      // Within the scope-file limit, so every module stays core, but too large to fit together.
+      for (let index = 0; index < 60; index++)
+        await p.workspace.write(
+          `src/module${index}.mjs`,
+          `export const x${index}=${index};\n// ${"module context ".repeat(40)}\n`,
+        );
       requireValue(await runProductWork(await p.workspace.state(), { task: "T001" }));
       await p.workspace.write("src/value.mjs", "export const value=2;\n");
       requireValue(await runProductVerify(await p.workspace.state(), { task: "T001" }));

@@ -12,6 +12,9 @@ export function sourceEntryHash(bytes: Uint8Array | undefined, mode?: number, sy
   });
 }
 
+/** Snapshot identity of a tracked path with no file behind it (deleted from the working tree). */
+export const MISSING_SOURCE_ENTRY = sourceEntryHash(undefined);
+
 export async function readSourceEntry(files: ProjectFileSystem, path: string, maxBytes: number) {
   const link = await files.readSymbolicLink(path);
   if (!link.ok) return link;

@@ -286,7 +286,7 @@ function validateDeliveredCatalogue(
   return ok({
     ...catalogue,
     deliveredDiffReferences: delivered.generatedReferences.filter(
-      (entry) => entry.sourceKind === "implementation-diff" && ids.has(entry.id),
+      (entry) => entry.sourceKind !== undefined && ids.has(entry.id),
     ),
     sources: catalogue.sources.filter((source) => ids.has(source.id)),
     entries: [
