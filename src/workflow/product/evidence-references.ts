@@ -174,6 +174,8 @@ export async function productEvidenceCatalogue(
       summary: `${source.reference}: ${source.sha256}`,
     });
   }
+  if (codeSources === undefined)
+    entries.push(...recordedDiffReferences(record, subject, entries, selectedSlice));
   const ambiguous = ambiguousEvidenceIds(entries);
   for (const [index, entry] of entries.entries())
     if (ambiguous.has(entry.id))
@@ -185,6 +187,32 @@ export async function productEvidenceCatalogue(
         historicalFailure: false,
       };
   return { entries, aliases, sources, sourceClaims: claims };
+}
+
+/** Recorded delivery identities stay bound to their review, never to the latest authorization. */
+function recordedDiffReferences(
+  record: ProductRecord,
+  subject: string,
+  entries: readonly ProductEvidenceReference[],
+  slice?: ProductSlice,
+) {
+  const known = new Set(entries.map((entry) => entry.id));
+  const retained = new Map<string, ProductEvidenceReference>();
+  for (const review of record.state.reviews) {
+    const applicable =
+      evidenceApplies(record, subject, review) && evidenceInSlice(review.task, slice);
+    const references = (review.deliveredDiffReferences ?? []).filter(
+      (reference) => reference.sourceKind === "implementation-diff" && !known.has(reference.id),
+    );
+    for (const reference of references) {
+      if (applicable || !retained.has(reference.id))
+        retained.set(reference.id, {
+          ...reference,
+          status: applicable ? reference.status : "stale",
+        });
+    }
+  }
+  return [...retained.values()];
 }
 
 export function ambiguousEvidenceIds(entries: readonly ProductEvidenceReference[]) {

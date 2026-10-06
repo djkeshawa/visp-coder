@@ -13,6 +13,7 @@ import { repairRecheck } from "./repair-recheck.js";
 import { findingReproductions } from "./reproduction-bindings.js";
 import { deliveredReviewEvidenceIds } from "./review-context.js";
 import {
+  REVIEW_DIFF_INSTRUCTIONS,
   SOURCE_ADVICE_INSTRUCTIONS,
   UNDERSTANDING_CRITIC_INSTRUCTIONS,
 } from "./review-instructions.js";
@@ -66,8 +67,10 @@ function packetInstructions(
   understanding: boolean,
   openFindings: number,
   disputes: number,
+  changeDiff: boolean,
 ) {
-  if (sourceOnly) return SOURCE_ADVICE_INSTRUCTIONS;
+  if (sourceOnly)
+    return SOURCE_ADVICE_INSTRUCTIONS + (changeDiff ? `\n${REVIEW_DIFF_INSTRUCTIONS}` : "");
   if (understanding) return UNDERSTANDING_CRITIC_INSTRUCTIONS;
   return [
     product,
@@ -134,6 +137,7 @@ export async function criticPacket(
       understanding,
       open.length,
       disputes.length,
+      sources.value.some((source) => source.kind === "implementation-diff"),
     ),
     ...(open.length ? { openFindings: open } : {}),
     ...(disputes.length ? { disputes } : {}),

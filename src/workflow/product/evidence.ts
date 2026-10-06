@@ -1,5 +1,5 @@
 import { vispError } from "../../core/errors.js";
-import { type FileMutation, filePrecondition } from "../../core/file-transaction.js";
+import type { FileMutation } from "../../core/file-transaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { CHECK_OUTPUT_GUIDANCE } from "../product-output-guidance.js";
 import type { WorkspaceState } from "../state.js";
@@ -38,11 +38,11 @@ import {
   type ProductState,
 } from "./model.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
+import { reviewBaselineMutations } from "./review-baseline.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
 import { type ProductNext, runProductNext } from "./status.js";
 import {
-  authorizationPath,
   type ProductRecord,
   type ProductSelection,
   readProductRecord,
@@ -513,16 +513,9 @@ async function completionState(
         contractDigest: productContractDigest(record.brief, slice),
       },
     };
-    const auth = await workspace.files.readTextIfExists(
-      authorizationPath(workspace, record.brief.feature),
-    );
-    if (!auth.ok) return auth;
-    if (auth.value && JSON.parse(auth.value).task === slice.id)
-      extra.push({
-        kind: "remove" as const,
-        path: authorizationPath(workspace, record.brief.feature),
-        expectedBefore: filePrecondition(auth.value),
-      });
+    const baseline = await reviewBaselineMutations(workspace, record, slice);
+    if (!baseline.ok) return baseline;
+    extra.push(...baseline.value);
     const status = await statusMutation(workspace, record.brief.feature, undefined, "done");
     if (!status.ok) return status;
     extra.push(status.value);

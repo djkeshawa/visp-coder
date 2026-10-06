@@ -1,6 +1,7 @@
 import { sha256 } from "../../core/hash.js";
 import type { ProductEvidenceReference } from "./evidence-references.js";
 import { deliveredEvidenceIdsSchema } from "./review-delivery-validation.js";
+import { fitReviewDiff, REVIEW_DIFF_BUDGET } from "./review-diff.js";
 import { reviewExcerpt } from "./review-excerpts.js";
 import type { ProductSource } from "./sources.js";
 
@@ -127,6 +128,8 @@ export async function deliveredSources(
   input: readonly ProductSource[],
   fullText: ReadonlyMap<string, string>,
 ) {
+  const diffs = input.filter((source) => source.kind === "implementation-diff");
+  input = input.filter((source) => source.kind !== "implementation-diff");
   const core = input.filter((source) => source.coreOutcomes !== undefined);
   const availableCore = core.filter((source) => source.available);
   const required = input.filter(
@@ -148,6 +151,7 @@ export async function deliveredSources(
     delivered.push(supplied);
     remaining -= sourceCost(supplied);
   }
+  remaining = appendReviewDiffs(delivered, diffs, remaining, coreLimitations(core, []));
   const full = compactFullSources(fullCoreSources(availableCore, fullText));
   const fits =
     !coreLimitations(core, full) &&
@@ -263,6 +267,26 @@ function appendCoreLimitations(
     } else {
       delivered.push(gap);
       remaining -= sourceCost(gap);
+    }
+  }
+  return remaining;
+}
+
+function appendReviewDiffs(
+  delivered: ProductSource[],
+  diffs: readonly ProductSource[],
+  remaining: number,
+  gap: ProductSource | undefined,
+) {
+  const reserve = gap ? sourceCost(gap) : 0;
+  for (const source of diffs) {
+    const fitted = fitReviewDiff(source, Math.min(REVIEW_DIFF_BUDGET, remaining - reserve));
+    if (fitted) {
+      const firstImplementation = delivered.findIndex(
+        (entry) => entry.kind === "implementation-file",
+      );
+      delivered.splice(firstImplementation < 0 ? delivered.length : firstImplementation, 0, fitted);
+      remaining -= sourceCost(fitted);
     }
   }
   return remaining;

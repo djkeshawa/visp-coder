@@ -17,20 +17,25 @@ import {
   type ProductSlice,
 } from "./model.js";
 import { reviewCheckPaths, reviewCheckResult } from "./review-check-context.js";
+import { reviewDiffSource } from "./review-diff.js";
 import { reviewExcerpt } from "./review-excerpts.js";
-import { readProductAuthorization } from "./scopes.js";
+import { readProductAuthorizationBaseline } from "./scopes.js";
 import type { ProductSource } from "./sources.js";
 import type { ProductRecord } from "./store.js";
 import { productSourceChanges, productSourceDigest, productSourceSnapshot } from "./subject.js";
 
-/** The authorization baseline identifies the current slice's changed deliverables. */
+/**
+ * Paths added, modified or deleted since the retained authorization baseline (including
+ * metadata/binary changes), before delivery filters. Closed-slice and whole-feature reviews
+ * use the same read-only baseline; a selected slice must own it. This grants no edit authority.
+ */
 export async function reviewChangedPaths(
   workspace: WorkspaceState,
   record: ProductRecord,
   snapshot: Record<string, string>,
   slice?: ProductSlice,
 ) {
-  const authorization = await readProductAuthorization(workspace, record);
+  const authorization = await readProductAuthorizationBaseline(workspace, record);
   if (!authorization.ok) return authorization;
   if (!authorization.value || (slice && authorization.value.task !== slice.id))
     return ok(new Set<string>());
@@ -72,7 +77,8 @@ export async function reviewCodeSources(
     readSource,
   );
   const question = reviewQuestion(record);
-  const sources: ProductSource[] = [];
+  const diff = await reviewDiffSource(workspace, record, changedPaths, slice);
+  const sources: ProductSource[] = diff ? [diff] : [];
   let remaining = 31000; // Reserve space within the existing 32k budget for cutoff disclosures.
   const core = candidates.filter((candidate) => candidate.coreOutcomes !== undefined);
   const secondary = candidates.filter((candidate) => candidate.coreOutcomes === undefined);

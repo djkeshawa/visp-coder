@@ -47,6 +47,9 @@ export const productStatePath = (state: WorkspaceState, feature: string): string
   state.paths.featureFile(feature, "product-state.json");
 export const authorizationPath = (state: WorkspaceState, feature: string): string =>
   state.paths.stateFile(`state/product-authorizations/${feature}.json`);
+/** Read-only review context, outside active authorization discovery and repair. */
+export const reviewBaselinePath = (state: WorkspaceState, feature: string): string =>
+  state.paths.stateFile(`state/product-review-baselines/${feature}.json`);
 export const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 /**
