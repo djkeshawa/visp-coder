@@ -38,6 +38,51 @@ export async function availableValidationCommands(
   return { commands, skipped };
 }
 
+/** Shared bound for running candidates once; a project suite that is slower is not adopted. */
+const VERIFY_BUDGET_MS = 90_000;
+
+/**
+ * On an existing project, adopt a whole-project command only when it passes now. A command
+ * that already fails or cannot finish here would block every later `visp done` on a problem
+ * the change did not cause; it is listed with its reason so it can be added once it passes.
+ */
+export async function verifiedValidationCommands(
+  root: string,
+  available: AvailableValidationCommands,
+  budgetMs = VERIFY_BUDGET_MS,
+  notice?: (commands: readonly string[], budgetMs: number) => void,
+): Promise<AvailableValidationCommands> {
+  const commands: string[] = [];
+  const skipped = [...available.skipped];
+  // Running project scripts is a side effect; say what runs before it starts.
+  if (available.commands.length) notice?.(available.commands, budgetMs);
+  const deadline = Date.now() + budgetMs;
+  for (const command of available.commands) {
+    const reason = await failureReason(root, command, deadline - Date.now());
+    if (reason) skipped.push({ command, reason });
+    else commands.push(command);
+  }
+  return { commands, skipped };
+}
+
+/** Why a candidate cannot be adopted now, or undefined when it passed within the budget. */
+async function failureReason(
+  root: string,
+  command: string,
+  remainingMs: number,
+): Promise<string | undefined> {
+  if (remainingMs <= 0) return "not verified within the setup time limit";
+  const argv = parseCommand(command);
+  const [file, ...args] = argv.ok ? argv.value : [];
+  if (!file) return "the command could not be parsed";
+  const result = await run(file, args, { cwd: root, timeoutMs: remainingMs });
+  if (!result.ok) return `it could not start here (${result.error.message})`;
+  if (result.value.timedOut) return "it did not finish within the setup time limit";
+  return result.value.exitCode === 0
+    ? undefined
+    : `it fails here now (exit ${result.value.exitCode}), so it would block every change`;
+}
+
 async function resolveSuggestion(
   root: string,
   command: string,

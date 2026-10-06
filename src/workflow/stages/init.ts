@@ -4,6 +4,7 @@ import { renderConfigTemplate } from "../../config/template.js";
 import {
   availableValidationCommands,
   type SkippedValidationCommand,
+  verifiedValidationCommands,
 } from "../../config/validation.js";
 import {
   HARNESSES,
@@ -32,6 +33,8 @@ export interface InitOptions {
   readonly root: string;
   readonly harness?: Harness;
   readonly force?: boolean;
+  /** Told which suggested project checks will run once, and the shared time limit. */
+  readonly onVerifyChecks?: (commands: readonly string[], budgetMs: number) => void;
 }
 
 export interface InitRuntime {
@@ -166,7 +169,14 @@ async function planInit(
   if (!projectMutation.ok) return projectMutation;
   const statusMutation = await plannedWrite(files, paths.status, json(emptyStatus(timestamp)));
   if (!statusMutation.ok) return statusMutation;
-  const config = await plannedConfigMutation(files, paths, preset, harness, options.force === true);
+  const config = await plannedConfigMutation(
+    files,
+    paths,
+    preset,
+    harness,
+    options.force === true,
+    options.onVerifyChecks,
+  );
   if (!config.ok) return config;
   const ignored = await planDerivedStateIgnore(files, paths.root);
   if (!ignored.ok) return ignored;
@@ -190,6 +200,7 @@ async function plannedConfigMutation(
   preset: Preset,
   harness: Harness,
   force: boolean,
+  onVerifyChecks?: InitOptions["onVerifyChecks"],
 ): Promise<
   Result<{ exists: boolean; mutation?: FileMutation; skipped: readonly SkippedValidationCommand[] }>
 > {
@@ -197,7 +208,12 @@ async function plannedConfigMutation(
   if (!configPresent.ok) return configPresent;
   if (configPresent.value && !force) return ok({ exists: true, skipped: [] });
   const manifest = await readPackageJson(paths.root, files);
-  const validation = await availableValidationCommands(paths.root, preset, manifest?.scripts ?? {});
+  const validation = await verifiedValidationCommands(
+    paths.root,
+    await availableValidationCommands(paths.root, preset, manifest?.scripts ?? {}),
+    undefined,
+    onVerifyChecks,
+  );
   const template = renderConfigTemplate({
     preset,
     harness,
