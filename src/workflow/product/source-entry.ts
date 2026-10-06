@@ -27,10 +27,11 @@ export function sourcePreconditionHash(
 /** Snapshot identity of a tracked path with no file behind it (deleted from the working tree). */
 export const MISSING_SOURCE_ENTRY = sourceEntryHash(undefined);
 
-export async function readSourceEntry(files: ProjectFileSystem, path: string, maxBytes: number) {
+/** Inspect before reading so callers can apply their byte budget in path order. */
+export async function inspectSourceEntry(files: ProjectFileSystem, path: string) {
   const link = await files.readSymbolicLink(path);
   if (!link.ok) return link;
-  if (link.value !== undefined) return ok({ bytes: link.value, mode: 0o777, symlink: true });
+  if (link.value !== undefined) return ok({ link: link.value, metadata: undefined });
   const metadata = await files.readMetadata(path);
   if (!metadata.ok) return metadata;
   if (metadata.value && metadata.value.type !== "file")
@@ -40,13 +41,21 @@ export async function readSourceEntry(files: ProjectFileSystem, path: string, ma
         `Product evidence requires files or symlinks; cannot inspect ${path}`,
       ),
     );
-  if ((metadata.value?.size ?? 0) > maxBytes)
+  return ok({ link: undefined, metadata: metadata.value });
+}
+
+export async function readSourceEntry(files: ProjectFileSystem, path: string, maxBytes: number) {
+  const inspected = await inspectSourceEntry(files, path);
+  if (!inspected.ok) return inspected;
+  const { link, metadata } = inspected.value;
+  if (link !== undefined) return ok({ bytes: link, mode: 0o777, symlink: true });
+  if ((metadata?.size ?? 0) > maxBytes)
     return err(vispError("UNSUPPORTED", `Product evidence input budget exceeded at ${path}`));
   const read = await files.readBytesIfExists(path);
   if (!read.ok) return read;
   if ((read.value?.length ?? 0) > maxBytes)
     return err(vispError("UNSUPPORTED", `Product evidence input budget exceeded at ${path}`));
-  return ok({ bytes: read.value, mode: metadata.value?.mode, symlink: false });
+  return ok({ bytes: read.value, mode: metadata?.mode, symlink: false });
 }
 
 export function sourceEntryMutation(
