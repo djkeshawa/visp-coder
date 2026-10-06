@@ -98,9 +98,8 @@ telemetry:
 }
 
 /**
- * Validation commands to suggest at init. For script-based projects only
- * scripts that actually exist are suggested: handing someone a command that
- * cannot run would make their first `verify` fail for no reason.
+ * Validation candidates for init. Only existing npm scripts are candidates;
+ * availableValidationCommands additionally checks their local toolchains.
  */
 export function suggestedValidationCommands(
   preset: Preset,

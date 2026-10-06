@@ -31,6 +31,10 @@ export function initCommand(): Command {
           [
             `Set up visp for a ${outcome.preset} project.`,
             outcome.createdConfig ? `Wrote ${outcome.configPath}` : "Kept your existing visp.yml",
+            ...outcome.skippedValidationCommands.map(
+              ({ command, reason }) =>
+                `Skipped ${command}: ${reason}. Once available, add "${command}" to workflow.validationCommands in visp.yml.`,
+            ),
             // Choosing go or rust used to buy the workflow half silently: the
             // index parsed nothing and packs, queries and covering-tests all
             // fell back without anything saying so.
