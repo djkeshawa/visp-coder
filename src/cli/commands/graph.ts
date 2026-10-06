@@ -12,6 +12,7 @@ import {
 } from "../../graph/index.js";
 import { resolveQueryInput } from "../../graph/query/arguments.js";
 import { queryFreshnessNote } from "../../graph/query/index.js";
+import { type AnswerStyle, renderQueryAnswer } from "../../graph/query/render.js";
 import { recordActivity, recordActivityLater } from "../../orchestrate/session.js";
 import { isJson, mutatingWorkspace, options, workspace } from "../context.js";
 import { emit, emitError } from "../output.js";
@@ -171,53 +172,14 @@ export function queryCommand(): Command {
     );
 }
 
+const CLI_ANSWER: AnswerStyle = {
+  indent: "  ",
+  summaryLine: (key, value) => `  ${key.padEnd(18)} ${format(value)}`,
+  truncationHint,
+};
+
 function renderAnswer(answer: QueryEnvelope): string {
-  const lines: string[] = [];
-
-  if (answer.summary) {
-    for (const [key, value] of Object.entries(answer.summary)) {
-      lines.push(`  ${key.padEnd(18)} ${format(value)}`);
-    }
-  }
-
-  for (const row of answer.rows) {
-    const where = row.startLine === undefined ? row.path : `${row.path}:${row.startLine}`;
-    lines.push(`  ${where}  ${row.name}${row.detail ? `  ${row.detail}` : ""}`);
-  }
-
-  // For `unknowns` the unknowns *are* the answer, so listing them under a
-  // "not determined" aside — after saying there were no results — contradicts
-  // itself. Everywhere else they are context alongside the rows.
-  const unknownsAreTheAnswer = answer.operation === "unknowns";
-  if (answer.unknowns.length > 0) {
-    if (unknownsAreTheAnswer) {
-      lines.push(
-        ...answer.unknowns.map(
-          (unknown) => `  ${unknown.kind.padEnd(24)} ${unknown.path}${detailOf(unknown)}`,
-        ),
-      );
-    } else {
-      lines.push(
-        "",
-        "Not determined:",
-        ...answer.unknowns.map((unknown) => `  ${unknown.kind} at ${unknown.path}`),
-      );
-    }
-  }
-
-  if (lines.length === 0) lines.push("  no results");
-
-  for (const note of answer.notes) lines.push("", note);
-
-  if (answer.receipt.truncated) {
-    lines.push("", truncationHint(answer));
-  }
-
-  return lines.join("\n");
-}
-
-function detailOf(unknown: { detail?: string }): string {
-  return unknown.detail ? `  ${unknown.detail}` : "";
+  return renderQueryAnswer(answer, CLI_ANSWER);
 }
 
 function format(value: unknown): string {

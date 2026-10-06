@@ -56,7 +56,6 @@ export const checkEventSchema = z
 
 export type CheckEvent = z.infer<typeof checkEventSchema>;
 export type CheckStage = CheckEvent["stage"];
-export type CheckSource = CheckEvent["source"];
 
 const usageSegmentSchema = z
   .object({

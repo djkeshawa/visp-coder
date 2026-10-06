@@ -1,6 +1,6 @@
 import { amount, count, object, optionalObject, requiredText } from "../core/validation-values.js";
 
-export { amount, count, object, optionalObject, requiredText } from "../core/validation-values.js";
+export { object } from "../core/validation-values.js";
 
 import { parseObservedCommand } from "./command-observation.js";
 import type {

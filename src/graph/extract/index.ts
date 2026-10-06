@@ -336,5 +336,3 @@ function byEntrypoint(a: Entrypoint, b: Entrypoint): number {
     compareCodeUnits(a.name, b.name)
   );
 }
-
-export { parseCount, resetParseCount } from "./parser.js";

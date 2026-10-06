@@ -16,16 +16,19 @@ pnpm build
 | `pnpm build` | Bundle `dist/` with tsup |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | Biome over `src` and `tests`; `pnpm format` applies fixes |
+| `pnpm knip` | Knip: unused files, exports, types and dependencies, then runtime import cycles |
 | `pnpm test` | The default Vitest suite (unit, integration, functional) |
 | `pnpm test:unit`, `test:integration`, `test:functional` | One suite |
 | `pnpm test:browser` | Real-browser journeys (`tests/browser`); set `CHROME_BIN` to choose the browser |
 | `pnpm test:qualification` | Node tests for the qualification helpers |
 | `pnpm test:coverage:trust` | Coverage for the trust-boundary modules |
 | `pnpm test:package` | Pack and install the package into a disposable consumer |
-| `pnpm check` | typecheck, lint, build and test |
+| `pnpm check` | typecheck, lint, knip, build and test |
 | `pnpm release:check` | `check` plus browser, qualification, trust coverage and package tests |
 
 `pnpm release:check` is the release gate and runs before publishing (`prepublishOnly`).
+
+**When `pnpm knip` fails**, delete what nothing uses rather than ignoring it; an export that only its own file uses is fine. Code that only tests call is not reported, so check that a function you replace loses its tests too. The import cycles that predate the check are listed in `knip.json` under `cycles.allow`; a new cycle fails, so break it, or, if it cannot be avoided, add its exact path there with the reason in the commit.
 
 **Rebuild before running tests.** Several tests run the compiled CLI from `dist/`, and hook and installation tests compare the build ID of the running code with the build that generated the hooks. A stale `dist/` makes them fail. Run `pnpm build` after changing `src/`.
 

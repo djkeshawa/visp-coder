@@ -16,7 +16,7 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { STATE_DIR } from "./constants.js";
-import { fromUnknown, isNodeError, type VispError, vispError } from "./errors.js";
+import { fromUnknown, isNodeError, vispError } from "./errors.js";
 import { canonicalProjectRoot, hasParentSegment, isInside, isPortableAbsolute } from "./paths.js";
 import { err, ok, type Result } from "./result.js";
 
@@ -144,8 +144,6 @@ function describe(cause: unknown): string {
 function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
 }
-
-export type { VispError };
 
 export interface ProjectFileMetadata {
   readonly type: "file" | "directory" | "other";

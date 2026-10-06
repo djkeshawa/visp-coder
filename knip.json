@@ -1,0 +1,59 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/**/*.{mjs,js}",
+    "tests/compat/*.ts"
+  ],
+  "project": [
+    "src/**/*.ts!",
+    "tests/**/*.{ts,mjs}",
+    "!tests/fixtures/**",
+    "scripts/**/*.{mjs,js}"
+  ],
+  "ignoreBinaries": [
+    "mkfifo",
+    "pgrep"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "cycles": "error"
+  },
+  "cycles": {
+    "allow": [
+      [
+        "src/workflow/state.ts",
+        "src/workflow/product/scopes.ts",
+        "src/workflow/product/store.ts"
+      ],
+      [
+        "src/workflow/product/store.ts",
+        "src/workflow/product/trail.ts"
+      ],
+      [
+        "src/workflow/product/evidence-references.ts",
+        "src/workflow/product/exploratory-history.ts"
+      ],
+      [
+        "src/workflow/product/critic-model.ts",
+        "src/workflow/product/review-request.ts",
+        "src/workflow/product-inputs.ts",
+        "src/workflow/product/review.ts",
+        "src/workflow/product/independent-tests.ts",
+        "src/workflow/product/brief.ts",
+        "src/workflow/product/critic-revision.ts"
+      ],
+      [
+        "src/workflow/product/critic-store.ts",
+        "src/workflow/product/critic-budget.ts",
+        "src/workflow/product/critic-budget-history.ts",
+        "src/workflow/product/critic-model.ts",
+        "src/workflow/product/review-request.ts",
+        "src/workflow/product-inputs.ts",
+        "src/workflow/product/review.ts",
+        "src/workflow/product/independent-tests.ts",
+        "src/workflow/product/brief.ts",
+        "src/workflow/product/critic-revision.ts"
+      ]
+    ]
+  }
+}

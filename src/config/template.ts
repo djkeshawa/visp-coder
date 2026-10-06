@@ -1,7 +1,6 @@
 import type { Harness, Preset } from "../core/constants.js";
 import { DEFAULT_BLOCKED_PATHS, LIMITS } from "../core/constants.js";
 import { criticHarnessSchema } from "./critic.js";
-import type { VispConfig } from "./schema.js";
 
 /**
  * The commented starter `visp.yml` written by `visp init`. Values shown are the
@@ -125,5 +124,3 @@ export function suggestedValidationCommands(
       return [];
   }
 }
-
-export type { VispConfig };

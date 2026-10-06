@@ -29,6 +29,11 @@ describe("graph tools over MCP", () => {
       "src/login.ts",
       'import { makeToken } from "./token.js";\nexport function login(u: string) {\n  return makeToken(u);\n}\n',
     );
+    await write(
+      root,
+      "src/legacy.ts",
+      'import { gone } from "./missing.js";\nexport const legacy = gone;\n',
+    );
     execFileSync("git", ["init", "-b", "main"], { cwd: root, stdio: "ignore" });
     await runInit({ root, harness: "generic" });
 
@@ -138,6 +143,15 @@ describe("graph tools over MCP", () => {
     expect(result.content[0]?.text).toContain("increase nodes or edges");
   });
 
+  it("lists the unknowns themselves as the answer to an unknowns query", async () => {
+    const result = await call("visp_query", { operation: "unknowns" });
+    const text = result.content[0]?.text ?? "";
+    expect(result.isError).toBeFalsy();
+    expect(text).toMatch(/unresolved_import\s+src\/legacy\.ts\s+\S/);
+    expect(text).not.toContain("no results");
+    expect(text).not.toContain("Not determined");
+  });
+
   it("accepts a file path for neighbors", async () => {
     const result = await call("visp_query", { operation: "neighbors", target: "src/token.ts" });
     expect(result.isError).toBeFalsy();
@@ -194,14 +208,14 @@ describe("graph tools over MCP", () => {
         },
         { timeout: 3000 },
       )
-      .toBe(6);
+      .toBe(7);
     const session = await readSession(state.value);
     expect(session.ok).toBe(true);
     if (!session.ok) return;
     const commands = session.value.activity.map((entry) => entry.command);
     expect(commands.filter((command) => command === "index")).toHaveLength(1);
     expect(commands.filter((command) => command === "index --refresh")).toHaveLength(3);
-    expect(commands.filter((command) => command === "query")).toHaveLength(6);
+    expect(commands.filter((command) => command === "query")).toHaveLength(7);
     expect(session.value.activity.every((entry) => entry.outcome === "ok")).toBe(true);
   });
 

@@ -101,27 +101,6 @@ type OwnedJourney = {
   captures?: readonly { id: string; path?: string }[];
 };
 
-/** A reviewer can retain a discovered defect by citing its runner evidence. */
-export function isReviewerRequiredJourney(record: ProductRecord, run: OwnedJourney) {
-  const refs = new Set(
-    [
-      run.id,
-      run.id ? `HIST-${run.id}` : undefined,
-      ...(run.operations ?? []).map((entry) => entry.id),
-      ...(run.captures ?? []).flatMap((entry) => [entry.id, entry.path]),
-      ...record.state.executions
-        .filter((entry) => entry.captureRunId === run.id)
-        .map((entry) => entry.id),
-    ].filter((id): id is string => id !== undefined),
-  );
-  return outstandingFeedback(record).some(
-    (finding) =>
-      finding.required &&
-      finding.phase === "product" &&
-      finding.evidence.some((id) => refs.has(id)),
-  );
-}
-
 /** Unknown legacy ownership stays obligatory; only explicitly unlinked hypotheses are informational. */
 export function isExploratoryJourney(record: ProductRecord, run: OwnedJourney) {
   return journeyOwnershipIndex(record).isExploratory(run);

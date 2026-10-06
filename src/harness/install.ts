@@ -21,11 +21,6 @@ import type {
 } from "./install-types.js";
 import { verifyInstalledHarness } from "./install-verification.js";
 
-export type {
-  ForeignHarnessAssets,
-  ForeignMcpRegistration,
-  McpRegistrationHarness,
-} from "./asset-inspection.js";
 export {
   assetFingerprint,
   CLAUDE_SETTINGS_REGISTRATION,
@@ -34,10 +29,7 @@ export {
 } from "./asset-inspection.js";
 export { previewHarnessInstall } from "./install-preview.js";
 export type {
-  AssetManifest,
-  AssetStatus,
   HookKind,
-  InstalledAsset,
   InstallOptions,
   InstallOutcome,
   InstallPreview,
