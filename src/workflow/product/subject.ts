@@ -8,6 +8,7 @@ import {
   declaredEnvironment,
   productExecutionEnvironment,
 } from "../../core/execution-environment.js";
+import { type FilePrecondition, filePrecondition } from "../../core/file-transaction.js";
 import { repositoryFiles, repositoryGitlinks } from "../../core/git.js";
 import { repositorySourceObjects } from "../../core/git-source.js";
 import { hashValue, sha256 } from "../../core/hash.js";
@@ -20,7 +21,7 @@ import { acceptanceEnvironment } from "./acceptance-environment.js";
 import { byproductProtection, skippedByproduct } from "./byproducts.js";
 import { isBrowserCheckCommand } from "./check-command.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
-import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
+import { readSourceEntry, sourcePreconditionHash } from "./source-entry.js";
 import { repositorySourceIdentity, workingSourceIdentity } from "./source-git.js";
 import { sourceInputPatterns } from "./source-inputs.js";
 import { readProductRecord } from "./store.js";
@@ -53,6 +54,7 @@ function inputLimit(path: string) {
 export async function productSourceSnapshot(
   workspace: WorkspaceState,
   brief?: ProductBrief,
+  preconditions?: Map<string, FilePrecondition>,
 ): Promise<Result<Record<string, string>>> {
   const links = await repositoryGitlinks(workspace.paths.root);
   if (!links.ok) return links;
@@ -86,7 +88,7 @@ export async function productSourceSnapshot(
   const budget: InputBudget = { entries: 0, bytes: 0 };
   for (const path of [...new Set([...paths, ...declared.value])].sort()) {
     const hash = matchesAny(path, patterns)
-      ? await productFileHash(workspace, path, budget)
+      ? await productFileHash(workspace, path, budget, preconditions)
       : await repositorySourceIdentity(workspace, path, objects.value, algorithm);
     if (!hash.ok) return hash;
     files[path] = hash.value;
@@ -148,6 +150,7 @@ async function productFileHash(
   workspace: WorkspaceState,
   path: string,
   budget: InputBudget,
+  preconditions?: Map<string, FilePrecondition>,
 ): Promise<Result<string>> {
   budget.entries += 1;
   if (budget.entries > INPUT_LIMITS.entries) return inputLimit(path);
@@ -158,7 +161,9 @@ async function productFileHash(
   );
   if (!entry.ok) return entry;
   budget.bytes += entry.value.bytes?.byteLength ?? 0;
-  return ok(sourceEntryHash(entry.value.bytes, entry.value.mode, entry.value.symlink));
+  const precondition = filePrecondition(entry.value.bytes, entry.value.mode, entry.value.symlink);
+  preconditions?.set(path, precondition);
+  return ok(sourcePreconditionHash(precondition, entry.value.mode));
 }
 
 /**

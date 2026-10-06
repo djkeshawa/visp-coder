@@ -54,7 +54,8 @@ export type FileMutation =
       readonly content: string | Uint8Array;
       readonly mode?: number;
     })
-  | (MutationPrecondition & { readonly kind: "remove"; readonly path: string });
+  | (MutationPrecondition & { readonly kind: "remove"; readonly path: string })
+  | { readonly kind: "assert"; readonly path: string; readonly expectedBefore: FilePrecondition };
 
 interface FileSnapshot {
   readonly symlink?: true;
@@ -230,7 +231,10 @@ async function applyLocked(
     const removed = await fs.removeFile(journalPath);
     if (!removed.ok) return removed;
     await cleanEmptyJournalDirectories(fs);
-    return ok({ id: prepared.value.id, changed: mutations.length });
+    return ok({
+      id: prepared.value.id,
+      changed: mutations.filter((mutation) => mutation.kind !== "assert").length,
+    });
   } finally {
     activeJournals.delete(activeKey);
   }
@@ -286,13 +290,10 @@ async function prepareJournal(
   mutations: readonly FileMutation[],
 ): Promise<Result<TransactionJournal>> {
   const seen = new Set<string>();
-  const entries: JournalEntry[] = [];
-
-  for (const mutation of mutations) {
-    const entry = await prepareEntry(fs, requestedRoot, mutation, seen);
-    if (!entry.ok) return entry;
-    entries.push(entry.value);
-  }
+  const entries = await observeAssertions(mutations, (mutation) =>
+    prepareEntry(fs, requestedRoot, mutation, seen),
+  );
+  if (!entries.ok) return entries;
 
   return ok({
     version: JOURNAL_VERSION,
@@ -300,7 +301,7 @@ async function prepareJournal(
     label,
     createdAt: new Date().toISOString(),
     state: "prepared",
-    entries,
+    entries: entries.value,
   });
 }
 
@@ -317,10 +318,14 @@ async function prepareEntry(
   }
   seen.add(path.value);
 
-  const read = await readEntrySnapshot(fs, path.value);
+  const read = await readEntrySnapshot(fs, path.value, mutation.kind !== "assert");
   if (!read.ok) return read;
   const before = read.value;
-  if (before.symlink && !(mutation.expectedBefore?.existed && mutation.expectedBefore.symlink))
+  if (
+    before.symlink &&
+    mutation.kind !== "assert" &&
+    !(mutation.expectedBefore?.existed && mutation.expectedBefore.symlink)
+  )
     return err(
       vispError(
         "IO_ERROR",
@@ -334,7 +339,8 @@ async function prepareEntry(
       }),
     );
   }
-  if (mutation.kind === "remove") return ok({ kind: mutation.kind, path: path.value, before });
+  if (mutation.kind === "remove" || mutation.kind === "assert")
+    return ok({ kind: mutation.kind, path: path.value, before });
 
   const content = bytesOf(mutation.content);
   return ok({
@@ -374,6 +380,15 @@ async function applyPreparedMutation(
   if (!mutation || !entry) {
     return err(vispError("INTERNAL", "Transaction plan and journal diverged"));
   }
+  // Assertions are observed in planning and at the final commit boundary.
+  if (mutation.kind === "assert") {
+    try {
+      await options.afterMutation?.(index + 1);
+      return ok(undefined);
+    } catch (cause) {
+      return err(fromUnknown(cause));
+    }
+  }
   const unchanged = await matchesSnapshot(fs, entry.path, entry.before);
   if (!unchanged.ok) return unchanged;
   if (!unchanged.value) {
@@ -399,6 +414,7 @@ async function matchesAfter(
   entry: JournalEntry,
   ignoreMode = false,
 ): Promise<Result<boolean>> {
+  if (entry.kind === "assert") return matchesSnapshot(fs, entry.path, entry.before);
   const current = await readEntrySnapshot(fs, entry.path);
   if (!current.ok) return current;
   if (entry.kind === "remove") return ok(!current.value.existed);
@@ -414,18 +430,25 @@ async function verifyAppliedJournal(
   fs: ProjectFileSystem,
   journal: TransactionJournal,
 ): Promise<Result<void>> {
-  for (const entry of journal.entries) {
+  const verified = await observeAssertions(journal.entries, async (entry) => {
     const current = await matchesAfter(fs, entry);
     if (!current.ok) return current;
     if (!current.value) {
       return err(
-        vispError("IO_ERROR", `Transaction target changed before commit: ${entry.path}`, {
-          details: { transaction: journal.id, path: entry.path },
-        }),
+        vispError(
+          "IO_ERROR",
+          entry.kind === "assert"
+            ? `Concurrent change detected before commit ${entry.path}`
+            : `Transaction target changed before commit: ${entry.path}`,
+          {
+            details: { transaction: journal.id, path: entry.path },
+          },
+        ),
       );
     }
-  }
-  return ok(undefined);
+    return ok(undefined);
+  });
+  return verified.ok ? ok(undefined) : verified;
 }
 
 async function handleApplyFailure(
@@ -462,7 +485,7 @@ async function applyMutation(
 ): Promise<Result<void>> {
   // Guards restate unchanged files; the precondition check already proved them.
   // Rewriting them touched every file and failed where hosts protect agent directories.
-  if (alreadyInPlace(entry)) return ok(undefined);
+  if (mutation.kind === "assert" || alreadyInPlace(entry)) return ok(undefined);
   if (mutation.kind === "remove") return fs.removeFile(entry.path, !!entry.before.symlink);
   if (mutation.kind === "symlink")
     return fs.writeSymlinkAtomic(entry.path, bytesOf(mutation.content));
@@ -490,6 +513,8 @@ async function restoreJournal(
 ): Promise<Result<void>> {
   const applied: JournalEntry[] = [];
   for (const entry of journal.entries) {
+    // Assertions own no writes, including external edits made after interruption.
+    if (entry.kind === "assert") continue;
     const current = await classifyRecoveryEntry(fs, journal.id, entry);
     if (!current.ok) return current;
     if (current.value === "applied") applied.push(entry);
@@ -541,16 +566,17 @@ async function restoreEntry(fs: ProjectFileSystem, entry: JournalEntry): Promise
 async function readEntrySnapshot(
   fs: ProjectFileSystem,
   path: string,
+  retainContent = true,
 ): Promise<Result<FileSnapshot>> {
   const link = await fs.readSymbolicLink(path);
   if (!link.ok) return link;
-  if (link.value !== undefined) return ok(snapshot(link.value, 0o777, true));
+  if (link.value !== undefined) return ok(snapshot(link.value, 0o777, true, retainContent));
   const metadata = await fs.metadata(path);
   if (!metadata.ok) return metadata;
   if (metadata.value && metadata.value.type !== "file")
     return err(vispError("IO_ERROR", `Transaction target is not a file: ${path}`));
   const bytes = await fs.readBytesIfExists(path);
-  return bytes.ok ? ok(snapshot(bytes.value, metadata.value?.mode)) : bytes;
+  return bytes.ok ? ok(snapshot(bytes.value, metadata.value?.mode, false, retainContent)) : bytes;
 }
 
 async function matchesSnapshot(
@@ -559,7 +585,7 @@ async function matchesSnapshot(
   expected: FileSnapshot,
   ignoreMode = false,
 ): Promise<Result<boolean>> {
-  const current = await readEntrySnapshot(fs, path);
+  const current = await readEntrySnapshot(fs, path, false);
   return current.ok
     ? ok(
         matchesPrecondition(
@@ -585,11 +611,12 @@ function snapshot(
   content: Uint8Array | undefined,
   mode: number | undefined,
   symlink = false,
+  retainContent = true,
 ): FileSnapshot {
   if (content === undefined) return { existed: false };
   return {
     existed: true,
-    content: Buffer.from(content).toString("base64"),
+    ...(retainContent ? { content: Buffer.from(content).toString("base64") } : {}),
     ...(symlink ? { symlink: true as const } : {}),
     hash: sha256(content),
     mode: mode ?? 0o644,
@@ -670,7 +697,7 @@ function parseJournal(value: unknown): Result<TransactionJournal> {
 function parseEntry(value: unknown): Result<JournalEntry> {
   if (
     !isRecord(value) ||
-    (value.kind !== "write" && value.kind !== "symlink" && value.kind !== "remove") ||
+    !isMutationKind(value.kind) ||
     typeof value.path !== "string" ||
     !isJournalPath(value.path) ||
     !isRecord(value.before) ||
@@ -678,28 +705,19 @@ function parseEntry(value: unknown): Result<JournalEntry> {
   ) {
     return err(vispError("ARTIFACT_INVALID", "Malformed VISP transaction entry"));
   }
-  const writes = value.kind !== "remove";
+  const writes = value.kind === "write" || value.kind === "symlink";
   const before = value.before;
   const existed = before.existed;
-  if (!validBeforeSnapshot(before, existed)) {
+  if (!validBeforeSnapshot(before, existed, value.kind === "assert")) {
     return err(vispError("ARTIFACT_INVALID", "Malformed VISP transaction entry metadata"));
   }
   if (
     (writes && (!isSha256(value.afterHash) || !isFileMode(value.afterMode))) ||
-    (value.kind === "remove" && (value.afterHash !== undefined || value.afterMode !== undefined))
+    (!writes && (value.afterHash !== undefined || value.afterMode !== undefined))
   ) {
     return err(vispError("ARTIFACT_INVALID", "Malformed VISP transaction post-image"));
   }
-  const beforeSnapshot: FileSnapshot =
-    existed === true
-      ? {
-          existed: true,
-          content: before.content as string,
-          hash: before.hash as string,
-          mode: before.mode as number,
-          ...(before.symlink ? { symlink: true as const } : {}),
-        }
-      : { existed: false };
+  const beforeSnapshot = journalBefore(before, value.kind === "assert");
   return writes
     ? ok({
         kind: value.kind,
@@ -708,10 +726,26 @@ function parseEntry(value: unknown): Result<JournalEntry> {
         afterHash: value.afterHash as string,
         afterMode: value.afterMode as number,
       })
-    : ok({ kind: "remove", path: value.path, before: beforeSnapshot });
+    : ok({ kind: value.kind, path: value.path, before: beforeSnapshot });
 }
 
-function validBeforeSnapshot(before: Record<string, unknown>, existed: unknown): boolean {
+function journalBefore(before: Record<string, unknown>, assertion: boolean): FileSnapshot {
+  return before.existed === true
+    ? {
+        existed: true,
+        ...(assertion ? {} : { content: before.content as string }),
+        hash: before.hash as string,
+        mode: before.mode as number,
+        ...(before.symlink ? { symlink: true as const } : {}),
+      }
+    : { existed: false };
+}
+
+function validBeforeSnapshot(
+  before: Record<string, unknown>,
+  existed: unknown,
+  assertion = false,
+): boolean {
   if (before.symlink !== undefined && before.symlink !== true) return false;
   if (existed === false) {
     return (
@@ -719,6 +753,14 @@ function validBeforeSnapshot(before: Record<string, unknown>, existed: unknown):
       before.content === undefined &&
       before.hash === undefined &&
       before.mode === undefined
+    );
+  }
+  if (assertion) {
+    return (
+      existed === true &&
+      before.content === undefined &&
+      isSha256(before.hash) &&
+      isFileMode(before.mode)
     );
   }
   if (
@@ -783,4 +825,34 @@ async function cleanEmptyJournalDirectories(fs: ProjectFileSystem): Promise<void
   await fs.removeDir(TRANSACTIONS_DIR).catch(() => undefined);
   await fs.removeDir(`${STATE_DIR}/state`).catch(() => undefined);
   await fs.removeDir(STATE_DIR).catch(() => undefined);
+}
+
+/** Bound read pressure; preserve journal order and select errors in input order. */
+async function observeAssertions<T extends { readonly kind: string }, U>(
+  items: readonly T[],
+  observe: (item: T) => Promise<Result<U>>,
+): Promise<Result<U[]>> {
+  const values: U[] = [];
+  for (let index = 0; index < items.length; ) {
+    const first = items[index];
+    if (!first) break;
+    const batch: T[] = [first];
+    index += 1;
+    while (first.kind === "assert" && batch.length < 4) {
+      const next = items[index];
+      if (next?.kind !== "assert") break;
+      batch.push(next);
+      index += 1;
+    }
+    const results = await Promise.all(batch.map(observe));
+    for (const result of results) {
+      if (!result.ok) return result;
+      values.push(result.value);
+    }
+  }
+  return ok(values);
+}
+
+function isMutationKind(value: unknown): value is FileMutation["kind"] {
+  return value === "write" || value === "symlink" || value === "remove" || value === "assert";
 }

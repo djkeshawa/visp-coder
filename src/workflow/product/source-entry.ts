@@ -1,12 +1,24 @@
 import { vispError } from "../../core/errors.js";
-import { type FileMutation, filePrecondition } from "../../core/file-transaction.js";
+import {
+  type FileMutation,
+  type FilePrecondition,
+  filePrecondition,
+} from "../../core/file-transaction.js";
 import type { ProjectFileSystem } from "../../core/fs.js";
-import { hashValue, sha256 } from "../../core/hash.js";
+import { hashValue } from "../../core/hash.js";
 import { err, ok } from "../../core/result.js";
 
 export function sourceEntryHash(bytes: Uint8Array | undefined, mode?: number, symlink = false) {
+  return sourcePreconditionHash(filePrecondition(bytes, mode, symlink), mode, symlink);
+}
+
+export function sourcePreconditionHash(
+  precondition: FilePrecondition,
+  mode?: number,
+  symlink = precondition.existed && !!precondition.symlink,
+) {
   return hashValue({
-    hash: bytes === undefined ? null : sha256(bytes),
+    hash: precondition.existed ? precondition.hash : null,
     mode,
     ...(symlink ? { type: "symlink" } : {}),
   });

@@ -65,11 +65,15 @@ export async function previewHarnessInstall(
     repositoryAvailable: repository,
     hasBaseline: baseline.ok,
     ...(changed.ok ? { changedFiles: changed.value.files.map((file) => file.path) } : {}),
-    changes: planned.value.mutations.map((mutation) => ({
-      operation: mutation.kind,
-      path: paths.relative(mutation.path) ?? mutation.path,
-      ...(mutation.kind === "write" && mutation.mode !== undefined ? { mode: mutation.mode } : {}),
-    })),
+    changes: planned.value.mutations
+      .filter((mutation) => mutation.kind !== "assert")
+      .map((mutation) => ({
+        operation: mutation.kind,
+        path: paths.relative(mutation.path) ?? mutation.path,
+        ...(mutation.kind === "write" && mutation.mode !== undefined
+          ? { mode: mutation.mode }
+          : {}),
+      })),
     requirements,
     manualSteps: planned.value.manualSteps,
   });
