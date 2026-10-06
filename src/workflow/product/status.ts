@@ -139,6 +139,7 @@ async function currentProductIdentity(
     ? ok({
         subject: subject.value,
         implementation: productImplementationDigest(workspace, snapshot.value),
+        sourceSnapshot: snapshot.value,
       })
     : subject;
 }

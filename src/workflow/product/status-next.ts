@@ -39,6 +39,10 @@ import { withNotObservedAdvice } from "./not-observed-advice.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
 import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
+import {
+  withRegressionScopeAdvice,
+  withRegressionScopeAdviceResult,
+} from "./regression-scope-advice.js";
 import { repairRecheck } from "./repair-recheck.js";
 import { completesFeature } from "./review-selection.js";
 import {
@@ -110,7 +114,13 @@ export async function nextFromRecord(
   const allClosed = record.brief.slices.every((entry) =>
     closedSlice(record.state.slices[entry.id]?.status),
   );
-  if (allClosed) return nextClosedProduct(workspace, record, subject.value);
+  if (allClosed)
+    return withRegressionScopeAdviceResult(
+      workspace,
+      record,
+      await nextClosedProduct(workspace, record, subject.value),
+      identity.value.sourceSnapshot,
+    );
   if (!slice)
     return ok({
       ...base,
@@ -122,7 +132,15 @@ export async function nextFromRecord(
     });
   const next = await nextOpenSlice(workspace, record, slice, subject.value);
   return next.ok && next.value.action === "implement"
-    ? ok(withNotObservedAdvice(next.value, record, subject.value))
+    ? ok(
+        await withRegressionScopeAdvice(
+          workspace,
+          record,
+          withNotObservedAdvice(next.value, record, subject.value),
+          slice,
+          identity.value.sourceSnapshot,
+        ),
+      )
     : next;
 }
 

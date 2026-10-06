@@ -26,6 +26,7 @@ import {
   sliceDigest,
 } from "./model.js";
 import { protectedEnvSnapshot } from "./protected-env.js";
+import { retainRegressionScopeBaseline } from "./regression-scope-advice.js";
 import { withProductMutation } from "./runtime.js";
 import {
   type ProductAuthorization,
@@ -300,6 +301,7 @@ async function runProductWorkLocked(
     { kind: "write", path, content: json(auth), expectedBefore: filePrecondition(before.value) },
     status.value,
   ]);
+  await retainRegressionScopeBaseline(workspace, auth, saved.ok);
   return saved.ok
     ? ok({
         context: {

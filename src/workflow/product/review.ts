@@ -26,6 +26,7 @@ import {
 } from "./model.js";
 import type { observationSequence } from "./observation-preview.js";
 import { rulesForRequest } from "./project-rules.js";
+import { regressionScopeLimitations } from "./regression-scope-advice.js";
 import { assembleReviewBundle } from "./review-bundle.js";
 import {
   previousReviewAssessments,
@@ -86,6 +87,7 @@ export interface ProductReviewBundle {
   readonly assessments: readonly ProductAssessment[];
   readonly images: readonly ProductReviewImage[];
   readonly gaps: readonly string[];
+  readonly limitations?: readonly string[];
   readonly agenda: ReturnType<typeof productReviewAgenda>;
   readonly interactionEvidence: ReturnType<typeof reviewInteractionEvidence>;
   readonly experiments: ReturnType<typeof experimentReviewContext>;
@@ -233,7 +235,14 @@ async function review(
   const rules = await rulesForRequest(workspace, record.brief.feature);
   const tests = await readTestsRecord(workspace, record.brief.feature);
   if (!tests.ok) return tests;
+  const regressionContext = await regressionScopeLimitations(
+    workspace,
+    record,
+    slice,
+    snapshot.value,
+  );
   return ok({
+    ...regressionContext,
     ...assembleReviewBundle({
       workspace,
       rules,

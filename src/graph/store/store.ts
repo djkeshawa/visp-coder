@@ -18,6 +18,7 @@ import {
   toUnknown,
 } from "./rows.js";
 import { INSERTS, SCHEMA_STATEMENTS, SNAPSHOT_TABLES } from "./schema.js";
+import { readTestScope } from "./test-scope.js";
 import { writeSnapshotRows } from "./write.js";
 
 /**
@@ -169,6 +170,11 @@ export class GraphStore {
     } catch (cause) {
       return err(graphError(cause));
     }
+  }
+
+  /** Read only named files and their test/import edges, within one snapshot transaction. */
+  readTestScope(snapshotId: string, paths: readonly string[]) {
+    return this.readTransaction(() => ok(readTestScope(this.db, snapshotId, paths)));
   }
 
   requireHead(): Result<GraphSnapshot> {

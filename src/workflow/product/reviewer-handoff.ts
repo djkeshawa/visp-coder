@@ -99,6 +99,7 @@ export function productReviewerContext(bundle: ProductReviewBundle) {
     images: bundle.images,
     imageGroups: bundle.imageGroups,
     imageGroupsOmitted: bundle.imageGroupsOmitted,
+    ...(bundle.limitations?.length ? { limitations: bundle.limitations } : {}),
     gaps: bundle.gaps,
     recurrence: bundle.recurrence,
     previousFindings: bundle.previousAssessments.flatMap((review) =>
@@ -147,6 +148,7 @@ export function independentReviewerContext(bundle: ReturnType<typeof productRevi
         "Recorded operations show what was exercised; assess their actual results independently.",
     },
     evidence: bundle.evidence.filter((entry) => !entry.id.startsWith("BRIEF-")),
+    ...(bundle.limitations?.length ? { limitations: bundle.limitations } : {}),
     gaps: independentReviewGaps(bundle.gaps),
     ...repairQuestions(bundle),
   };
