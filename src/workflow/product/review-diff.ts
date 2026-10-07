@@ -242,25 +242,20 @@ async function readUnifiedDiff(
   }
 }
 
-function baselineMode(bytes: Buffer, identity: string): number | undefined {
+export function baselineMode(bytes: Buffer, identity: string, symlink = false): number | undefined {
   if (!identity.startsWith("git:")) {
     // The snapshot retains actual permission bits, while Git retains only the executable bit.
     const hash = sha256(bytes);
     for (let mode = 0; mode <= 0o777; mode++)
-      if (hashValue({ hash, mode }) === identity) return mode;
+      if (hashValue({ hash, mode, ...(symlink ? { type: "symlink" } : {}) }) === identity)
+        return mode;
     return undefined;
   }
-  const [, mode, object = ""] = identity.split(":");
-  if (mode !== "100644" && mode !== "100755") return undefined;
-  const observed = createHash(object.length === 64 ? "sha256" : "sha1")
-    .update(`blob ${bytes.length}\0`)
-    .update(bytes)
-    .digest("hex");
-  return observed === object ? (mode === "100755" ? 0o755 : 0o644) : undefined;
+  return gitBaselineMode(bytes, identity, symlink);
 }
 
 /** One bounded batch, retaining bytes so encoding fixtures cannot corrupt following entries. */
-async function baselineObjects(root: string, requests: (string | undefined)[]) {
+export async function baselineObjects(root: string, requests: (string | undefined)[]) {
   const selected = requests.filter((request): request is string => request !== undefined);
   const output = selected.length
     ? await new Promise<Buffer | undefined>((resolve) => {
@@ -395,4 +390,16 @@ export function fitReviewDiff(source: ProductSource, budget: number): ProductSou
   const excerpt = `Changed files omitted from diff: ${files.length}; identity digest: ${sha256(source.excerpt)}. First omitted: ${files[0]?.path.slice(0, 160)}. Hunks not shown.`;
   const fitted = { ...base, excerpt };
   return JSON.stringify(fitted).length + 1 <= budget ? fitted : undefined;
+}
+
+function gitBaselineMode(bytes: Buffer, identity: string, symlink: boolean) {
+  const [, mode, object = ""] = identity.split(":");
+  if (symlink ? mode !== "120000" : mode !== "100644" && mode !== "100755") return undefined;
+  const observed = createHash(object.length === 64 ? "sha256" : "sha1")
+    .update(`blob ${bytes.length}\0`)
+    .update(bytes)
+    .digest("hex");
+  if (observed !== object) return undefined;
+  if (symlink) return 0o777;
+  return mode === "100755" ? 0o755 : 0o644;
 }

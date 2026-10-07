@@ -123,7 +123,7 @@ export const flipCheckSchema = z
   .object({
     failsWithoutChange: z.union([z.boolean(), z.literal("unchecked"), z.literal("not-applicable")]),
     /** What kind of failure the reverted tree produced, when it failed. */
-    /** `behavioral` is retained for old receipts, not inferred from assertion output. */
+    /** Product comparisons label recognizable test failures; this alone grants no evidence credit. */
     signal: z.enum(["behavioral", "structural", "unclassified"]).optional(),
     /** Why it could not run, did not apply, or how the reverted tree was built. */
     reason: z.string().optional(),

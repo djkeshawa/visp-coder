@@ -402,10 +402,10 @@ async function readReviewSource(
     };
   if (candidate.execution) {
     const execution = candidate.execution;
-    const text = reviewCheckResult(
-      execution,
-      declarations.find((check) => check.id === execution.check),
-    );
+    const declaration = declarations.find((check) => check.id === execution.check);
+    const text = reviewCheckResult(execution, declaration);
+    // The identity excludes wall-clock timing, which changes on every run of the same execution.
+    const identity = reviewCheckResult(execution, declaration, { timing: false });
     const gap = candidate.sourceUnresolved
       ? "Evidence gap: executed verifier/check source is unresolved or unavailable. Inspect the runner's selected assertion sources before judging coverage.\n"
       : "";
@@ -414,7 +414,7 @@ async function readReviewSource(
       id: `CHECK-${execution.id}`,
       kind: "executed-check",
       reference: `Executed ${execution.check} at ${execution.subjectDigest}`,
-      sha256: sha256(text),
+      sha256: sha256(identity),
       available: true,
       excerpt: gap + text,
       omittedRegions: [],

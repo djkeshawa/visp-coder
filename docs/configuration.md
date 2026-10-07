@@ -23,7 +23,7 @@ workflow:
   blockedPaths: [".env", ".env.*", node_modules, dist, build, .git]
   validationCommands: []    # for example: - pnpm test
   acceptanceChecks: []
-  flipCheck: auto           # historical telemetry label only
+  flipCheck: auto           # off | auto | on; see workflow.flipCheck below
 
 graph:
   languages: [typescript, javascript, python]
@@ -62,7 +62,7 @@ telemetry:
 | `workflow.blockedPaths` | Paths rejected by explicit `visp guard` checks and Claude's edit hook regardless of slice scope. A slash-free pattern matches at any directory depth, without regard to case. Git-listed changes are checked again at commit and `done`; ignored `.env` and `.env.*` files are hashed at authorization and checked at `done`. Ignored build output is not checked after a shell write. Blocked files are left out of the source VISP delivers and of the tester's execution-mode copy. |
 | `workflow.validationCommands` | Commands run with every slice's checks as `CONFIG_1`, `CONFIG_2`, … One entry is one command, run without a shell; write `pnpm test` and `pnpm lint` as two entries, or give an argument list such as `["pnpm", "test", "--", "--reporter=dot"]`. |
 | `workflow.acceptanceChecks` | `{command, files}` checks pinned into each new feature and run at `visp accept`. |
-| `workflow.flipCheck` | Kept for labeling historical telemetry; current verification does not run flip checks. |
+| `workflow.flipCheck` | `off`, `auto` (default) or `on`. For each passing declared check, VISP runs the check a second time on the old implementation, in a temporary relocated copy of the project (tests kept), to show whether it fails without the change. The result is display only and never gates acceptance. References to the project by its absolute path in copied, overlaid or scanned files are rewritten to the copy, or make the comparison unchecked when they sit in binary or UTF-16 bytes. Other spellings are not detected and can reach the project: a symbolic link to the project directory, escaped forms (JSON `\/` or `\u002F`, URL `%2F`, `\x2F` in source strings) and paths the check builds at run time (for example from `HOME`). The check's external side effects (databases, services, files outside the project) happen again. Set `workflow.flipCheck: off` for checks that must not run twice. `auto` compares changes to existing implementation; `on` also compares added files. A comparison is skipped and reported unchecked when the project has git-ignored state it cannot reproduce. |
 | `graph.languages`, `graph.exclude`, `graph.maxFileBytes` | What the repository index parses. |
 | `context.tokenBudget` | Approximate budget for the complete context `work` delivers. |
 | `context.maxSnippets` | Maximum source excerpts in delivered context. |

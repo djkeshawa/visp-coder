@@ -28,7 +28,11 @@ import { hasRequiredFindings, productRefinement } from "./refinement.js";
 import { reproductionContextDigest } from "./reproduction-bindings.js";
 import type { ProductReviewBundle } from "./review.js";
 import { productReviewAgenda, reviewInteractionEvidence } from "./review-context.js";
-import { productReviewInstructions, REVIEW_DIFF_INSTRUCTIONS } from "./review-instructions.js";
+import {
+  productReviewInstructions,
+  REVIEW_DIFF_INSTRUCTIONS,
+  REVIEW_FLIP_INSTRUCTIONS,
+} from "./review-instructions.js";
 import { productReviewRecurrence } from "./review-recurrence.js";
 import type { ProductRecord } from "./store.js";
 
@@ -154,7 +158,8 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
       reviewInstructions(workspace, record, slice, images.images.length) +
       (catalogue.sources.some((source) => source.kind === "implementation-diff")
         ? `\n${REVIEW_DIFF_INSTRUCTIONS}`
-        : ""),
+        : "") +
+      (hasDeliveredFlip(record, catalogue) ? `\n${REVIEW_FLIP_INSTRUCTIONS}` : ""),
   };
 }
 
@@ -215,4 +220,13 @@ export function reviewEvidence(
     linked.has(entry.id) || entry.historicalFailure ? 0 : entry.kind === "operation" ? 2 : 1;
   entries.sort((a, b) => rank(a) - rank(b));
   return { entries: entries.slice(0, 60), omitted: Math.max(0, entries.length - 60) };
+}
+
+function hasDeliveredFlip(record: ProductRecord, catalogue: ProductEvidenceCatalogue) {
+  const ids = new Set(
+    catalogue.sources
+      .filter((source) => source.kind === "executed-check")
+      .map((source) => source.id),
+  );
+  return record.state.executions.some((entry) => entry.flip && ids.has(`CHECK-${entry.id}`));
 }

@@ -98,8 +98,8 @@ const operationNotes: Readonly<Record<string, string>> = {
 function effect(path: string) {
   if (path === "workflow.flipCheck")
     return {
-      effect: "legacy-only",
-      note: "Retained so existing historical telemetry configuration still loads; flip checks and their reporting were removed, so nothing reads it.",
+      effect: "conditional",
+      note: "Runs a display-only regression comparison for passing slice checks: auto reverts changes to existing implementation, on includes added implementation, off skips. Never changes evidence credit or acceptance.",
     };
   if (path.startsWith("critic."))
     return {

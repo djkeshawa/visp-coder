@@ -59,3 +59,6 @@ export function productReviewInstructions(
 
 export const REVIEW_DIFF_INSTRUCTIONS =
   "The supplied unified diff is the change under review against the work-authorization baseline. Use the other sources for context. Omitted hunks and files marked not shown remain unassessed; source changes alone are not passing execution evidence.";
+
+export const REVIEW_FLIP_INSTRUCTIONS =
+  "A check that also passes without the change does not demonstrate the requested change. The flip comparison is display-only: a failure can guide coverage review, but grants no evidence credit or acceptance; unchecked means the comparison could not establish a result.";
