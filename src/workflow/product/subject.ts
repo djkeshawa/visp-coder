@@ -8,11 +8,11 @@ import {
   declaredEnvironment,
   productExecutionEnvironment,
 } from "../../core/execution-environment.js";
-import { type FilePrecondition, filePrecondition } from "../../core/file-transaction.js";
+import type { FilePrecondition } from "../../core/file-transaction.js";
 import { repositoryFiles, repositoryGitlinks } from "../../core/git.js";
 import { repositorySourceObjects } from "../../core/git-source.js";
 import { hashValue, sha256 } from "../../core/hash.js";
-import { matchesAny, matchesPattern } from "../../core/patterns.js";
+import { matchesPattern } from "../../core/patterns.js";
 import { pythonCacheDirectory } from "../../core/python-cache.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
@@ -21,34 +21,16 @@ import { acceptanceEnvironment } from "./acceptance-environment.js";
 import { byproductProtection, skippedByproduct } from "./byproducts.js";
 import { isBrowserCheckCommand } from "./check-command.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
-import { readSourceEntry, sourcePreconditionHash } from "./source-entry.js";
-import { repositorySourceIdentity, workingSourceIdentity } from "./source-git.js";
+import { workingSourceIdentity } from "./source-git.js";
 import { sourceInputPatterns } from "./source-inputs.js";
+import {
+  INPUT_LIMITS,
+  type InputBudget,
+  inputLimit,
+  productFileHash,
+  snapshotSourceFiles,
+} from "./source-snapshot.js";
 import { readProductRecord } from "./store.js";
-
-const INPUT_LIMITS = {
-  entries: 20_000,
-  depth: 64,
-  fileBytes: 64 * 1024 * 1024,
-  totalBytes: 512 * 1024 * 1024,
-};
-interface InputBudget {
-  entries: number;
-  bytes: number;
-}
-function inputLimit(path: string) {
-  return err(
-    vispError(
-      "UNSUPPORTED",
-      `Product evidence input budget exceeded at ${path}; declared slice scopes and check inputs exceed the snapshot budget`,
-      {
-        details: INPUT_LIMITS,
-        recovery:
-          "Narrow slice scopes and check file patterns, or reduce oversized declared inputs. A pattern that starts with a wildcard skips tool directories (node_modules, dist, build, .venv and similar) unless it names them. Other tracked files use Git identities and do not consume this budget.",
-      },
-    ),
-  );
-}
 
 /** Generated state is excluded unless it is explicitly declared as executable check input. */
 export async function productSourceSnapshot(
@@ -84,16 +66,16 @@ export async function productSourceSnapshot(
       !path.startsWith(".visp/") &&
       !skippedByproduct(path, objects.value.entries.has(path), protection),
   );
-  const files: Record<string, string> = {};
-  const budget: InputBudget = { entries: 0, bytes: 0 };
-  for (const path of [...new Set([...paths, ...declared.value])].sort()) {
-    const hash = matchesAny(path, patterns)
-      ? await productFileHash(workspace, path, budget, preconditions)
-      : await repositorySourceIdentity(workspace, path, objects.value, algorithm);
-    if (!hash.ok) return hash;
-    files[path] = hash.value;
-  }
-  return ok(files);
+  return workspace.files.withReadPass(() =>
+    snapshotSourceFiles(
+      workspace,
+      [...new Set([...paths, ...declared.value])].sort(),
+      patterns,
+      objects.value,
+      algorithm,
+      preconditions,
+    ),
+  );
 }
 
 /** Compare historical identities without letting changed input declarations reset the baseline. */
@@ -144,26 +126,6 @@ async function sourceIdentitiesEqual(
       )
     : await productFileHash(workspace, path, budget);
   return comparable.ok ? ok(before === comparable.value) : comparable;
-}
-
-async function productFileHash(
-  workspace: WorkspaceState,
-  path: string,
-  budget: InputBudget,
-  preconditions?: Map<string, FilePrecondition>,
-): Promise<Result<string>> {
-  budget.entries += 1;
-  if (budget.entries > INPUT_LIMITS.entries) return inputLimit(path);
-  const entry = await readSourceEntry(
-    workspace.files,
-    path,
-    Math.min(INPUT_LIMITS.fileBytes, INPUT_LIMITS.totalBytes - budget.bytes),
-  );
-  if (!entry.ok) return entry;
-  budget.bytes += entry.value.bytes?.byteLength ?? 0;
-  const precondition = filePrecondition(entry.value.bytes, entry.value.mode, entry.value.symlink);
-  preconditions?.set(path, precondition);
-  return ok(sourcePreconditionHash(precondition, entry.value.mode));
 }
 
 /**

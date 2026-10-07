@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
 import {
   access,
@@ -156,6 +157,11 @@ export interface ProjectDirectoryEntry {
   readonly type: "file" | "directory" | "symlink" | "other";
 }
 
+interface ReadPass {
+  targets: Map<string, Result<string>>;
+  managed: Map<string, boolean>;
+}
+
 /**
  * Filesystem access constrained to one canonical project root.
  *
@@ -168,10 +174,16 @@ export interface ProjectDirectoryEntry {
 export class ProjectFileSystem {
   readonly root: string;
   private readonly requestedRoot: string;
+  private readonly readPass = new AsyncLocalStorage<ReadPass>();
 
   constructor(root: string) {
     this.requestedRoot = resolve(root);
     this.root = canonicalProjectRoot(root);
+  }
+
+  /** Cache lexical path calculations only; filesystem components are checked on every access. */
+  async withReadPass<T>(read: () => Promise<T>): Promise<T> {
+    return this.readPass.run({ targets: new Map(), managed: new Map() }, read);
   }
 
   async exists(path: string): Promise<Result<boolean>> {
@@ -526,8 +538,13 @@ export class ProjectFileSystem {
   }
 
   private isManagedTarget(path: string): boolean {
+    const managed = this.readPass.getStore()?.managed;
+    const cached = managed?.get(path);
+    if (cached !== undefined) return cached;
     const rel = relative(this.root, path).split(sep).join("/");
-    return rel === STATE_DIR || rel.startsWith(`${STATE_DIR}/`);
+    const result = rel === STATE_DIR || rel.startsWith(`${STATE_DIR}/`);
+    managed?.set(path, result);
+    return result;
   }
 
   private async validate(path: string): Promise<Result<string>> {
@@ -560,6 +577,15 @@ export class ProjectFileSystem {
   }
 
   private confinedTarget(path: string): Result<string> {
+    const targets = this.readPass.getStore()?.targets;
+    const cached = targets?.get(path);
+    if (cached) return cached;
+    const target = this.resolveConfinedTarget(path);
+    targets?.set(path, target);
+    return target;
+  }
+
+  private resolveConfinedTarget(path: string): Result<string> {
     if (hasParentSegment(path)) {
       return err(vispError("IO_ERROR", `Refusing path with parent traversal: ${path}`));
     }
