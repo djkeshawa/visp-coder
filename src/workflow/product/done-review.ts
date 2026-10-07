@@ -4,13 +4,14 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { launchesReviewer } from "../../config/critic.js";
 import { ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { finalProductAssessmentGaps, outcomeStatuses } from "./assessment.js";
 import { cancelledExecution } from "./check-lifecycle.js";
 import { type ProductCriticHost, runProductCritic } from "./critic.js";
 import { type ReviewerCapacity, reviewerCapacity } from "./critic-capacity.js";
-import { codexExecCriticHost, configuredCriticLauncher } from "./critic-exec.js";
+import { configuredCriticLauncher } from "./critic-exec.js";
 import { hasPendingCriticReview } from "./critic-policy.js";
 import { type ProductVerification, runProductAccept, runProductDone } from "./evidence.js";
 import { openRequiredFindings, outstandingFeedback } from "./findings.js";
@@ -450,7 +451,7 @@ const REVIEW_WAIT_MS = { cli: 100_000, mcp: 50_000 } as const;
 
 /** How long `done` and `next` wait for a VISP-launched review on this channel. */
 export function reviewWaitMs(workspace: WorkspaceState, channel: "cli" | "mcp"): number {
-  return workspace.config.critic?.launch === "codex-exec" ? REVIEW_WAIT_MS[channel] : 0;
+  return launchesReviewer(workspace.config.critic) ? REVIEW_WAIT_MS[channel] : 0;
 }
 
 /** How `done` starts review for this project, or undefined when the host delegates it. */
@@ -458,18 +459,14 @@ export function configuredReviewStarter(
   workspace: WorkspaceState,
   channel: "cli" | "mcp" = "cli",
 ): ReviewStarter | undefined {
-  if (workspace.config.critic?.launch !== "codex-exec") return undefined;
+  const launcher = configuredCriticLauncher(workspace);
+  if (!launcher) return undefined;
   // Codex's sandbox ends background processes when a shell command returns; reviews from a
   // Codex worker's CLI stayed pending forever. They run inside `visp done` there instead.
-  if (channel === "cli" && workspace.config.harness === "codex")
-    return inlineReview(
-      configuredCriticLauncher(workspace) ?? codexExecCriticHost({ root: workspace.paths.root }),
-    );
+  if (channel === "cli" && workspace.config.harness === "codex") return inlineReview(launcher);
   // Bundled builds place the CLI entry beside this chunk; source runs review inline.
   const cli = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
-  return existsSync(cli)
-    ? backgroundReview(cli)
-    : inlineReview(codexExecCriticHost({ root: workspace.paths.root }));
+  return existsSync(cli) ? backgroundReview(cli) : inlineReview(launcher);
 }
 
 /**

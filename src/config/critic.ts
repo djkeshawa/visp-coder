@@ -51,8 +51,14 @@ export function configuredCriticMode(
  * `host`: the worker's host delegates the review through the native handoff (default).
  * `codex-exec`: VISP launches a read-only, ephemeral `codex exec` reviewer itself, so a
  * worker that never orchestrates delegation still receives independent review.
+ * `claude-exec`: the same with a read-only `claude -p` reviewer (critic.harness: claude-code).
  */
-const criticLaunchSchema = z.enum(["host", "codex-exec"]);
+const criticLaunchSchema = z.enum(["host", "codex-exec", "claude-exec"]);
+
+/** Whether VISP launches the reviewer itself instead of the worker's host delegating it. */
+export function launchesReviewer(critic: { launch?: string } | undefined): boolean {
+  return critic?.launch === "codex-exec" || critic?.launch === "claude-exec";
+}
 
 export const criticDefaultsSchema = criticConfigSchema
   .partial()

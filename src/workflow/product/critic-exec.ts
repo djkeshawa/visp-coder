@@ -83,6 +83,176 @@ export function codexExecCriticHost(options: {
   };
 }
 
+/**
+ * VISP launches a Claude reviewer itself: one `claude -p` per reserved call in the project,
+ * restricted to the read-only file tools (Read, Grep, Glob), with no settings files, hooks or
+ * MCP servers, no saved session, and the packet's response schema as structured output. It
+ * uses the operator's Claude sign-in. The project opts in with `critic.launch: claude-exec`
+ * and `critic.harness: claude-code`.
+ */
+export function claudeExecCriticHost(options: {
+  root: string;
+  executable?: string;
+  /** Resolves a model endpoint; injectable so tests need no network. */
+  lookup?: (host: string) => Promise<unknown>;
+}): ProductCriticHost {
+  const executable = options.executable ?? "claude";
+  const lookup = options.lookup ?? ((host: string) => dnsLookup(host));
+  return {
+    async inspect(config) {
+      if (config.harness !== "claude-code")
+        return { unavailable: "critic.launch: claude-exec requires critic.harness: claude-code" };
+      const version = await run(executable, ["--version"], { signal: config.signal });
+      if (version.exitCode !== 0)
+        return {
+          unavailable: `Claude Code CLI is not runnable: ${version.error ?? version.stderr}`,
+        };
+      if (!(await claudeSignedIn(executable, config.signal)))
+        return {
+          unavailable:
+            "Claude Code is not signed in for this process (claude auth status); sign in with claude and rerun visp done. No review call was spent.",
+        };
+      if (!(await reachesModel(lookup, CLAUDE_HOSTS)))
+        return {
+          unavailable:
+            "The reviewer cannot reach its model from this process; the host sandbox likely blocks network. Rerun visp done with sandbox escalation. No review call was spent.",
+        };
+      return {
+        harness: "claude-code",
+        model: config.model,
+        ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
+        freshContext: true,
+        images: true,
+        readOnly: true,
+        delegationAllowed: true,
+      };
+    },
+    async review(packet, config) {
+      await sweepStaleTempDirectories(STALE_REVIEW_NAMES, STALE_REVIEW_MS);
+      const directory = await mkdtemp(join(tmpdir(), "visp-critic-"));
+      try {
+        const images = await writeImages(directory, packet);
+        const response = await runClaudeStructured({
+          executable,
+          root: options.root,
+          directory,
+          model: config.model,
+          reasoningEffort: config.reasoningEffort,
+          schema: packet.responseSchema,
+          prompt: claudeReviewerPrompt(images.packet),
+          signal: config.signal,
+        });
+        // Claude refuses an unknown model or effort, so a successful result ran the configured pair.
+        return {
+          model: config.model,
+          ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
+          context: "fresh" as const,
+          response,
+        };
+      } finally {
+        await rm(directory, REMOVE_TEMPORARY);
+      }
+    },
+  };
+}
+
+const CLAUDE_HOSTS = ["api.anthropic.com", "claude.ai"];
+/** Linux limits one argument to 128 KiB (bytes); the schema travels as an argument. */
+const CLAUDE_SCHEMA_LIMIT = 120 * 1024;
+
+/**
+ * One read-only `claude -p` session in the project that answers `prompt` with JSON matching
+ * `schema`. Only Read, Grep and Glob are available, confined to the project and `directory`
+ * (which holds images); `--restricted` also ignores user, project and local settings, so
+ * project hooks do not run in the reviewer.
+ */
+export async function runClaudeStructured(options: {
+  executable?: string;
+  root: string;
+  directory: string;
+  model: string;
+  reasoningEffort?: string;
+  schema: unknown;
+  prompt: string;
+  signal?: AbortSignal;
+}): Promise<unknown> {
+  const schema = JSON.stringify(options.schema);
+  if (Buffer.byteLength(schema) > CLAUDE_SCHEMA_LIMIT)
+    throw new Error(`The review response schema exceeds ${CLAUDE_SCHEMA_LIMIT} characters`);
+  const args = [
+    "-p",
+    "--model",
+    options.model,
+    ...(options.reasoningEffort ? ["--effort", options.reasoningEffort] : []),
+    "--output-format",
+    "json",
+    "--json-schema",
+    schema,
+    "--tools",
+    "Read,Grep,Glob",
+    "--restricted",
+    // Project CLAUDE.md, skills, plugins and hooks could carry worker-authored instructions.
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--no-session-persistence",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
+    "--add-dir",
+    options.directory,
+  ];
+  const termination = forwardTermination(options.signal);
+  let result: RunResult;
+  try {
+    result = await run(options.executable ?? "claude", args, {
+      signal: termination.signal,
+      stdin: options.prompt,
+      cwd: options.root,
+    });
+  } finally {
+    termination.release();
+  }
+  const reply = claudeReply(result.stdout);
+  if (
+    result.exitCode !== 0 ||
+    !reply ||
+    reply.is_error === true ||
+    reply.structured_output === undefined ||
+    reply.structured_output === null
+  )
+    throw new Error(
+      `claude -p ${result.exitCode === 0 ? "returned no structured result" : `exited ${result.exitCode ?? "without a status"}`}: ${(typeof reply?.result === "string" ? reply.result : (result.error ?? result.stderr)).slice(-1200)}`,
+    );
+  return reply.structured_output;
+}
+
+/** `claude auth status` prints JSON with `loggedIn`; anything else counts as signed out. */
+async function claudeSignedIn(executable: string, signal?: AbortSignal): Promise<boolean> {
+  const status = await run(executable, ["auth", "status", "--json"], { signal });
+  return status.exitCode === 0 && claudeReply(status.stdout)?.loggedIn === true;
+}
+
+function claudeReply(stdout: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(stdout);
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function claudeReviewerPrompt(packet: unknown): string {
+  return [
+    "You are an independent reviewer. You did not write this code. Follow `instructions` and answer `question` in the JSON packet below.",
+    "Inspect the repository in the current directory with the Read, Grep and Glob tools where it helps. Do not modify files.",
+    "Images listed under `current.images` are files: open each `file` with the Read tool before judging it.",
+    "Respond only with JSON that matches the provided output schema.",
+    "",
+    JSON.stringify(packet),
+  ].join("\n");
+}
+
 /** Exactly what `mkdtemp` makes (prefix plus six characters), so named directories survive. */
 const STALE_REVIEW_NAMES = [/^visp-(?:critic|review)-[A-Za-z0-9]{6}$/];
 const STALE_REVIEW_MS = 60 * 60_000;
@@ -232,8 +402,11 @@ const RERAISE_DELAY_MS = 1000;
  * Codex without network retries for over a minute before failing, after the call is
  * reserved. Sandboxed shells deny sockets, so name resolution fails fast there.
  */
-export async function reachesModel(lookup: (host: string) => Promise<unknown>): Promise<boolean> {
-  const attempts = ["chatgpt.com", "api.openai.com"].map((host) =>
+export async function reachesModel(
+  lookup: (host: string) => Promise<unknown>,
+  hosts: readonly string[] = ["chatgpt.com", "api.openai.com"],
+): Promise<boolean> {
+  const attempts = hosts.map((host) =>
     Promise.race([
       lookup(host).then(() => true),
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000).unref()),
@@ -344,10 +517,10 @@ function sessionActivity(events: string): SessionActivity {
 async function run(
   executable: string,
   args: string[],
-  options: { signal?: AbortSignal; stdin?: string; env?: Record<string, string> },
+  options: { signal?: AbortSignal; stdin?: string; env?: Record<string, string>; cwd?: string },
 ): Promise<RunResult> {
   const result = await execRun(executable, args, {
-    cwd: process.cwd(),
+    cwd: options.cwd ?? process.cwd(),
     timeoutMs: 0,
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.stdin === undefined ? {} : { input: options.stdin }),
@@ -365,10 +538,9 @@ export function configuredCriticLauncher(workspace: {
   config: { critic?: { launch?: string; webSearch?: boolean } };
   paths: { root: string };
 }): ProductCriticHost | undefined {
-  return workspace.config.critic?.launch === "codex-exec"
-    ? codexExecCriticHost({
-        root: workspace.paths.root,
-        webSearch: workspace.config.critic.webSearch === true,
-      })
+  const critic = workspace.config.critic;
+  if (critic?.launch === "claude-exec") return claudeExecCriticHost({ root: workspace.paths.root });
+  return critic?.launch === "codex-exec"
+    ? codexExecCriticHost({ root: workspace.paths.root, webSearch: critic.webSearch === true })
     : undefined;
 }

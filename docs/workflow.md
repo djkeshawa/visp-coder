@@ -133,7 +133,7 @@ Without a check, `done` has nothing to execute and the reviewer has no evidence.
 
 **`visp verify`** runs the slice's checks without closing it.
 
-**`visp done`** runs the checks and records each execution. When all pass and any required review is current, the slice closes. If `critic.launch: codex-exec` is set and every check passed, `done` then starts the independent reviewer and waits for it (using the time left in a 100-second CLI or 50-second MCP call budget), so its findings usually arrive in the same step; see [the critic guide](critic.md). On the last open slice `done` also runs the pinned acceptance tests; on earlier slices it reports them without blocking. While a review is pending, editing, closing and acceptance wait for it.
+**`visp done`** runs the checks and records each execution. When all pass and any required review is current, the slice closes. If `critic.launch: codex-exec` or `claude-exec` is set and every check passed, `done` then starts the independent reviewer and waits for it (using the time left in a 100-second CLI or 50-second MCP call budget), so its findings usually arrive in the same step; see [the critic guide](critic.md). On the last open slice `done` also runs the pinned acceptance tests; on earlier slices it reports them without blocking. While a review is pending, editing, closing and acceptance wait for it.
 
 The reviewer checks stated rules and common natural input variants before optional robustness concerns. Only required findings cause repair routing or reopening; advisory findings remain visible without blocking closure or acceptance.
 

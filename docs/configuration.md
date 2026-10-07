@@ -53,7 +53,7 @@ telemetry:
 | `preset` | Project type detected at init; used to suggest `validationCommands`. Changing it later regenerates nothing. |
 | `harness` | The coding host `visp install` targets. Rerun `visp install` after changing it. |
 | `profile` | How much always-resident text is installed. `minimal` installs a short guide and the core MCP tools (every other capability stays available as a CLI command); `standard` installs the full guide and all MCP tools. Rerun `visp install` after changing it. |
-| `critic` | Reviewer host, launch mode, feedback mode, model and budgets. See [the critic guide](critic.md). |
+| `critic` | Reviewer host, launch mode (`host`, `codex-exec`, `claude-exec`), feedback mode, model and budgets. See [the critic guide](critic.md). |
 | `critic.webSearch` | With `launch: codex-exec`, lets the reviewer search the web for public documentation; every query is logged and listed by `visp pr`. |
 | `critic.existingCodeTests` | Experimental. With `launch: codex-exec`, also runs the independent tester on existing codebases, in a disposable copy with network access. See [the critic guide](critic.md#independent-acceptance-tests). |
 | `workflow.strictness` | Default rule strictness until a policy is recorded; afterwards use `visp policy set-strictness <mode>`. `locked` is `strict` with overrides refused. |

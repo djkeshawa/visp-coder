@@ -69,6 +69,7 @@ export async function runChecks(
     await checkMcpRegistration(state),
     await checkCodexTrust(state),
     await checkCodexCli(state),
+    await checkClaudeCli(state),
     await checkHarnessActivation(state),
     await checkPreviousHarnessAssets(state),
     await checkEnforcement(state, runtime),
@@ -184,6 +185,44 @@ async function checkCodexCli(state: WorkspaceState): Promise<Check> {
         status: "unknown",
         detail: "Codex sign-in could not be verified",
         recovery: "Run codex login status and sign in if needed",
+      };
+}
+
+async function checkClaudeCli(state: WorkspaceState): Promise<Check> {
+  if (state.config.critic?.launch !== "claude-exec")
+    return { name: "claude critic CLI", status: "ok", detail: "Claude exec is not selected" };
+  if (state.config.critic.harness !== "claude-code")
+    return {
+      name: "claude critic CLI",
+      status: "warn",
+      detail: "critic.launch: claude-exec requires critic.harness: claude-code",
+      recovery: "Set critic.harness: claude-code or choose another critic.launch",
+    };
+  const version = await run("claude", ["--version"], { cwd: state.paths.root, timeoutMs: 5000 });
+  if (!version.ok || version.value.exitCode !== 0)
+    return {
+      name: "claude critic CLI",
+      status: "warn",
+      detail: "Claude Code CLI is unavailable",
+      recovery: "Install Claude Code and sign in, or choose another critic.launch",
+    };
+  const login = await run("claude", ["auth", "status", "--json"], {
+    cwd: state.paths.root,
+    timeoutMs: 10_000,
+  });
+  const signedIn =
+    login.ok && login.value.exitCode === 0 && /"loggedIn"\s*:\s*true/.test(login.value.stdout);
+  return signedIn
+    ? {
+        name: "claude critic CLI",
+        status: "ok",
+        detail: "Claude Code CLI is available and signed in",
+      }
+    : {
+        name: "claude critic CLI",
+        status: "warn",
+        detail: "Claude Code is not signed in",
+        recovery: "Run claude and sign in, or choose another critic.launch",
       };
 }
 
