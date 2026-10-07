@@ -1,4 +1,5 @@
-import { lstat, readFile, readlink, rm, symlink } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { applyFileTransaction } from "../../../../src/core/file-transaction.js";
@@ -11,12 +12,29 @@ import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
 let setup: Awaited<ReturnType<typeof productWorkspace>>;
-afterEach(async () => setup?.workspace.destroy());
+let external: string | undefined;
+afterEach(async () => {
+  await setup?.workspace.destroy();
+  if (external) await rm(external, { recursive: true, force: true });
+  external = undefined;
+});
 
-it.each(["value.mjs", "../test", "../dist/missing.mjs", "../../outside-library"])(
+it.each([
+  "value.mjs",
+  "../test",
+  "../dist/missing.mjs",
+  "../../outside-library",
+  "../large-target.bin",
+  "external-file",
+])(
   "snapshots and restores a symlink to %s as a link without following its target",
   async (target) => {
     setup = await productWorkspace();
+    if (target === "external-file") {
+      external = await mkdtemp(join(tmpdir(), "visp-link-target-"));
+      target = join(external, "source");
+      await writeFile(target, "external source bytes");
+    }
     const updated = await updateProductBrief(await setup.workspace.state(), {
       brief: {
         ...setup.brief,
@@ -28,6 +46,8 @@ it.each(["value.mjs", "../test", "../dist/missing.mjs", "../../outside-library"]
       reason: "Include the repository link in this slice",
     });
     expect(updated.ok).toBe(true);
+    if (target === "../large-target.bin")
+      await setup.workspace.write("large-target.bin", Buffer.alloc(32 * 1024 * 1024 + 1));
     const path = join(setup.workspace.root, "src/link");
     await symlink(target, path);
     setup.workspace.git("add", "src/link");
@@ -39,6 +59,7 @@ it.each(["value.mjs", "../test", "../dist/missing.mjs", "../../outside-library"]
     if (!selected.ok) throw new Error(selected.error.message);
     const prepared = await prepareCandidate(state, selected.value, {});
     if (!prepared.ok) throw new Error(prepared.error.message);
+    expect(prepared.value.candidate.identityOnly).toBeUndefined();
     expect(prepared.value.candidate.files.find((file) => file.path === "src/link")).toMatchObject({
       symlink: true,
       content: Buffer.from(target).toString("base64"),

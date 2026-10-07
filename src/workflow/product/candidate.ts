@@ -6,13 +6,14 @@ import { run } from "../../core/exec.js";
 import {
   applyFileTransaction,
   type FileMutation,
+  type FilePrecondition,
   filePrecondition,
 } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
 import { isPortableAbsolute } from "../../core/paths.js";
 import { matchesAny } from "../../core/patterns.js";
 import { privatePath } from "../../core/redaction.js";
-import { err, ok } from "../../core/result.js";
+import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { type CriticSelection, recordGuards } from "./critic-store.js";
 import type { ProductSlice } from "./model.js";
@@ -42,6 +43,7 @@ const fileSchema = z
     hash: z.string(),
   })
   .strict();
+const MAX_FILES = 2000;
 const candidateSchema = z
   .object({
     version: z.literal(1),
@@ -52,7 +54,9 @@ const candidateSchema = z
     subject: z.string(),
     contract: z.string(),
     intent: z.string(),
-    files: z.array(fileSchema).max(2000),
+    files: z.array(fileSchema).max(MAX_FILES),
+    /** Too large to copy: identity and evidence only, never restorable. */
+    identityOnly: z.literal(true).optional(),
     brief: z.string().optional(),
     productState: z.string(),
     evidence: z.unknown(),
@@ -63,13 +67,18 @@ const MAX_BYTES = 32 * 1024 * 1024;
 export const candidatePath = (workspace: WorkspaceState, feature: string, id: string) =>
   join(workspace.paths.featureDir(feature), `candidates/${id}.json`);
 
-/** Exact bytes, including binary assets, deletions and modes; generated evidence is stored separately from source. */
+/**
+ * Exact bytes, including binary assets, deletions and modes; generated evidence is stored separately
+ * from source. A product larger than one copy (an existing repository under a broad scope) still
+ * gets its review: the candidate then records identity and evidence only and cannot be restored.
+ */
 export async function prepareCandidate(
   workspace: WorkspaceState,
   selected: CriticSelection,
   evidence: unknown,
 ) {
-  const snapshot = await productSourceSnapshot(workspace, selected.record.brief);
+  const preconditions = new Map<string, FilePrecondition>();
+  const snapshot = await productSourceSnapshot(workspace, selected.record.brief, preconditions);
   if (!snapshot.ok) return snapshot;
   const paths = candidateSourcePaths(
     workspace,
@@ -77,32 +86,12 @@ export async function prepareCandidate(
     snapshot.value,
     selected.slice,
   );
-  if (paths.length > 2000)
-    return err(
-      vispError("UNSUPPORTED", "Candidate exceeds 2000 declared source files", {
-        recovery: "Narrow this slice's scope and check inputs before preserving a candidate.",
-      }),
-    );
-  const files: ProductCandidate["files"] = [];
-  const guards: FileMutation[] = [];
-  let bytes = 0;
-  const ignored = await ignoredPaths(workspace, paths);
-  if (!ignored.ok) return ignored;
-  for (const path of paths) {
-    const expected = snapshot.value[path] ?? "";
-    const omitted =
-      ignored.value.has(path) ||
-      privatePath(path) ||
-      privatePath(path, workspace.config.workflow.blockedPaths);
-    const captured = await captureFile(workspace, path, expected, bytes, omitted);
-    if (!captured.ok) return captured;
-    bytes += captured.value.bytes;
-    files.push(captured.value.file);
-    guards.push(captured.value.guard);
-  }
+  const captured =
+    paths.length > MAX_FILES ? undefined : await captureFiles(workspace, paths, snapshot.value);
+  if (captured && !captured.ok) return captured;
   const subject = await productSourceDigest(workspace, selected.record.brief, snapshot.value);
   if (!subject.ok) return subject;
-  const candidate: ProductCandidate = {
+  const copied: ProductCandidate = {
     version: 1,
     id: `CAN-${randomUUID().replaceAll("-", "")}`,
     root: hashValue(workspace.paths.root),
@@ -111,18 +100,27 @@ export async function prepareCandidate(
     subject: subject.value,
     contract: selected.contract,
     intent: selected.intent,
-    files,
+    files: captured?.value?.files ?? [],
+    ...(captured?.value ? {} : { identityOnly: true as const }),
     productState: json({ executions: selected.record.state.executions }),
     evidence: compactEvidence(evidence),
   };
+  const fits = Buffer.byteLength(json(copied)) <= MAX_BYTES;
+  const candidate: ProductCandidate = fits
+    ? copied
+    : { ...copied, files: [], identityOnly: true as const };
   const content = json(candidate);
   if (Buffer.byteLength(content) > MAX_BYTES)
-    return err(vispError("UNSUPPORTED", "Candidate source and evidence exceed 32 MiB"));
+    return err(vispError("UNSUPPORTED", "Candidate evidence exceeds 32 MiB"));
+  const guards = candidate.identityOnly
+    ? assertionGuards(paths, preconditions)
+    : ok(captured?.value?.guards ?? []);
+  if (!guards.ok) return guards;
   return ok({
     candidate,
     snapshot: snapshot.value,
     mutations: [
-      ...guards,
+      ...guards.value,
       {
         kind: "write" as const,
         path: candidatePath(workspace, candidate.feature, candidate.id),
@@ -131,6 +129,20 @@ export async function prepareCandidate(
       },
     ],
   });
+}
+
+function assertionGuards(
+  paths: readonly string[],
+  preconditions: ReadonlyMap<string, FilePrecondition>,
+) {
+  const guards: FileMutation[] = [];
+  for (const path of paths) {
+    const expectedBefore = preconditions.get(path);
+    if (!expectedBefore)
+      return err(vispError("INTERNAL", "Candidate snapshot is missing source preconditions"));
+    guards.push({ kind: "assert", path, expectedBefore });
+  }
+  return ok(guards);
 }
 
 export async function readCandidate(
@@ -166,6 +178,44 @@ export async function readCandidate(
   }
 }
 
+/** Source bytes of declared paths, or undefined when they exceed one candidate's 32 MiB. */
+async function captureFiles(
+  workspace: WorkspaceState,
+  paths: readonly string[],
+  snapshot: Record<string, string>,
+): Promise<Result<{ files: ProductCandidate["files"]; guards: FileMutation[] } | undefined>> {
+  const files: ProductCandidate["files"] = [];
+  const guards: FileMutation[] = [];
+  let bytes = 0;
+  const ignored = await ignoredPaths(workspace, [...paths]);
+  if (!ignored.ok) return ignored;
+  for (const path of paths) {
+    const omitted =
+      ignored.value.has(path) ||
+      privatePath(path) ||
+      privatePath(path, workspace.config.workflow.blockedPaths);
+    // Sizes decide before reading; a file that grows while being read still fails capture.
+    const size = omitted ? 0 : await declaredSize(workspace, path);
+    if (typeof size !== "number") return size;
+    if (bytes + size > MAX_BYTES) return ok(undefined);
+    const captured = await captureFile(workspace, path, snapshot[path] ?? "", bytes, omitted);
+    if (!captured.ok) return captured;
+    bytes += captured.value.bytes;
+    files.push(captured.value.file);
+    guards.push(captured.value.guard);
+  }
+  return ok({ files, guards });
+}
+
+/** A link's own size, as capture stores the link, never its target's. */
+async function declaredSize(workspace: WorkspaceState, path: string) {
+  const link = await workspace.files.readSymbolicLink(path);
+  if (!link.ok) return link;
+  if (link.value !== undefined) return link.value.length;
+  const metadata = await workspace.files.readMetadata(path);
+  return metadata.ok ? (metadata.value?.size ?? 0) : metadata;
+}
+
 /** Explicit restore is guarded by current subject, current authorization and original scope. Never restores acceptance or evidence as fresh. */
 export async function restoreCandidate(
   workspace: WorkspaceState,
@@ -184,6 +234,17 @@ export async function restoreCandidate(
   if (!scoped.ok) return scoped;
   const candidate = await readCandidate(workspace, selected, id);
   if (!candidate.ok) return candidate;
+  if (candidate.value.identityOnly)
+    return err(
+      vispError(
+        "UNSUPPORTED",
+        `Candidate ${id} recorded identity only: its source exceeded ${MAX_FILES} files or 32 MiB`,
+        {
+          recovery:
+            "Return to the reviewed state with git (for example git stash or git checkout).",
+        },
+      ),
+    );
   const current = await productSourceSnapshot(workspace, selected.record.brief);
   if (!current.ok) return current;
   const subject = await productSourceDigest(workspace, selected.record.brief, current.value);

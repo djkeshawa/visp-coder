@@ -1,6 +1,7 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { balancedCritic } from "../../../../src/config/critic.js";
 import { sha256 } from "../../../../src/core/hash.js";
 import { ok } from "../../../../src/core/result.js";
 import { productEvidenceGaps } from "../../../../src/workflow/product/assessment.js";
@@ -8,6 +9,11 @@ import {
   CORE_SCOPE_FILE_LIMIT,
   coreReviewPaths,
 } from "../../../../src/workflow/product/core-review-sources.js";
+import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
+import {
+  inlineReview,
+  runProductDoneReviewed,
+} from "../../../../src/workflow/product/done-review.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import { productEvidenceCatalogue } from "../../../../src/workflow/product/evidence-references.js";
 import { independentSources } from "../../../../src/workflow/product/independent-sources.js";
@@ -490,3 +496,78 @@ it("treats many small checks of one outcome as wide inputs without reading them 
   expect([...selected.core]).toEqual([["pkg/entry.py", ["O001"]]]);
   expect(reads).toBe(1);
 });
+
+it("reviews and closes a slice in a repository larger than one candidate copy", async () => {
+  const p = await productWorkspace({ critic: true });
+  projects.push(p);
+  const w = p.workspace;
+  for (let index = 0; index < 2100; index++)
+    await w.write(`lib/part${String(index).padStart(4, "0")}.mjs`, `export const p${index} = 1;\n`);
+  w.commit("existing repository");
+  const updated = await updateProductBrief(await w.state(), {
+    brief: {
+      ...p.brief,
+      slices: [{ ...p.brief.slices[0], scope: { allowed: ["**"], expected: [], forbidden: [] } }],
+    },
+    reason: "Review a change in a large repository",
+  });
+  if (!updated.ok) throw new Error(updated.error.message);
+  expect((await runProductWork(await w.state(), { task: "T001" })).ok).toBe(true);
+  await w.write("src/value.mjs", "export const value = 2;\n");
+  const config = {
+    ...(balancedCritic("codex") as NonNullable<ReturnType<typeof balancedCritic>>),
+    maxCalls: 2,
+  };
+  const configured = await runProductCritic(await w.state(), {
+    task: "T001",
+    operation: "configure",
+    config,
+  });
+  expect(configured.ok, JSON.stringify(configured)).toBe(true);
+  let reviewed: CriticPacket | undefined;
+  const host = {
+    inspect: async () => ({
+      harness: "codex" as const,
+      model: config.model,
+      reasoningEffort: config.reasoningEffort,
+      freshContext: true,
+      images: true,
+      readOnly: true,
+      delegationAllowed: true,
+    }),
+    review: async (packet: CriticPacket) => {
+      reviewed = packet;
+      const source = packet.current.sources.find((entry) => entry.reference === "src/value.mjs");
+      const execution = packet.current.evidence.find(
+        (entry) => entry.kind === "execution" && entry.status === "available",
+      );
+      return {
+        model: config.model,
+        reasoningEffort: config.reasoningEffort,
+        context: "fresh" as const,
+        response: {
+          summary: "Inspected the changed module and its passing check",
+          assessments: [
+            {
+              outcome: "O001",
+              status: "satisfied" as const,
+              summary: "The module returns two and its check passed",
+              evidence: [source?.id ?? "missing", execution?.id ?? "missing"],
+              expectations: [],
+            },
+          ],
+          findings: [],
+          limitations: [],
+          resolutions: [],
+          disputes: [],
+        },
+      };
+    },
+  };
+  const done = await runProductDoneReviewed(await w.state(), { task: "T001" }, inlineReview(host));
+  expect(done, JSON.stringify(done).slice(0, 2000)).toMatchObject({
+    ok: true,
+    value: { closed: true, critic: { reviewed: true } },
+  });
+  expect(reviewed?.current.sources.some((source) => source.id === "CODE-SCOPE")).toBe(true);
+}, 120000);
