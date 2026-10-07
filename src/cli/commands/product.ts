@@ -406,7 +406,7 @@ export const statusCommand = () =>
   ).option("--full", "Include the full brief and product state in --json output");
 export const verifyCommand = () =>
   command("verify", "Run the selected slice's behavior checks", true, runProductVerify);
-const DISPUTE_HELP = `\nA pinned acceptance test that fails and contradicts the request can be disputed instead of edited: --dispute "<test name>" --reason "<quote the request sentence + why>". The independent reviewer rules; only failing tests can be disputed, and a rejected dispute needs a product change before it is filed again. When critic.launch is codex-exec, VISP starts the independent reviewer during the command; you never delegate it.`;
+const DISPUTE_HELP = `\nA pinned acceptance test that fails and contradicts the request can be disputed instead of edited: --dispute "<test name>" --reason "<quote the request sentence + why>". The independent reviewer rules; only failing tests can be disputed, and a rejected dispute needs a product change before it is filed again. When critic.launch is codex-exec or claude-exec, VISP starts the independent reviewer during the command; you never delegate it.`;
 const disputeOptions = (operation: Command) =>
   operation
     .option("--dispute <tests...>", "Dispute failing pinned acceptance tests by name")

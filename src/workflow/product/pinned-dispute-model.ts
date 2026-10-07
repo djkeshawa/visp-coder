@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join, normalize, relative } from "node:path";
 import { z } from "zod";
+import { launchesReviewer } from "../../config/critic.js";
 import { hashValue } from "../../core/hash.js";
 import type { WorkspaceState } from "../state.js";
 import { productFailureSignature } from "./failures.js";
@@ -520,7 +521,7 @@ export function waivedFailure(output: string, waivers: Waivers): boolean {
 
 /** Whether a VISP-launched reviewer exists to rule; only then can a dispute be decided. */
 export function reviewerRules(workspace: WorkspaceState): boolean {
-  return workspace.config.critic?.launch === "codex-exec";
+  return launchesReviewer(workspace.config.critic);
 }
 
 /**
