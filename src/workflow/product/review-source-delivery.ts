@@ -7,6 +7,8 @@ import type { ProductSource } from "./sources.js";
 
 export const REVIEW_SOURCE_BUDGET = 32000;
 const REVIEW_LIMITATION_BUDGET = 8000;
+/** Missing or binary files are named one by one only within this share of the source budget. */
+const REVIEW_UNAVAILABLE_BUDGET = 4000;
 
 function sourceCost(source: ProductSource) {
   return JSON.stringify(source).length + 1;
@@ -123,29 +125,49 @@ function compactFullSources(input: readonly ProductSource[]) {
   return compacted;
 }
 
+/** A packet that cannot fit; no reviewer call is reserved or spent for it. */
+export class ReviewBudgetRefusal extends Error {}
+
 /** Exact required evidence must fit before reserving a reviewer call. */
 export async function deliveredSources(
   input: readonly ProductSource[],
   fullText: ReadonlyMap<string, string>,
 ) {
+  try {
+    return await deliverSources(input, fullText, false);
+  } catch (cause) {
+    // Only a packet that would otherwise be refused summarizes missing or binary files.
+    if (!(cause instanceof ReviewBudgetRefusal) || !input.some(compactable)) throw cause;
+    return deliverSources(input, fullText, true);
+  }
+}
+
+async function deliverSources(
+  input: readonly ProductSource[],
+  fullText: ReadonlyMap<string, string>,
+  compact: boolean,
+) {
   const diffs = input.filter((source) => source.kind === "implementation-diff");
   input = input.filter((source) => source.kind !== "implementation-diff");
   const core = input.filter((source) => source.coreOutcomes !== undefined);
   const availableCore = core.filter((source) => source.available);
-  const required = input.filter(
+  const candidates = input.filter(
     (source) =>
       !source.available ||
       (source.coreOutcomes === undefined &&
         (source.kind === "preserved-request" || source.kind === "executed-check")),
   );
-  const secondary = input.filter((source) => !core.includes(source) && !required.includes(source));
+  const secondary = input.filter(
+    (source) => !core.includes(source) && !candidates.includes(source),
+  );
+  const required = compact ? boundedUnavailable(candidates) : candidates;
   const question = required.map((source) => source.excerpt).join(" ");
   const delivered: ProductSource[] = [];
   let remaining = REVIEW_SOURCE_BUDGET - 2;
   for (const source of required) {
     const supplied = duplicateSource(source, delivered);
     if (sourceCost(supplied) > remaining)
-      throw new Error(
+      throw new ReviewBudgetRefusal(
         "Required review output or limitation exceeds the serialized source budget; no review call spent.",
       );
     delivered.push(supplied);
@@ -159,7 +181,7 @@ export async function deliveredSources(
   const possibleGap = !fits ? coreLimitations(core, []) : undefined;
   const reserve = possibleGap ? sourceCost(possibleGap) : 0;
   if (reserve > REVIEW_LIMITATION_BUDGET || reserve > remaining)
-    throw new Error(
+    throw new ReviewBudgetRefusal(
       "Exact core outcome limitations exceed the review source budget; no review call spent.",
     );
   const primary = await deliverCore(availableCore, fullText, question, remaining - reserve);
@@ -179,9 +201,52 @@ export async function deliveredSources(
   return JSON.parse(JSON.stringify(delivered)) as ProductSource[];
 }
 
+/** Missing, binary or unreadable implementation files: disclosures, not evidence. */
+function compactable(source: ProductSource) {
+  return source.kind === "implementation-file" && !source.available && source.sha256 !== "";
+}
+
+/**
+ * Many unavailable implementation files, as in a large repository's changed catalogues, would
+ * exhaust the budget and refuse the review, so beyond a small share they are summarized by count,
+ * first references and identity digest. Pinned files, generated disclosures and everything else
+ * stay as they are; unavailable core files still raise their outcome limitations.
+ */
+function boundedUnavailable(required: readonly ProductSource[]) {
+  const files = required.filter(compactable);
+  if (files.reduce((cost, source) => cost + sourceCost(source), 0) <= REVIEW_UNAVAILABLE_BUDGET)
+    return [...required];
+  const named = new Set<ProductSource>();
+  let cost = 0;
+  for (const source of files) {
+    if (cost + sourceCost(source) > REVIEW_UNAVAILABLE_BUDGET / 2) break;
+    named.add(source);
+    cost += sourceCost(source);
+  }
+  const rest = files.filter((source) => !named.has(source));
+  return [
+    ...required.filter((source) => !files.includes(source) || named.has(source)),
+    {
+      id: "CODE-UNAVAILABLE-REST",
+      kind: "implementation-file" as const,
+      reference: "Further unavailable sources",
+      sha256: "",
+      available: false,
+      excerpt: `${rest.length} further sources are missing, binary or unreadable and are not shown one by one; they are not evidence either way. First: ${rest
+        .slice(0, 8)
+        .map((source) => source.reference.slice(0, 160))
+        .join(", ")}; identity digest: ${sha256(
+        JSON.stringify(rest.map((source) => [source.id, source.reference, source.sha256])),
+      )}.`,
+    },
+  ];
+}
+
 export function assertReviewSourceBudget(sources: readonly ProductSource[]) {
   if (JSON.stringify(sources).length > REVIEW_SOURCE_BUDGET)
-    throw new Error("Serialized review sources exceed the source budget; no review call spent.");
+    throw new ReviewBudgetRefusal(
+      "Serialized review sources exceed the source budget; no review call spent.",
+    );
 }
 
 // Images have a separate byte budget. This bounds the serialized text and response schema.
@@ -251,7 +316,7 @@ function appendCoreLimitations(
 ) {
   if (gap) {
     if (sourceCost(gap) > remaining)
-      throw new Error(
+      throw new ReviewBudgetRefusal(
         "Exact core outcome limitations exceed the review source budget; no review call spent.",
       );
     const previous = delivered.find((source) => source.id === gap.id);
@@ -259,7 +324,7 @@ function appendCoreLimitations(
       const combined = { ...previous, excerpt: `${previous.excerpt}\n${gap.excerpt}` };
       const extra = sourceCost(combined) - sourceCost(previous);
       if (extra > remaining)
-        throw new Error(
+        throw new ReviewBudgetRefusal(
           "Exact core outcome limitations exceed the review source budget; no review call spent.",
         );
       delivered[delivered.indexOf(previous)] = combined;

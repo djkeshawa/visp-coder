@@ -547,6 +547,7 @@ export const productStateSchema = z
               .union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
               .optional(),
             findingIdentityVersion: z.literal(2).optional(),
+            // Delivered identities later catalogues cannot re-derive: diffs and broad-scope files.
             deliveredDiffReferences: generatedSourceReferencesSchema.optional(),
             subjectDigest: z.string(),
             implementationDigest: z.string().optional(),
