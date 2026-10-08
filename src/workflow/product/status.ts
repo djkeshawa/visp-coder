@@ -5,6 +5,7 @@ import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses, type ProductOutcomeStatus } from "./assessment.js";
 import { criticNext } from "./critic-guidance.js";
 import { isStopHookObserver } from "./environment-model.js";
+import { withFlipAdvice } from "./flip-advice.js";
 import { featureStartingAge, hasUntakenPrompts } from "./host-prompts.js";
 import { productInputWarnings } from "./input-warnings.js";
 import type { ProductBrief, ProductState } from "./model.js";
@@ -102,8 +103,10 @@ export async function runProductNext(
   if (!next.ok) return next;
   const warnings = await productInputWarnings(workspace, loaded.value.brief);
   const result = await criticNext(workspace, {
-    ...next.value,
-    evidence: [...next.value.evidence, ...warnings, ...staleTaskNote(workspace, loaded.value)],
+    ...withFlipAdvice(loaded.value, {
+      ...next.value,
+      evidence: [...next.value.evidence, ...warnings, ...staleTaskNote(workspace, loaded.value)],
+    }),
   });
   if (!result.ok || (!loaded.value.state.criticManual && !loaded.value.state.userFeedback?.length))
     return observed(result);

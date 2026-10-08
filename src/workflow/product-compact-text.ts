@@ -284,6 +284,7 @@ function compactVerificationText(
         ? boundedRows(data.committedChanges)
         : undefined,
     checks: rows(data.executions).map(executionSummary),
+    flipExtraMs: data.flipDurationMs,
     unresolved,
     gaps: closureGaps(data.gaps, unresolved),
     findings:
@@ -313,7 +314,23 @@ function closureGaps(gaps: unknown, unresolved: readonly string[]): unknown {
 }
 
 function executionSummary(execution: Record<string, unknown>): unknown {
-  if (execution.status === "passed") return `${execution.check}: passed`;
+  if (execution.status === "passed") {
+    const flip = object(execution.flip);
+    if (Object.keys(flip).length)
+      return {
+        check: execution.check,
+        status: "passed",
+        failsWithoutChange: flip.failsWithoutChange,
+        flipExtraMs: execution.flipDurationMs,
+        ...(flip.failsWithoutChange === false
+          ? {
+              advice: `${execution.check} also passes with your source change reverted, so it does not show the requested change. Add a test that fails on the old code and passes now (keep it), then rerun visp done.`,
+            }
+          : {}),
+        ...(flip.reason ? { flipReason: flip.reason } : {}),
+      };
+    return `${execution.check}: passed`;
+  }
   const output = typeof execution.output === "string" ? execution.output : "";
   return {
     check: execution.check,

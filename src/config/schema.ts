@@ -30,7 +30,10 @@ const workflowSchema = z
     validationCommands: z.array(commandSpecSchema).default([]),
     /** Operator-defined feature checks, pinned at feature creation and run by final-task verify. */
     acceptanceChecks: z.array(acceptanceCheckSchema).default([]),
-    /** Historical telemetry preference; current product verification does not dispatch flip checks. */
+    /**
+     * Display-only regression comparison for passing declared slice checks: the check runs again on
+     * the old implementation, repeating its external side effects. Never an acceptance gate; off stops it.
+     */
     flipCheck: z.enum(["off", "auto", "on"]).default("auto"),
   })
   .strict()

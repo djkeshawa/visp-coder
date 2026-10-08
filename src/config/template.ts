@@ -64,8 +64,11 @@ ${DEFAULT_BLOCKED_PATHS.map((path) => `    - "${path}"`).join("\n")}
   # like shell syntax.
   validationCommands:${commands}
 
-  # Historical telemetry preference: off | auto | on.
-  # Current product verification does not run flip checks from this setting.
+  # Display-only regression comparison: off | auto | on.
+  # A passing check runs a second time on the old implementation (in a temporary tree, tests kept)
+  # to show whether it fails without the change. That run repeats the check's external side effects
+  # (databases, services, files outside the project); set off to stop it.
+  # auto checks changes to existing implementation; on also checks added files.
   flipCheck: auto
 
 graph:

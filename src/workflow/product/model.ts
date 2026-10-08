@@ -13,6 +13,7 @@ import {
   taskClassSchema,
   taskIdSchema,
 } from "../artifacts/common.js";
+import { flipCheckSchema } from "../artifacts/evidence.js";
 import { browserCapabilitySchema } from "./environment-model.js";
 import { experimentResolutionsSchema } from "./experiment-model.js";
 import { productFeedbackSchema } from "./feedback-model.js";
@@ -409,6 +410,10 @@ export const executionSchema = z
     status: z.enum(["passed", "failed", "environment-failed", "timed-out"]),
     exitCode: z.number(),
     durationMs: z.number(),
+    /** Display-only regression comparison; never passing evidence or a gate. */
+    flip: flipCheckSchema.optional(),
+    flipCacheKey: z.string().optional(),
+    flipDurationMs: z.number().nonnegative().optional(),
     output: z.string(),
     /** Complete runner-derived failure attribution, independent of the displayed output budget. */
     pinnedFailures: z

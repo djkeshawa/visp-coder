@@ -68,6 +68,7 @@ export interface ProductVerification {
   readonly passed: boolean;
   readonly closed?: boolean;
   readonly executions: readonly ProductExecution[];
+  readonly flipDurationMs?: number;
   readonly behaviorChanges?: ReturnType<typeof checkBehaviorChanges>;
   readonly outcomes: readonly ProductOutcomeStatus[];
   readonly gaps: readonly string[];
@@ -122,7 +123,7 @@ async function execute(
     if (!contract.ok) return contract;
     const available = await closeoutAvailability(workspace, record.brief.feature, close, accept);
     if (!available.ok) return available;
-    return finishExecution(
+    const finished = await finishExecution(
       workspace,
       loaded.value,
       slice,
@@ -135,7 +136,20 @@ async function execute(
       prepared.value.committedChanges,
       options.signal,
     );
+    return finished.ok
+      ? ok({ ...finished.value, ...flipBatchTiming(record, loaded.value) })
+      : finished;
   });
+}
+
+function flipBatchTiming(before: ProductRecord, after: ProductRecord): { flipDurationMs?: number } {
+  const prior = new Map(before.state.executions.map((entry) => [entry.id, entry.flipCacheKey]));
+  const flipped = after.state.executions.filter(
+    (entry) => entry.flip && (!prior.has(entry.id) || prior.get(entry.id) !== entry.flipCacheKey),
+  );
+  return flipped.length
+    ? { flipDurationMs: flipped.reduce((total, entry) => total + (entry.flipDurationMs ?? 0), 0) }
+    : {};
 }
 
 async function finishExecution(

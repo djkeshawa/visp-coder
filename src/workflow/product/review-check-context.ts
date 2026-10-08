@@ -71,12 +71,27 @@ function wrappedRunner(executable: string, args: string[]): string[] | undefined
   return runner.length ? runner : undefined;
 }
 
-/** Keep observed names verbatim; an exit code never invents per-assertion successes. */
-export function reviewCheckResult(execution: ProductExecution, check?: ProductCheck) {
+/**
+ * Keep observed names verbatim; an exit code never invents per-assertion successes. The flip
+ * duration is wall-clock time: pass `timing: false` for any text that identifies the execution.
+ */
+export function reviewCheckResult(
+  execution: ProductExecution,
+  check?: ProductCheck,
+  options: { timing?: boolean } = {},
+) {
   return [
     `Check ${execution.check}; execution ${execution.id}; ${execution.status}; exit ${execution.exitCode}`,
     `Command executed: ${execution.command}`,
     `Provenance: ${execution.provenance}; assertions: ${execution.assertions}`,
+    ...(execution.flip
+      ? [
+          `Without the change (implementation reverted to the work-authorization baseline, tests kept): ${execution.flip.failsWithoutChange === true ? "failed" : execution.flip.failsWithoutChange === false ? "passed" : "unchecked"}${execution.flip.reason ? ` (${execution.flip.reason})` : ""}`,
+          ...(options.timing === false
+            ? []
+            : [`Flip check extra time: ${execution.flipDurationMs ?? 0} ms`]),
+        ]
+      : []),
     ...(check && isBrowserCheckCommand(check.command)
       ? [`Executed journey/check source: ${JSON.stringify(check.command)}`]
       : []),

@@ -7,6 +7,7 @@ import {
   checkComparisonEnvironment,
   type ExecutedProductCheck,
   executeProductCheck,
+  reuseProductCheckFlip,
 } from "./check-execution.js";
 import type { ProductCheck, ProductExecution, ProductSlice, ProductState } from "./model.js";
 import { withProductMutation } from "./runtime.js";
@@ -91,8 +92,21 @@ export async function executeChecks(
   for (const check of commands) {
     if (options.signal?.aborted) return cancelledExecution();
     const owner = slice?.checks.includes(check.id) ? slice : undefined;
-    if (reuse && (await reusable(workspace, record, check, existing.get(key(check, owner)))))
+    const prior = existing.get(key(check, owner));
+    if (reuse && (await reusable(workspace, record, check, prior))) {
+      const refreshed = await refreshFlip(
+        workspace,
+        current,
+        owner,
+        check,
+        prior as ProductExecution,
+        verifierSnapshot,
+        options.signal,
+      );
+      if (!refreshed.ok) return refreshed;
+      current = refreshed.value;
       continue;
+    }
     const ran = await runCheck(workspace, record, current, {
       check,
       owner,
@@ -196,4 +210,53 @@ function key(check: ProductCheck, owner?: ProductSlice) {
 
 export function executionOwnerKey(check: string, task?: string) {
   return JSON.stringify([check, task]);
+}
+
+/**
+ * Advisory only: a flip that cannot be recomputed or recorded is logged, and the closeout's own
+ * result stands. Nothing here may fail done.
+ */
+async function refreshFlip(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice | undefined,
+  check: ProductCheck,
+  execution: ProductExecution,
+  verifierSnapshot: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<Result<ProductRecord>> {
+  const notRecorded = (reason: string) => {
+    console.warn(`VISP: flip advisory not recorded for ${check.id}: ${reason}`);
+    return ok(record);
+  };
+  try {
+    const flip = await reuseProductCheckFlip(
+      workspace,
+      record,
+      slice,
+      check,
+      execution,
+      verifierSnapshot,
+      signal,
+    );
+    if (signal?.aborted) return cancelledExecution();
+    if (!flip.flip || execution.flipCacheKey === flip.flipCacheKey) return ok(record);
+    const saved = await withProductMutation(workspace, async () => {
+      const loaded = await readProductRecord(workspace, { feature: record.brief.feature });
+      if (!loaded.ok) return loaded;
+      const contract = requireExecutionContract(record, loaded.value);
+      if (!contract.ok) return contract;
+      const state = {
+        ...loaded.value.state,
+        executions: loaded.value.state.executions.map((entry) =>
+          entry.id === execution.id ? { ...entry, ...flip } : entry,
+        ),
+      };
+      const written = await saveProductState(workspace, loaded.value, state);
+      return written.ok ? readProductRecord(workspace, { feature: record.brief.feature }) : written;
+    });
+    return saved.ok ? saved : notRecorded(saved.error.message);
+  } catch (cause) {
+    return notRecorded(cause instanceof Error ? cause.message : String(cause));
+  }
 }

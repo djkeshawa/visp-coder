@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { withProductCheckContext } from "../../core/check-context.js";
+import { PRODUCT_CHECK_CONTEXT, withProductCheckContext } from "../../core/check-context.js";
 import { commandExecutableDigest } from "../../core/command-executable.js";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { type CommandOutput, resolveCommand, run } from "../../core/exec.js";
+import {
+  comparisonEnvironmentParts,
+  resolvedProductExecutionEnvironment,
+} from "../../core/execution-environment.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
 import { outputRedactor, privatePath } from "../../core/redaction.js";
@@ -24,6 +28,12 @@ import {
   isConfiguredCheck,
 } from "./configured-checks.js";
 import { browserUnavailable } from "./environment.js";
+import { prepareProductFlipEnvironment, productFlipCheck } from "./flip-check.js";
+import {
+  disposeFlipEnvironment,
+  reboundFlipEnvironment,
+  unsnapshottedFlipState,
+} from "./flip-environment.js";
 import type {
   ProductBrief,
   ProductCheck,
@@ -108,84 +118,110 @@ export async function executeProductCheck(
       reuseCapture,
     );
   const started = Date.now();
-  const argv = resolveCommand(check.command);
-  const envFiles = argv.ok
-    ? argv.value.flatMap((arg, index, args) =>
-        arg.startsWith("--env-file=")
-          ? [arg.slice("--env-file=".length)]
-          : arg === "--env-file" && args[index + 1]
-            ? [args[index + 1] as string]
-            : [],
-      )
-    : [];
-  const redact = await outputRedactor(workspace.paths.root, [
-    ...envFiles,
-    ...Object.keys(verifierSnapshot).filter((path) => privatePath(path)),
-  ]);
+  const redact = await checkRedactor(workspace, check, verifierSnapshot);
   // Tests the independent reviewer found contradicting the request are skipped by the suite.
   const waivers = check.id.startsWith("PINNED_")
     ? await pinnedWaivers(workspace, record.brief.feature)
     : undefined;
-  const output = await executeCommand(
-    workspace,
-    check,
-    !!base.verifierDigest,
-    signal,
-    waiverEnvironment(waivers),
+  let originalEnvironment: Record<string, string> | undefined;
+  const isolation = await prepareProductFlipEnvironment(workspace, record, slice, check, async () =>
+    flipEnvironmentIdentity(
+      base.comparisonEnvironment,
+      await resolvedProductExecutionEnvironment(),
+    ),
   );
-  // Capture joins stdout and stderr without chronological ordering. Attribution depends on
-  // indentation and explicit error/result headers, not blank lines at that stream join.
-  const raw = output.ok ? `${output.value.stdout}\n${output.value.stderr}` : output.error.message;
-  const commandVerifier =
-    base.verifierDigest && output.ok && output.value.executableDigest
-      ? {
-          version: 2 as const,
-          verifier: base.verifierDigest,
-          executable: output.value.executableDigest,
-        }
-      : undefined;
-  // The recorded text is for reading and may leave lines out; waivers and disputes are decided
-  // on the whole redacted output.
-  const evidence = commandEvidenceOutput(
-    output,
-    !!base.verifierDigest,
-    workspace.paths.root,
-    redact,
-  );
-  const full = redact(raw);
-  const decided = waivedResult(output, full, workspace.paths.root, waivers);
-  const { status, note } = await commandDecision(
-    workspace,
-    record,
-    check,
-    decided,
-    waivers,
-    full,
-    output,
-  );
-  return {
-    execution: {
-      ...base,
-      ...(commandVerifier ? { commandVerifier } : {}),
-      verifierDigest: commandVerifier ? hashValue(commandVerifier) : undefined,
-      assertions: "agent-reported",
-      status,
-      exitCode: output.ok ? output.value.exitCode : -1,
-      durationMs: output.ok ? output.value.durationMs : Date.now() - started,
-      output: [note, evidence].filter(Boolean).join("\n"),
-      ...(waivers ? { pinnedFailures: pinnedFailureSummary(full, waivers) } : {}),
-    },
-    state: record.state,
-    mutations: [
+  try {
+    const output = await executeCommand(
+      workspace,
+      check,
+      !!base.verifierDigest,
+      signal,
+      waiverEnvironment(waivers),
       {
-        kind: "write",
-        path: join(workspace.paths.sessionDir, "check-output", `${base.id}.log`),
-        content: raw,
-        mode: 0o600,
-        expectedBefore: { existed: false },
+        onEnvironment: (environment) => {
+          originalEnvironment = environment;
+        },
       },
-    ],
-  };
+    );
+    // Capture joins stdout and stderr without chronological ordering. Attribution depends on
+    // indentation and explicit error/result headers, not blank lines at that stream join.
+    const raw = output.ok ? `${output.value.stdout}\n${output.value.stderr}` : output.error.message;
+    const commandVerifier =
+      base.verifierDigest && output.ok && output.value.executableDigest
+        ? {
+            version: 2 as const,
+            verifier: base.verifierDigest,
+            executable: output.value.executableDigest,
+          }
+        : undefined;
+    // The recorded text is for reading and may leave lines out; waivers and disputes are decided
+    // on the whole redacted output.
+    const evidence = commandEvidenceOutput(
+      output,
+      !!base.verifierDigest,
+      workspace.paths.root,
+      redact,
+    );
+    const full = redact(raw);
+    const decided = waivedResult(output, full, workspace.paths.root, waivers);
+    const { status, note } = await commandDecision(
+      workspace,
+      record,
+      check,
+      decided,
+      waivers,
+      full,
+      output,
+    );
+    const flip = isUnwaivedPass(status, output)
+      ? await productFlipCheck(
+          workspace,
+          record,
+          slice,
+          check,
+          flipEnvironmentIdentity(base.comparisonEnvironment, originalEnvironment),
+          (directory) =>
+            executeCommand(workspace, check, false, signal, waiverEnvironment(waivers), {
+              cwd: directory,
+              environment: reboundFlipEnvironment(
+                originalEnvironment,
+                workspace.paths.root,
+                directory,
+              ),
+            }),
+          redact,
+          isolation,
+        )
+      : {};
+    return {
+      execution: {
+        ...base,
+        ...flip,
+        ...(commandVerifier ? { commandVerifier } : {}),
+        verifierDigest: commandVerifier ? hashValue(commandVerifier) : undefined,
+        assertions: "agent-reported",
+        status,
+        exitCode: output.ok ? output.value.exitCode : -1,
+        durationMs: output.ok ? output.value.durationMs : Date.now() - started,
+        output: [note, evidence].filter(Boolean).join("\n"),
+        ...(waivers ? { pinnedFailures: pinnedFailureSummary(full, waivers) } : {}),
+      },
+      state: record.state,
+      mutations: [
+        {
+          kind: "write",
+          path: join(workspace.paths.sessionDir, "check-output", `${base.id}.log`),
+          content: raw,
+          mode: 0o600,
+          expectedBefore: { existed: false },
+        },
+      ],
+    };
+  } finally {
+    await disposeFlipEnvironment(isolation).catch((cause) => {
+      console.warn(redact(`comparison environment cleanup failed: ${String(cause)}`));
+    });
+  }
 }
 
 async function commandDecision(
@@ -398,6 +434,11 @@ async function executeCommand(
   identifyExecutable: boolean,
   signal?: AbortSignal,
   extraEnvironment: Record<string, string> = {},
+  options: {
+    cwd?: string;
+    environment?: Record<string, string>;
+    onEnvironment?: (environment: Record<string, string>) => void;
+  } = {},
 ): Promise<Result<CommandOutput & { executableDigest?: string }>> {
   const valid = validateProductCheckCommand(check);
   if (!valid.ok) return valid;
@@ -406,37 +447,45 @@ async function executeCommand(
   const argv = resolveCommand(check.command);
   if (!argv.ok) return err(fromUnknown(argv.error.message, "ARTIFACT_INVALID"));
   try {
-    const result = await withProductCheckContext(
-      workspace.paths.root,
-      check.id,
-      async (environment, directory) => {
-        const binary = argv.value[0] ?? "";
-        const checkEnvironment = check.id.startsWith("PINNED_")
-          ? { ...(await privateAcceptanceEnvironment(environment, directory)), ...extraEnvironment }
+    const inContext = async () =>
+      withProductCheckContext(workspace.paths.root, check.id, async (environment, directory) => {
+        const inheritedEnvironment = options.environment
+          ? {
+              ...options.environment,
+              [PRODUCT_CHECK_CONTEXT]: environment[PRODUCT_CHECK_CONTEXT] as string,
+            }
           : environment;
-        const before = identifyExecutable
-          ? await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment)
-          : undefined;
-        const executed = await run(binary, argv.value.slice(1), {
-          cwd: workspace.paths.root,
-          env: checkEnvironment,
-          replaceEnv: true,
-          timeoutMs: check.timeoutMs,
-          signal,
-        });
-        if (!executed.ok) return executed;
-        const after = before
-          ? await commandExecutableDigest(binary, workspace.paths.root, checkEnvironment)
-          : undefined;
-        return {
-          ok: true as const,
-          value: {
-            ...executed.value,
-            executableDigest: before && before === after ? before : undefined,
-          },
-        };
-      },
-    );
+        const checkEnvironment = check.id.startsWith("PINNED_")
+          ? {
+              ...(await privateAcceptanceEnvironment(inheritedEnvironment, directory)),
+              ...extraEnvironment,
+            }
+          : inheritedEnvironment;
+        options.onEnvironment?.(checkEnvironment);
+        const execute = (executionEnvironment: Record<string, string>) =>
+          runIdentifiedCommand(
+            options.cwd
+              ? argv.value.map((arg) => arg.replaceAll(workspace.paths.root, options.cwd as string))
+              : argv.value,
+            options.cwd ?? workspace.paths.root,
+            executionEnvironment,
+            check.timeoutMs,
+            identifyExecutable,
+            signal,
+          );
+        if (options.cwd && options.cwd !== workspace.paths.root)
+          return withProductCheckContext(options.cwd, check.id, (environment) =>
+            execute({
+              ...checkEnvironment,
+              [PRODUCT_CHECK_CONTEXT]: JSON.stringify([
+                ...JSON.parse(checkEnvironment[PRODUCT_CHECK_CONTEXT] ?? "[]"),
+                ...JSON.parse(environment[PRODUCT_CHECK_CONTEXT] ?? "[]"),
+              ]),
+            }),
+          );
+        return execute(checkEnvironment);
+      });
+    const result = await inContext();
     if (!result.ok && result.error.details?.errno === "ENOENT")
       return err(
         vispError("COMMAND_FAILED", missingCommandMessage(check, argv.value[0] ?? ""), {
@@ -491,4 +540,116 @@ function commandStatus(output: Result<CommandOutput>, root: string): ProductExec
   return sandboxDenial(`${output.value.stdout}\n${output.value.stderr}`, root) === "denied"
     ? "environment-failed"
     : "failed";
+}
+
+function isUnwaivedPass(status: ProductExecution["status"], output: Result<CommandOutput>) {
+  return status === "passed" && output.ok && output.value.exitCode === 0;
+}
+
+async function runIdentifiedCommand(
+  argv: string[],
+  cwd: string,
+  environment: Record<string, string>,
+  timeoutMs: number | undefined,
+  identifyExecutable: boolean,
+  signal?: AbortSignal,
+): Promise<Result<CommandOutput & { executableDigest?: string }>> {
+  const binary = argv[0] ?? "";
+  const before = identifyExecutable
+    ? await commandExecutableDigest(binary, cwd, environment)
+    : undefined;
+  const executed = await run(binary, argv.slice(1), {
+    cwd,
+    env: environment,
+    replaceEnv: true,
+    timeoutMs,
+    signal,
+  });
+  if (!executed.ok) return executed;
+  const after = before ? await commandExecutableDigest(binary, cwd, environment) : undefined;
+  return {
+    ok: true,
+    value: { ...executed.value, executableDigest: before && before === after ? before : undefined },
+  };
+}
+
+/**
+ * Identity of an advisory flip's environment: the check's comparison identity plus the toolchain
+ * and locale variables it runs under. Other variables (shell state, unrelated settings) do not
+ * make a recorded flip stale, since they cannot change what the check loads.
+ */
+function flipEnvironmentIdentity(
+  comparison: string | undefined,
+  environment: Record<string, string> | undefined,
+) {
+  return hashValue({
+    comparison,
+    parts: comparisonEnvironmentParts(environment ?? {}),
+  });
+}
+
+/** Attach advisory metadata to a reused pass without creating new passing evidence. */
+export async function reuseProductCheckFlip(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice | undefined,
+  check: ProductCheck,
+  execution: ProductExecution,
+  verifierSnapshot: Record<string, string>,
+  signal?: AbortSignal,
+) {
+  if (
+    !slice?.checks.includes(check.id) ||
+    workspace.config.workflow.flipCheck === "off" ||
+    isBrowserCheckCommand(check.command) ||
+    execution.status !== "passed" ||
+    execution.exitCode !== 0
+  )
+    return {};
+  // A reused pass has no pre-run snapshot. Where one is needed, a recorded advisory stands:
+  // recomputing it could only report unchecked for want of that snapshot.
+  if (execution.flip && (await unsnapshottedFlipState(workspace.paths.root))) return {};
+  const environment = await resolvedProductExecutionEnvironment();
+  const redact = await checkRedactor(workspace, check, verifierSnapshot);
+  return productFlipCheck(
+    workspace,
+    record,
+    slice,
+    check,
+    flipEnvironmentIdentity(execution.comparisonEnvironment, environment),
+    (directory) =>
+      executeCommand(
+        workspace,
+        check,
+        false,
+        signal,
+        {},
+        {
+          cwd: directory,
+          environment: reboundFlipEnvironment(environment, workspace.paths.root, directory),
+        },
+      ),
+    redact,
+  );
+}
+
+async function checkRedactor(
+  workspace: WorkspaceState,
+  check: ProductCheck,
+  verifierSnapshot: Record<string, string>,
+) {
+  const argv = isBrowserCheckCommand(check.command) ? undefined : resolveCommand(check.command);
+  const envFiles = argv?.ok
+    ? argv.value.flatMap((arg, index, args) =>
+        arg.startsWith("--env-file=")
+          ? [arg.slice("--env-file=".length)]
+          : arg === "--env-file" && args[index + 1]
+            ? [args[index + 1] as string]
+            : [],
+      )
+    : [];
+  return outputRedactor(workspace.paths.root, [
+    ...envFiles,
+    ...Object.keys(verifierSnapshot).filter((path) => privatePath(path)),
+  ]);
 }
