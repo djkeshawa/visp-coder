@@ -55,6 +55,7 @@ def run(commands):
     completed = subprocess.run(
         ["./run.sh"], cwd=ROOT, input="\n".join(commands) + "\n", capture_output=True, text=True, timeout=30
     )
+    completed.check_returncode()
     return completed.stdout.split("\n")[:-1] if completed.stdout.endswith("\n") else completed.stdout.split("\n")
 
 
