@@ -284,11 +284,14 @@ export async function preToolUseRegistration(
 /**
  * A path reference identifies an edited VISP entry for conflict reporting.
  * It never establishes health: only the exact generated entry is active.
+ * Either separator matches: `hookCommand` writes backslashes on Windows.
  */
 function referencesHook(entry: HookEntry, hookPath: string): boolean {
   return Array.isArray(entry.hooks)
     ? entry.hooks.some(
-        (hook) => typeof hook?.command === "string" && hook.command.includes(hookPath),
+        (hook) =>
+          typeof hook?.command === "string" &&
+          hook.command.replaceAll("\\", "/").includes(hookPath),
       )
     : false;
 }

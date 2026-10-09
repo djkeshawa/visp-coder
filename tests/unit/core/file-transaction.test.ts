@@ -35,24 +35,28 @@ async function root(): Promise<string> {
 }
 
 describe("file transactions", () => {
-  it("rolls back a mode-only mutation even when both snapshots contain identical bytes", async () => {
-    const project = await root();
-    await writeFile(join(project, "mode-only"), "same");
-    await chmod(join(project, "mode-only"), 0o600);
-    await applyFileTransaction(
-      project,
-      "mode-only-rollback",
-      [{ kind: "write", path: "mode-only", content: "same", mode: 0o755 }],
-      {
-        leavePreparedOnError: true,
-        afterMutation() {
-          throw new Error("interrupted");
+  // Windows has no POSIX permission bits: stat() reports 0o666 or 0o444 whatever was requested.
+  it.skipIf(process.platform === "win32")(
+    "rolls back a mode-only mutation even when both snapshots contain identical bytes",
+    async () => {
+      const project = await root();
+      await writeFile(join(project, "mode-only"), "same");
+      await chmod(join(project, "mode-only"), 0o600);
+      await applyFileTransaction(
+        project,
+        "mode-only-rollback",
+        [{ kind: "write", path: "mode-only", content: "same", mode: 0o755 }],
+        {
+          leavePreparedOnError: true,
+          afterMutation() {
+            throw new Error("interrupted");
+          },
         },
-      },
-    );
-    expect((await recoverFileTransactions(project)).ok).toBe(true);
-    expect((await stat(join(project, "mode-only"))).mode & 0o777).toBe(0o600);
-  });
+      );
+      expect((await recoverFileTransactions(project)).ok).toBe(true);
+      expect((await stat(join(project, "mode-only"))).mode & 0o777).toBe(0o600);
+    },
+  );
 
   it("ignores a journal removed between listing and reading", async () => {
     const project = await root();
@@ -66,20 +70,23 @@ describe("file transactions", () => {
     }
   });
 
-  it("applies requested modes under a restrictive umask", async () => {
-    const project = await root();
-    const previous = process.umask(0o077);
-    try {
-      const result = await applyFileTransaction(project, "restrictive-umask", [
-        { kind: "write", path: "state.json", content: "{}\n" },
-      ]);
-      expect(result.ok, JSON.stringify(result)).toBe(true);
-      expect((await stat(join(project, "state.json"))).mode & 0o777).toBe(0o644);
-      expect((await inspection(project)).pending).toEqual([]);
-    } finally {
-      process.umask(previous);
-    }
-  });
+  it.skipIf(process.platform === "win32")(
+    "applies requested modes under a restrictive umask",
+    async () => {
+      const project = await root();
+      const previous = process.umask(0o077);
+      try {
+        const result = await applyFileTransaction(project, "restrictive-umask", [
+          { kind: "write", path: "state.json", content: "{}\n" },
+        ]);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        expect((await stat(join(project, "state.json"))).mode & 0o777).toBe(0o644);
+        expect((await inspection(project)).pending).toEqual([]);
+      } finally {
+        process.umask(previous);
+      }
+    },
+  );
 
   it("recovers matching content even when its mode differs from the journal", async () => {
     const project = await root();

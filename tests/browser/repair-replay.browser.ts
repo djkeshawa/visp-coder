@@ -24,11 +24,13 @@ it("retains a failed second interaction across edits and replays its unchanged a
     ];
     const shallow = await runProductCapture(state, {
       task: "T001",
+      outcomes: ["O001"],
       journey: { url, actions: first },
     });
     expect(shallow.ok && shallow.value.status).toBe("completed");
     const failed = await runProductCapture(state, {
       task: "T001",
+      outcomes: ["O001"],
       journey: {
         url,
         actions: [
@@ -49,7 +51,11 @@ it("retains a failed second interaction across edits and replays its unchanged a
       failed.value.runId,
     );
     // A new first-action-only capture cannot resolve the original second-action failure.
-    await runProductCapture(state, { task: "T001", journey: { url, actions: first } });
+    await runProductCapture(state, {
+      task: "T001",
+      outcomes: ["O001"],
+      journey: { url, actions: first },
+    });
     const unchanged = await readProductRecord(state);
     if (!unchanged.ok) throw new Error(unchanged.error.message);
     expect(currentJourneyFailures(unchanged.value, subject.value).join(" ")).toContain(

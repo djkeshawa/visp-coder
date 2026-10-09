@@ -68,6 +68,31 @@ it("resolves Windows npm shims through PATHEXT and escapes metacharacters", asyn
   }
 });
 
+it("prefers a PATHEXT shim over Node's extensionless Windows npm shell script", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "visp-windows-command-"));
+  try {
+    await writeFile(join(directory, "npm"), "#!/usr/bin/env bash\n");
+    await writeFile(join(directory, "npm.cmd"), "@echo off\r\n");
+    const prepared = prepareCommand(
+      "npm",
+      ["--version"],
+      { PATH: directory, PATHEXT: ".exe;.cmd" },
+      "win32",
+    );
+    expect(prepared.file).toBe("cmd.exe");
+    expect(prepared.args[3]).toContain("npm.cmd");
+    const explicit = prepareCommand(
+      "npm.cmd",
+      ["--version"],
+      { PATH: directory, PATHEXT: ".exe;.cmd" },
+      "win32",
+    );
+    expect(explicit.args[3]).toContain("npm.cmd");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 describe("run", () => {
   it("delivers explicit stdin and closes it after the input", async () => {
     const input = "first line\nUnicode: café\n";

@@ -39,8 +39,8 @@ describe("doctor", () => {
     expect(result.envelope.data?.settings.value.settings).toContainEqual(
       expect.objectContaining({
         path: "workflow.flipCheck",
-        effect: "legacy-only",
-        note: expect.stringContaining("historical telemetry"),
+        effect: "conditional",
+        note: expect.stringContaining("display-only regression comparison"),
       }),
     );
     const text = project.run("doctor", "--settings");
