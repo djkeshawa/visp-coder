@@ -156,7 +156,7 @@ export function claudeExecCriticHost(options: {
   };
 }
 
-const CLAUDE_HOSTS = ["api.anthropic.com", "claude.ai"];
+export const CLAUDE_HOSTS = ["api.anthropic.com", "claude.ai"];
 /** Linux limits one argument to 128 KiB (bytes); the schema travels as an argument. */
 const CLAUDE_SCHEMA_LIMIT = 120 * 1024;
 
@@ -228,7 +228,7 @@ export async function runClaudeStructured(options: {
 }
 
 /** `claude auth status` prints JSON with `loggedIn`; anything else counts as signed out. */
-async function claudeSignedIn(executable: string, signal?: AbortSignal): Promise<boolean> {
+export async function claudeSignedIn(executable: string, signal?: AbortSignal): Promise<boolean> {
   const status = await run(executable, ["auth", "status", "--json"], { signal });
   return status.exitCode === 0 && claudeReply(status.stdout)?.loggedIn === true;
 }

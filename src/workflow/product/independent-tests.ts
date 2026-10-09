@@ -35,7 +35,14 @@ import {
   type ProductFeatureOutcome,
   updateProductBrief,
 } from "./brief.js";
-import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
+import {
+  CLAUDE_HOSTS,
+  claudeSignedIn,
+  reachesModel,
+  runClaudeStructured,
+  runCodexStructured,
+  type SessionActivity,
+} from "./critic-exec.js";
 import { browserUnavailable } from "./environment.js";
 import { hostRequest } from "./host-prompts.js";
 import {
@@ -211,10 +218,25 @@ export type TestsStarter = ((
 const TESTS_WAIT_MS = { cli: 100_000, mcp: 50_000 } as const;
 
 export function testsWaitMs(workspace: WorkspaceState, channel: "cli" | "mcp"): number {
-  return workspace.config.critic?.launch === "codex-exec" &&
-    workspace.config.critic.harness === "codex"
-    ? TESTS_WAIT_MS[channel]
-    : 0;
+  return testerCli(workspace) ? TESTS_WAIT_MS[channel] : 0;
+}
+
+/**
+ * The CLI VISP launches the tester with, as for the reviewer: the critic's harness, or the
+ * project's when the critic names none. Undefined when VISP launches no tester.
+ */
+export function testerCli(workspace: WorkspaceState): "codex" | "claude" | undefined {
+  const { critic } = workspace.config;
+  const harness = critic?.harness ?? workspace.config.harness;
+  if (critic?.launch === "codex-exec" && harness === "codex") return "codex";
+  if (critic?.launch === "claude-exec" && harness === "claude-code") return "claude";
+  return undefined;
+}
+
+/** The tester session for this project's critic settings; undefined when VISP launches none. */
+export function configuredTester(workspace: WorkspaceState): IndependentTester | undefined {
+  const cli = testerCli(workspace);
+  return cli === "claude" ? claudeTester() : cli === "codex" ? codexTester() : undefined;
 }
 
 /** The tester VISP launches for this project, or undefined when it launches no model. */
@@ -222,27 +244,27 @@ export function configuredTestsStarter(
   workspace: WorkspaceState,
   channel: "cli" | "mcp" = "cli",
 ): TestsStarter | undefined {
-  if (
-    workspace.config.critic?.launch !== "codex-exec" ||
-    workspace.config.critic.harness !== "codex"
-  )
-    return undefined;
-  const probe = prepareCommand("codex", ["--version"]);
-  if (
+  const cli = testerCli(workspace);
+  const tester = configuredTester(workspace);
+  if (!cli || !tester || !runnable(cli)) return undefined;
+  // Codex's sandbox ends every process a shell command started, so a detached tester never
+  // finished there; a Codex worker's CLI runs it inside `visp feature` instead. The MCP
+  // server outlives each call, so it keeps the background process.
+  if (channel === "cli" && workspace.config.harness === "codex") return inlineTests(tester);
+  // Bundled builds place the CLI entry beside this chunk; source runs test inline.
+  const entry = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
+  return existsSync(entry) ? backgroundTests(entry) : inlineTests(tester);
+}
+
+function runnable(cli: string): boolean {
+  const probe = prepareCommand(cli, ["--version"]);
+  return (
     spawnSync(probe.file, probe.args, {
       stdio: "ignore",
       timeout: 3000,
       windowsVerbatimArguments: probe.windowsVerbatimArguments,
-    }).status !== 0
-  )
-    return undefined;
-  // Codex's sandbox ends every process a shell command started, so a detached tester never
-  // finished there; a Codex worker's CLI runs it inside `visp feature` instead. The MCP
-  // server outlives each call, so it keeps the background process.
-  if (channel === "cli" && workspace.config.harness === "codex") return inlineTests(codexTester());
-  // Bundled builds place the CLI entry beside this chunk; source runs test inline.
-  const cli = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
-  return existsSync(cli) ? backgroundTests(cli) : inlineTests(codexTester());
+    }).status === 0
+  );
 }
 
 export function codexTester(
@@ -252,10 +274,7 @@ export function codexTester(
     const { lookup: dnsLookup } = await import("node:dns/promises");
     if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)))))
       throw new Error("The tester cannot reach its model from this process");
-    await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
-    const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
-    const started = Date.now();
-    try {
+    return testerSession(async (directory) => {
       const root = request.explore
         ? await repositoryCopy(
             request.root,
@@ -263,10 +282,8 @@ export function codexTester(
             request.blockedPaths ?? [],
             request.sourceRoot,
           )
-        : await mkdir(join(directory, "empty-project"), { recursive: true }).then(() =>
-            join(directory, "empty-project"),
-          );
-      return await runCodexStructured({
+        : await emptyProject(directory);
+      return runCodexStructured({
         ...(options.executable ? { executable: options.executable } : {}),
         root,
         ...(request.explore ? { sandbox: "workspace-write" as const, network: true } : {}),
@@ -278,17 +295,70 @@ export function codexTester(
         signal: AbortSignal.timeout(TESTER_TIMEOUT_MS),
         ...(request.onActivity ? { onActivity: request.onActivity } : {}),
       });
-    } catch (cause) {
-      // An abort here is the tester's own time limit; "The operation was aborted" hid that.
-      if (Date.now() - started >= TESTER_TIMEOUT_MS)
-        throw new Error(
-          `The tester did not answer within ${TESTER_TIMEOUT_MS / 60_000} minutes (${message(cause)})`,
-        );
-      throw cause;
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    });
   };
+}
+
+/**
+ * The tester as one `claude -p` session with the reviewer's restrictions (read-only tools,
+ * no settings, hooks or MCP servers), confined to an empty temporary directory. It writes
+ * tests for new projects only: running an existing program needs the Codex tester's
+ * writable, networked sandbox.
+ */
+export function claudeTester(
+  options: { executable?: string; lookup?: (host: string) => Promise<unknown> } = {},
+): IndependentTester {
+  return async (request) => {
+    if (request.explore) throw new Error(CLAUDE_EXISTING_CODE);
+    if (!(await claudeSignedIn(options.executable ?? "claude", AbortSignal.timeout(30_000))))
+      throw new Error(
+        "Claude Code is not signed in for this process (claude auth status); sign in with claude, then run visp work --feature <id> --retry-tests",
+      );
+    const { lookup: dnsLookup } = await import("node:dns/promises");
+    if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)), CLAUDE_HOSTS)))
+      throw new Error("The tester cannot reach its model from this process");
+    return testerSession(async (directory) => {
+      const root = await emptyProject(directory);
+      return runClaudeStructured({
+        ...(options.executable ? { executable: options.executable } : {}),
+        root,
+        directory: root,
+        model: request.model,
+        ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
+        schema: request.schema,
+        prompt: request.prompt,
+        signal: AbortSignal.timeout(TESTER_TIMEOUT_MS),
+      });
+    });
+  };
+}
+
+const CLAUDE_EXISTING_CODE =
+  "The Claude tester writes tests for new projects only; tests of an existing codebase need critic.launch: codex-exec with critic.harness: codex";
+
+/** One tester session in a fresh temporary directory, removed afterwards. */
+async function testerSession(session: (directory: string) => Promise<unknown>): Promise<unknown> {
+  await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
+  const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
+  const started = Date.now();
+  try {
+    return await session(directory);
+  } catch (cause) {
+    // An abort here is the tester's own time limit; "The operation was aborted" hid that.
+    if (Date.now() - started >= TESTER_TIMEOUT_MS)
+      throw new Error(
+        `The tester did not answer within ${TESTER_TIMEOUT_MS / 60_000} minutes (${message(cause)})`,
+      );
+    throw cause;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function emptyProject(directory: string): Promise<string> {
+  const root = join(directory, "empty-project");
+  await mkdir(root, { recursive: true });
+  return root;
 }
 
 /** Exactly what `mkdtemp` makes (prefix plus six characters), so named directories survive. */
@@ -376,8 +446,9 @@ export async function independentTestsBeforeWork(
   // Workers waited 1–2 minutes here. Pinned tests are not part of a slice's contract, so
   // work proceeds and the tests are pinned whenever the tester finishes.
   if (!record) {
-    if (!starter) return ok(unavailableTester(workspace));
-    if (!(await testerLaunches(workspace, loaded.value))) return ok(undefined);
+    if (!(await testerApplies(workspace, loaded.value))) return ok(undefined);
+    if (!starter || !(await testerLaunches(workspace, loaded.value)))
+      return ok(await skippedTester(workspace));
     const source = await startingSourceDigest(workspace, brief.feature, brief);
     if (!source.ok) return source;
     const started = await starter(workspace, brief.feature, waitMs);
@@ -387,11 +458,32 @@ export async function independentTestsBeforeWork(
   return ok(await summary(record));
 }
 
-function unavailableTester(workspace: WorkspaceState): IndependentTestsSummary | undefined {
-  return workspace.config.critic?.launch === "codex-exec" &&
-    workspace.config.critic.harness !== "codex"
-    ? { status: "skipped", reason: "The independent tester requires critic.harness: codex" }
-    : undefined;
+/** `work --write-tests` and `--retry-tests`: the configured tester, or why VISP launches none. */
+export async function writeConfiguredTests(
+  workspace: WorkspaceState,
+  feature: string,
+  retryFailed: boolean,
+): Promise<Result<IndependentTestsRecord>> {
+  const tester = configuredTester(workspace);
+  if (!tester)
+    return err(vispError("CONFIG_INVALID", (await skippedTester(workspace)).reason ?? ""));
+  return writeIndependentTests(workspace, feature, tester, retryFailed);
+}
+
+/** Why a feature that would get independent tests gets none, so the worker can say so. */
+async function skippedTester(workspace: WorkspaceState): Promise<IndependentTestsSummary> {
+  const critic = workspace.config.critic;
+  const cli = testerCli(workspace);
+  const reason = !cli
+    ? critic?.launch === "codex-exec"
+      ? "The independent tester requires critic.harness: codex"
+      : critic?.launch === "claude-exec"
+        ? "The independent tester requires critic.harness: claude-code"
+        : "VISP launches its independent tester only with critic.launch: codex-exec or claude-exec, so no acceptance tests are written for this feature"
+    : cli === "claude" && (await existingCode(workspace.paths.root))
+      ? CLAUDE_EXISTING_CODE
+      : `The independent tester needs the ${cli} CLI on PATH for this process`;
+  return { status: "skipped", reason };
 }
 
 /**
@@ -582,8 +674,11 @@ function hasFunctionalOutcome(brief: ProductRecord["brief"]): boolean {
   return brief.outcomes.some((outcome) => outcome.kind === "functional");
 }
 
-/** Once per feature, when the project pins no acceptance checks of its own. */
-async function testerLaunches(workspace: WorkspaceState, record: ProductRecord): Promise<boolean> {
+/**
+ * Whether a feature would get a tester, whichever CLI launches it: once per feature, when the
+ * critic is on and the project pins no acceptance checks of its own (existing code is opt-in).
+ */
+async function testerApplies(workspace: WorkspaceState, record: ProductRecord): Promise<boolean> {
   if (record.brief.acceptanceBaseline.length || record.state.status === "accepted") return false;
   if (
     workspace.config.critic?.existingCodeTests !== true &&
@@ -591,7 +686,19 @@ async function testerLaunches(workspace: WorkspaceState, record: ProductRecord):
   )
     return false;
   const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
-  return policy.ok && policy.value.enabled && policy.value.config?.harness === "codex";
+  return policy.ok && policy.value.enabled;
+}
+
+/**
+ * Whether a tester for the critic's harness can test this project: a Codex tester any
+ * project, a Claude tester new projects only. The starter decides which CLI launches it.
+ */
+async function testerLaunches(workspace: WorkspaceState, record: ProductRecord): Promise<boolean> {
+  if (!(await testerApplies(workspace, record))) return false;
+  const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
+  const harness = policy.ok ? policy.value.config?.harness : undefined;
+  if (harness === "codex") return true;
+  return harness === "claude-code" && !(await existingCode(workspace.paths.root));
 }
 
 async function summary(record: IndependentTestsRecord): Promise<IndependentTestsSummary> {

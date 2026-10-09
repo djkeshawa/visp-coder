@@ -13,11 +13,10 @@ import {
 } from "../../workflow/product/done-review.js";
 import {
   beginFeatureTester,
-  codexTester,
   configuredTestsStarter,
   createProductFeatureChecked,
   testsWaitMs,
-  writeIndependentTests,
+  writeConfiguredTests,
 } from "../../workflow/product/independent-tests.js";
 import {
   readProductBrief,
@@ -377,7 +376,7 @@ export const workCommand = () =>
     opts.retryTests && !opts.feature
       ? Promise.resolve(err(vispError("CONFIG_INVALID", "--retry-tests requires --feature")))
       : (opts.writeTests || opts.retryTests) && opts.feature
-        ? writeIndependentTests(state, opts.feature, codexTester(), opts.retryTests === true)
+        ? writeConfiguredTests(state, opts.feature, opts.retryTests === true)
         : opts.inspect
           ? runProductContext(state, opts)
           : runProductWork(state, opts, configuredTestsStarter(state), testsWaitMs(state, "cli")),
