@@ -35,6 +35,25 @@ VISP matched or beat every arm on every task, and took about as long as Spec Kit
 
 The gain was smaller and mixed. The 53 run declared the program itself as its check and never ran `visp done`, so it was never reviewed. On the reservations and bundles tasks, earlier two-run rounds tied (bare 44, 44 and VISP 43, 42 of 44; 60 each on bundles).
 
+## Strong-worker results (October 2026)
+
+**New projects, Codex `gpt-6-luna` at maximum effort,** three runs per arm, 90-minute cap. On reservations, the spreadsheet engine, conventions carryover and the slingshot game, VISP scored the maximum in every run (44, 38, 57, 28) at about 22 minutes per task. Spec Kit also scored the maximum at about twice that time, and bare and BMAD dropped a point once or twice. Those tasks no longer separate the arms at this worker strength.
+
+On a harder catapult game (`bench/tasks/catapult-game`, 69 browser checks not yet published), the first VISP build scored 61, 68, 59 against bare 66.3, Spec Kit 66.7 and BMAD 66.3 on average: its tester treated "every level is winnable" as an open question, so unwinnable levels shipped. After the tester was told to search for each stated goal through allowed inputs, 18 VISP runs averaged 67.1. That lead is within run-to-run noise.
+
+**Existing repositories: SWE-bench Verified Mini** (50 Django and Sphinx issues, official test images), same worker, two runs per arm. VISP used a Claude Sonnet 5.5 reviewer (`critic.launch: claude-exec`) and no tester, which runs for new projects only:
+
+| Arm | Run 1 | Run 2 | Resolved of 100 | Mean time per task |
+|---|---|---|---|---|
+| VISP | 37 | 32 | 69 | 8.3 min |
+| Bare | 32 | 34 | 66 | 3.5 min |
+| Spec Kit | 30 | 34 | 64 | 10.8 min |
+| BMAD | 33 | 29 | 62 | 6.2 min |
+
+None of the differences is significant (sign tests, p 0.12 to 0.58). Five BMAD runs in the second round stopped within 30 seconds because the worker mistyped the path to BMAD's skill; they are counted as BMAD's result. In earlier rounds VISP's review never ran on these repositories: `init` read Django as JavaScript, adopted checks that could not pass there, and review packets broke on non-UTF-8 fixtures and on scopes of thousands of files. With those fixed, reviews ran.
+
+**The tester matters where the hidden failures are behavioural.** Of 310 pinned tester suites, half failed on their first run, so defects were fixed before `done`. When `claude-exec` was added it started no tester; two catapult runs without one scored 55 (unwinnable levels again) and 68 (time cap), and two with the Claude tester added scored 64 and 66. Replaying review packets with more source, higher effort or a prompt to read more files found no additional hidden defects: the misses (an unwinnable level, a wrong gravity arc, a range corner) needed executed probes, not more reading.
+
 ## What made the difference
 
 **The harness must launch the critic itself.** In the first weak-agent pilot (Luna at low effort, a sentiment API with 36 hidden tests), bare coding scored 36 and both VISP arms 34: workers never ran a check that covered errors and never delegated review. A critic launched by VISP (`codex exec`, read-only) on the same code reported the two missing 405 responses, acceptance of `NaN` and a request that can hang without `Content-Length`, each with a next check. VISP now launches the reviewer after checks pass (`critic.launch: codex-exec`).
@@ -141,4 +160,5 @@ Independent studies point the same way: execution feedback against fixed tests i
 - Three runs per arm on four tasks the authors wrote; differences of one or two checks are within run-to-run noise.
 - The reviewer is a stronger model than the weak worker. Part of VISP's gain may come from that model rather than the loop; a same-model reviewer ablation has not been run.
 - The opt-in tester for existing codebases needs more trials, including with its newest rule that tests of existing behavior must use every assertion helper the new tests use.
-- Stronger workers gain little on these tasks; harder tasks, such as stateful browser games and larger multi-module changes, and blind code review scored separately are still to come.
+- Stronger workers gain little on these tasks. On SWE-bench Verified Mini and the catapult game VISP leads by amounts within noise; more runs, a weaker worker on the current build, and blind code review scored separately are still to come.
+- The catapult game's hidden checks are not yet in `bench/`, so its scores cannot be reproduced from this repository.

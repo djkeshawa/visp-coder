@@ -13,6 +13,10 @@ Fixed-contract tasks for comparing coding workflows (bare coding, Spec Kit, BMAD
 | `conventions-carryover` | Two sessions on the existing reservations service: the first states team API conventions and adds a list and an audit log; a fresh second session adds prices, retirement and a reservations list under those conventions | 20 core + 20 new + 9 code + 8 memory |
 | `sheet-carryover` | Two sessions on the existing spreadsheet engine: AVERAGE and ROUND, then MEDIAN and directed rounding carrying the empty-statistic rule and digits restriction | 22 core + 14 new + 8 memory |
 | `archive-carryover` | Two sessions on the existing reservations service: item archiving and a quantity cap, then bundles and restocking that must preserve those feature decisions | 15 core + 17 new + 7 memory |
+| `conventions-carryover-prose` | `conventions-carryover` with the first request stating the conventions in conversational prose instead of a labelled list | as `conventions-carryover` |
+| `archive-carryover-raised` | `archive-carryover` after an intermediate feature (`intermediate.md`) raised the quantity cap to 50,000, with ten unrelated earlier requests (`noise.md`) in the store; checks use the raised cap | as `archive-carryover` |
+| `slingshot-game` | New browser game: drag-to-launch slingshot, physics, three levels, test hooks on `window.gameTest` | 22 core + 6 UI |
+| `catapult-game` | New browser game: catapult with four projectile kinds, three materials, per-level ammunition and three levels | request only; hidden checks not yet published |
 
 - `tasks/<task>/task.md` is the request every arm receives; `start/`, when present, is the existing codebase the project starts from.
 - `tasks/<task>/hidden_test.py <project>` runs the project and prints JSON results.
