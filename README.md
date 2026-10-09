@@ -121,6 +121,7 @@ The request and redacted check output are saved in the committed feature trail; 
 | `visp observations` | List an outcome's captured output and image paths |
 | `visp accept` | Check the assembled product against its mandatory outcomes |
 | `visp pr` | Print the reviewer document |
+| `visp ui` | Open a live, read-only dashboard of the work in your browser |
 | `visp index` / `visp query` | Build and query the repository graph |
 | `visp learn` / `visp recall` | Record and recall project notes |
 | `visp rules` / `visp rules remove <id>` | List or remove the rules the user stated for all later work |
@@ -146,6 +147,7 @@ On VISP's own benchmark (`bench/`: four tasks with hidden checks, Claude Haiku 4
 - [Workflow](docs/workflow.md): briefs, slices, checks, scope and the check gate
 - [Product review](docs/product-review.md): browser journeys, capture and review sessions
 - [Critic](docs/critic.md): independent review setup, launch modes and budgets
+- [Dashboard](docs/dashboard.md): `visp ui`, the live local view of checks, reviews and questions
 - [Configuration](docs/configuration.md): `visp.yml`, the repository graph and `.visp/`
 - [Migration](docs/migration.md): upgrading saved history and the 0.5 removals
 - [Runner](docs/runner.md): the optional `visp-runner` experiment runner
