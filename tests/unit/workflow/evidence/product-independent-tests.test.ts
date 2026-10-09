@@ -970,6 +970,7 @@ it("does not launch the tester on an existing codebase", async () => {
   );
   expect(work.ok, JSON.stringify(work)).toBe(true);
   expect(calls).toBe(0);
+  expect(work.ok && work.value.independentTests).toBeUndefined();
 });
 
 it("gives the tester one repair round with the failure output", async () => {
