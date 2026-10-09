@@ -236,18 +236,20 @@ export class TestWorkspace {
     if (!built.ok) throw new Error(built.error.message);
   }
 
+  /** Retries like global-setup: a git or VISP background process can still be writing a file. */
   async destroy(): Promise<void> {
-    await rm(this.root, { recursive: true, force: true });
-    await rm(this.bin, { recursive: true, force: true });
+    await rm(this.root, REMOVE_TREE);
+    await rm(this.bin, REMOVE_TREE);
   }
 }
 
+const REMOVE_TREE = { recursive: true, force: true, maxRetries: 4, retryDelay: 100 } as const;
 const templates = new Map<string, Promise<{ workspace: TestWorkspace; value: unknown }>>();
 const templateDirs = new Set<string>();
 // Templates live for one test file, and this module is loaded once per file.
 afterAll(async () => {
   templates.clear();
-  for (const dir of templateDirs) await rm(dir, { recursive: true, force: true });
+  for (const dir of templateDirs) await rm(dir, REMOVE_TREE);
   templateDirs.clear();
 });
 
