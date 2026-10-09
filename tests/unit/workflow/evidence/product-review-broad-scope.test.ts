@@ -497,6 +497,8 @@ it("treats many small checks of one outcome as wide inputs without reading them 
   expect(reads).toBe(1);
 });
 
+// Builds 2,100 files to pass the candidate copy limit: about 20 s alone, several times that
+// under a full parallel suite on a small CI runner.
 it("reviews and closes a slice in a repository larger than one candidate copy", async () => {
   const p = await productWorkspace({ critic: true });
   projects.push(p);
@@ -570,4 +572,4 @@ it("reviews and closes a slice in a repository larger than one candidate copy", 
     value: { closed: true, critic: { reviewed: true } },
   });
   expect(reviewed?.current.sources.some((source) => source.id === "CODE-SCOPE")).toBe(true);
-}, 120000);
+}, 300_000);

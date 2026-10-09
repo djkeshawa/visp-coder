@@ -44,7 +44,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       if (published.linkFailure)
         throw Object.assign(new Error(published.linkFailure), { code: published.linkFailure });
       await actual.link(...args);
-      if (String(args[1]).endsWith("mutation.lock/owner.json")) await published.after?.();
+      if (/mutation\.lock[\\/]owner\.json$/.test(String(args[1]))) await published.after?.();
     },
     readdir: async (...args: Parameters<typeof actual.readdir>) => {
       await published.listing?.(String(args[0]));
@@ -136,29 +136,36 @@ describe("worktree state ownership", () => {
     expect(await inspectStateLock(project)).toEqual(ok({ state: "unlocked" }));
   });
 
-  it("reclaims a reused PID with a different recorded process start", async () => {
-    const project = await root();
-    let saved: Record<string, unknown> = {};
-    await withStateLock(project, async () => {
-      saved = JSON.parse(await readFile(join(project, STATE_LOCK_DIRECTORY, "owner.json"), "utf8"));
-      return ok(undefined);
-    });
-    await mkdir(join(project, STATE_LOCK_DIRECTORY));
-    await writeFile(
-      join(project, STATE_LOCK_DIRECTORY, "owner.json"),
-      JSON.stringify({
-        ...saved,
-        processStart: "old-process",
-      }),
-    );
-    expect(await inspectStateLock(project)).toMatchObject({
-      ok: true,
-      value: { state: "abandoned" },
-    });
-    expect(await withStateLock(project, async () => ok("recovered"), { timeoutMs: 0 })).toEqual(
-      ok("recovered"),
-    );
-  });
+  // Only Linux exposes a process start time (/proc/<pid>/stat); elsewhere a reused PID cannot be
+  // told apart from its owner, so the lock stays ambiguous until recovered with its token.
+  it.runIf(process.platform === "linux")(
+    "reclaims a reused PID with a different recorded process start",
+    async () => {
+      const project = await root();
+      let saved: Record<string, unknown> = {};
+      await withStateLock(project, async () => {
+        saved = JSON.parse(
+          await readFile(join(project, STATE_LOCK_DIRECTORY, "owner.json"), "utf8"),
+        );
+        return ok(undefined);
+      });
+      await mkdir(join(project, STATE_LOCK_DIRECTORY));
+      await writeFile(
+        join(project, STATE_LOCK_DIRECTORY, "owner.json"),
+        JSON.stringify({
+          ...saved,
+          processStart: "old-process",
+        }),
+      );
+      expect(await inspectStateLock(project)).toMatchObject({
+        ok: true,
+        value: { state: "abandoned" },
+      });
+      expect(await withStateLock(project, async () => ok("recovered"), { timeoutMs: 0 })).toEqual(
+        ok("recovered"),
+      );
+    },
+  );
 
   it.each(["missing", "changed", "symlink"])(
     "refuses a %s command-check receipt instead of crediting an exit-zero wrapper",
