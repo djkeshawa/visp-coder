@@ -29,13 +29,20 @@ export function prepareCommand(
   };
 }
 
+/**
+ * Like Windows itself, only names with an executable extension run: Node's install directory
+ * holds an extensionless `npm` shell script beside `npm.cmd`, which Windows cannot start.
+ */
 function resolveWindowsFile(file: string, env: NodeJS.ProcessEnv): string {
   if (isAbsolute(file) || /[\\/]/.test(file)) return file;
   const path = env.Path ?? env.PATH ?? "";
-  const extensions = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";");
+  const extensions = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  const named = extensions.some((extension) =>
+    file.toLowerCase().endsWith(extension.toLowerCase()),
+  );
   for (const directory of path.split(";")) {
     if (!directory) continue;
-    for (const extension of ["", ...extensions]) {
+    for (const extension of named ? [""] : extensions) {
       const candidate = join(directory, `${file}${extension}`);
       if (existsSync(candidate)) return candidate;
     }

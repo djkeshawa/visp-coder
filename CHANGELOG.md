@@ -22,6 +22,9 @@
   - Reviewers see a bounded diff of changes to existing files before other context, so a small change inside a large file is not missed.
   - `brief.yaml` is written so every string reads back exactly; a pasted issue with tab-only lines made VISP reject its own brief.
   - Refreshing the code graph no longer overflows the stack on large repositories (about 135,000 relations).
+- On Node 22, every command printed "ExperimentalWarning: SQLite is an experimental feature" to stderr, which hosts and `--json` callers read. VISP now holds back that one warning when it loads `node:sqlite`.
+- On native Windows, `npm` and other commands named without an extension resolved to Node's extensionless `npm` shell script, which Windows cannot start, so npm checks failed. VISP now tries only the extensions in `PATHEXT` when a name has none of them, as Windows does.
+- On native Windows, `visp install` did not recognize its own Claude hook entries (written with backslashes), so an edited entry was not reported as customized, and an install over an older build's entries added new ones beside them instead of replacing them.
 - Product source snapshots hash files with bounded concurrency and batched Git identities: `visp next` on Django went from about 4.8 to 2.1 s and `visp done` from about 45 to 26 s, with the same path checks on every access.
 - MCP `visp_query` with `operation: "unknowns"` lists the unknowns as its answer, with their detail. It said `no results` and then listed them under "Not determined", which the CLI had already stopped doing. Both surfaces now share one renderer; a CLI query with no rows but some unknowns now says `no results` before listing them.
 - Independent acceptance baselines run against private launch-time source copies, so concurrent implementation no longer discards the suite. Each baseline uses a fresh copy; temporary files are cleaned up and environment filtering, process cleanup and output redaction remain in place.

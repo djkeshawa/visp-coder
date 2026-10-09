@@ -24,11 +24,38 @@ import { writeSnapshotRows } from "./write.js";
 /**
  * Loaded at runtime rather than imported: bundlers that do not recognise
  * `node:sqlite` as a builtin rewrite the specifier to a bare `sqlite`, which
- * then fails to resolve.
+ * then fails to resolve. Node 22 warns that SQLite is experimental when the
+ * module loads; that warning would reach every command's stderr, which hosts
+ * and JSON callers read, so only that one warning is held back.
  */
-const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
-  DatabaseSync: typeof DatabaseSyncType;
-};
+const { DatabaseSync } = loadSqlite();
+
+function loadSqlite(): { DatabaseSync: typeof DatabaseSyncType } {
+  const emitWarning = process.emitWarning;
+  process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+    if (!isSqliteExperimentalWarning(warning, rest[0])) {
+      (emitWarning as (...args: unknown[]) => void).call(process, warning, ...rest);
+    }
+  }) as typeof process.emitWarning;
+  try {
+    return createRequire(import.meta.url)("node:sqlite") as {
+      DatabaseSync: typeof DatabaseSyncType;
+    };
+  } finally {
+    process.emitWarning = emitWarning;
+  }
+}
+
+function isSqliteExperimentalWarning(warning: string | Error, options: unknown): boolean {
+  const type =
+    typeof options === "string"
+      ? options
+      : warning instanceof Error
+        ? warning.name
+        : (options as { type?: unknown } | undefined)?.type;
+  const message = warning instanceof Error ? warning.message : warning;
+  return type === "ExperimentalWarning" && message.startsWith("SQLite ");
+}
 
 /** Opaque identity is local to one connection; equal numbers on another store are unrelated. */
 export interface GraphRevision {

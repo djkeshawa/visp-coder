@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ok } from "../../../src/core/result.js";
 import {
   CLAUDE_SETTINGS_FILE,
   hookCommand,
@@ -218,6 +219,22 @@ describe("registerPreToolUseHook", () => {
 });
 
 describe("planPreToolUseRegistration discarding", () => {
+  it("recognizes its own entry written with Windows path separators", () => {
+    const command = 'node "%CLAUDE_PROJECT_DIR%\\.visp\\hooks\\claude-pretooluse.mjs" || exit /b 2';
+    const current = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: "Write", hooks: [{ type: "command", command }] },
+          { matcher: "Bash", hooks: [{ type: "command", command: "node .\\tools\\lint.mjs" }] },
+        ],
+      },
+    });
+
+    expect(planPreToolUseRegistration(current, HOOK_PATH, false)).toEqual(
+      ok({ status: "customized" }),
+    );
+  });
+
   it("marks a forced rewrite of unparseable or malformed hooks as discarding", () => {
     for (const current of ["{ not json", JSON.stringify({ hooks: { PreToolUse: "x" } })]) {
       const plan = planPreToolUseRegistration(current, HOOK_PATH, true);
