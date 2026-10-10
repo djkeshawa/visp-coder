@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
 import type { Result } from "../../src/core/result.js";
 import { runProductCapture } from "../../src/workflow/evidence/product-capture.js";
+import { runProductCaptureAction } from "../../src/workflow/evidence/product-capture-actions.js";
 import { createProductFeature, updateProductBrief } from "../../src/workflow/product/brief.js";
 import { isBrowserCheckCommand } from "../../src/workflow/product/check-command.js";
 import { productCaptureRunSchema } from "../../src/workflow/product/evidence-references.js";
@@ -52,6 +53,7 @@ it("resolves a mistaken post-completion wait through actual runner observations 
     const viewport = { width: 390, height: 844 };
     const first = value(
       await runProductCapture(await workspace.state(), {
+        outcomes: ["O001"],
         journey: {
           url,
           viewport,
@@ -305,6 +307,89 @@ it("reconciles a corrected declared text assertion without changing the outcome 
     expect(after.state.outcomeDigest).toBe(before.state.outcomeDigest);
     expect(after.state.captureRuns[0]).toEqual(originalFailure);
     expect(value(await runProductReview(await workspace.state())).experiments.failures).toEqual([]);
+  } finally {
+    await workspace.destroy();
+  }
+}, 30_000);
+
+it("reports and retires an unlinked mistaken wait while preserving real browser observations", async () => {
+  const workspace = await TestWorkspace.create({ "index.html": html });
+  try {
+    await workspace.installFoundation();
+    workspace.commit("foundation");
+    const started = value(
+      await createProductFeature(await workspace.state(), {
+        goal: "Build a browser UI with visible completion",
+      }),
+    );
+    value(
+      await updateProductBrief(await workspace.state(), {
+        brief: {
+          ...started.brief,
+          outcomes: [{ id: "O001", kind: "experience", statement: "Finishing shows completion" }],
+          slices: [
+            { id: "T001", goal: "Finish", outcomes: ["O001"], scope: { allowed: ["index.html"] } },
+          ],
+        },
+      }),
+    );
+    value(await runProductWork(await workspace.state()));
+    const url = pathToFileURL(join(workspace.root, "index.html")).href;
+    const captured = value(
+      await runProductCapture(await workspace.state(), {
+        journey: {
+          url,
+          actions: [
+            { kind: "click", selector: "#finish" },
+            { kind: "wait-for", selector: "#finish", enabled: true, timeoutMs: 200 },
+          ],
+        },
+      }),
+    );
+    expect(captured.status).toBe("timed-out");
+    expect(captured.information).toContain("not required replay");
+    expect(value(await runProductNext(await workspace.state())).action).toBe("refine");
+    const before = value(await readProductRecord(await workspace.state()));
+    const failed = productCaptureRunSchema.parse(before.state.captureRuns.at(-1));
+    expect(
+      failed.operations.some(
+        (entry) => entry.kind === "observe" && entry.measurement?.json.includes('"matched":false'),
+      ),
+    ).toBe(true);
+    const retired = await runProductCaptureAction(await workspace.state(), {
+      retire: captured.runId,
+      reason: "Completion intentionally disables Finish; the enabled wait was speculative",
+    });
+    expect(retired.ok).toBe(true);
+    const passing = value(
+      await runProductCapture(await workspace.state(), {
+        journey: {
+          url,
+          actions: [
+            { kind: "tap", selector: "#finish" },
+            { kind: "wait-for", selector: "#status", text: "Complete", timeoutMs: 500 },
+          ],
+        },
+      }),
+    );
+    expect(passing.status).toBe("completed");
+    const review = value(await runProductReview(await workspace.state()));
+    expect(review.experiments.failures).toEqual([]);
+    expect(review.experiments.exploratory).toEqual([
+      expect.objectContaining({
+        runId: captured.runId,
+        status: "timed-out",
+        informational: true,
+        retirement: expect.objectContaining({
+          reason: "Completion intentionally disables Finish; the enabled wait was speculative",
+          provenance: "worker-reported",
+        }),
+      }),
+    ]);
+    const after = value(await readProductRecord(await workspace.state()));
+    expect(after.state.captureRuns[0]).toEqual(before.state.captureRuns[0]);
+    expect(after.state.reviews).toEqual([]);
+    expect(value(await runProductNext(await workspace.state())).action).toBe("refine");
   } finally {
     await workspace.destroy();
   }

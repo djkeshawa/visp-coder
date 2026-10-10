@@ -1,6 +1,7 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { TestProject } from "../../functional/support/project.js";
 
 /**
@@ -14,7 +15,12 @@ describe("the pull request check", () => {
   const feature = "001-scoped-change";
 
   beforeEach(async () => {
-    project = await TestProject.create({
+    // Setup is a dozen CLI calls, so it is built once per file and each test gets a copy.
+    ({ project } = await TestProject.cached("ci-workflow", buildFixture));
+  });
+
+  async function buildFixture() {
+    const project = await TestProject.create({
       "src/auth/login.ts": "export const login = () => null;\n",
       "src/billing/invoice.ts": "export const invoice = () => null;\n",
     });
@@ -36,7 +42,9 @@ describe("the pull request check", () => {
         },
       ],
     });
-  });
+
+    return { project, value: null };
+  }
 
   afterEach(async () => {
     await project.destroy();
@@ -98,12 +106,12 @@ describe("the pull request check", () => {
     expect(result.stdout).toContain("No task is authorized");
   });
 
-  it("names the feature to pass when the branch matches none", async () => {
+  it("finds the changed feature when the branch has a new name", async () => {
     const base = await asPullRequest();
     project.git("checkout", "-q", "-b", "unrelated-branch");
 
     const result = project.run("guard", "--base", base, "--scope", "tasks");
-    expect(result.stdout + result.stderr).toContain("--feature");
+    expect(result.exitCode).toBe(0);
   });
 
   it("accepts the feature explicitly", async () => {
@@ -130,24 +138,32 @@ describe("the pull request check", () => {
     expect(project.git("rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("HEAD");
 
     const without = project.run("guard", "--base", base, "--scope", "tasks");
-    expect(without.exitCode).not.toBe(0);
+    expect(without.exitCode).toBe(0);
 
     const withBranch = project.run("guard", "--base", base, "--scope", "tasks", "--branch", branch);
     expect(withBranch.exitCode).toBe(0);
   });
 
-  it("tells you --branch exists when the checkout is detached", async () => {
+  it("uses changed feature history when the checkout is detached", async () => {
     const base = await asPullRequest();
     project.git("checkout", "-q", "--detach", "HEAD");
 
     const result = project.run("guard", "--base", base, "--scope", "tasks");
-    expect(result.stdout + result.stderr).toContain("--branch");
+    expect(result.exitCode).toBe(0);
   });
 
   it("generates a workflow that passes the branch explicitly", async () => {
     const workflow = await project.read(".github/workflows/visp.yml");
     expect(workflow).toContain("--branch");
     expect(workflow).toContain("github.head_ref");
+    expect(workflow).toMatch(/env:\n\s+HEAD_REF: \$\{\{ github\.head_ref \}\}/u);
+    expect(workflow).toContain('--branch "$HEAD_REF"');
+    const parsed = parse(workflow);
+    expect(parsed.permissions).toEqual({ contents: "read" });
+    const steps = parsed.jobs["scope-and-evidence"].steps;
+    expect(steps).toHaveLength(4);
+    expect(steps.at(-1).env.HEAD_REF).toMatch(/^\$\{\{ github\.head_ref \}\}$/u);
+    expect(steps.at(-1).run).toContain('--branch "$HEAD_REF"');
   });
 
   it("rejects a scope source it does not have", () => {

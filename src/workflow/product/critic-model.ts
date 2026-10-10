@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
-  CRITIC_MAX_CALLS,
+  CRITIC_FEATURE_TIMEOUT_MS,
+  CRITIC_MIN_TIMEOUT_MS,
   criticConfigSchema,
   criticHarnessSchema,
   criticModeSchema,
@@ -8,11 +9,15 @@ import {
 } from "../../config/critic.js";
 import { historicalCriticConfigSchema } from "../../config/critic-history.js";
 import { qualityDimensionSchema } from "./feedback-model.js";
+import {
+  deliveredEvidenceIdsSchema,
+  generatedSourceReferencesSchema,
+} from "./review-delivery-validation.js";
 import { productReviewSubmissionSchema } from "./review-request.js";
 
 export { type CriticConfig, criticConfigSchema } from "../../config/critic.js";
 
-export const criticPhaseSchema = z.enum(["understanding", "product"]);
+const criticPhaseSchema = z.enum(["understanding", "product"]);
 export type CriticPhase = z.infer<typeof criticPhaseSchema>;
 
 export const nativeCapabilitySchema = z
@@ -26,7 +31,7 @@ export const nativeCapabilitySchema = z
     delegationAllowed: z.boolean().optional(),
   })
   .strict();
-export const nativeResultSchema = z
+const nativeResultSchema = z
   .object({
     attempt: z.string().uuid(),
     model: z.string().min(1).max(200),
@@ -146,11 +151,48 @@ const attemptSchema = z
     evidenceDigest: z.string(),
     selectionDigest: z.string(),
     selection: productReviewSubmissionSchema.shape.selection,
+    deliveredEvidenceIds: deliveredEvidenceIdsSchema.optional(),
+    deliveredGeneratedReferences: generatedSourceReferencesSchema.optional(),
+    // Read-only compatibility for attempts written before delivered IDs replaced manifests.
+    deliveredSourceManifest: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            reference: z.string(),
+            sha256: z.string(),
+            candidateExcerptSha256: z.string(),
+            coreOutcomes: z.array(z.string()).optional(),
+            delivered: z.boolean(),
+            available: z.boolean(),
+            excerptSha256: z.string().optional(),
+            excerptChars: z.number().int().nonnegative(),
+            truncated: z.boolean(),
+          })
+          .strict(),
+      )
+      .optional(),
     comparisonCandidate: z.string().optional(),
     transport: z.enum(["sampling", "native"]).optional(),
+    /** VISP started this review itself; only then may a failure be retried automatically. */
+    launcher: z.literal("visp").optional(),
     hostReport: nativeCapabilitySchema.optional(),
     requiresImages: z.boolean().optional(),
     sourceOnly: z.boolean().optional(),
+    /** Pinned tests the reviewer was asked to rule on, recorded at reservation. */
+    disputes: z.array(z.string()).optional(),
+    /** Rulings from an accepted, VISP-launched review; only these can waive a test. */
+    disputeRulings: z
+      .array(
+        z
+          .object({
+            test: z.string(),
+            ruling: z.enum(["upheld", "rejected"]),
+            reasoning: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
     startedAt: z.number(),
     status: z.enum(["pending", "reviewed", "unavailable"]),
     gaps: z.array(z.string()).optional(),
@@ -188,7 +230,8 @@ export const criticStateSchema = z
     intent: z.string(),
     config: historicalCriticConfigSchema,
     disabled: z.boolean().default(false),
-    attempts: z.array(attemptSchema).max(CRITIC_MAX_CALLS),
+    // No-response retries spend time rather than calls; retain every possible reservation.
+    attempts: z.array(attemptSchema).max(CRITIC_FEATURE_TIMEOUT_MS / CRITIC_MIN_TIMEOUT_MS),
     preferredCandidate: z.string().optional(),
     understandingGap: z
       .object({

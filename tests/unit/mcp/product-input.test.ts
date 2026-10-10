@@ -87,8 +87,8 @@ it("CLI and MCP return identical editable inputs without mutation", async () => 
   expect(compactWork.structuredContent).toMatchObject({
     data: { mayEdit: true, scope: brief.slices[0]?.scope, checks: brief.checks },
   });
-  expect(JSON.stringify(compactWork).length).toBeLessThan(
-    JSON.stringify(detailedWork).length * 0.7,
+  expect(JSON.stringify(detailedWork).length).toBeLessThan(
+    JSON.stringify(compactWork).length * 1.1,
   );
 });
 

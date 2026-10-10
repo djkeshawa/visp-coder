@@ -22,13 +22,7 @@ import type { SkillAppliesTo } from "./schema.js";
  * what it assumed.
  */
 
-export const APPLIES_DIMENSIONS = [
-  "paths",
-  "taskClass",
-  "entrypointKind",
-  "language",
-  "stage",
-] as const;
+const APPLIES_DIMENSIONS = ["paths", "taskClass", "entrypointKind", "language", "stage"] as const;
 export type AppliesDimension = (typeof APPLIES_DIMENSIONS)[number];
 
 export interface ApplicationFacts {

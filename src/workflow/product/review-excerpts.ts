@@ -36,7 +36,26 @@ interface RankedRegion extends Region {
 export async function reviewExcerpt(path: string, source: string, question: string, limit = 6000) {
   if (source.length <= limit) return { excerpt: source, omitted: [] as string[] };
   const regions = await sourceRegions(path, source);
-  return selectRegions(source, regions, question, limit);
+  const lines = source.split("\n");
+  // Oversized symbols still need their signature and relevant body/tail, rather than a file prefix.
+  const bounded = regions.flatMap((region) => {
+    const renderedCost =
+      region.text.length + (region.end - region.start + 1) * (String(region.end + 1).length + 4);
+    if (renderedCost <= limit) return [region];
+    const windows = new Set([region.start, Math.max(region.start, region.end - 4)]);
+    const terms = words(question);
+    for (let index = region.start; index <= region.end; index++)
+      if ([...words(lines[index] ?? "")].some((word) => terms.has(word))) windows.add(index);
+    return [...windows].slice(0, 64).map((index) => ({
+      ...region,
+      start: Math.max(region.start, index - 1),
+      end: Math.min(region.end, index + 4),
+      text: lines
+        .slice(Math.max(region.start, index - 1), Math.min(region.end + 1, index + 5))
+        .join("\n"),
+    }));
+  });
+  return selectRegions(source, bounded, question, limit);
 }
 
 async function sourceRegions(path: string, source: string): Promise<Region[]> {
@@ -65,6 +84,7 @@ async function sourceRegions(path: string, source: string): Promise<Region[]> {
     }
   }
   if (html) regions.push(...htmlRegions(lines));
+  if (/\.(?:md|mdx|txt|rst|adoc|json|ya?ml)$/i.test(path)) regions.push(...textRegions(lines));
   return regions;
 }
 
@@ -146,16 +166,27 @@ function selectLineIndexes(
   let remaining = limit;
   const selected = new Set<number>();
   const coveredNames = new Set<string>();
-  let rerank = true;
-  while (ranked.length) {
-    if (rerank)
+  ranked.sort(
+    (a, b) =>
+      regionScore(b, mentions, coveredNames) - regionScore(a, mentions, coveredNames) ||
+      a.start - b.start,
+  );
+  // Rank the whole input once, then bound diversity selection independently of file size.
+  ranked = ranked.slice(0, 512);
+  let rerank = false;
+  let index = 0;
+  while (index < ranked.length) {
+    if (rerank) {
+      ranked = ranked.slice(index);
+      index = 0;
       ranked.sort(
         (a, b) =>
           regionScore(b, mentions, coveredNames) - regionScore(a, mentions, coveredNames) ||
           a.start - b.start,
       );
+    }
     rerank = false;
-    const item = ranked.shift();
+    const item = ranked[index++];
     if (!item) break;
     const cost = incrementalRegionCost(item, lines, selected, remaining);
     if (cost > remaining) continue;
@@ -234,4 +265,21 @@ function nodeRegion(node: SyntaxNode | null): Region | undefined {
 
 function region(node: SyntaxNode, name: string, test: boolean): Region {
   return { start: node.startPosition.row, end: node.endPosition.row, text: node.text, name, test };
+}
+
+function textRegions(lines: string[]): Region[] {
+  const regions: Region[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    const start = Math.max(0, index - 1);
+    const end = Math.min(lines.length - 1, index + 2);
+    regions.push({
+      start,
+      end,
+      name: line,
+      text: lines.slice(start, end + 1).join("\n"),
+      test: /(?:\bFAIL(?:ED)?\b|not ok|\.\.\. (?:ok|FAIL|ERROR)|^(?:ok|PASS):?)/.test(line),
+    });
+  }
+  return regions;
 }

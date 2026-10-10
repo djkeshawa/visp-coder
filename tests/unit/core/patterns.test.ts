@@ -54,6 +54,42 @@ describe("matchesPattern", () => {
   });
 });
 
+describe("bracket segments", () => {
+  it("matches a framework route directory by its literal name", () => {
+    expect(matchesPattern("app/[id]/page.tsx", "app/[id]/page.tsx")).toBe(true);
+    expect(matchesPattern("app/[id]/page.tsx", "app/[id]/**")).toBe(true);
+    expect(matchesPattern("app/[id]/nested/page.tsx", "app/[id]/**")).toBe(true);
+  });
+
+  it("keeps character-class semantics beside the literal spelling", () => {
+    expect(matchesPattern("app/i/page.tsx", "app/[id]/page.tsx")).toBe(true);
+    expect(matchesPattern("app/x/page.tsx", "app/[id]/page.tsx")).toBe(false);
+    expect(matchesPattern("src/bx.ts", "src/[a-c]*.ts")).toBe(true);
+    expect(matchesPattern("src/dx.ts", "src/[a-c]*.ts")).toBe(false);
+    expect(matchesPattern("b.ts", "[!abc].ts")).toBe(false);
+    expect(matchesPattern("d.ts", "[!abc].ts")).toBe(true);
+  });
+
+  it("matches catch-all and optional catch-all route names", () => {
+    expect(matchesPattern("app/[...all]/page.tsx", "app/[...all]/page.tsx")).toBe(true);
+    expect(matchesPattern("app/[[...slug]]/page.tsx", "app/[[...slug]]/page.tsx")).toBe(true);
+    expect(matchesPattern("app/[[...slug]]/a/b.tsx", "app/[[...slug]]/**")).toBe(true);
+    expect(matchesPattern("app/other/page.tsx", "app/[[...slug]]/**")).toBe(false);
+  });
+
+  it("does not throw on an invalid class and matches only the literal name", () => {
+    expect(() => matchesPattern("[z-a].ts", "[z-a].ts")).not.toThrow();
+    expect(matchesPattern("[z-a].ts", "[z-a].ts")).toBe(true);
+    expect(matchesPattern("m.ts", "[z-a].ts")).toBe(false);
+    expect(matchesPattern("[].ts", "[].ts")).toBe(true);
+    expect(matchesPattern("a.ts", "[].ts")).toBe(false);
+  });
+
+  it("lets a forbidden bracket directory be named", () => {
+    expect(firstMatch("app/[id]/secret.ts", ["docs/**", "app/[id]/**"])).toBe("app/[id]/**");
+  });
+});
+
 describe("matchesAny and firstMatch", () => {
   const patterns = ["src/**/*.ts", "docs/*.md"];
 

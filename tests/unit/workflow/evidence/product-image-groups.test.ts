@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { sha256 } from "../../../../src/core/hash.js";
 import { ok } from "../../../../src/core/result.js";
 import {
+  newestRunPerJourney,
   type ProductReviewImageGroup,
   productReviewImageGroups,
 } from "../../../../src/workflow/product/image-groups.js";
@@ -74,7 +75,7 @@ it("keeps three complete journey pairs when unrelated images would split the six
   expect(result.availability.find((entry) => entry.id === "omitted-before")?.status).toBe(
     "not-delivered",
   );
-  expect(result.gaps).toEqual([]);
+  expect(result.gaps.join()).toContain("3 intact current capture(s) omitted");
 });
 
 it("selects requested groups and preserves endpoints when sampling desktop and mobile journeys", async () => {
@@ -101,7 +102,7 @@ it("selects requested groups and preserves endpoints when sampling desktop and m
     deliveredCaptureIds: ["desktop-0", "desktop-4", "desktop-7"],
   });
   expect(result.groups.find((entry) => entry.id === "mobile")?.status).toBe("delivered");
-  expect(result.images).toHaveLength(5);
+  expect(result.images).toHaveLength(6);
   const requested = await inspectProductImages(
     workspace,
     subject,
@@ -194,7 +195,7 @@ it("enforces the total byte budget atomically and avoids reading oversized files
   expect(read).not.toHaveBeenCalled();
 });
 
-it("rechecks bytes at delivery and withholds the complete group if one image changes", async () => {
+it("rechecks bytes at delivery and only delivers an intact representative if another frame changes", async () => {
   const reads = new Map<string, number>();
   const changing = {
     files: {
@@ -212,9 +213,10 @@ it("rechecks bytes at delivery and withholds the complete group if one image cha
     [],
     [group("journey", ["before", "after"])],
   );
-  expect(result.images).toEqual([]);
-  expect(result.groups[0]?.status).toBe("unavailable");
-  expect(result.availability.find((entry) => entry.id === "before")?.status).toBe("not-delivered");
+  expect(result.images.map((image) => image.id)).toEqual(["before"]);
+  expect(result.groups[0]?.status).toBe("delivered");
+  expect(result.groups[0]?.omittedCaptureIds).toEqual(["after"]);
+  expect(result.availability.find((entry) => entry.id === "before")?.status).toBe("delivered");
   expect(result.availability.find((entry) => entry.id === "after")?.status).toBe("unavailable");
   expect(result.gaps.join()).toContain("during delivery");
 });
@@ -364,12 +366,18 @@ it("reserves endpoints for three viewports instead of dropping the older journey
   );
   expect(roundtrip.images.map((i) => i.id)).toEqual(ids);
   const explicit = await inspectProductImages(workspace, subject, captures, ["desktop"], groups);
-  expect(explicit.groups.find((g) => g.id === "desktop")?.deliveredCaptureIds).toEqual(
-    groups[2]?.captureIds,
+  expect(explicit.groups.find((g) => g.id === "desktop")?.deliveredCaptureIds).toEqual([
+    "d0",
+    "d1",
+    "d2",
+    "d4",
+  ]);
+  expect(new Set(explicit.images.map((image) => image.viewport.width))).toEqual(
+    new Set([844, 390, 1280]),
   );
 });
 
-it("reports a viewport that cannot fit without splitting its journey endpoints", async () => {
+it("uses representatives when four viewport journeys cannot all fit in full", async () => {
   const groups = [320, 640, 960, 1280].map((width) =>
     group(String(width), [`${width}-start`, `${width}-end`], width),
   );
@@ -382,7 +390,311 @@ it("reports a viewport that cannot fit without splitting its journey endpoints",
   );
   expect(result.images).toHaveLength(6);
   expect(result.groups.find((g) => g.id === "1280")).toMatchObject({
-    status: "not-delivered",
-    omittedCaptureCount: 2,
+    status: "delivered",
+    omittedCaptureCount: 1,
   });
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(
+    new Set([320, 640, 960, 1280]),
+  );
+});
+
+const keyed = (id: string, journeyKey: string, captureIds: string[], width = 1280) => ({
+  ...group(id, captureIds, width),
+  journeyKey,
+});
+
+it("keeps other journeys in the packet when one journey was replayed three times", async () => {
+  const numbered = (prefix: string, count: number) =>
+    Array.from({ length: count }, (_, index) => `${prefix}-${index + 1}`);
+  const groups = [
+    keyed("A3", "journey-a", numbered("A3", 5)),
+    keyed("A2", "journey-a", numbered("A2", 5)),
+    keyed("A1", "journey-a", numbered("A1", 5)),
+    keyed("B", "journey-b", numbered("B", 3)),
+  ];
+  const captures = groups.flatMap((entry) => entry.captureIds.map((id) => capture(id)));
+  const result = await inspectProductImages(workspace, subject, captures, [], groups);
+  expect(result.images.map((entry) => entry.id)).toEqual([
+    "A3-1",
+    "A3-2",
+    "A3-4",
+    "A3-5",
+    "B-1",
+    "B-3",
+  ]);
+  expect(result.groups.map((entry) => [entry.id, entry.status])).toEqual([
+    ["A3", "delivered"],
+    ["B", "delivered"],
+    ["A2", "not-delivered"],
+    ["A1", "not-delivered"],
+  ]);
+});
+
+it("keeps replays with different journey keys and spends the window on distinct journeys", async () => {
+  const groups = ["one", "two", "three", "four"].map((id) =>
+    keyed(id, `journey-${id}`, [`${id}-0`, `${id}-1`, `${id}-2`]),
+  );
+  const captures = groups.flatMap((entry) => entry.captureIds.map((id) => capture(id)));
+  const result = await inspectProductImages(workspace, subject, captures, [], groups);
+  expect(result.images.map((entry) => entry.id)).toEqual([
+    "one-0",
+    "one-2",
+    "two-0",
+    "two-2",
+    "three-0",
+    "three-2",
+  ]);
+  expect(result.groups.find((entry) => entry.id === "four")?.status).toBe("not-delivered");
+});
+
+it("gives unkeyed repeated groups at one viewport the same sample as before", async () => {
+  const groups = ["new", "old"].map((id) =>
+    group(id, [`${id}-0`, `${id}-1`, `${id}-2`, `${id}-3`]),
+  );
+  const captures = groups.flatMap((entry) => entry.captureIds.map((id) => capture(id)));
+  const result = await inspectProductImages(workspace, subject, captures, [], groups);
+  expect(result.groups.map((entry) => [entry.id, entry.status])).toEqual([
+    ["new", "delivered"],
+    ["old", "not-delivered"],
+  ]);
+  expect(result.images.map((entry) => entry.id)).toEqual(["new-0", "new-1", "new-2", "new-3"]);
+});
+
+it("drops older identical replays of a journey but keeps other outcomes, viewports and unkeyed runs", () => {
+  const brief = productBriefSchema.parse({
+    version: 2,
+    feature: "001-replays",
+    originalRequest: "Useful UI",
+    goal: "Useful UI",
+  });
+  const run = (id: string, createdAt: string, extra: Record<string, unknown>) => ({
+    id,
+    version: 1,
+    provenance: "runner-executed",
+    subjectDigest: subject,
+    createdAt,
+    status: "completed",
+    captures: [capture(`${id}-a`), capture(`${id}-b`), capture(`${id}-m`, 390)],
+    ...extra,
+  });
+  const record: ProductRecord = {
+    brief,
+    briefText: "",
+    stateText: "",
+    state: {
+      ...initialProductState(brief, "2026-01-01"),
+      captureRuns: [
+        run("r1", "2026-01-01T00:00:01Z", { journeyKey: "k1" }),
+        run("r2", "2026-01-01T00:00:02Z", { journeyKey: "k1" }),
+        run("r3", "2026-01-01T00:00:03Z", { journeyKey: "k1", status: "failed" }),
+        run("r4", "2026-01-01T00:00:04Z", { journeyKey: "k2" }),
+        run("r5", "2026-01-01T00:00:05Z", {}),
+        run("r6", "2026-01-01T00:00:06Z", {}),
+      ],
+    },
+  };
+  const groups = productReviewImageGroups(record, subject);
+  expect(groups.map((entry) => entry.id)).toEqual([
+    "image-group:r6:1280x720",
+    "image-group:r6:390x720",
+    "image-group:r5:1280x720",
+    "image-group:r5:390x720",
+    "image-group:r4:1280x720",
+    "image-group:r4:390x720",
+    "image-group:r3:1280x720",
+    "image-group:r3:390x720",
+    "image-group:r2:1280x720",
+    "image-group:r2:390x720",
+  ]);
+  expect(groups.find((entry) => entry.runId === "r4")?.journeyKey).toBe("k2");
+  expect(groups.find((entry) => entry.runId === "r6")).not.toHaveProperty("journeyKey");
+});
+
+it("keeps the newest of each identical replay among the last three capture runs", () => {
+  const run = (id: string, journeyKey?: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    ...(journeyKey ? { journeyKey } : {}),
+    ...extra,
+  });
+  const runs = [
+    run("old", "b"),
+    run("a1", "a"),
+    run("a2", "a"),
+    run("a3", "a"),
+    run("plain-1"),
+    run("plain-2"),
+  ];
+  expect(newestRunPerJourney(runs, 3).map((entry) => entry.id)).toEqual([
+    "a3",
+    "plain-1",
+    "plain-2",
+  ]);
+  expect(newestRunPerJourney(runs.slice(0, 4), 3).map((entry) => entry.id)).toEqual(["old", "a3"]);
+  expect(newestRunPerJourney([{ note: "not a run" }, run("x")], 3)).toHaveLength(2);
+  // A same-key failed reproduction is not replaced by a completed rerun, and vice versa.
+  const reproduction = [
+    run("failed", "a", { status: "failed", failure: { kind: "behavior" } }),
+    run("timeout", "a", { status: "timed-out" }),
+    run("completed", "a", { status: "completed" }),
+    run("completed-2", "a", { status: "completed" }),
+    run("other-captures", "a", { status: "completed", captures: [{ steps: ["Click"] }] }),
+  ];
+  expect(newestRunPerJourney(reproduction, 5).map((entry) => entry.id)).toEqual([
+    "failed",
+    "timeout",
+    "completed-2",
+    "other-captures",
+  ]);
+});
+
+it("keeps an older failed group when a newer cancelled run has one image, and runs with other captures", () => {
+  const brief = productBriefSchema.parse({
+    version: 2,
+    feature: "001-outcomes",
+    originalRequest: "Useful UI",
+    goal: "Useful UI",
+  });
+  const step = (steps: string[]) => (entry: ReturnType<typeof capture>) => ({ ...entry, steps });
+  const run = (id: string, createdAt: string, extra: Record<string, unknown>) => ({
+    id,
+    version: 1,
+    provenance: "runner-executed",
+    subjectDigest: subject,
+    createdAt,
+    journeyKey: "k",
+    ...extra,
+  });
+  const failedCaptures = ["f1", "f2", "f3", "f4", "f5"].map((id, index) =>
+    step([`Drag ${index}`])(capture(id)),
+  );
+  const record: ProductRecord = {
+    brief,
+    briefText: "",
+    stateText: "",
+    state: {
+      ...initialProductState(brief, "2026-01-01"),
+      captureRuns: [
+        run("failed", "2026-01-01T00:00:01Z", {
+          status: "failed",
+          failure: { kind: "behavior" },
+          captures: failedCaptures,
+        }),
+        run("cancelled", "2026-01-01T00:00:02Z", {
+          status: "cancelled",
+          captures: [step(["Drag 0"])(capture("c1"))],
+        }),
+        run("done-a", "2026-01-01T00:00:03Z", {
+          status: "completed",
+          captures: [step(["Open"])(capture("a1")), step(["Drag 0"])(capture("a2"))],
+        }),
+        run("done-b", "2026-01-01T00:00:04Z", {
+          status: "completed",
+          captures: [step(["Open"])(capture("b1")), step(["Drag 1"])(capture("b2"))],
+        }),
+        run("done-b-again", "2026-01-01T00:00:05Z", {
+          status: "completed",
+          captures: [step(["Open"])(capture("e1")), step(["Drag 1"])(capture("e2"))],
+        }),
+      ],
+    },
+  };
+  const ids = productReviewImageGroups(record, subject).map((entry) => entry.runId);
+  expect(ids).toEqual(["done-b-again", "done-a", "cancelled", "failed"]);
+});
+
+it("reserves every available viewport before a preferred desktop journey spends the slots", async () => {
+  const desktop = group(
+    "desktop",
+    Array.from({ length: 6 }, (_, i) => `d${i}`),
+  );
+  const groups = [
+    desktop,
+    ...[320, 640, 960].map((width) =>
+      group(String(width), [`${width}-start`, `${width}-end`], width),
+    ),
+  ];
+  const result = await inspectProductImages(
+    workspace,
+    subject,
+    groups.flatMap((g) => g.captureIds.map((id) => capture(id, g.viewport.width))),
+    ["desktop"],
+    groups,
+  );
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(
+    new Set([1280, 320, 640, 960]),
+  );
+  expect(result.images).toHaveLength(6);
+  expect(result.gaps.join()).toContain("omitted");
+});
+
+it("samples across viewport byte costs and reports viewports that cannot fit", async () => {
+  const large = Buffer.alloc(3 * 1024 * 1024);
+  bytes.copy(large);
+  const groups = [1280, 390, 844].map((width) =>
+    group(String(width), [`${width}-before`, `${width}-after`], width),
+  );
+  const captures = groups.flatMap((g) =>
+    g.captureIds.map((id) => ({ ...capture(id, g.viewport.width), sha256: sha256(large) })),
+  );
+  const limited = {
+    files: { readBytesIfExists: async () => ok(large) },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(limited, subject, captures, ["1280"], groups);
+  expect(new Set(result.images.map((image) => image.viewport.width)).size).toBe(2);
+  expect(
+    result.images.reduce((sum, image) => sum + Buffer.from(image.data, "base64").length, 0),
+  ).toBeLessThanOrEqual(8 * 1024 * 1024);
+  expect(result.gaps.join()).toContain("no current representative delivered");
+  expect(result.gaps.join()).toContain("omitted");
+});
+
+it("uses a smaller representative when full endpoints would exclude a phone viewport", async () => {
+  const large = Buffer.alloc(3 * 1024 * 1024);
+  bytes.copy(large);
+  const groups = [group("desktop", ["before", "middle", "after"]), group("phone", ["phone"], 390)];
+  const captures = groups.flatMap((g) =>
+    g.captureIds.map((id) => ({
+      ...capture(id, g.viewport.width),
+      sha256: sha256(id === "middle" ? bytes : large),
+    })),
+  );
+  const limited = {
+    files: { readBytesIfExists: async (path: string) => ok(path === "middle.png" ? bytes : large) },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(limited, subject, captures, ["desktop"], groups);
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(new Set([1280, 390]));
+  expect(result.images.length).toBeLessThanOrEqual(6);
+});
+
+it("uses an intact viewport representative when another journey state is corrupt", async () => {
+  const groups = [group("desktop", ["bad", "intact"]), group("phone", ["phone"], 390)];
+  const captures = groups.flatMap((g) => g.captureIds.map((id) => capture(id, g.viewport.width)));
+  const partial = {
+    files: {
+      readBytesIfExists: async (path: string) =>
+        ok(path === "bad.png" ? Buffer.from("corrupt") : bytes),
+    },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(partial, subject, captures, [], groups);
+  expect(new Set(result.images.map((image) => image.viewport.width))).toEqual(new Set([1280, 390]));
+  expect(result.gaps.join()).toContain("image changed since capture");
+  expect(result.groups.find((g) => g.id === "desktop")?.omittedCaptureCount).toBe(1);
+});
+
+it("delivers an intact current representative when the only journey has a missing frame", async () => {
+  const partial = {
+    files: {
+      readBytesIfExists: async (path: string) => ok(path === "missing.png" ? undefined : bytes),
+    },
+  } as unknown as WorkspaceState;
+  const result = await inspectProductImages(
+    partial,
+    subject,
+    [capture("missing"), capture("intact")],
+    [],
+    [group("journey", ["missing", "intact"])],
+  );
+  expect(result.images.map((image) => image.id)).toEqual(["intact"]);
+  expect(result.gaps.join()).toContain("missing");
+  expect(result.groups[0]?.omittedCaptureCount).toBe(1);
 });

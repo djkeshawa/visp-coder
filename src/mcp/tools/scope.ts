@@ -1,27 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { PRODUCT_NAME } from "../../core/constants.js";
-import { ok, type Result } from "../../core/result.js";
+import { ok } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import { requireInstalledRuntime } from "../../harness/runtime.js";
-import { checkPaths, type ScopeViolation } from "../../orchestrate/guard.js";
 import {
-  hasPendingCriticReview,
-  PENDING_REVIEW_MESSAGE,
-} from "../../workflow/product/critic-policy.js";
+  evaluateGuardPaths,
+  pendingTransactionViolations,
+} from "../../orchestrate/guard-evaluation.js";
 import { productScopes as authorizedScopes } from "../../workflow/product/scopes.js";
-import { isStatePath, type WorkspaceState } from "../../workflow/state.js";
 import { TOOL } from "../constants.js";
 import { workspaceFor } from "../context.js";
 import { failure, reply } from "../reply.js";
 import { guardInput } from "./schemas.js";
-
-type ScopeToolViolation =
-  | ScopeViolation
-  | {
-      readonly path: string;
-      readonly reason: "review-pending";
-      readonly message: string;
-    };
 
 /**
  * The question an agent should ask before writing: may I touch this file? It
@@ -38,6 +27,9 @@ export function registerScopeTools(server: McpServer, root: string): void {
       annotations: { readOnlyHint: true },
     },
     async (args) => {
+      const transactions = await pendingTransactionViolations(root);
+      if (!transactions.ok) return failure(TOOL.guard, transactions.error);
+      if (transactions.value.length) return guardReply(args.paths, transactions.value, []);
       const state = await workspaceFor(root);
       if (!state.ok) return failure(TOOL.guard, state.error);
 
@@ -48,64 +40,46 @@ export function registerScopeTools(server: McpServer, root: string): void {
         if (!agreed.ok) return failure(TOOL.guard, agreed.error);
       }
 
-      const violations: ScopeToolViolation[] = checkPaths(args.paths, {
-        markers: markers.value,
-        blockedPaths: state.value.config.workflow.blockedPaths,
+      const guarded = await evaluateGuardPaths(state.value, args.paths, markers.value, {
+        writeTime: true,
       });
-      const guarded = await pendingReviewViolations(
-        state.value,
-        markers.value[0]?.feature,
-        args.paths,
-        violations,
-      );
       if (!guarded.ok) return failure(TOOL.guard, guarded.error);
-      const checkedViolations = guarded.value;
-
-      const authorizedTasks = markers.value.map((marker) => marker.task);
-      const payload = {
-        runtime: runtimeIdentity(),
-        checked: args.paths.length,
-        allowed: checkedViolations.length === 0,
-        violations: checkedViolations,
-        authorizedTasks,
-      };
-
-      return reply(TOOL.guard, ok(payload), {
-        text: (data) =>
-          data.allowed
-            ? `All ${data.checked} paths are in scope.`
-            : [
-                `Refused: ${data.violations.length} of ${data.checked} paths are out of scope.`,
-                ...data.violations.map((violation) => `  - ${violation.message}`),
-                "",
-                authorizedTasks.length === 0
-                  ? `No task is authorized. Run: ${PRODUCT_NAME} work --task <id>`
-                  : `Authorized tasks: ${authorizedTasks.join(", ")}`,
-              ].join("\n"),
-      });
+      return guardReply(
+        args.paths,
+        guarded.value,
+        markers.value.map((marker) => marker.task),
+      );
     },
   );
 }
 
-async function pendingReviewViolations(
-  state: WorkspaceState,
-  feature: string | undefined,
+function guardReply(
   paths: readonly string[],
-  violations: readonly ScopeToolViolation[],
-): Promise<Result<ScopeToolViolation[]>> {
-  if (!feature || paths.length === 0) return ok([...violations]);
-  const pending = await hasPendingCriticReview(state, feature);
-  if (!pending.ok) return pending;
-  if (!pending.value) return ok([...violations]);
-  const alreadyRefused = new Set(violations.map((violation) => violation.path));
-  return ok([
-    ...violations,
-    ...paths
-      .filter((path) => !alreadyRefused.has(path) && !isStatePath(path))
-      .map((path) => ({
-        path,
-        reason: "review-pending" as const,
-        message: PENDING_REVIEW_MESSAGE,
-      })),
-  ]);
+  violations: readonly {
+    readonly path: string;
+    readonly reason: string;
+    readonly message: string;
+  }[],
+  authorizedTasks: readonly string[],
+) {
+  const payload = {
+    runtime: runtimeIdentity(),
+    checked: paths.length,
+    allowed: violations.length === 0,
+    violations,
+    authorizedTasks,
+  };
+  return reply(TOOL.guard, ok(payload), {
+    text: (data) =>
+      data.allowed
+        ? `All ${data.checked} paths are in scope.`
+        : [
+            `Refused: ${data.violations.length} of ${data.checked} paths are out of scope.`,
+            ...data.violations.map((violation) => `  - ${violation.message}`),
+            "",
+            authorizedTasks.length === 0
+              ? "No task is authorized. Run: visp_next {}"
+              : `Authorized tasks: ${authorizedTasks.join(", ")}`,
+          ].join("\n"),
+  });
 }

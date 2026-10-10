@@ -6,7 +6,8 @@ export const CRITIC_MAX_CALLS = 6;
  * contract gap the hidden tests checked; later ones raised untested edge cases and
  * doubled the time. Repair gains also flatten after 2–3 rounds in published studies.
  */
-export const CRITIC_DEFAULT_CALLS = 3;
+const CRITIC_DEFAULT_CALLS = 3;
+export const CRITIC_MIN_TIMEOUT_MS = 1000;
 export const CRITIC_CALL_TIMEOUT_MS = 180_000;
 export const CRITIC_FEATURE_TIMEOUT_MS = 18 * 60 * 1000;
 
@@ -22,7 +23,7 @@ export const criticConfigSchema = z
     transport: z.enum(["sampling", "native"]).optional(),
     harness: criticHarnessSchema.optional(),
     maxCalls: z.number().int().min(1).max(CRITIC_MAX_CALLS),
-    timeoutMs: z.number().int().min(1000).max(300_000),
+    timeoutMs: z.number().int().min(CRITIC_MIN_TIMEOUT_MS).max(300_000),
     maxImageBytes: z
       .number()
       .int()
@@ -50,9 +51,14 @@ export function configuredCriticMode(
  * `host`: the worker's host delegates the review through the native handoff (default).
  * `codex-exec`: VISP launches a read-only, ephemeral `codex exec` reviewer itself, so a
  * worker that never orchestrates delegation still receives independent review.
+ * `claude-exec`: the same with a read-only `claude -p` reviewer (critic.harness: claude-code).
  */
-export const criticLaunchSchema = z.enum(["host", "codex-exec"]);
-export type CriticLaunch = z.infer<typeof criticLaunchSchema>;
+const criticLaunchSchema = z.enum(["host", "codex-exec", "claude-exec"]);
+
+/** Whether VISP launches the reviewer itself instead of the worker's host delegating it. */
+export function launchesReviewer(critic: { launch?: string } | undefined): boolean {
+  return critic?.launch === "codex-exec" || critic?.launch === "claude-exec";
+}
 
 export const criticDefaultsSchema = criticConfigSchema
   .partial()

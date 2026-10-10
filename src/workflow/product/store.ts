@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import { parse, stringify } from "yaml";
 import { PRODUCT_STATE_VERSION } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
@@ -6,6 +8,7 @@ import {
   type FileMutation,
   filePrecondition,
 } from "../../core/file-transaction.js";
+import { currentBranch } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
@@ -16,8 +19,17 @@ import {
   parseProductBrief,
   productStateSchema,
 } from "./model.js";
+import { compactTrail } from "./trail.js";
 
 export interface ProductSelection {
+  readonly signal?: AbortSignal;
+  readonly deadline?: number;
+  readonly onProgress?: (event: { check: string; status: string }) => void | Promise<void>;
+  /** Internal acceptance continuation after a review of the same checked subject. */
+  readonly reusePassed?: boolean;
+  /** `done` and `accept` only: failing pinned tests the worker disputes, with one shared reason. */
+  readonly dispute?: readonly string[];
+  readonly disputeReason?: string;
   readonly feature?: string;
   readonly task?: string;
   /** Mutating work/check operations only; does not change host permissions. */
@@ -35,7 +47,25 @@ export const productStatePath = (state: WorkspaceState, feature: string): string
   state.paths.featureFile(feature, "product-state.json");
 export const authorizationPath = (state: WorkspaceState, feature: string): string =>
   state.paths.stateFile(`state/product-authorizations/${feature}.json`);
+/** Read-only review context, outside active authorization discovery and repair. */
+export const reviewBaselinePath = (state: WorkspaceState, feature: string): string =>
+  state.paths.stateFile(`state/product-review-baselines/${feature}.json`);
 export const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
+/**
+ * YAML whose strings read back exactly. Folded block scalars cannot represent some pasted
+ * text (whitespace-only lines with tabs between long folded lines), and a request that reads
+ * back changed fails VISP's own contract check; fall back to styles that preserve every byte.
+ */
+export function exactYaml(value: unknown): string {
+  const expected = JSON.parse(JSON.stringify(value));
+  let text = "";
+  for (const options of [undefined, { blockQuote: "literal" as const }, { blockQuote: false }]) {
+    text = stringify(value, options);
+    if (isDeepStrictEqual(parse(text), expected)) return text;
+  }
+  return text;
+}
 
 export async function readProductRecord(
   workspace: WorkspaceState,
@@ -62,6 +92,19 @@ async function readRecord(
   const resolved = resolveFeature(workspace, options.feature);
   if (!resolved.ok) return resolved;
   const feature = resolved.value;
+  for (let attempt = 0; ; attempt++) {
+    const result = await readRecordSnapshot(workspace, feature, allowDraft, migrateVersionTwo);
+    if (result.ok || !result.error.details?.externalBriefEdit || attempt >= 20) return result;
+    await delay(25);
+  }
+}
+
+async function readRecordSnapshot(
+  workspace: WorkspaceState,
+  feature: string,
+  allowDraft: boolean,
+  migrateVersionTwo: boolean,
+): Promise<Result<ProductRecord>> {
   const content = await workspace.files.readTextIfExists(briefPath(workspace, feature));
   if (!content.ok) return content;
   if (content.value === undefined) return missingBrief(workspace, feature);
@@ -69,6 +112,14 @@ async function readRecord(
   if (!brief.ok) return brief;
   const stored = await workspace.files.readText(productStatePath(workspace, feature));
   if (!stored.ok) return stored;
+  const repeated = await workspace.files.readTextIfExists(briefPath(workspace, feature));
+  if (!repeated.ok) return repeated;
+  if (repeated.value !== content.value)
+    return err(
+      vispError("STATE_BUSY", "Brief changed while reading product state; retry", {
+        details: { externalBriefEdit: true },
+      }),
+    );
   const state = parseStateText(stored.value, feature, migrateVersionTwo);
   if (!state.ok) return state;
   if (!allowDraft && brief.value.originalRequest !== state.value.intentSnapshot.originalRequest)
@@ -97,16 +148,17 @@ async function readRecord(
 async function missingBrief(workspace: WorkspaceState, feature: string): Promise<Result<never>> {
   const legacy = await workspace.files.exists(workspace.paths.featureFile(feature, "intent.json"));
   if (!legacy.ok) return legacy;
+  const branch = await currentBranch(workspace.paths.root);
   return err(
     vispError(
       legacy.value ? "MIGRATION_REQUIRED" : "ARTIFACT_MISSING",
       legacy.value
         ? `Feature ${feature} uses the replaced workflow`
-        : `Feature ${feature} does not exist`,
+        : `Feature ${feature} does not exist in this checkout (branch ${branch.ok ? branch.value : "HEAD"})`,
       {
         recovery: legacy.value
           ? `visp migrate --feature ${feature} --dry-run`
-          : "visp feature <goal>",
+          : "Switch to the feature’s branch, or select an existing feature with --feature <id>; inspect branches with git branch --all",
       },
     ),
   );
@@ -177,13 +229,13 @@ export function recordMutations(
     {
       kind: "write",
       path: briefPath(workspace, brief.feature),
-      content: stringify(brief),
+      content: exactYaml(brief),
       expectedBefore: filePrecondition(record?.briefText),
     },
     {
       kind: "write",
       path: productStatePath(workspace, brief.feature),
-      content: json(state),
+      content: json(compactTrail(state)),
       expectedBefore: filePrecondition(record?.stateText),
     },
   ];
@@ -206,7 +258,7 @@ export async function saveProductState(
     {
       kind: "write",
       path: productStatePath(workspace, record.brief.feature),
-      content: json(next),
+      content: json(compactTrail(next)),
       expectedBefore: filePrecondition(record.stateText),
     },
     ...extra,

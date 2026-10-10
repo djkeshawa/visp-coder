@@ -9,6 +9,7 @@ import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import type { ProductBrief } from "../../../../src/workflow/product/model.js";
 import {
+  productComparisonEnvironmentDigest,
   productSourceDigest,
   productSourceSnapshot,
 } from "../../../../src/workflow/product/subject.js";
@@ -34,7 +35,7 @@ async function fixture() {
 }
 
 describe("product check input freshness", () => {
-  it("keeps evidence current across equivalent browser selectors but invalidates a different executable", async () => {
+  it("keeps the subject across equivalent browser selectors and compares a different executable", async () => {
     const { workspace, brief } = await fixture();
     await workspace.write(".visp/browser-a", "browser-a");
     await workspace.write(".visp/browser-b", "browser-b");
@@ -48,15 +49,20 @@ describe("product check input freshness", () => {
     vi.stubEnv("CHROME_BIN", undefined);
     const state = await workspace.state();
     const original = value(await productSourceDigest(state, brief));
+    const comparison = value(await productComparisonEnvironmentDigest(state, brief));
     const executed = await productCheckEnvironment(workspace.root, "C001");
     vi.stubEnv("CHROME_BIN", join(workspace.root, ".visp/browser-a"));
     expect(value(await productSourceDigest(state, brief))).toBe(original);
+    expect(value(await productComparisonEnvironmentDigest(state, brief))).toBe(comparison);
     expect(await productCheckEnvironment(workspace.root, "C001")).toEqual(executed);
     vi.stubEnv("CHROME_BIN", join(workspace.root, ".visp/browser-b"));
-    expect(value(await productSourceDigest(state, brief))).not.toBe(original);
+    // The browser is toolchain: evidence about the product stays current, reuse does not.
+    expect(value(await productSourceDigest(state, brief))).toBe(original);
+    expect(value(await productComparisonEnvironmentDigest(state, brief))).not.toBe(comparison);
   });
   it("ignores shell bookkeeping but invalidates changed behavioral environment and executes that identity", async () => {
     const { workspace, brief } = await fixture();
+    for (const check of brief.checks) check.environmentVariables = ["VISP_TEST_SETTING"];
     vi.stubEnv("VISP_TEST_SETTING", "expected");
     vi.stubEnv("SHLVL", "2");
     vi.stubEnv("CODEX_THREAD_ID", "actor-thread");

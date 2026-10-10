@@ -5,7 +5,7 @@ import { ok, type Result } from "../core/result.js";
 import { extractionInputs } from "./extract/identity.js";
 import { computeLanguageCoverage, dedupeRelations, extractRepository } from "./extract/index.js";
 import { mergeFacts } from "./merge.js";
-import { type GraphProjection, projectGraph, reverseImportClosure } from "./projection.js";
+import { type GraphProjection, projectGraph, refreshDependencySet } from "./projection.js";
 import { type GraphStore, openProjectStore } from "./store/index.js";
 import type { FileEntry, GraphSnapshot, LanguageCoverage, SkippedFile } from "./types.js";
 import { walkRepository, worktreeFingerprint } from "./walker/index.js";
@@ -86,7 +86,7 @@ export async function refreshRepository(
   return runIndex(root, config, storePath, "incremental");
 }
 
-export async function runIndex(
+async function runIndex(
   root: string,
   config: GraphConfig,
   storePath: string,
@@ -133,7 +133,7 @@ async function withStore(
       ? walked.value.files.map((file) => file.path)
       : parseSet(diff, previousProjection);
   const reparse = new Set(
-    previousProjection ? reverseImportClosure(previousProjection, seeds) : seeds,
+    previousProjection ? refreshDependencySet(previousProjection, seeds) : seeds,
   );
 
   const reusablePaths = new Set(
@@ -243,8 +243,32 @@ function parseSet(diff: FileDiff, previous?: GraphProjection): string[] {
         .filter((unknown) => unknown.kind === "unresolved_import")
         .map((unknown) => unknown.path),
     );
+    const addedModules = diff.added.filter((path) => path.endsWith(".py"));
+    for (const dependency of previousExternalImports(previous)) {
+      const suffix = dependency.module.replaceAll(".", "/");
+      if (
+        addedModules.some(
+          (path) =>
+            path === `${suffix}.py` ||
+            path.endsWith(`/${suffix}.py`) ||
+            path === `${suffix}/__init__.py` ||
+            path.endsWith(`/${suffix}/__init__.py`),
+        )
+      )
+        seeds.push(dependency.from);
+    }
   }
   return [...new Set(seeds)].sort();
+}
+
+function previousExternalImports(projection: GraphProjection) {
+  return projection.edges.kinds.flatMap((kind, index) => {
+    if (kind !== "external") return [];
+    const target = projection.edges.targets[index] ?? "";
+    return [
+      { from: projection.edges.paths[index] ?? "", module: target.slice("external:".length) },
+    ];
+  });
 }
 
 function hashesOf(snapshot: GraphSnapshot | undefined): Map<string, string> {

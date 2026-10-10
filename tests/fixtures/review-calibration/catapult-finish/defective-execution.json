@@ -1,0 +1,109 @@
+{
+  "inputs": [
+    {
+      "file": "game.js",
+      "sha256": "1fd79181aa5c3dc24f479a83305aebaab669ec8aa2fdded696d80b6e412b8e83"
+    },
+    {
+      "file": "index.html",
+      "sha256": "07cb62bbe43703134dab4619b78359f8113db51324fbfe58d0973812304c663a"
+    },
+    {
+      "file": "styles.css",
+      "sha256": "256f24507b87f676e93b45aa3a47646a6d8c1ba1a94bfe84dd214914656702b2"
+    }
+  ],
+  "operations": [
+    {
+      "id": "8f2fd113-09e7-44ad-93fb-684630ef9012",
+      "kind": "navigate",
+      "description": "Navigate file:///tmp/visp-freeze-32a0K8/index.html",
+      "completedAt": "2026-09-30T06:44:14.426Z"
+    },
+    {
+      "id": "7b39d908-a1bf-4ecc-8fd4-8dfbd76591a2",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:14.461Z",
+      "resultDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "measurement": {
+        "json": "1",
+        "truncated": false
+      }
+    },
+    {
+      "id": "848ddaf3-abba-4427-8653-2b5974fa2640",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:14.766Z",
+      "resultDigest": "d8947b56ded2567bf0c6d0a75fbcfb9f8a2c2ea678661241e69615d10f444e3a",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-32a0K8/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "8e52b6a8-2c49-4c04-be89-43351f77a826",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:14.775Z",
+      "resultDigest": "86a41bc5fb3e7b6e51dd8f1cc6ce228c0d39beaa1c68953adc14f194d7142dcc",
+      "captureId": "CAP-ad36287c-3ea8-4bcf-96bf-d8af43992a86",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-ad36287c-3ea8-4bcf-96bf-d8af43992a86\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#game\",\"viewportAreaFraction\":0.703125,\"intrinsic\":{\"width\":1200,\"height\":600},\"content\":{\"width\":1200,\"height\":600},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart-button\",\"width\":102.4375,\"height\":40,\"inViewport\":true},{\"element\":\"button#ammo-stone\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"button#ammo-bomb\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"button#ammo-cluster\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"button#ammo-fire\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"canvas#game\",\"width\":1200,\"height\":600,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "0ce4f607-4f12-4b26-9e8e-d649abfc34ba",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-32a0K8/index.html",
+      "completedAt": "2026-09-30T06:44:14.872Z",
+      "resultDigest": "0999d15ff799d7d5011e047c28d75b9802ed4ea12042deb782515d0dcde8d513",
+      "captureId": "CAP-ad36287c-3ea8-4bcf-96bf-d8af43992a86"
+    },
+    {
+      "id": "d9ebd52a-3276-4e30-aa4b-26c9fe0f3ce8",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:14.876Z",
+      "resultDigest": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+      "measurement": {
+        "json": "3",
+        "truncated": false
+      }
+    },
+    {
+      "id": "295f906a-59d1-4db8-bf96-5a2c0534a3e6",
+      "kind": "measure",
+      "description": "Read browser state",
+      "completedAt": "2026-09-30T06:44:15.181Z",
+      "resultDigest": "d8947b56ded2567bf0c6d0a75fbcfb9f8a2c2ea678661241e69615d10f444e3a",
+      "measurement": {
+        "json": "\"file:///tmp/visp-freeze-32a0K8/index.html\"",
+        "truncated": false
+      }
+    },
+    {
+      "id": "91b79653-7cde-41bb-a393-677a1fa07b03",
+      "kind": "measure",
+      "description": "Measure rendered layout",
+      "completedAt": "2026-09-30T06:44:15.193Z",
+      "resultDigest": "fe706432fec405eba88e2e1b1757c757884f683086e3c59290bc994241c583a2",
+      "captureId": "CAP-6b97a23c-5476-46b6-b6b5-ba974104da5c",
+      "measurement": {
+        "json": "{\"kind\":\"rendered-layout\",\"captureId\":\"CAP-6b97a23c-5476-46b6-b6b5-ba974104da5c\",\"result\":{\"version\":1,\"viewport\":{\"width\":1280,\"height\":800},\"canvases\":[{\"element\":\"canvas#game\",\"viewportAreaFraction\":0.703125,\"intrinsic\":{\"width\":1200,\"height\":600},\"content\":{\"width\":1200,\"height\":600},\"scaleRatio\":1}],\"clipped\":[],\"controls\":[{\"element\":\"button#restart-button\",\"width\":102.4375,\"height\":40,\"inViewport\":true},{\"element\":\"button#ammo-stone\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"button#ammo-bomb\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"button#ammo-cluster\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"button#ammo-fire\",\"width\":149,\"height\":42,\"inViewport\":true},{\"element\":\"canvas#game\",\"width\":1200,\"height\":600,\"inViewport\":true}],\"omittedCanvases\":0,\"uninspectedElements\":0}}",
+        "truncated": false
+      }
+    },
+    {
+      "id": "886b89aa-77a7-4dbd-b88d-122f884304ec",
+      "kind": "capture",
+      "description": "Capture file:///tmp/visp-freeze-32a0K8/index.html",
+      "completedAt": "2026-09-30T06:44:15.296Z",
+      "resultDigest": "06f7871c991495b5d82634c01e38de5bd971c55f3017a8cf2a5092e3c8e6fc01",
+      "captureId": "CAP-6b97a23c-5476-46b6-b6b5-ba974104da5c"
+    }
+  ],
+  "provenance": "runner-observed"
+}

@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "../core/hash.js";
 import { type ApplicationFacts, applicationOf } from "./applies.js";
 import type { SkillRecord } from "./schema.js";
 
@@ -41,10 +42,6 @@ export function rankSkills(input: SkillSelectionInput): SkillCandidate[] {
   }
 
   return candidates.sort(
-    (a, b) => b.specificity - a.specificity || compare(a.skill.id, b.skill.id),
+    (a, b) => b.specificity - a.specificity || compareCodeUnits(a.skill.id, b.skill.id),
   );
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }

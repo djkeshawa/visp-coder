@@ -12,7 +12,7 @@ import {
   featureCriticCapacity,
   readFeatureCriticBudget,
 } from "./critic-budget.js";
-import type { CriticRequest, CriticState } from "./critic-model.js";
+import type { CriticPhase, CriticRequest, CriticState } from "./critic-model.js";
 import { nativeCapabilityGaps, nativePacket } from "./critic-native.js";
 import { criticPacket, currentReviewGap, packetHasImages } from "./critic-packet.js";
 import { CRITIC_SETUP_GAP, missingCriticSetup } from "./critic-policy.js";
@@ -21,12 +21,23 @@ import { observedProduct, stopReason } from "./critic-status.js";
 import { criticSelection, readCriticState, saveCriticState } from "./critic-store.js";
 import { phaseReviewGap } from "./critic-understanding.js";
 import { productFailureSignature } from "./failures.js";
-import { executionSchema, type ProductSlice } from "./model.js";
-import { runProductReviewerHandoff } from "./reviewer-handoff.js";
+import { openRequiredFindings } from "./findings.js";
+import { executionSchema, type ProductSlice, productStateSchema } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
+import { disputeSetKey, disputeState } from "./pinned-disputes.js";
+import { reproductionContextDigest } from "./reproduction-bindings.js";
+import { deliveredReviewEvidenceIds } from "./review-context.js";
+import { generatedSourceReferences } from "./review-delivery-validation.js";
+import { reviewerHandoffCandidates } from "./reviewer-handoff.js";
 import type { ProductRecord } from "./store.js";
 import { productImplementationDigest } from "./subject.js";
 
-const historicalExecutions = z.object({ executions: z.array(executionSchema) }).passthrough();
+const historicalExecutions = z
+  .object({
+    executions: z.array(executionSchema),
+    reproductions: productStateSchema.shape.reproductions,
+  })
+  .passthrough();
 const historicalHandoff = z
   .object({
     images: z.array(z.object({ sha256: z.string() }).passthrough()),
@@ -43,7 +54,7 @@ const historicalHandoff = z
   })
   .passthrough();
 type Handoff = Extract<
-  Awaited<ReturnType<typeof runProductReviewerHandoff>>,
+  Awaited<ReturnType<typeof reviewerHandoffCandidates>>,
   { ok: true }
 >["value"];
 
@@ -71,12 +82,18 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
       : undefined;
   if (delivery && !delivery.ok) return delivery;
   const delivered = delivery?.value;
+  const sources = delivered?.sources ?? packet.value.current.sources;
   const startedAt = Date.now(); // Context, snapshots and image encoding are prepared before the clock starts.
   const next: CriticState = {
     ...state,
     contract: selected.value.contract,
     attempts: [
-      ...state.attempts,
+      ...endedWithoutResult(
+        state,
+        relaunchesReview(workspace, request),
+        selected.value.phase,
+        startedAt,
+      ),
       {
         id,
         phase: selected.value.phase,
@@ -88,8 +105,19 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
         evidenceDigest,
         selectionDigest: hashValue(packet.value.selection),
         selection: packet.value.selection,
+        deliveredEvidenceIds: deliveredReviewEvidenceIds(
+          packet.value.current.evidence,
+          packet.value.current.interactionEvidence,
+          sources,
+          packet.value.current.experiments,
+        ),
+        deliveredGeneratedReferences: generatedSourceReferences(sources, handoff.value.sources),
         requiresImages: packetHasImages(packet.value),
         ...(request.sourceOnly ? { sourceOnly: true } : {}),
+        // Rulings count only for the disputes the reviewer was asked about here.
+        ...(packet.value.disputes?.length
+          ? { disputes: packet.value.disputes.map((dispute) => dispute.test) }
+          : {}),
         startedAt,
         status: "pending",
         ...(request.retryAfter
@@ -102,6 +130,8 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
             }
           : {}),
         transport: request.operation === "prepare" || request.capabilities ? "native" : "sampling",
+        // The attached launcher reports capabilities too, so transport alone cannot tell who ran it.
+        ...(relaunchesReview(workspace, request) ? { launcher: "visp" as const } : {}),
         ...(request.capabilities ? { hostReport: request.capabilities } : {}),
       },
     ],
@@ -122,6 +152,36 @@ export async function reserveReview(workspace: WorkspaceState, request: CriticRe
     : saved;
 }
 
+/** VISP launches the reviewer only for a review it runs itself; a host `--preflight` stays strict. */
+export function relaunchesReview(workspace: WorkspaceState, request: CriticRequest) {
+  return reviewerRules(workspace) && request.operation === "review";
+}
+
+/**
+ * A reviewer process that ended without a result before its deadline never returns one. Marking it
+ * unavailable in the save that reserves the fresh review spends no call (its reservation already counted).
+ */
+function endedWithoutResult(
+  state: CriticState,
+  relaunch: boolean,
+  phase: CriticPhase,
+  now: number,
+) {
+  return state.attempts.map((attempt) =>
+    relaunch &&
+    (attempt.phase ?? "product") === phase &&
+    attempt.status === "pending" &&
+    now > attempt.startedAt + state.config.timeoutMs
+      ? {
+          ...attempt,
+          status: "unavailable" as const,
+          failureKind: "invocation-failed" as const,
+          message: "The reviewer process ended without a result before its deadline",
+        }
+      : attempt,
+  );
+}
+
 async function prepareReviewEvidence(
   workspace: WorkspaceState,
   selected: import("./critic-store.js").CriticSelection,
@@ -135,11 +195,16 @@ async function prepareReviewEvidence(
     return err(vispError("EVIDENCE_FAILED", "Source changed while preparing critic context"));
   const implementation = productImplementationDigest(workspace, prepared.value.snapshot);
   const evidenceScope = selected.phase === "product" ? selected.slice : undefined;
+  // A review of other disputes is a new review even when the source and checks are the same.
+  const disputes = disputeSetKey(
+    (await disputeState(workspace, selected.record.brief.feature)).pending,
+  );
   const evidenceDigest = reviewEvidenceDigest(
     selected.record,
     handoff.subjectDigest,
     evidenceScope,
     handoff,
+    disputes,
   );
   const unique = await requireNewReview(
     workspace,
@@ -166,6 +231,7 @@ function reviewEvidenceDigest(
       readonly measurement?: unknown;
     }[];
   },
+  disputes?: string,
 ) {
   return hashValue({
     checks: [
@@ -175,6 +241,11 @@ function reviewEvidenceDigest(
     observations: handoff.evidence
       .filter((entry) => ["operation", "control"].includes(entry.kind))
       .map(({ kind, status, summary, measurement }) => ({ kind, status, summary, measurement })),
+    ...(disputes ? { disputes } : {}),
+    reproductions: reproductionContextDigest(record),
+    journeyRetirements: record.state.journeyRetirements?.filter(
+      (entry) => !slice || !entry.task || entry.task === slice.id,
+    ),
   });
 }
 
@@ -186,6 +257,9 @@ async function requireNewReview(
   implementation: string,
   evidenceDigest: string,
 ) {
+  // A saved assessment without a disposition leaves real review work outstanding.
+  // VISP may spend remaining capacity on it; reservation budget and evidence guards still apply.
+  if (owesResolutionReview(workspace, selected, request)) return ok(undefined);
   for (const attempt of state.attempts) {
     if (
       attempt.status !== "reviewed" ||
@@ -202,6 +276,19 @@ async function requireNewReview(
     if (historical.value === evidenceDigest) return duplicateReview();
   }
   return ok(undefined);
+}
+
+function owesResolutionReview(
+  workspace: WorkspaceState,
+  selected: import("./critic-store.js").CriticSelection,
+  request: CriticRequest,
+) {
+  return (
+    selected.phase === "product" &&
+    !request.sourceOnly &&
+    relaunchesReview(workspace, request) &&
+    openRequiredFindings(selected.record, selected.slice).length > 0
+  );
 }
 
 function duplicateReview() {
@@ -234,7 +321,11 @@ async function historicalSelectedEvidenceDigest(
     reviewEvidenceDigest(
       {
         ...selected.record,
-        state: { ...selected.record.state, executions: snapshot.data.executions },
+        state: {
+          ...selected.record.state,
+          executions: snapshot.data.executions,
+          reproductions: snapshot.data.reproductions,
+        },
       },
       attempt.subject,
       selected.slice,
@@ -256,7 +347,7 @@ async function reviewContext(workspace: WorkspaceState, request: CriticRequest) 
   if (transportGap) return err(vispError("CONFIG_INVALID", transportGap));
   const retryError = criticRetryError(state, request, selected.value.phase);
   if (retryError) return err(vispError("STATE_BUSY", retryError));
-  const handoff = await runProductReviewerHandoff(workspace, selected.value.selection);
+  const handoff = await reviewerHandoffCandidates(workspace, selected.value.selection);
   if (!handoff.ok) return handoff;
   const reason = stopReason(
     state,
@@ -265,6 +356,7 @@ async function reviewContext(workspace: WorkspaceState, request: CriticRequest) 
     selected.value.intent,
     selected.value.phase,
     request.retryAfter,
+    { relaunch: relaunchesReview(workspace, request) },
   );
   if (reason) return err(vispError("STAGE_BLOCKED", reason));
   const capacity = await reservationCapacity(

@@ -5,7 +5,7 @@ import type { SkillRecord } from "./schema.js";
 import { readIndex, upsert } from "./store.js";
 import { currentSupport } from "./support.js";
 
-export { currentSupport, type Support, supportFor } from "./support.js";
+export { supportFor } from "./support.js";
 
 /**
  * A skill cannot outlive the evidence that justified it.

@@ -92,7 +92,10 @@ function addEvidence(
   summary.executions.current += currentExecutions.length;
   summary.executions.stale += executions.length - currentExecutions.length;
   for (const execution of executions) {
-    const key = execution.status === "environment-failed" ? "environmentFailed" : execution.status;
+    const key =
+      execution.status === "environment-failed" || execution.status === "timed-out"
+        ? "environmentFailed"
+        : execution.status;
     summary.executions[key]++;
     summary.executions.durationMs += execution.durationMs;
   }

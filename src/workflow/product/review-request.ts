@@ -9,7 +9,9 @@ import { productFeedbackSchema } from "./feedback-model.js";
 import type { ProductFeedbackHost } from "./host-feedback.js";
 import { independentJudgments, independentReviewSchema } from "./independent-review.js";
 import { assessmentSchema, coverageAssessmentSchema, reviewerContextSchema } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { type ProductReviewOptions, runProductReview } from "./review.js";
+import type { DeliveredReviewEvidence } from "./review-delivery-validation.js";
 import { reviewSelectionSchema } from "./review-selection.js";
 import { runProductReviewerHandoff } from "./reviewer-handoff.js";
 
@@ -69,13 +71,14 @@ export async function runProductReviewRequest(
   workspace: WorkspaceState,
   options: ProductReviewRequest = {},
   host?: ProductFeedbackHost,
+  deliveredEvidence?: DeliveredReviewEvidence,
 ): Promise<Result<unknown>> {
   const valid = validateProductReviewRequest(options);
   if (!valid.ok) return valid;
   if (options.prepare || options.session) {
     const sessions = await import("./review-session.js");
     return options.prepare
-      ? sessions.prepareReviewSession(workspace, options)
+      ? withReviewNotice(workspace, await sessions.prepareReviewSession(workspace, options))
       : sessions.submitReviewSession(workspace, options);
   }
   if (options.dispatch) {
@@ -83,10 +86,27 @@ export async function runProductReviewRequest(
     return runProductHostFeedback(workspace, host ?? { model: "host-configured" }, options);
   }
   if (options.template) return productInputTemplate(workspace, "review", options);
-  if (options.handoff) return runProductReviewerHandoff(workspace, options);
-  const result = await runProductReview(workspace, options);
+  if (options.handoff)
+    return withReviewNotice(workspace, await runProductReviewerHandoff(workspace, options));
+  const result = await runProductReview(workspace, options, deliveredEvidence);
   return result.ok && options.assessments !== undefined && !options.detail
     ? ok(productReviewReceipt(result.value))
+    : result;
+}
+
+const OWN_REVIEW_NOTICE =
+  "VISP runs this project's reviewer inside visp done. A review you write yourself is not that review and does not replace it: run visp done, or visp next if VISP's review is still running.";
+
+/**
+ * Workers self-started `review --prepare` when VISP's reviewer was slow or unavailable.
+ * Advisory only, not a refusal: VISP's own reviewer packets are built by
+ * runProductReviewerHandoff directly, so a reviewer never sees this.
+ */
+function withReviewNotice(workspace: WorkspaceState, result: Result<unknown>): Result<unknown> {
+  if (!result.ok || !reviewerRules(workspace)) return result;
+  const value = result.value;
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? ok({ notice: OWN_REVIEW_NOTICE, ...value })
     : result;
 }
 

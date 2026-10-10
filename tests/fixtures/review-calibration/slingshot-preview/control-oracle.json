@@ -1,0 +1,9 @@
+{
+  "variant": "control",
+  "expectedDefects": [],
+  "counterevidence": {
+    "held": "The dashed preview arcs up and to the right from the sling in the direction the pull implies.",
+    "released": "The released bird flies up and to the right and stays on the drawn arc."
+  },
+  "evaluationScope": "Preview versus launch only, from one recorded pull. A required finding here is a false rejection. Do not score differences in art, layout or level content."
+}

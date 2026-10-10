@@ -4,7 +4,7 @@ import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { now } from "../../workflow/artifacts/common.js";
 import { mutateOverrides } from "../../workflow/policy/mutations.js";
-import { RULES } from "../../workflow/policy/rules.js";
+import { EVALUATED_RULE_IDS, RULES } from "../../workflow/policy/rules.js";
 import type { Override } from "../../workflow/policy/schema.js";
 import { overrideSchema } from "../../workflow/policy/schema.js";
 import { isJson, options, projectRoot, validateArtifactSelection, workspace } from "../context.js";
@@ -35,14 +35,14 @@ function createCommand(): Command {
     .option("--feature <id>", "Limit the exception to one feature")
     .option("--task <id>", "Limit the exception to one task")
     .option("--stage <stage>", `Limit the exception to one stage (${STAGES.join(", ")})`)
-    .option("--days <n>", `How long it lasts (default ${DEFAULT_DAYS})`, Number.parseInt)
+    .option("--days <n>", `How long it lasts (default ${DEFAULT_DAYS})`)
     .action(async (rule: string, _flags: unknown, command: Command) => {
       const opts = options<{
         reason: string;
         feature?: string;
         task?: string;
         stage?: string;
-        days?: number;
+        days?: string;
       }>(command);
 
       const identifiers = validateArtifactSelection(opts);
@@ -50,9 +50,21 @@ function createCommand(): Command {
         process.exitCode = emitError("override", identifiers.error, { json: isJson(opts) });
         return;
       }
+      const days = opts.days === undefined ? undefined : Number(opts.days);
+      if (
+        opts.days !== undefined &&
+        (!/^[1-9]\d*$/.test(opts.days) || !Number.isSafeInteger(days) || (days ?? 0) > 36500)
+      ) {
+        process.exitCode = emitError(
+          "override",
+          vispError("UNSUPPORTED", "--days must be a positive whole number"),
+          { json: isJson(opts) },
+        );
+        return;
+      }
 
       const saved = await mutateOverrides(projectRoot(opts), (current) => {
-        const built = buildOverride(rule, opts, current.length);
+        const built = buildOverride(rule, { ...opts, days }, current.length);
         return built.ok ? ok({ overrides: [...current, built.value], value: built.value }) : built;
       });
       if (!saved.ok) {
@@ -90,6 +102,12 @@ function buildOverride(
 
   if (!known.overridable) {
     return err(vispError("UNSUPPORTED", `${rule} cannot be overridden: ${known.reason}`));
+  }
+
+  if (!EVALUATED_RULE_IDS.includes(known.id)) {
+    return err(
+      vispError("UNSUPPORTED", `${rule} is catalogued but not evaluated by this workflow`),
+    );
   }
 
   if (opts.stage && !STAGES.includes(opts.stage as Stage)) {

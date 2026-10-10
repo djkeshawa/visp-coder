@@ -16,6 +16,7 @@ import {
   criticSelection,
 } from "../../../../src/workflow/product/critic-store.js";
 import { runProductWork } from "../../../../src/workflow/product/index.js";
+import { candidateSourcePaths } from "../../../../src/workflow/product/source-inputs.js";
 import * as subjects from "../../../../src/workflow/product/subject.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 import { productWorkspace } from "../../support/product-workspace.js";
@@ -108,17 +109,27 @@ it("enforces bounds for source, serialized evidence, file count and saved record
     ok: false,
     error: { message: "Oversized candidate" },
   });
-  await setup.workspace.write("src/huge.bin", Buffer.alloc(32 * 1024 * 1024 + 1));
-  expect(await prepareCandidate(state, selected, {})).toMatchObject({
-    ok: false,
-    error: { code: "UNSUPPORTED" },
+  // Source beyond one copy (32 MiB or 2000 files) records identity only, so reviews still run.
+  await setup.workspace.write("src/value.mjs", Buffer.alloc(32 * 1024 * 1024 + 1));
+  const large = await prepareCandidate(state, selected, {});
+  expect(large).toMatchObject({
+    ok: true,
+    value: { candidate: { identityOnly: true, files: [] } },
   });
-  vi.spyOn(subjects, "productSourceSnapshot").mockResolvedValueOnce(
-    ok(Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`file-${i}`, "hash"]))),
-  );
-  expect(await prepareCandidate(state, selected, {})).toMatchObject({
+  expect(
+    large.ok && large.value.mutations.slice(0, -1).every((mutation) => mutation.kind === "assert"),
+  ).toBe(true);
+});
+it("never restores an identity-only candidate", async () => {
+  await setup.workspace.write("src/value.mjs", Buffer.alloc(32 * 1024 * 1024 + 1));
+  const candidate = await preserve();
+  expect(candidate.identityOnly).toBe(true);
+  expect((await readCandidate(state, selected, candidate.id)).ok).toBe(true);
+  expect(
+    await restoreCandidate(state, selected, candidate.id, await currentSubject()),
+  ).toMatchObject({
     ok: false,
-    error: { message: expect.stringContaining("2000") },
+    error: { code: "UNSUPPORTED", message: expect.stringContaining("identity only") },
   });
 });
 it("does not legitimize files changing between snapshot, metadata and capture reads", async () => {
@@ -222,3 +233,55 @@ it("recovers an interrupted restoration without changing saved candidate bytes",
   expect(await readFile(join(state.paths.root, "src/value.mjs"), "utf8")).toContain("value = 8");
   expect(await readFile(path)).toEqual(bytes);
 });
+
+it.each(["source-size", "serialized-size", "file-count"])(
+  "guards every declared path in the %s identity fallback",
+  async (fallback) => {
+    if (fallback === "source-size")
+      await setup.workspace.write("src/value.mjs", Buffer.alloc(32 * 1024 * 1024 + 1));
+    if (fallback === "serialized-size")
+      await setup.workspace.write("src/value.mjs", Buffer.alloc(1024 * 1024, 97));
+    if (fallback === "file-count") {
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(join(state.paths.root, "test/inputs"));
+      for (let i = 0; i < 2001; i++) await setup.workspace.write(`test/inputs/${i}.mjs`, "fixture");
+      selected.record.brief.checks[0]?.files.push("test/**");
+    }
+    const prepared = await prepareCandidate(
+      state,
+      selected,
+      fallback === "serialized-size" ? "x".repeat(31 * 1024 * 1024) : {},
+    );
+    if (!prepared.ok) throw new Error(prepared.error.message);
+    expect(prepared.value.candidate).toMatchObject({ identityOnly: true, files: [] });
+    const paths = candidateSourcePaths(
+      state,
+      selected.record.brief,
+      prepared.value.snapshot,
+      selected.slice,
+    );
+    expect(prepared.value.mutations.slice(0, -1).map((mutation) => mutation.path)).toEqual(paths);
+    expect(
+      prepared.value.mutations.slice(0, -1).every((mutation) => mutation.kind === "assert"),
+    ).toBe(true);
+    expect(prepared.value.mutations.some((mutation) => mutation.path === "src/value.mjs")).toBe(
+      true,
+    );
+    expect(prepared.value.mutations.length).toBeGreaterThan(1);
+    expect(paths).toContain("src/value.mjs");
+    await setup.workspace.write("src/value.mjs", "concurrent edit");
+    expect(
+      await transactions.applyFileTransaction(
+        state.paths.root,
+        "candidate-race",
+        prepared.value.mutations,
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining("Concurrent change detected") },
+    });
+    await expect(
+      readFile(candidatePath(state, prepared.value.candidate.feature, prepared.value.candidate.id)),
+    ).rejects.toThrow();
+  },
+);

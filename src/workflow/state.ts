@@ -1,20 +1,29 @@
 import { resolveCriticDefault } from "../config/critic-defaults.js";
 import { loadConfig } from "../config/load.js";
-import { defaultConfig, type VispConfig } from "../config/schema.js";
+import type { VispConfig } from "../config/schema.js";
 import { DIR, FILE, STATE_DIR } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { RecoveringProjectFileSystem, recoverFileTransactions } from "../core/file-transaction.js";
 import type { ProjectFileSystem } from "../core/fs.js";
-import { currentBranch, headCommit, isRepository, workingTreeChanges } from "../core/git.js";
+import {
+  currentBranch,
+  gitWritable,
+  headCommit,
+  isRepository,
+  workingTreeChanges,
+} from "../core/git.js";
 import { parseFeatureId } from "../core/input.js";
 import { isExecutableMode } from "../core/mode.js";
 import { ProjectPaths } from "../core/paths.js";
+import { normalizePath } from "../core/patterns.js";
+import { discoverProjectRoot } from "../core/project-root.js";
 import { err, ok, type Result } from "../core/result.js";
 import {
   agentActivationFile,
   planAgentActivation,
   requiresAgentActivation,
 } from "../harness/activation.js";
+import { sameAssetContent } from "../harness/asset-inspection.js";
 import { preToolUseRegistration } from "../harness/claude-settings.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
@@ -40,10 +49,11 @@ export interface WorkspaceState {
   readonly policy: Policy;
   readonly overrides: readonly Override[];
   readonly status: Status | undefined;
+  readonly checkoutNotice?: string;
 }
 
 export async function loadWorkspace(root: string): Promise<Result<WorkspaceState>> {
-  const paths = new ProjectPaths(root);
+  const paths = new ProjectPaths(discoverProjectRoot(root));
   const files = new RecoveringProjectFileSystem(paths.root);
 
   // A lock may create .visp/state before init; the tracked project record marks setup.
@@ -73,7 +83,15 @@ export async function loadWorkspace(root: string): Promise<Result<WorkspaceState
   const resolved = await withLatestFeature(store, status.value);
   if (!resolved.ok) return resolved;
 
+  const missing =
+    status.value?.activeFeature && status.value.activeFeature !== resolved.value?.activeFeature;
+  const branch = missing ? await currentBranch(root) : undefined;
   return ok({
+    ...(missing
+      ? {
+          checkoutNotice: `Feature ${status.value?.activeFeature} is absent from branch ${branch?.ok ? branch.value : "HEAD"}; switch back to its branch or select an existing feature explicitly.`,
+        }
+      : {}),
     paths,
     files,
     store,
@@ -86,7 +104,7 @@ export async function loadWorkspace(root: string): Promise<Result<WorkspaceState
 
 /** Recover first, then load; mutators must never plan from a partly applied transaction. */
 export async function loadWorkspaceForMutation(root: string): Promise<Result<WorkspaceState>> {
-  const recovered = await recoverFileTransactions(root);
+  const recovered = await recoverFileTransactions(discoverProjectRoot(root));
   if (!recovered.ok) return recovered;
   return loadWorkspace(root);
 }
@@ -101,16 +119,15 @@ async function withLatestFeature(
   store: ArtifactStore,
   status: Status | undefined,
 ): Promise<Result<Status | undefined>> {
-  if (status?.activeFeature) return ok(status);
-
   const features = await store.listFeatures();
   if (!features.ok) return features;
 
+  if (status?.activeFeature && features.value.includes(status.activeFeature)) return ok(status);
   const latest = features.value[0];
-  if (!latest) return ok(status);
+  if (!latest && !status?.activeFeature) return ok(status);
 
   const base = status ?? { kind: "status" as const, createdAt: now(), updatedAt: now() };
-  return ok({ ...base, activeFeature: latest });
+  return ok({ ...base, activeFeature: latest, activeTask: undefined });
 }
 
 /**
@@ -175,8 +192,8 @@ export function resolveFeature(state: WorkspaceState, explicit?: string): Result
   const feature = explicit ?? state.status?.activeFeature;
   if (!feature) {
     return err(
-      vispError("NO_ACTIVE_FEATURE", "No feature is active", {
-        recovery: 'visp feature "<goal>"',
+      vispError("NO_ACTIVE_FEATURE", state.checkoutNotice ?? "No feature is active", {
+        recovery: state.checkoutNotice ? "git switch -" : 'visp feature "<goal>"',
       }),
     );
   }
@@ -189,11 +206,14 @@ export interface FoundationContext {
   readonly repositoryAvailable?: boolean;
   readonly hasBaseline?: boolean;
   readonly changedFiles?: readonly string[];
+  /** Probed on request, and only when the tree has changes: whether Git can be written. */
+  readonly gitWritable?: boolean;
 }
 
 /** Foundation checks do not read feature artifacts, including historical legacy drafts. */
 export async function buildFoundationContext(
   state: WorkspaceState,
+  options: { readonly probeGit?: boolean } = {},
 ): Promise<Result<FoundationContext>> {
   const [harnessInstalled, enforcementInstalled, repositoryAvailable, baseline, changedFiles] =
     await Promise.all([
@@ -203,48 +223,60 @@ export async function buildFoundationContext(
       headCommit(state.paths.root),
       changedFilesOf(state),
     ]);
+  if (!harnessInstalled.ok) return harnessInstalled;
+  // Only feature start uses the answer, so no other command pays for the probe.
+  const writable =
+    options.probeGit && changedFiles?.length ? await gitWritable(state.paths.root) : undefined;
   return ok({
-    harnessInstalled,
+    harnessInstalled: harnessInstalled.value,
     enforcementInstalled,
     repositoryAvailable,
     hasBaseline: baseline.ok,
     ...(changedFiles ? { changedFiles } : {}),
+    ...(writable === undefined ? {} : { gitWritable: writable }),
   });
 }
 
-async function hasHarnessAssets(state: WorkspaceState): Promise<boolean> {
+async function hasHarnessAssets(state: WorkspaceState): Promise<Result<boolean>> {
   const critic = await resolveCriticDefault(state.config.harness, state.config.critic);
-  if (!critic.ok) return false;
-  const assets = planFor(state.config.harness, state.config.profile, critic.value).assets;
-  if (assets.length === 0) return false;
+  if (!critic.ok) return critic;
+  const assets = planFor(state.config.harness, state.config.profile, critic.value ?? null).assets;
+  if (assets.length === 0) return ok(false);
 
   const current = await Promise.all(
     assets.map(async (asset) => {
       const installed = await state.files.readTextIfExists(asset.path);
-      if (!installed.ok || installed.value !== asset.content) return false;
+      if (
+        !installed.ok ||
+        installed.value === undefined ||
+        !sameAssetContent(installed.value, asset)
+      )
+        return false;
       if (asset.executable !== true) return true;
 
       const metadata = await state.files.metadata(asset.path);
       return metadata.ok && isExecutableMode(metadata.value?.mode);
     }),
   );
-  if (!current.every(Boolean)) return false;
+  if (!current.every(Boolean)) return ok(false);
 
-  if (!requiresAgentActivation(state.config.harness)) return true;
+  if (!requiresAgentActivation(state.config.harness)) return ok(true);
   const activation = await state.files.readTextIfExists(agentActivationFile(state.config.harness));
-  if (!activation.ok) return false;
+  if (!activation.ok) return activation;
   const planned = planAgentActivation(state.config.harness, activation.value, false);
-  return planned.ok && planned.value.status === "current";
+  return ok(planned.ok && planned.value.status === "current");
 }
 
 async function hasEnforcementSurface(state: WorkspaceState): Promise<boolean> {
   const hookPath = await preCommitHookPath(state.paths.root);
   if (hookPath.ok) {
     const preCommit = await state.files.readTextIfExists(hookPath.value.absolute);
+    const local = await state.files.readTextIfExists(`${hookPath.value.absolute}.local`);
     const metadata = await state.files.metadata(hookPath.value.absolute);
     if (
       preCommit.ok &&
-      preCommit.value === renderPreCommitHook() &&
+      local.ok &&
+      preCommit.value === renderPreCommitHook(local.value !== undefined) &&
       metadata.ok &&
       isExecutableMode(metadata.value?.mode)
     ) {
@@ -276,42 +308,8 @@ async function changedFilesOf(state: WorkspaceState): Promise<string[] | undefin
 }
 
 export function isStatePath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "");
+  const normalized = normalizePath(path);
   return normalized === STATE_DIR || normalized.startsWith(`${STATE_DIR}/`);
-}
-
-/**
- * The feature whose intent records this branch.
- *
- * CI has no active feature of its own: `status.json` is per-developer and is not
- * committed. The branch is, so it is what ties a pull request back to the scope
- * it was supposed to stay inside. Undefined when nothing matches, which the
- * caller must treat as "ask explicitly" rather than "any feature will do".
- */
-export async function featureForBranch(
-  state: WorkspaceState,
-  branchOverride?: string,
-): Promise<string | undefined> {
-  // A detached checkout has no branch to read — `rev-parse --abbrev-ref HEAD`
-  // answers the literal string "HEAD" — and that is the normal state in CI:
-  // actions/checkout detaches for a pull_request event. So the caller may say
-  // which branch this checkout represents when git cannot.
-  const name = (branchOverride ?? (await readBranch(state))).trim();
-  if (name === "" || name === "HEAD") return undefined;
-
-  const features = await state.store.listFeatures();
-  if (!features.ok) return undefined;
-
-  for (const feature of features.value) {
-    const intent = await state.store.readIntent(feature);
-    if (intent.ok && intent.value.branch === name) return feature;
-  }
-  return undefined;
-}
-
-async function readBranch(state: WorkspaceState): Promise<string> {
-  const branch = await currentBranch(state.paths.root);
-  return branch.ok ? branch.value : "";
 }
 
 /** Where the scope being enforced comes from. */
@@ -327,6 +325,12 @@ export interface ScopeOptions {
    * fresh checkout — which is all CI ever has — can only ask the second one.
    */
   readonly source?: ScopeSource;
+  /**
+   * The host session asking, as its hook reports it. An authorization granted to another
+   * session permits no edits; without it, the session of the latest recorded prompt or
+   * shell command stands in.
+   */
+  readonly hostSession?: string;
 }
 
 /**
@@ -410,5 +414,3 @@ function markerFor(feature: string, task: Task): ImplementMarker {
     forbiddenFiles: task.forbiddenFiles,
   };
 }
-
-export { defaultConfig };

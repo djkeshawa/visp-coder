@@ -1,7 +1,15 @@
 import type { Language } from "../../core/constants.js";
+import { compareCodeUnits } from "../../core/hash.js";
 import { ok, type Result } from "../../core/result.js";
+import { appendAll } from "../append.js";
 import { GRAMMAR_BY_EXTENSION, UNPARSED_SOURCE_EXTENSIONS } from "../constants.js";
-import { extensionOf, grammarForPath, isHtmlPath, isPackageManifest } from "../paths.js";
+import {
+  extensionOf,
+  grammarForPath,
+  isGraphInputPath,
+  isHtmlPath,
+  isPackageManifest,
+} from "../paths.js";
 import type {
   Entity,
   Entrypoint,
@@ -88,14 +96,21 @@ class ExtractionRun {
   async prepare(): Promise<void> {
     const aliases = this.request.aliases ?? (await loadAliases(this.request.root));
     for (const problem of aliases.problems) {
-      this.unknowns.record("parser_error", problem, "tsconfig could not be read");
+      const extendsAt = problem.indexOf(" extends ");
+      if (extendsAt !== -1)
+        this.unknowns.record(
+          "unresolved_import",
+          problem.slice(0, extendsAt),
+          problem.slice(extendsAt + 9),
+        );
+      else this.unknowns.record("parser_error", problem, "tsconfig could not be read");
     }
     this.context = createResolutionContext(
       this.request.files.map((file) => file.path),
       aliases,
     );
     for (const skip of this.request.skipped) {
-      this.unknowns.record("file_skipped", skip.path, skip.reason);
+      if (isGraphInputPath(skip.path)) this.unknowns.record("file_skipped", skip.path, skip.reason);
     }
   }
 
@@ -108,7 +123,7 @@ class ExtractionRun {
 
     if (isPackageManifest(file.path)) {
       const manifest = extractManifest(file.path, source.value);
-      this.entrypoints.push(...manifest.entrypoints);
+      appendAll(this.entrypoints, manifest.entrypoints);
       this.unknowns.addAll(manifest.unknowns);
       return;
     }
@@ -130,9 +145,10 @@ class ExtractionRun {
 
   private async parseHtml(file: FileEntry, source: string): Promise<void> {
     const page = extractHtml(file.path, source, this.context);
-    this.entities.push(...page.entities);
-    this.relations.push(...page.relations);
-    this.entrypoints.push(...page.entrypoints);
+    appendAll(this.entities, page.entities);
+    appendAll(this.relations, page.relations);
+    appendAll(this.entrypoints, page.entrypoints);
+    this.unknowns.addAll(page.unknowns);
     if (page.relations.length > 0) this.parsedPaths.add(file.path);
     if (this.enabled.has("javascript")) {
       const inline = inlineJavaScript(source);
@@ -185,10 +201,11 @@ class ExtractionRun {
       importedModules: imports.importedModules,
     });
 
-    this.entities.push(...entities.entities);
-    this.relations.push(...entities.relations, ...imports.relations);
-    this.relations.push(...extractTestRelations(file.path, imports.relations));
-    this.entrypoints.push(...entrypoints);
+    appendAll(this.entities, entities.entities);
+    appendAll(this.relations, entities.relations);
+    appendAll(this.relations, imports.relations);
+    appendAll(this.relations, extractTestRelations(file.path, imports.relations));
+    appendAll(this.entrypoints, entrypoints);
     this.unknowns.addAll(imports.unknowns);
     this.parsedPaths.add(file.path);
     this.facts.push({
@@ -259,7 +276,7 @@ class ExtractionRun {
         reexports,
         enclosing: file.entities,
       });
-      this.relations.push(...resolved.relations);
+      appendAll(this.relations, resolved.relations);
       this.unknowns.addAll(resolved.unknowns);
     }
   }
@@ -297,28 +314,27 @@ export function dedupeRelations(relations: readonly Relation[]): Relation[] {
   return [...seen.values()].sort(byRelation);
 }
 
-export function byRelation(a: Relation, b: Relation): number {
+function byRelation(a: Relation, b: Relation): number {
   return (
-    compare(a.path, b.path) ||
+    compareCodeUnits(a.path, b.path) ||
     a.line - b.line ||
-    compare(a.kind, b.kind) ||
-    compare(a.source, b.source) ||
-    compare(a.target, b.target)
+    compareCodeUnits(a.kind, b.kind) ||
+    compareCodeUnits(a.source, b.source) ||
+    compareCodeUnits(a.target, b.target)
   );
 }
 
 function byEntity(a: Entity, b: Entity): number {
-  return compare(a.path, b.path) || a.startLine - b.startLine || compare(a.id, b.id);
+  return (
+    compareCodeUnits(a.path, b.path) || a.startLine - b.startLine || compareCodeUnits(a.id, b.id)
+  );
 }
 
 function byEntrypoint(a: Entrypoint, b: Entrypoint): number {
   return (
-    compare(a.path, b.path) || a.line - b.line || compare(a.kind, b.kind) || compare(a.name, b.name)
+    compareCodeUnits(a.path, b.path) ||
+    a.line - b.line ||
+    compareCodeUnits(a.kind, b.kind) ||
+    compareCodeUnits(a.name, b.name)
   );
 }
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-export { parseCount, resetParseCount } from "./parser.js";

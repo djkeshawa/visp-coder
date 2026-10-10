@@ -1,5 +1,10 @@
+import { randomBytes } from "node:crypto";
+import { rm, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { type VispError, vispError } from "./errors.js";
 import { run } from "./exec.js";
+import { ProjectFileSystem } from "./fs.js";
+import { flaggedSourcePaths, headSourceObjects, workingSourceObject } from "./git-source.js";
 import { err, ok, type Result } from "./result.js";
 
 export interface ChangedFile {
@@ -25,6 +30,39 @@ const GIT_ENV = {
 export async function isRepository(cwd: string): Promise<boolean> {
   const result = await run("git", ["rev-parse", "--git-dir"], { cwd, env: GIT_ENV });
   return result.ok && result.value.exitCode === 0;
+}
+
+/**
+ * Whether Git can record anything here. Codex's workspace-write sandbox mounts `.git`
+ * read-only, so `git commit` fails with "Read-only file system" and uncommitted work can
+ * never be committed by the agent. Probed by creating and removing a file, because Git's
+ * own read commands succeed on a read-only repository. Unknown counts as writable, so a
+ * failed inspection never waives the commit requirement.
+ */
+export async function gitWritable(cwd: string): Promise<boolean> {
+  const dirs = await run("git", ["rev-parse", "--git-dir", "--git-common-dir"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!dirs.ok || dirs.value.exitCode !== 0) return true;
+  const unique = [...new Set(dirs.value.stdout.split("\n").filter(Boolean))];
+  // A commit writes the index in the git dir and objects and refs in the common dir.
+  for (const dir of unique) if (!(await directoryWritable(resolve(cwd, dir)))) return false;
+  return true;
+}
+
+async function directoryWritable(directory: string): Promise<boolean> {
+  const probe = join(
+    directory,
+    `visp-write-probe-${process.pid}-${randomBytes(4).toString("hex")}`,
+  );
+  try {
+    await writeFile(probe, "", { flag: "wx" });
+  } catch {
+    return false;
+  }
+  await rm(probe, { force: true }).catch(() => undefined);
+  return true;
 }
 
 /**
@@ -122,6 +160,124 @@ export async function headCommit(cwd: string): Promise<Result<string>> {
     return err(vispError("COMMAND_FAILED", "Repository has no commits yet"));
   }
   return ok(result.value.stdout.trim());
+}
+
+export interface CommitSummary {
+  readonly hash: string;
+  readonly subject: string;
+  /** Committer time, whole seconds since the epoch. */
+  readonly committedAt: number;
+}
+
+/**
+ * The newest non-merge commits reachable from HEAD, newest first, leaving out commits that
+ * touch only VISP's own state (`.visp`); an unborn HEAD is an error.
+ */
+export async function recentCommits(cwd: string, limit: number): Promise<Result<CommitSummary[]>> {
+  const result = await run(
+    "git",
+    [
+      "log",
+      "--no-merges",
+      "-n",
+      String(limit),
+      "--format=%ct%x09%h%x09%s",
+      "--",
+      ".",
+      ":(exclude).visp",
+    ],
+    { cwd, env: GIT_ENV, timeoutMs: 10_000 },
+  );
+  if (!result.ok) return result;
+  if (result.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not list recent commits"));
+  return ok(
+    result.value.stdout.split("\n").flatMap((line) => {
+      const [time, hash, ...subject] = line.split("\t");
+      const committedAt = Number(time);
+      return hash && Number.isFinite(committedAt) && time !== ""
+        ? [{ hash, subject: subject.join("\t"), committedAt }]
+        : [];
+    }),
+  );
+}
+
+/** Committed changes since authorization whose working content still equals HEAD. */
+export async function committedChangesSince(
+  cwd: string,
+  reference: string,
+): Promise<Result<string[]>> {
+  if (!/^[a-f0-9]{40,64}$/.test(reference))
+    return err(vispError("ARTIFACT_INVALID", "Invalid authorization commit"));
+  const changed = await run(
+    "git",
+    ["diff", "--name-status", "-z", "--no-renames", reference, "HEAD", "--"],
+    { cwd, env: GIT_ENV },
+  );
+  if (!changed.ok) return changed;
+  if (changed.value.exitCode !== 0)
+    return err(
+      vispError("COMMAND_FAILED", "Could not compare the authorization commit with HEAD", {
+        recovery:
+          "Recover the recorded commit before checking scope; preserve incoming committed changes.",
+      }),
+    );
+  const local = await run("git", ["diff", "--name-only", "-z", "--no-renames", "HEAD", "--"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!local.ok) return local;
+  if (local.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not compare working content with HEAD"));
+  const untracked = await run("git", ["ls-files", "--others", "-z", "--exclude-standard"], {
+    cwd,
+    env: GIT_ENV,
+  });
+  if (!untracked.ok) return untracked;
+  if (untracked.value.exitCode !== 0)
+    return err(vispError("COMMAND_FAILED", "Could not list untracked files"));
+  const dirty = new Set([...local.value.stdout.split("\0"), ...untracked.value.stdout.split("\0")]);
+  const changes = parseNameStatus(changed.value.stdout);
+  const flags = await flaggedSourcePaths(cwd);
+  if (!flags.ok) return flags;
+  const candidates = changes.filter((file) => !dirty.has(file.path));
+  const uncertain = candidates.filter(
+    (file) => file.status === "deleted" || flags.value.has(file.path),
+  );
+  if (uncertain.length) {
+    const observed = await matchingCommittedPaths(
+      cwd,
+      uncertain.map((file) => file.path),
+    );
+    if (!observed.ok) return observed;
+    for (const file of uncertain.filter((file) => !observed.value.has(file.path)))
+      dirty.add(file.path);
+  }
+  return ok(
+    candidates
+      .map((file) => file.path)
+      .filter((path) => !dirty.has(path))
+      .sort(),
+  );
+}
+
+async function matchingCommittedPaths(cwd: string, paths: string[]): Promise<Result<Set<string>>> {
+  const head = await headSourceObjects(cwd, paths);
+  if (!head.ok) return head;
+  const files = new ProjectFileSystem(cwd);
+  const matching = new Set<string>();
+  for (const path of paths) {
+    const expected = head.value.get(path);
+    const current = await workingSourceObject(
+      files,
+      path,
+      expected?.object.length === 64 ? "sha256" : "sha1",
+    );
+    if (!current.ok) return current;
+    if (current.value?.mode === expected?.mode && current.value?.object === expected?.object)
+      matching.add(path);
+  }
+  return ok(matching);
 }
 
 /** Files changed in the working tree, including untracked files. */

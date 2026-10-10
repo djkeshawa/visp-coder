@@ -11,6 +11,7 @@ import {
 } from "./evidence-references.js";
 import { experimentReviewContext } from "./experiments.js";
 import { productFeedbackPlan } from "./feedback.js";
+import { newestRunPerJourney } from "./image-groups.js";
 import type { inspectProductImages } from "./images.js";
 import {
   latestExecutionsByOwner,
@@ -22,16 +23,23 @@ import {
   type ProductSlice,
 } from "./model.js";
 import { observationSequence } from "./observation-preview.js";
+import { withRules } from "./project-rules.js";
 import { hasRequiredFindings, productRefinement } from "./refinement.js";
 import { reproductionContextDigest } from "./reproduction-bindings.js";
 import type { ProductReviewBundle } from "./review.js";
 import { productReviewAgenda, reviewInteractionEvidence } from "./review-context.js";
-import { productReviewInstructions } from "./review-instructions.js";
+import {
+  productReviewInstructions,
+  REVIEW_DIFF_INSTRUCTIONS,
+  REVIEW_FLIP_INSTRUCTIONS,
+} from "./review-instructions.js";
 import { productReviewRecurrence } from "./review-recurrence.js";
 import type { ProductRecord } from "./store.js";
 
 interface ReviewBundleInput {
   workspace: WorkspaceState;
+  /** Current project rules, appended to the request the reviewer judges against. */
+  rules?: string;
   record: ProductRecord;
   slice: ProductSlice | undefined;
   subject: string;
@@ -91,7 +99,7 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
       reproductionDigest: reproductionContextDigest(record),
       images: images.images.map(({ id, sha256 }) => ({ id, sha256 })),
     },
-    originalRequest: record.brief.originalRequest,
+    originalRequest: withRules(record.brief.originalRequest, input.rules ?? ""),
     outcomes,
     executions: latestExecutionsByOwner(applicableExecutions(record, subject, slice)).slice(-12),
     controls: record.state.controls
@@ -105,8 +113,8 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
           ),
       )
       .slice(-12),
-    captureRuns: record.state.captureRuns
-      .filter((candidate) => {
+    captureRuns: newestRunPerJourney(
+      record.state.captureRuns.filter((candidate) => {
         const run = productCaptureRunSchema.safeParse(candidate);
         if (!run.success || !evidenceApplies(record, subject, run.data)) return false;
         return (
@@ -116,8 +124,9 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
             .find((entry) => entry.id === run.data.task)
             ?.outcomes.some((id) => slice.outcomes.includes(id))
         );
-      })
-      .slice(-3),
+      }),
+      3,
+    ),
     previousAssessments: previous,
     assessments,
     images: images.images,
@@ -145,7 +154,12 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
     imageGroupsOmitted: images.groupsOmitted,
     reviewer: reviewer,
     recurrence: productReviewRecurrence(record, implementationDigest, slice),
-    reviewerInstructions: reviewInstructions(workspace, record, slice, images.images.length),
+    reviewerInstructions:
+      reviewInstructions(workspace, record, slice, images.images.length) +
+      (catalogue.sources.some((source) => source.kind === "implementation-diff")
+        ? `\n${REVIEW_DIFF_INSTRUCTIONS}`
+        : "") +
+      (hasDeliveredFlip(record, catalogue) ? `\n${REVIEW_FLIP_INSTRUCTIONS}` : ""),
   };
 }
 
@@ -181,7 +195,7 @@ function reviewFindings(
     .slice(0, 3);
 }
 
-function reviewEvidence(
+export function reviewEvidence(
   catalogue: ProductEvidenceCatalogue,
   assessments: readonly ProductAssessment[],
   outcomes: readonly ProductOutcome[],
@@ -196,13 +210,23 @@ function reviewEvidence(
   const entries = catalogue.entries.filter(
     (entry) =>
       linked.has(entry.id) ||
+      entry.historicalFailure ||
       (entry.status !== "stale" &&
-        (entry.kind !== "execution" || latest.has(entry.id)) &&
+        (entry.kind !== "execution" || latest.has(catalogue.aliases.get(entry.id) ?? entry.id)) &&
         (!entry.outcomes.length ||
           entry.outcomes.some((id) => outcomes.some((outcome) => outcome.id === id)))),
   );
   const rank = (entry: ProductEvidenceReference) =>
-    linked.has(entry.id) ? 0 : entry.kind === "operation" ? 2 : 1;
+    linked.has(entry.id) || entry.historicalFailure ? 0 : entry.kind === "operation" ? 2 : 1;
   entries.sort((a, b) => rank(a) - rank(b));
   return { entries: entries.slice(0, 60), omitted: Math.max(0, entries.length - 60) };
+}
+
+function hasDeliveredFlip(record: ProductRecord, catalogue: ProductEvidenceCatalogue) {
+  const ids = new Set(
+    catalogue.sources
+      .filter((source) => source.kind === "executed-check")
+      .map((source) => source.id),
+  );
+  return record.state.executions.some((entry) => entry.flip && ids.has(`CHECK-${entry.id}`));
 }

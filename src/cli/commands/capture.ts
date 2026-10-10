@@ -1,9 +1,11 @@
 import { Command } from "commander";
 import { fromUnknown } from "../../core/errors.js";
 import type { Result } from "../../core/result.js";
-import { runProductCapture } from "../../workflow/evidence/product-capture.js";
+import { runProductCaptureAction } from "../../workflow/evidence/product-capture-actions.js";
 import { runProductControl } from "../../workflow/evidence/product-control.js";
+import { compactProductReply } from "../../workflow/product-compact-text.js";
 import {
+  productNextCommand,
   productResultFailed,
   productWithoutImageBytes,
   renderProductResult,
@@ -18,6 +20,10 @@ interface CaptureOptions {
   task?: string;
   from?: string;
   replay?: string;
+  replayBatch?: string;
+  retire?: string;
+  reason?: string;
+  outcome?: string[];
   binary?: string;
 }
 function runtimeCommand(
@@ -51,7 +57,8 @@ function runtimeCommand(
           result.ok ? { ok: true, value: productWithoutImageBytes(result.value) } : result,
           {
             json: isJson(flags),
-            text: renderProductResult,
+            text: (value) => compactProductReply(name, value, "cli") ?? renderProductResult(value),
+            nextCommand: productNextCommand,
           },
         );
         if (result.ok && productResultFailed(result.value)) process.exitCode = 1;
@@ -66,12 +73,29 @@ export const captureCommand = () =>
   runtimeCommand(
     "capture",
     "Capture a real browser journey with an isolated installed browser, including optional viewport resize",
-    (state, flags, journey) => runProductCapture(state, { ...flags, journey }),
+    (state, flags, journey) =>
+      runProductCaptureAction(state, { ...flags, journey, outcomes: flags.outcome }),
     false,
   )
     .option(
       "--replay <run-id>",
       "Rerun a recorded journey against current code and compare observations",
+    )
+    .option(
+      "--replay-batch <run-id>",
+      "Replay the canonical saved input and affected neighbouring journeys in one result",
+    )
+    .option(
+      "--retire <run-id>",
+      "Retire your unlinked exploratory hypothesis without changing its result",
+    )
+    .option(
+      "--reason <text>",
+      "One-line reason for retiring an exploratory journey; shown to the reviewer",
+    )
+    .option(
+      "--outcome <ids...>",
+      "Link this journey expectation to declared outcomes (retains obligation semantics)",
     )
     .option(
       "--binary <path>",

@@ -1,0 +1,208 @@
+import { homedir, tmpdir } from "node:os";
+import { parseEnv } from "node:util";
+import { ProjectFileSystem } from "./fs.js";
+import { matchesPattern } from "./patterns.js";
+
+export const SECRET_FILES = [
+  ".env",
+  ".env.*",
+  "*.pem",
+  "*.key",
+  "*.p12",
+  "*.pfx",
+  "id_rsa*",
+  "id_ecdsa*",
+  "id_ed25519*",
+  ".npmrc",
+  ".pypirc",
+  ".netrc",
+];
+const SECRET_NAME = /secret|token|password|passwd|credential|api[_-]?key|private[_-]?key/i;
+const MASK = "[REDACTED]";
+
+export function privatePath(path: string, patterns: readonly string[] = SECRET_FILES): boolean {
+  const parts = path.split("/");
+  return parts.some((part, index) =>
+    patterns.some(
+      (pattern) =>
+        matchesPattern(parts.slice(0, index + 1).join("/"), pattern) ||
+        (!pattern.includes("/") && matchesPattern(part, pattern)),
+    ),
+  );
+}
+
+/** Applied to human text only: structural digests and evidence identities must stay intact. */
+export function redactText(
+  text: string,
+  options: { root?: string; environment?: NodeJS.ProcessEnv; values?: readonly string[] } = {},
+): string {
+  let safe = text;
+  for (const [value, label] of redactionValues(options)) safe = safe.replaceAll(value, label);
+  return safe
+    .replace(
+      /(\b(?:[a-z_]*(?:token|secret|password|passwd|api_key|private_key)|(?:api|deploy|private)[ -]key)\s*(?:=|:)\s*|\b(?:api|deploy|private)[ -]key\s+is\s+)("[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi,
+      (_match, prefix: string, value: string) =>
+        `${prefix}${value.startsWith('"') || value.startsWith("'") ? `${value[0]}${MASK}${value[0]}` : MASK}`,
+    )
+    .replace(
+      /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g,
+      MASK,
+    )
+    .replace(
+      /\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|AKIA[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g,
+      MASK,
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, MASK)
+    .replace(/\b[A-Za-z0-9_+/=-]{32,}\b/g, (token) => (highEntropy(token) ? MASK : token));
+}
+
+/** VISP's own identities (CAP-…, CAPRUN-…, CAN-…): an uppercase kind and lowercase hex. */
+const VISP_IDENTITY = /^[A-Z]{2,12}-[0-9a-f][0-9a-f-]*$/;
+
+function highEntropy(token: string): boolean {
+  // Replay, review and attribution resolve these; masking them breaks the evidence trail.
+  if (VISP_IDENTITY.test(token)) return false;
+  if (!/[a-z]/.test(token) || !/[A-Z]/.test(token) || !/[0-9]/.test(token)) return false;
+  const counts = new Map<string, number>();
+  for (const character of token) counts.set(character, (counts.get(character) ?? 0) + 1);
+  return (
+    [...counts.values()].reduce(
+      (sum, count) => sum - (count / token.length) * Math.log2(count / token.length),
+      0,
+    ) >= 4
+  );
+}
+
+/** Node env files need not be inherited by VISP, so collect their values before the child runs. */
+export async function outputRedactor(root: string, declared: readonly string[] = []) {
+  const files = new ProjectFileSystem(root);
+  const entries = await files.listEntries(".");
+  const paths = new Set([
+    ...declared,
+    ...(entries.ok
+      ? entries.value
+          .filter((entry) => entry.type === "file" && /^\.env(?:\.|$)/.test(entry.name))
+          .map((entry) => entry.name)
+      : []),
+  ]);
+  const values: string[] = [];
+  for (const path of paths) {
+    const metadata = await files.readMetadata(path);
+    if (!metadata.ok || metadata.value?.type !== "file" || metadata.value.size > 1024 * 1024)
+      continue;
+    const text = await files.readText(path);
+    if (!text.ok) continue;
+    values.push(...envValues(text.value));
+  }
+  return (text: string) => redactText(text, { root, values });
+}
+
+export function redactStrings<T>(value: T, root: string): T {
+  if (typeof value === "string") return redactText(value, { root }) as T;
+  if (Array.isArray(value)) return value.map((item) => redactStrings(item, root)) as T;
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactStrings(item, root)]),
+    ) as T;
+  return value;
+}
+
+/**
+ * Settings whose values are ordinary words that appear in test names and output
+ * (`NODE_ENV=production`, `COLORTERM=truecolor`, `LANG=en_US.UTF-8`). Masking them turned
+ * `FAIL: production build works` into `FAIL: [REDACTED] build works`, which no declared test
+ * name matches. Names are listed explicitly (no wildcard families), identity data such as
+ * USER stays masked, and a name that also looks secret (`API_TOKEN`) or a value that looks
+ * like a credential is still masked.
+ */
+const PLAIN_SETTING = new RegExp(
+  `^(?:${[
+    "NODE_ENV",
+    "LANGUAGE",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "LC_COLLATE",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_MONETARY",
+    "SHELL",
+    "TERM",
+    "COLORTERM",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "TZ",
+    "EDITOR",
+    "VISUAL",
+    "PAGER",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "DESKTOP_SESSION",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "XDG_DATA_DIRS",
+    "XDG_CONFIG_DIRS",
+    "XDG_SESSION_TYPE",
+    "XDG_CURRENT_DESKTOP",
+    "PWD",
+    "OLDPWD",
+  ].join("|")})$`,
+);
+
+/** A URL with credentials, an address with a user part, or one long unbroken token. */
+function credentialShaped(value: string): boolean {
+  return value.includes("://") || value.includes("@") || /^[A-Za-z0-9_\-+/=]{20,}$/.test(value);
+}
+
+function sensitiveValue(name: string, value: string | undefined): boolean {
+  if (!value) return false;
+  if (SECRET_NAME.test(name)) return true;
+  if (value.length < 8) return false;
+  return !PLAIN_SETTING.test(name) || credentialShaped(value);
+}
+
+function envValues(text: string): string[] {
+  try {
+    return Object.entries(parseEnv(text))
+      .filter(([name, value]) => sensitiveValue(name, value))
+      .map(([, value]) => value as string);
+  } catch {
+    return [];
+  }
+}
+
+function redactionValues(options: {
+  root?: string;
+  environment?: NodeJS.ProcessEnv;
+  values?: readonly string[];
+}): [string, string][] {
+  const paths = [
+    [options.root, "<project>"],
+    [homedir(), "~"],
+    [tmpdir(), "<tmp>"],
+  ].filter((entry): entry is [string, string] => !!entry[0] && entry[0].length > 1);
+  const environment: [string, string][] = Object.entries(options.environment ?? process.env)
+    .filter(
+      ([name, value]) =>
+        sensitiveValue(name, value) &&
+        (SECRET_NAME.test(name) || !paths.some(([path]) => path === value)),
+    )
+    .map(([, value]) => [value as string, MASK]);
+  return [
+    ...environment,
+    ...(options.values ?? []).filter(Boolean).map((value): [string, string] => [value, MASK]),
+    ...paths,
+  ].sort((a, b) => b[0].length - a[0].length);
+}
+
+/** Requests preserve ordinary wording; only credential-named environment values are secrets. */
+export function redactRequest(text: string, root?: string): string {
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => SECRET_NAME.test(name)),
+  );
+  return redactText(text, { root, environment });
+}

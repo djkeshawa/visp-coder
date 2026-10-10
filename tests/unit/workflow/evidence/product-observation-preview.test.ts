@@ -125,3 +125,42 @@ it("distinguishes later operations from an earlier release and retains recovery 
   expect(selected.states.at(-1)).toMatchObject({ id: "CAP-6", label: "final recorded state" });
   expect(selected.omittedCaptureIds).toEqual(["CAP-5"]);
 });
+
+it("reserves phone observation states even when newer desktop states fill the window", () => {
+  const brief = productBriefSchema.parse({
+    version: 2,
+    feature: "001-viewports",
+    originalRequest: "Responsive game",
+    goal: "Game",
+  });
+  const run = (width: number, count: number) => ({
+    version: 1,
+    provenance: "runner-executed",
+    subjectDigest: "current",
+    status: "completed",
+    operations: [],
+    captures: Array.from({ length: count }, (_, index) => ({
+      id: `${width}-${index}`,
+      path: `${width}-${index}.png`,
+      subjectDigest: "current",
+      sha256: String(index).repeat(64),
+      route: "/",
+      steps: [`Input ${index}`],
+      viewport: { width, height: 720 },
+      createdAt: "now",
+      provenance: "runner-captured",
+    })),
+  });
+  const record = {
+    brief,
+    briefText: "",
+    stateText: "",
+    state: { ...initialProductState(brief, "now"), captureRuns: [run(390, 2), run(1280, 6)] },
+  };
+  const sequence = observationSequence(record, "current");
+  expect(sequence.states).toHaveLength(6);
+  expect(new Set(sequence.states.map((state) => state.viewport.width))).toEqual(
+    new Set([390, 1280]),
+  );
+  expect(sequence.omittedCaptureIds).toHaveLength(2);
+});

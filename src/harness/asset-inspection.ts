@@ -32,7 +32,7 @@ export interface ForeignHarnessAssets {
   readonly mcpRegistrations: readonly ForeignMcpRegistration[];
 }
 
-export type McpRegistrationHarness = "claude-code" | "codex" | "opencode";
+export type McpRegistrationHarness = "claude-code" | "codex" | "cursor" | "copilot" | "opencode";
 
 export interface ForeignMcpRegistration {
   readonly harness: McpRegistrationHarness;
@@ -168,25 +168,48 @@ function foreignMcpRegistrationCandidates(harness: Harness): ForeignMcpRegistrat
     harness: candidate,
     path: configFileForHarness(candidate),
   }));
-  if (harness === "codex" || harness === "opencode") {
+  if (
+    harness === "codex" ||
+    harness === "opencode" ||
+    harness === "cursor" ||
+    harness === "copilot"
+  ) {
     candidates.push({ harness: "claude-code", path: MCP_CONFIG_FILE });
   }
   return candidates;
 }
 
 function foreignMcpRegistrationHarnesses(harness: Harness): McpRegistrationHarness[] {
-  if (harness === "opencode") return ["codex"];
-  if (harness === "codex") return ["opencode"];
-  if (["claude-code", "cursor"].includes(harness)) return ["codex", "opencode"];
-  return ["codex", "opencode"];
+  return (["codex", "cursor", "copilot", "opencode"] as McpRegistrationHarness[]).filter(
+    (candidate) => candidate !== harness,
+  );
 }
 
 export function mcpRegistrationLabel(path: string): string {
   return `${path} (VISP MCP registration)`;
 }
 
+/** A CRLF checkout (git autocrlf) of a generated text file is the same generated content. */
+export function lineEndingsNormalized(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
+/** Hashes the normalized text, so LF files keep their recorded fingerprint. */
 export function assetFingerprint(content: string): string {
-  return sha256(content).slice(0, 12);
+  return sha256(lineEndingsNormalized(content)).slice(0, 12);
+}
+
+/**
+ * Whether `current` is what VISP generates for `asset`. Text assets ignore CRLF; an
+ * executable must match exactly, since a CRLF shell script does not run.
+ */
+export function sameAssetContent(
+  current: string,
+  asset: { readonly content: string; readonly executable?: boolean },
+): boolean {
+  return asset.executable
+    ? current === asset.content
+    : lineEndingsNormalized(current) === asset.content;
 }
 
 export async function readAssetManifest(

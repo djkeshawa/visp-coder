@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "../core/hash.js";
 import { EXTERNAL_PREFIX, isExternalRef } from "./constants.js";
 import { pathOfEntityId } from "./ids.js";
 import { isTestPath } from "./paths.js";
@@ -113,7 +114,7 @@ export function collapseToFileGraph(projection: GraphProjection): FileGraph {
     dependencyEdges: sortEdges(edges.dependency.values()),
     testEdges: sortEdges(edges.test.values()),
     externalDeps: [...edges.external.values()].sort(
-      (a, b) => compare(a.from, b.from) || compare(a.module, b.module),
+      (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.module, b.module),
     ),
     unparsedFiles: projection.files.paths
       .filter((_, index) => projection.files.parsed[index] !== true)
@@ -190,38 +191,61 @@ function propagateReexportedTests(
   }
 }
 
-/**
- * The changed files and every importer reachable by repeatedly following
- * dependency edges backwards. Re-export sources are imports edges too, so a
- * barrel remains part of the same closure. The visited set makes cycles
- * finite; sorting both the walk and result keeps refreshes reproducible.
- */
-export function reverseImportClosure(
+/** Refresh only direct importers, following re-export chains that carry changed names. */
+export function refreshDependencySet(
   projection: GraphProjection,
   seeds: Iterable<string>,
 ): string[] {
-  const reverseImporters = new Map<string, string[]>();
-  for (const edge of collapseToFileGraph(projection).dependencyEdges) {
-    const importers = reverseImporters.get(edge.to);
-    if (importers) importers.push(edge.from);
-    else reverseImporters.set(edge.to, [edge.from]);
-  }
-
-  const closure = new Set(seeds);
-  let frontier = [...closure].sort(compare);
-  while (frontier.length > 0) {
-    const next: string[] = [];
-    for (const path of frontier) {
-      for (const importer of reverseImporters.get(path) ?? []) {
-        if (closure.has(importer)) continue;
-        closure.add(importer);
-        next.push(importer);
+  const { incoming, outgoing, reexports } = refreshDependencyMaps(projection);
+  const selected = new Set(seeds);
+  const changed = [...selected];
+  const changedSet = new Set(changed);
+  for (const path of changed) {
+    for (const importer of incoming.get(path) ?? []) {
+      selected.add(importer);
+      if (reexports.get(importer)?.has(path) && !changedSet.has(importer)) {
+        changedSet.add(importer);
+        changed.push(importer);
       }
     }
-    frontier = next.sort(compare);
   }
+  addForwardBarrels(selected, outgoing, reexports);
+  return [...selected].sort(compareCodeUnits);
+}
 
-  return [...closure].sort(compare);
+/** Call resolution needs maps from unchanged barrels a parsed file imports. */
+function addForwardBarrels(
+  selected: Set<string>,
+  outgoing: ReadonlyMap<string, ReadonlySet<string>>,
+  reexports: ReadonlyMap<string, ReadonlySet<string>>,
+): void {
+  const forward = [...selected];
+  for (const path of forward) {
+    for (const dependency of outgoing.get(path) ?? []) {
+      if (reexports.has(dependency) && !selected.has(dependency)) {
+        selected.add(dependency);
+        forward.push(dependency);
+      }
+    }
+  }
+}
+
+function refreshDependencyMaps(projection: GraphProjection) {
+  const graph = collapseToFileGraph(projection);
+  const incoming = new Map<string, Set<string>>();
+  const outgoing = new Map<string, Set<string>>();
+  const reexports = new Map<string, Set<string>>();
+  for (const edge of graph.dependencyEdges) {
+    link(incoming, edge.to, edge.from);
+    link(outgoing, edge.from, edge.to);
+  }
+  for (let index = 0; index < projection.edges.kinds.length; index += 1) {
+    if (projection.edges.kinds[index] !== "exports") continue;
+    const from = pathOfEntityId(projection.edges.sources[index] ?? "");
+    const to = pathOfEntityId(projection.edges.targets[index] ?? "");
+    if (from !== to) link(reexports, from, to);
+  }
+  return { incoming, outgoing, reexports };
 }
 
 /**
@@ -286,7 +310,7 @@ export function structuralNeighbourhood(
 
   const ordered = [...distances.entries()]
     .map(([path, distance]) => ({ path, hops: distance }))
-    .sort((a, b) => a.hops - b.hops || compare(a.path, b.path));
+    .sort((a, b) => a.hops - b.hops || compareCodeUnits(a.path, b.path));
 
   return {
     files: ordered.slice(0, Math.max(0, maxFiles)),
@@ -471,7 +495,7 @@ function describeEntities(
     });
   }
 
-  return described.sort((a, b) => a.startLine - b.startLine || compare(a.label, b.label));
+  return described.sort((a, b) => a.startLine - b.startLine || compareCodeUnits(a.label, b.label));
 }
 
 function buildAdjacency(edges: readonly FileEdge[]): Map<string, Set<string>> {
@@ -490,9 +514,7 @@ function link(adjacency: Map<string, Set<string>>, from: string, to: string): vo
 }
 
 function sortEdges(edges: Iterable<FileEdge>): FileEdge[] {
-  return [...edges].sort((a, b) => compare(a.from, b.from) || compare(a.to, b.to));
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+  return [...edges].sort(
+    (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.to, b.to),
+  );
 }

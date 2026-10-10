@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
-import { vispError } from "../../core/errors.js";
+import { fromUnknown, vispError } from "../../core/errors.js";
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
@@ -12,8 +12,14 @@ import { independentReviewJsonSchema, independentReviewTemplate } from "./indepe
 import { independentSources } from "./independent-sources.js";
 import { runProductReview } from "./review.js";
 import { deliveredReviewEvidenceIds } from "./review-context.js";
+import {
+  generatedSourceReferences,
+  generatedSourceReferencesSchema,
+  reviewCitationGap,
+} from "./review-delivery-validation.js";
 import { type ProductReviewRequest, parseReviewSubmission } from "./review-request.js";
 import { reviewSelectionSchema } from "./review-selection.js";
+import { deliveredSourceEvidence, reviewPacketBudgetGap } from "./review-source-delivery.js";
 import { independentReviewerContext, productReviewerContext } from "./reviewer-handoff.js";
 import { withProductMutation } from "./runtime.js";
 import { json, type ProductRecord, readProductRecord } from "./store.js";
@@ -27,6 +33,7 @@ const sessionSchema = z
     selection: reviewSelectionSchema,
     reviewMode: z.enum(["current", "observation-preview"]),
     evidenceIds: z.array(z.string()),
+    generatedReferences: generatedSourceReferencesSchema.optional(),
     images: z.array(
       z.object({ path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
     ),
@@ -48,6 +55,7 @@ export function prepareReviewSession(
     const bundle = reviewed.value;
     const sources = await independentSources(workspace, bundle.sources);
     if (!sources.ok) return sources;
+    const evidence = deliveredSourceEvidence(bundle.evidence, bundle.sources, sources.value);
     const id = randomUUID();
     const directory = join(workspace.paths.featureDir(bundle.feature), "review-sessions", id);
     const packetPath = join(directory, "packet.json");
@@ -72,8 +80,26 @@ export function prepareReviewSession(
       id,
       selection: bundle.selection,
       reviewMode: workspace.config.workflow.reviewMode,
-      evidenceIds: deliveredReviewEvidenceIds(bundle.evidence, bundle.interactionEvidence),
+      generatedReferences: generatedSourceReferences(sources.value, bundle.sources),
+      evidenceIds: deliveredReviewEvidenceIds(
+        evidence,
+        bundle.interactionEvidence,
+        sources.value,
+        bundle.experiments,
+      ),
     };
+    const packet = {
+      ...independentReviewerContext(productReviewerContext(bundle)),
+      sources: sources.value,
+      evidence,
+      question:
+        "Does the implementation fulfill the original request? Identify consequential observed problems and uncertainty.",
+      images: images.map((image) => image.metadata),
+      submission: independentReviewTemplate(),
+      responseSchema: independentReviewJsonSchema(session.evidenceIds),
+    };
+    const gap = reviewPacketBudgetGap(packet, session.evidenceIds);
+    if (gap) return err(vispError("STAGE_BLOCKED", gap));
     const saved = await applyFileTransaction(workspace.paths.root, "prepare-review-session", [
       ...[...new Map(images.map((image) => [image.path, image])).values()].map((image) => ({
         kind: "write" as const,
@@ -96,15 +122,7 @@ export function prepareReviewSession(
       {
         kind: "write",
         path: packetPath,
-        content: json({
-          ...independentReviewerContext(productReviewerContext(bundle)),
-          sources: sources.value,
-          question:
-            "Does the implementation fulfill the original request? Identify consequential observed problems and uncertainty.",
-          images: images.map((image) => image.metadata),
-          submission: independentReviewTemplate(),
-          responseSchema: independentReviewJsonSchema(session.evidenceIds),
-        }),
+        content: json(packet),
         expectedBefore: { existed: false },
       },
     ]);
@@ -166,7 +184,23 @@ export async function submitReviewSession(
     if (!bound.ok) return bound;
     const evidence = await validateSessionEvidence(workspace, session, judgments.value);
     if (!evidence.ok) return evidence;
-    const result = await runProductReview(workspace, {
+    const result = await submitPreparedReview(workspace, options, session);
+    return result.ok
+      ? ok(options.detail ? result.value : productReviewReceipt(result.value))
+      : result;
+  });
+}
+
+async function submitPreparedReview(
+  workspace: WorkspaceState,
+  options: ProductReviewRequest,
+  session: z.infer<typeof sessionSchema>,
+) {
+  const generated = await sessionGeneratedReferences(workspace, session);
+  if (!generated.ok) return generated;
+  return runProductReview(
+    workspace,
+    {
       ...options,
       task: session.selection.task,
       subjectDigest: session.selection.subjectDigest,
@@ -176,11 +210,36 @@ export async function submitReviewSession(
         ...(options.reviewer as object | undefined),
         session: session.id,
       },
-    });
-    return result.ok
-      ? ok(options.detail ? result.value : productReviewReceipt(result.value))
-      : result;
-  });
+    },
+    { ids: session.evidenceIds, generatedReferences: generated.value },
+  );
+}
+
+/** Older sessions still have their exact delivered packet; recover records without refitting. */
+async function sessionGeneratedReferences(
+  workspace: WorkspaceState,
+  session: z.infer<typeof sessionSchema>,
+) {
+  if (session.generatedReferences !== undefined) return ok(session.generatedReferences);
+  const packet = await workspace.files.readText(
+    join(
+      workspace.paths.featureDir(session.selection.feature),
+      "review-sessions",
+      session.id,
+      "packet.json",
+    ),
+  );
+  if (!packet.ok) return packet;
+  try {
+    const delivered = JSON.parse(packet.value) as ReturnType<typeof productReviewerContext>;
+    return ok(
+      generatedSourceReferencesSchema.parse(
+        generatedSourceReferences(delivered.sources, delivered.evidence),
+      ),
+    );
+  } catch (cause) {
+    return err(fromUnknown(cause, "ARTIFACT_INVALID"));
+  }
 }
 
 function validateSessionBinding(
@@ -254,23 +313,7 @@ async function validateSessionEvidence(
         ),
       );
   }
-  const delivered = new Set(session.evidenceIds);
-  const missing = new Set<string>();
-  JSON.stringify(judgments, (key, value) => {
-    if (key === "evidence" && Array.isArray(value))
-      for (const id of value) if (!delivered.has(id)) missing.add(id);
-    return value;
-  });
-  if (missing.size)
-    return err(
-      vispError(
-        "EVIDENCE_FAILED",
-        `Evidence outside this review session: ${[...missing].join(", ")}`,
-        {
-          recovery:
-            "Prepare a new session selecting the relevant image groups; existing captures need not be rerun unless their product inputs changed.",
-        },
-      ),
-    );
+  const gap = reviewCitationGap(judgments, session.evidenceIds);
+  if (gap) return err(vispError("EVIDENCE_FAILED", `${gap}; evidence outside this review session`));
   return ok(undefined);
 }

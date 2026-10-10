@@ -46,7 +46,7 @@ describe("reply", () => {
 
     expect(result.isError).toBe(true);
     expect(text(result)).toContain("No feature is active");
-    expect(text(result)).toContain('Try: visp feature "<goal>"');
+    expect(text(result)).toContain("Try: visp_feature");
     expect(result.structuredContent).toEqual({
       tool: "visp_spec",
       ok: false,
@@ -55,6 +55,7 @@ describe("reply", () => {
         message: "No feature is active",
         recovery: 'visp feature "<goal>"',
       },
+      nextAction: { tool: "visp_feature", arguments: { goal: "<goal>" } },
     });
   });
 
@@ -72,5 +73,22 @@ describe("reply", () => {
       ok: false,
       error: { code: "IO_ERROR", message: "Disk is gone", details: { path: "/tmp/x" } },
     });
+  });
+});
+
+it("keeps non-lock STATE_BUSY recovery and gives lock failures MCP-specific advice", () => {
+  const changed = failure("visp_done", {
+    code: "STATE_BUSY",
+    message: "Brief changed",
+    recovery: "visp next",
+  });
+  expect(changed.structuredContent).toMatchObject({ error: { recovery: "visp next" } });
+  const locked = failure("visp_done", {
+    code: "STATE_BUSY",
+    message: "Writer active",
+    details: { lock: ".visp/state/mutation.lock", owner: { pid: 42 } },
+  });
+  expect(locked.structuredContent).toMatchObject({
+    error: { recovery: expect.stringContaining("MCP call"), details: { owner: { pid: 42 } } },
   });
 });

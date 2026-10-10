@@ -1,18 +1,39 @@
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { launchesReviewer } from "../../config/critic.js";
 import { ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
+import { finalProductAssessmentGaps, outcomeStatuses } from "./assessment.js";
+import { cancelledExecution } from "./check-lifecycle.js";
 import { type ProductCriticHost, runProductCritic } from "./critic.js";
-import { codexExecCriticHost, configuredCriticLauncher } from "./critic-exec.js";
+import { type ReviewerCapacity, reviewerCapacity } from "./critic-capacity.js";
+import { configuredCriticLauncher } from "./critic-exec.js";
 import { hasPendingCriticReview } from "./critic-policy.js";
 import { type ProductVerification, runProductAccept, runProductDone } from "./evidence.js";
-import { outstandingFeedback } from "./findings.js";
+import { openRequiredFindings, outstandingFeedback } from "./findings.js";
 import { type AcceptanceProgress, acceptanceProgress } from "./independent-tests.js";
-import { closedSlice } from "./model.js";
+import { checksFor, latestExecutionsByOwner } from "./model.js";
+import type { PinnedDispute } from "./pinned-dispute-model.js";
+import {
+  type DisputeInput,
+  type DisputeOutcome,
+  type DisputeState,
+  disputedFailure,
+  disputeInput,
+  disputeState,
+  failingPinned,
+  fileDisputes,
+  type PinnedTestsReport,
+  pinnedTestsReport,
+  ranPinned,
+  refreshDisputes,
+  rulingCurrent,
+} from "./pinned-disputes.js";
+import { completesFeature } from "./review-selection.js";
 import type { ProductNext } from "./status.js";
 import { runProductNext } from "./status.js";
 import { type ProductRecord, type ProductSelection, readProductRecord } from "./store.js";
@@ -29,14 +50,26 @@ export interface DoneCriticSummary {
 }
 export type ProductDoneReviewed = ProductVerification & {
   readonly acceptanceTests?: readonly AcceptanceProgress[];
+  /** Disputes of failing pinned tests: what was filed, the rulings, how to dispute. */
+  readonly pinnedTests?: PinnedTestsReport;
   readonly critic?: DoneCriticSummary;
   readonly next?: ProductNext;
 };
 
-interface ReviewSelection {
+interface ReviewSelection extends ProductSelection {
   readonly feature: string;
   readonly task?: string;
+  /** Running the same command again is cheap and safe: an inline review may wait for it. */
+  readonly rerunnable?: boolean;
 }
+
+/** What the detached review process writes: its JSON envelope, read back when it exits early. */
+const REVIEW_PROCESS_LOG = "review-process.log";
+
+/** Returned reviews took 48 s at the median and 75 s at p90; a review with less left is cut off. */
+const MIN_INLINE_REVIEW_MS = 75_000;
+/** Slack so a suite cut off at its reserved deadline still leaves a full review window. */
+const INFORMATIONAL_MARGIN_MS = 2000;
 /** Starts an independent review of the selection and reports what happened so far. */
 export type ReviewStarter = (
   workspace: WorkspaceState,
@@ -54,31 +87,80 @@ export async function runProductDoneReviewed(
   startReview?: ReviewStarter,
   waitMs = 0,
 ): Promise<Result<ProductDoneReviewed>> {
+  const dispute = disputeInput(options);
+  if (!dispute.ok) return dispute;
+  const deadline = callDeadline(options, waitMs);
   const checked = await runProductDone(workspace, options);
   if (!checked.ok) return checked;
+  const { feature } = checked.value;
+  const rerunnable = rerunnableReview(waitMs);
+  const progressDeadline = informationalDeadline(deadline, !!startReview && rerunnable);
   const progress = await acceptanceProgress(
     workspace,
-    checked.value.feature,
-    checked.value.executions.map((execution) => execution.check),
-  );
-  const done = ok(
-    progress.length ? { ...checked.value, acceptanceTests: progress } : checked.value,
-  );
-  if (!startReview || !checksPassed(done.value)) return done;
-  const skipped = await reviewNotNeeded(workspace, done.value.feature, done.value.task);
-  if (skipped) return ok({ ...done.value, critic: skipped });
-  const { feature } = done.value;
-  let critic = await startReview(workspace, {
     feature,
-    ...(done.value.closed || !done.value.task ? {} : { task: done.value.task }),
+    checked.value.executions.map((execution) => execution.check),
+    { ...options, deadline: progressDeadline },
+  );
+  if (options.signal?.aborted) return cancelledExecution();
+  const pinned = await pinnedView(workspace, "done", dispute.value, checked.value);
+  if (!pinned.ok) return pinned;
+  const { state } = pinned.value;
+  const done = ok({
+    ...(progress.length ? { ...checked.value, acceptanceTests: progress } : checked.value),
+    ...pinned.value.initial,
   });
-  // Weak workers kept editing while a review ran, and the changed source discarded it.
-  // Holding `done` until the review returns delivers findings in the same step.
-  if (critic.running && !(await pendingReview(workspace, feature, waitMs)))
-    critic = summarize(await runProductCritic(workspace, { operation: "status", feature }));
+  if (!startReview) return done;
+  const { record, owed } = await readForReview(
+    workspace,
+    feature,
+    done.value.task,
+    done.value.subjectDigest,
+  );
+  if (!checksPassed(done.value, state, owed)) return done;
+  const skipped = await reviewNotNeeded(
+    workspace,
+    feature,
+    done.value.task,
+    done.value.subjectDigest,
+    state.pending,
+    record,
+  );
+  if (skipped) return ok({ ...done.value, critic: skipped });
+  const critic = await launchReview(workspace, options, deadline, startReview, {
+    feature,
+    // `done` reuses passed checks, so running it again costs little; `accept` re-runs them all.
+    rerunnable,
+    ...(record && completesFeature(record, done.value.task) ? {} : { task: done.value.task }),
+  });
+  if (options.signal?.aborted) return cancelledExecution();
+  return doneAfterReview(workspace, options, done.value, critic, pinned.value);
+}
+
+/** Close against the saved review without launching another review or rerunning passed checks. */
+async function doneAfterReview(
+  workspace: WorkspaceState,
+  options: ProductSelection,
+  done: ProductDoneReviewed,
+  critic: DoneCriticSummary,
+  pinned: PinnedView,
+): Promise<Result<ProductDoneReviewed>> {
+  const { feature } = done;
+  const refreshed =
+    critic.reviewed && !critic.running
+      ? await runProductDone(workspace, { ...options, feature, task: done.task })
+      : ok(done);
+  if (!refreshed.ok) return refreshed;
   const next = critic.running ? waitingNext(feature) : await runProductNext(workspace, { feature });
   return ok({
-    ...done.value,
+    ...done,
+    ...refreshed.value,
+    // Preserve executed receipts, replacing any superseded by a post-review rerun (e.g. a waiver).
+    executions: latestExecutionsByOwner([...done.executions, ...refreshed.value.executions]),
+    behaviorChanges: refreshed.value.executions.length
+      ? refreshed.value.behaviorChanges
+      : done.behaviorChanges,
+    committedChanges: done.committedChanges,
+    ...(await pinned.refreshed()),
     critic,
     ...(next.ok ? { next: next.value, nextCommand: next.value.command } : {}),
   });
@@ -94,21 +176,161 @@ export async function runProductAcceptReviewed(
   options: ProductSelection,
   startReview?: ReviewStarter,
   waitMs = 0,
-): Promise<Result<ProductVerification & { readonly critic?: DoneCriticSummary }>> {
+): Promise<
+  Result<
+    ProductVerification & { readonly critic?: DoneCriticSummary; pinnedTests?: PinnedTestsReport }
+  >
+> {
+  const dispute = disputeInput(options);
+  if (!dispute.ok) return dispute;
+  const deadline = callDeadline(options, waitMs);
   const accepted = await runProductAccept(workspace, options);
-  if (!accepted.ok || accepted.value.passed || !startReview || !checksPassed(accepted.value))
-    return accepted;
+  if (!accepted.ok) return accepted;
   const { feature } = accepted.value;
-  let critic = await startReview(workspace, { feature });
-  if (critic.running && !(await pendingReview(workspace, feature, waitMs)))
-    critic = summarize(await runProductCritic(workspace, { operation: "status", feature }));
-  if (critic.running || !critic.reviewed) return ok({ ...accepted.value, critic });
-  const again = await runProductAccept(workspace, options);
-  return again.ok ? ok({ ...again.value, critic }) : again;
+  const pinned = await pinnedView(workspace, "accept", dispute.value, accepted.value);
+  if (!pinned.ok) return pinned;
+  const initial = { ...accepted.value, ...pinned.value.initial };
+  if (accepted.value.passed || !startReview || !checksPassed(accepted.value, pinned.value.state))
+    return ok(initial);
+  if (options.signal?.aborted) return cancelledExecution();
+  const critic = await launchReview(workspace, options, deadline, startReview, { feature });
+  if (critic.running || !critic.reviewed) return ok({ ...initial, critic });
+  if (options.signal?.aborted) return cancelledExecution();
+  const again = await runProductAccept(workspace, { ...options, reusePassed: true });
+  if (!again.ok) return again;
+  return ok({ ...again.value, critic, ...(await pinned.value.refreshed()) });
+}
+
+interface PinnedView {
+  /** Where the disputes stand; pending ones do not stop the reviewer from launching. */
+  readonly state: DisputeState;
+  readonly initial: { pinnedTests?: PinnedTestsReport };
+  /** After a review: this call's filing outcomes with where each dispute stands now. */
+  refreshed(): Promise<{ pinnedTests?: PinnedTestsReport }>;
 }
 
 /**
- * After a review with no failed assessment and no open finding, another review of a
+ * Brings open disputes up to the failing run just observed, files this call's disputes
+ * against it, and reports on them. Only the pinned suite run as a blocking check counts:
+ * on earlier slices it is informational and nothing can be disputed.
+ */
+async function pinnedView(
+  workspace: WorkspaceState,
+  command: "done" | "accept",
+  dispute: DisputeInput | undefined,
+  verification: ProductVerification,
+): Promise<Result<PinnedView>> {
+  const { feature } = verification;
+  const failing = failingPinned(verification.executions);
+  if (ranPinned(verification.executions)) {
+    const refreshed = await refreshDisputes(
+      workspace,
+      feature,
+      failing,
+      verification.subjectDigest,
+    );
+    if (!refreshed.ok) return refreshed;
+  }
+  // Whether VISP's reviewer can still rule matters to a failing pinned test and to a dispute.
+  const capacity = async (): Promise<ReviewerCapacity> =>
+    dispute !== undefined ||
+    failing.length > 0 ||
+    (await disputeState(workspace, feature)).all.some(isOpen)
+      ? reviewerCapacity(
+          workspace,
+          feature,
+          verification.subjectDigest,
+          verification.closed || !verification.task ? undefined : verification.task,
+        )
+      : { available: true };
+  const filed = dispute
+    ? await fileDisputes(
+        workspace,
+        feature,
+        dispute,
+        failing,
+        verification.subjectDigest,
+        await capacity(),
+      )
+    : undefined;
+  if (filed && !filed.ok) return filed;
+  const report = async (outcomes?: readonly DisputeOutcome[]) =>
+    pinnedTestsReport(workspace, feature, {
+      ...(outcomes ? { filed: outcomes } : {}),
+      failing: failing.length > 0,
+      command,
+      failures: failing,
+      capacity: await capacity(),
+    });
+  const wrap = (pinnedTests: PinnedTestsReport | undefined) => (pinnedTests ? { pinnedTests } : {});
+  const initial = wrap(await report(filed?.value));
+  return ok({
+    state: await disputeState(workspace, feature),
+    initial,
+    refreshed: async () => wrap(await report(filed?.value)),
+  });
+}
+
+const isOpen = (entry: PinnedDispute) => entry.status === "open";
+
+/** Starts the review and, when it is still running, holds the call for its result. */
+async function launchReview(
+  workspace: WorkspaceState,
+  options: ProductSelection,
+  deadline: number | undefined,
+  startReview: ReviewStarter,
+  selection: { feature: string; task?: string; rerunnable?: boolean },
+): Promise<DoneCriticSummary> {
+  await options.onProgress?.({
+    check: "review",
+    status: "starting; run visp next if still pending",
+  });
+  const critic = await startReview(workspace, { signal: options.signal, deadline, ...selection });
+  // Weak workers kept editing while a review ran, and the changed source discarded it.
+  // Holding `done` until the review returns delivers findings in the same step.
+  if (
+    critic.running &&
+    !(await pendingReview(workspace, selection.feature, deadline ?? Date.now(), options))
+  )
+    return summarize(
+      await runProductCritic(workspace, { operation: "status", feature: selection.feature }),
+    );
+  return critic;
+}
+
+/** The record after `done`, and whether the slice owes a required review. */
+async function readForReview(
+  workspace: WorkspaceState,
+  feature: string,
+  task: string | undefined,
+  subject: string,
+) {
+  const loaded = await readProductRecord(workspace, { feature });
+  const record = loaded.ok ? loaded.value : undefined;
+  return { record, owed: !!record && !!task && reviewOwed(record, task, subject) };
+}
+
+/**
+ * Running `done` again is cheap only where a review can ever fit in the call: the MCP wait is
+ * shorter than a review, so there it starts with whatever time is left.
+ */
+function rerunnableReview(waitMs: number): boolean {
+  return waitMs === 0 || waitMs >= MIN_INLINE_REVIEW_MS;
+}
+
+/** The informational pinned suite of a middle slice must not eat the time the review needs. */
+function informationalDeadline(deadline: number | undefined, reserve: boolean) {
+  return reserve && deadline !== undefined
+    ? deadline - MIN_INLINE_REVIEW_MS - INFORMATIONAL_MARGIN_MS
+    : deadline;
+}
+
+function callDeadline(options: ProductSelection, waitMs: number) {
+  return options.deadline ?? (waitMs > 0 ? Date.now() + waitMs : undefined);
+}
+
+/**
+ * After a review with no failed assessment and no required open finding, another review of a
  * middle slice rarely found anything in weak-worker runs and cost 1–2 minutes each.
  * The slice that completes the feature is always reviewed.
  */
@@ -116,30 +338,85 @@ async function reviewNotNeeded(
   workspace: WorkspaceState,
   feature: string,
   task: string | undefined,
+  subject: string,
+  pending: readonly PinnedDispute[],
+  record: ProductRecord | undefined,
 ): Promise<DoneCriticSummary | undefined> {
-  const loaded = await readProductRecord(workspace, { feature });
-  if (!loaded.ok || !task) return undefined;
-  if (!skippableReview(loaded.value, task)) return undefined;
+  // A dispute is decided only by a review; once it has ruled on this exact source, another
+  // review of it would find nothing new.
+  if (
+    record &&
+    completesFeature(record, task) &&
+    finalProductAssessmentGaps(record, subject).length > 0
+  )
+    return undefined;
+  if (pending.length) return undefined;
+  if (
+    record &&
+    openRequiredFindings(
+      record,
+      record.brief.slices.find((slice) => slice.id === task),
+    ).length
+  )
+    return undefined;
+  if (await rulingCurrent(workspace, feature, subject))
+    return {
+      reviewed: false,
+      findings: [],
+      reason: "The independent review already ruled on this exact source",
+    };
+  if (!record || !task) return undefined;
+  const capacity = await reviewerCapacity(workspace, feature, subject, task);
+  if (!skippableReview(record, task, subject, capacity.reserveCompletingReview)) return undefined;
   return {
     reviewed: false,
     findings: [],
-    reason:
-      "The previous independent review found no problems; the next review runs when the last slice is done",
+    reason: capacity.reserveCompletingReview
+      ? "Skipped this non-completing slice review to reserve independent review capacity (one call and its full timeout) for the completing whole-feature review; no call spent"
+      : "The previous independent review found no required problems; the next review runs when the last slice is done",
   };
 }
 
-/** A clean previous review, and a slice that does not complete the feature. */
-export function skippableReview(record: ProductRecord, task: string): boolean {
-  const { brief, state } = record;
+/**
+ * A required finding needs an explicit disposition, even after outcomes are satisfied.
+ * Mandatory review outcomes also owe a review until assessed. Neither obligation can be
+ * skipped merely because the slice has no new check to run.
+ */
+export function reviewOwed(record: ProductRecord, task: string, subject: string): boolean {
+  const slice = record.brief.slices.find((entry) => entry.id === task);
+  return (
+    !!slice &&
+    (openRequiredFindings(record, slice).length > 0 ||
+      outcomeStatuses(record, subject, slice).some(
+        (entry) =>
+          entry.priority === "must" &&
+          entry.review !== "satisfied" &&
+          (entry.requiredReview ||
+            entry.review === "failed" ||
+            (record.brief.outcomes.some(
+              (outcome) => outcome.id === entry.id && outcome.kind !== "functional",
+            ) &&
+              !checksFor(record.brief, slice).some((check) => check.outcomes.includes(entry.id)))),
+      ))
+  );
+}
+
+/** Optional middle reviews can yield to a clean predecessor or the completing review's reserve. */
+export function skippableReview(
+  record: ProductRecord,
+  task: string,
+  subject: string,
+  reserveCompletingReview = false,
+): boolean {
+  if (completesFeature(record, task) || reviewOwed(record, task, subject)) return false;
+  if (reserveCompletingReview) return true;
+  const { state } = record;
   const last = state.reviews.at(-1);
   if (!last?.reviewer?.model) return false;
   const clean =
     last.assessments.every((assessment) => assessment.status !== "failed") &&
-    !outstandingFeedback(record).some((finding) => finding.phase === "product");
-  const completesFeature = brief.slices.every(
-    (slice) => slice.id === task || closedSlice(state.slices[slice.id]?.status),
-  );
-  return clean && !completesFeature;
+    !outstandingFeedback(record).some((finding) => finding.required && finding.phase === "product");
+  return clean;
 }
 
 /**
@@ -152,21 +429,29 @@ export async function runProductNextAfterReview(
   channel: "cli" | "mcp" = "cli",
 ): Promise<Result<ProductNext>> {
   const feature = options.feature ?? workspace.status?.activeFeature;
-  if (feature && (await pendingReview(workspace, feature, reviewWaitMs(workspace, channel))))
+  if (
+    feature &&
+    (await pendingReview(
+      workspace,
+      feature,
+      options.deadline ?? Date.now() + reviewWaitMs(workspace, channel),
+      options,
+    ))
+  )
     return waitingNext(feature);
   return runProductNext(workspace, options);
 }
 
 /**
  * Reviews usually return in 40–100 s; weak workers asked once and stopped after a 30 s
- * wait. The CLI waits past a typical review inside the 180 s review deadline; MCP stays
- * under the ~60 s tool-call timeout hosts apply.
+ * wait. Polling uses the remaining whole-call budget: 100 s on CLI, 50 s on MCP.
+ * Checks may need a longer host timeout; they consume this budget before review waits.
  */
-const REVIEW_WAIT_MS = { cli: 120_000, mcp: 50_000 } as const;
+const REVIEW_WAIT_MS = { cli: 100_000, mcp: 50_000 } as const;
 
 /** How long `done` and `next` wait for a VISP-launched review on this channel. */
 export function reviewWaitMs(workspace: WorkspaceState, channel: "cli" | "mcp"): number {
-  return workspace.config.critic?.launch === "codex-exec" ? REVIEW_WAIT_MS[channel] : 0;
+  return launchesReviewer(workspace.config.critic) ? REVIEW_WAIT_MS[channel] : 0;
 }
 
 /** How `done` starts review for this project, or undefined when the host delegates it. */
@@ -174,24 +459,32 @@ export function configuredReviewStarter(
   workspace: WorkspaceState,
   channel: "cli" | "mcp" = "cli",
 ): ReviewStarter | undefined {
-  if (workspace.config.critic?.launch !== "codex-exec") return undefined;
+  const launcher = configuredCriticLauncher(workspace);
+  if (!launcher) return undefined;
   // Codex's sandbox ends background processes when a shell command returns; reviews from a
   // Codex worker's CLI stayed pending forever. They run inside `visp done` there instead.
-  if (channel === "cli" && workspace.config.harness === "codex")
-    return inlineReview(
-      configuredCriticLauncher(workspace) ?? codexExecCriticHost({ root: workspace.paths.root }),
-    );
+  if (channel === "cli" && workspace.config.harness === "codex") return inlineReview(launcher);
   // Bundled builds place the CLI entry beside this chunk; source runs review inline.
   const cli = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
-  return existsSync(cli)
-    ? backgroundReview(cli)
-    : inlineReview(codexExecCriticHost({ root: workspace.paths.root }));
+  return existsSync(cli) ? backgroundReview(cli) : inlineReview(launcher);
 }
 
-/** Run the review in this process; used where the caller outlives the reviewer. */
+/**
+ * Run the review in this process; used where the caller outlives the reviewer. The review is
+ * bounded by the critic's own timeout, not by this command's wait budget: Codex keeps a shell
+ * command running after its tool call yields, and reviews took 95-190 s on slow API days, so a
+ * 100 s cut spent every call without a result.
+ */
 export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
   return async (workspace, selection) =>
-    summarize(await runProductCritic(workspace, { operation: "review", ...selection }, launcher));
+    summarize(
+      await runProductCritic(
+        workspace,
+        { operation: "review", feature: selection.feature, task: selection.task },
+        launcher,
+        selection.signal,
+      ),
+    );
 }
 
 /**
@@ -201,8 +494,9 @@ export function inlineReview(launcher: ProductCriticHost): ReviewStarter {
  */
 export function backgroundReview(cli: string, startupMs = 15_000): ReviewStarter {
   return async (workspace, selection) => {
-    const log = join(await mkdtemp(join(tmpdir(), "visp-review-")), "review.json");
-    const output = openSync(log, "w");
+    // The feature's own directory keeps the process log: no stray temp directory per review.
+    const log = workspace.paths.featureFile(selection.feature, REVIEW_PROCESS_LOG);
+    const output = openSync(log, "w", 0o600);
     const child = spawn(
       process.execPath,
       [
@@ -224,11 +518,16 @@ export function backgroundReview(cli: string, startupMs = 15_000): ReviewStarter
       exited = true;
     });
     child.unref();
-    const deadline = Date.now() + startupMs;
-    while (Date.now() < deadline && !exited) {
+    const deadline = Math.min(
+      Date.now() + startupMs,
+      selection.deadline ?? Number.POSITIVE_INFINITY,
+    );
+    while (Date.now() < deadline && !exited && !selection.signal?.aborted) {
       const pending = await hasPendingCriticReview(workspace, selection.feature);
       if (pending.ok && pending.value) return runningSummary();
-      await sleep(250);
+      await delay(Math.min(250, Math.max(1, deadline - Date.now())), undefined, {
+        signal: selection.signal,
+      }).catch(() => undefined);
     }
     if (!exited) return runningSummary();
     return summarizeEnvelope(await readFile(log, "utf8").catch(() => ""));
@@ -257,13 +556,24 @@ function waitingNext(feature: string): Result<ProductNext> {
   });
 }
 
-async function pendingReview(workspace: WorkspaceState, feature: string, waitMs: number) {
-  const deadline = Date.now() + waitMs;
+async function pendingReview(
+  workspace: WorkspaceState,
+  feature: string,
+  deadline: number,
+  options: ProductSelection,
+) {
+  let announced = false;
   for (;;) {
     const pending = await hasPendingCriticReview(workspace, feature);
     if (!pending.ok || !pending.value) return false;
-    if (Date.now() >= deadline) return true;
-    await sleep(1000);
+    if (Date.now() >= deadline || options.signal?.aborted) return true;
+    if (!announced) {
+      await options.onProgress?.({ check: "review", status: "waiting for independent findings" });
+      announced = true;
+    }
+    await delay(Math.min(1000, Math.max(1, deadline - Date.now())), undefined, {
+      signal: options.signal,
+    }).catch(() => undefined);
   }
 }
 
@@ -271,9 +581,19 @@ async function pendingReview(workspace: WorkspaceState, feature: string, waitMs:
  * Failing checks are cheaper to fix than to review. `done` may execute nothing new when
  * `verify` already passed the current source; a passed result still warrants review.
  */
-function checksPassed(result: ProductVerification): boolean {
-  if (result.executions.some((execution) => execution.status !== "passed")) return false;
-  return result.executions.length > 0 || result.passed;
+function checksPassed(
+  result: ProductVerification,
+  disputes?: DisputeState,
+  reviewOwed = false,
+): boolean {
+  // A pinned failure the worker has disputed in full must not keep the reviewer from ruling.
+  const blocking = result.executions.filter(
+    (execution) =>
+      execution.status !== "passed" && !(disputes && disputedFailure(execution, disputes)),
+  );
+  if (blocking.length) return false;
+  // A slice whose required review has no check to run still owes that review.
+  return result.executions.length > 0 || result.passed || reviewOwed;
 }
 
 function summarizeEnvelope(text: string): DoneCriticSummary {
@@ -291,15 +611,38 @@ function summarizeEnvelope(text: string): DoneCriticSummary {
   }
 }
 
+interface CriticResult {
+  advice?: { summary?: string };
+  findings?: { problem: string; nextCheck?: string; required?: boolean }[];
+  callsRemaining?: number;
+  gaps?: string[];
+  /** Why an attempt ended without a review, as the critic recorded it. */
+  reason?: string;
+  stopped?: string;
+  lifecycle?: { acceptedReview?: boolean; status?: string };
+}
+
+/** Why no review came back; a review still running is not a failure and needs no worker action. */
+function unreviewedReason(value: CriticResult): string {
+  const given = [value.reason, ...(value.gaps ?? [])].filter(Boolean).join("; ");
+  if (given) return given;
+  return value.stopped?.startsWith("review-in-progress") || value.lifecycle?.status === "pending"
+    ? RUNNING_REASON
+    : "The critic did not review";
+}
+
+const RUNNING_REASON = "VISP's reviewer is still running. Wait: run visp next.";
+
 function summarize(result: Result<unknown>): DoneCriticSummary {
-  if (!result.ok) return { reviewed: false, findings: [], reason: result.error.message };
-  const value = result.value as {
-    lifecycle?: { acceptedReview?: boolean };
-    advice?: { summary?: string };
-    findings?: { problem: string; nextCheck?: string; required?: boolean }[];
-    callsRemaining?: number;
-    gaps?: string[];
-  };
+  if (!result.ok)
+    return {
+      reviewed: false,
+      findings: [],
+      reason: result.error.message.startsWith("review-in-progress")
+        ? RUNNING_REASON
+        : result.error.message,
+    };
+  const value = result.value as CriticResult;
   const reviewed = value.lifecycle?.acceptedReview === true;
   return {
     reviewed,
@@ -310,10 +653,6 @@ function summarize(result: Result<unknown>): DoneCriticSummary {
       ...(required !== undefined ? { required } : {}),
     })),
     ...(value.callsRemaining !== undefined ? { callsRemaining: value.callsRemaining } : {}),
-    ...(reviewed ? {} : { reason: value.gaps?.join("; ") || "The critic did not review" }),
+    ...(reviewed ? {} : { reason: unreviewedReason(value) }),
   };
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

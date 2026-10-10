@@ -2,10 +2,21 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { killCommandGroup } from "../core/exec.js";
 import { productExecutionEnvironment } from "../core/execution-environment.js";
 import { bounded } from "./deadline.js";
 
-export class BrowserUnavailableError extends Error {}
+export const BROWSER_STARTUP_TIMEOUT_MS = 10_000;
+export class BrowserUnavailableError extends Error {
+  constructor(
+    message: string,
+    options?: ErrorOptions & { kind?: "missing-browser" | "permissions" | "startup" },
+  ) {
+    super(message, options);
+    this.kind = options?.kind;
+  }
+  readonly kind?: "missing-browser" | "permissions" | "startup";
+}
 /** An established browser failed to execute an operation; partial history remains diagnostic. */
 export class BrowserRuntimeError extends Error {
   constructor(
@@ -50,8 +61,14 @@ export async function launchChrome(
       `--user-data-dir=${profile}`,
       "about:blank",
     ],
-    { stdio: ["ignore", "ignore", "pipe"], env: productExecutionEnvironment() },
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: productExecutionEnvironment(),
+      // Its own process group, so stopping it also ends the helpers it started.
+      detached: process.platform !== "win32",
+    },
   );
+  trackBrowser(child);
   let stderr = "";
   let diagnosticTruncated = false;
   const captureDiagnostic = (chunk: Buffer) => {
@@ -73,10 +90,13 @@ export async function launchChrome(
     }
   }
   try {
-    const endpoint = await debuggingEndpoint(child, options.startupTimeoutMs ?? 10_000);
+    const endpoint = await debuggingEndpoint(
+      child,
+      options.startupTimeoutMs ?? BROWSER_STARTUP_TIMEOUT_MS,
+    );
     connection = await connect(
       endpoint,
-      options.startupTimeoutMs ?? 10_000,
+      options.startupTimeoutMs ?? BROWSER_STARTUP_TIMEOUT_MS,
       options.operationTimeoutMs ?? 5_000,
     );
     return { send: connection.send, onEvent: connection.onEvent, close };
@@ -95,24 +115,69 @@ function startupError(
   diagnosticTruncated: boolean,
 ): BrowserUnavailableError {
   const missing = cause instanceof Error && "code" in cause && cause.code === "ENOENT";
-  const recovery = missing
-    ? "Select an installed Chrome/Chromium executable with --binary or CHROME_BIN."
-    : "Inspect the startup diagnostic and host process permissions. If the host restricts execution, use its supported permission recovery; keep browser sandboxing enabled.";
+  const diagnostic = `${cause instanceof Error ? cause.message : String(cause)}\n${stderr}`;
+  const kind = missing
+    ? "missing-browser"
+    : /\b(?:EPERM|EACCES)\b|Operation not permitted|Permission denied|No usable sandbox/i.test(
+          diagnostic,
+        )
+      ? "permissions"
+      : "startup";
+  const recovery =
+    kind === "missing-browser"
+      ? "Select an installed Chrome/Chromium executable with --binary or CHROME_BIN."
+      : kind === "permissions"
+        ? "Use the host's supported permission recovery; keep browser sandboxing enabled."
+        : "Inspect the startup diagnostic, browser installation and required shared libraries before retrying.";
   return new BrowserUnavailableError(
     `Browser unavailable (${binary}): ${cause instanceof Error ? cause.message : String(cause)}. ${recovery}${stderr.trim() ? `\nBrowser stderr${diagnosticTruncated ? " (truncated)" : ""}:\n${stderr.trim()}` : ""}`,
-    { cause },
+    { cause, kind },
   );
 }
 
+/**
+ * A detached browser no longer receives the signal a host sends to visp's process group, so
+ * every browser still running when visp exits is killed with its group here.
+ */
+const liveBrowsers = new Set<ChildProcess>();
+function trackBrowser(child: ChildProcess): void {
+  if (process.platform === "win32") return;
+  if (liveBrowsers.size === 0) process.once("exit", killLiveBrowsers);
+  liveBrowsers.add(child);
+  child.once("exit", () => {
+    liveBrowsers.delete(child);
+    if (liveBrowsers.size === 0) process.removeListener("exit", killLiveBrowsers);
+  });
+}
+
+function killLiveBrowsers(): void {
+  for (const child of liveBrowsers) killCommandGroup(child, "SIGKILL");
+}
+
+/**
+ * Chrome's launcher script pipes stderr through a `cat`, and its helpers outlive the leader
+ * when only the leader is signalled; they keep the other end of stderr's socket open, so a
+ * failed browser kept `visp` running after its result was printed. The whole group is ended
+ * and the streams are released.
+ */
 async function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
-  const stopped = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  child.kill("SIGTERM");
-  const timeout = setTimeout(() => child.kill("SIGKILL"), 500);
   try {
-    await bounded("Browser cleanup", 2_000, async () => stopped);
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      const stopped = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      killCommandGroup(child, "SIGTERM");
+      const timeout = setTimeout(() => killCommandGroup(child, "SIGKILL"), 500);
+      try {
+        await bounded("Browser cleanup", 2_000, async () => stopped);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
   } finally {
-    clearTimeout(timeout);
+    // Helpers that outlived the leader, or ignored SIGTERM.
+    killCommandGroup(child, "SIGKILL");
+    child.stderr?.destroy();
+    child.stdout?.destroy();
+    child.unref?.();
   }
 }
 
@@ -220,18 +285,26 @@ async function connect(
     if (response.error) request.reject(new BrowserRuntimeError(response.error.message));
     else request.resolve(response.result ?? {});
   });
+  // Once the socket is gone (Chrome killed, crashed, or closed by us) a send would wait its
+  // whole timeout for a reply that cannot come, and report a timeout rather than a lost browser.
+  let closed = false;
   const rejectPending = () => {
     for (const request of pending.values())
       request.reject(new BrowserRuntimeError("browser disconnected"));
     pending.clear();
   };
-  socket.addEventListener("close", rejectPending);
+  socket.addEventListener("close", () => {
+    closed = true;
+    rejectPending();
+  });
   return {
     onEvent(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     send(method, params = {}, sessionId) {
+      if (closed || socket.readyState !== WebSocket.OPEN)
+        return Promise.reject(new BrowserRuntimeError("browser disconnected"));
       const id = ++sequence;
       return new Promise<Record<string, unknown>>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -258,6 +331,7 @@ async function connect(
       });
     },
     async close() {
+      closed = true;
       listeners.clear();
       rejectPending();
       socket.close();

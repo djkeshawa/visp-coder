@@ -1,0 +1,19 @@
+{
+  "variant": "defective",
+  "expectedDefects": [
+    "preview-origin-mismatch"
+  ],
+  "caughtIf": [
+    [
+      "\\b(?:preview|dotted|dashed|aim(?:ing)?\\s+(?:line|guide)|trajectory|guide|arc)\\b",
+      "\\b(?:origin|starts?|begins?|offset|mismatch(?:es|ed)?|contradict\\w*|(?:does|do)\\s+not\\s+match|differs?|disagree\\w*|gap|away\\s+from|diverg\\w*)\\b",
+      "\\b(?:launch\\w*|release\\w*|flights?|flies|held|hold|pull\\w*|fired)\\b"
+    ]
+  ],
+  "counterevidence": {
+    "held": "The dotted preview starts at the pulled stone and falls toward the ground on the right.",
+    "released": "The released stone leaves the sling and flies right, close to the level of the sling. The drawn preview and the actual flight do not share an origin or a path.",
+    "source": "The preview loop starts at the pulled position while the projectile spawns at the sling."
+  },
+  "evaluationScope": "The dotted preview against the launch that follows, for one pull. Do not infer full-game quality, content or finish, and do not require a particular visual style. Later levels, ammunition kinds and scoring are not shown."
+}

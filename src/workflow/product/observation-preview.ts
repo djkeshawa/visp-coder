@@ -17,6 +17,12 @@ export function observationSequence(record: ProductRecord, subject: string, slic
     })
     .reverse();
   runs.sort((a, b) => Number(a.status === "completed") - Number(b.status === "completed"));
+  const viewportKey = (viewport: { width: number; height: number }) =>
+    `${viewport.width}x${viewport.height}`;
+  const pendingViewports = new Set(
+    runs.flatMap((run) => run.captures.map((capture) => viewportKey(capture.viewport))),
+  );
+  const shownViewports = new Set<string>();
   const seenImages = new Set<string>();
   const states = new Set<string>();
   const selected: {
@@ -35,8 +41,16 @@ export function observationSequence(record: ProductRecord, subject: string, slic
       const capture = run.captures[index];
       if (!capture) continue;
       const label = captureLabel(capture.steps, index, run.captures.length, run.status);
-      const state = `${capture.viewport.width}x${capture.viewport.height}:${label}`;
-      if (seenImages.has(capture.sha256) || states.has(state) || selected.length >= 6) {
+      const viewport = viewportKey(capture.viewport);
+      const state = `${viewport}:${label}`;
+      const image = `${viewport}:${capture.sha256}`;
+      const reserved = pendingViewports.size - Number(pendingViewports.has(viewport));
+      if (
+        seenImages.has(image) ||
+        states.has(state) ||
+        selected.length >= 6 ||
+        (shownViewports.has(viewport) && selected.length + reserved >= 6)
+      ) {
         omitted.push(capture.id);
         continue;
       }
@@ -48,7 +62,9 @@ export function observationSequence(record: ProductRecord, subject: string, slic
         runIndex,
         captureIndex: index,
       });
-      seenImages.add(capture.sha256);
+      seenImages.add(image);
+      pendingViewports.delete(viewport);
+      shownViewports.add(viewport);
       states.add(state);
     }
   }

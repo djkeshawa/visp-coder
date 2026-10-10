@@ -1,7 +1,6 @@
 import type { Harness, Preset } from "../core/constants.js";
 import { DEFAULT_BLOCKED_PATHS, LIMITS } from "../core/constants.js";
 import { criticHarnessSchema } from "./critic.js";
-import type { VispConfig } from "./schema.js";
 
 /**
  * The commented starter `visp.yml` written by `visp init`. Values shown are the
@@ -65,8 +64,11 @@ ${DEFAULT_BLOCKED_PATHS.map((path) => `    - "${path}"`).join("\n")}
   # like shell syntax.
   validationCommands:${commands}
 
-  # Historical telemetry preference: off | auto | on.
-  # Current product verification does not run flip checks from this setting.
+  # Display-only regression comparison: off | auto | on.
+  # A passing check runs a second time on the old implementation (in a temporary tree, tests kept)
+  # to show whether it fails without the change. That run repeats the check's external side effects
+  # (databases, services, files outside the project); set off to stop it.
+  # auto checks changes to existing implementation; on also checks added files.
   flipCheck: auto
 
 graph:
@@ -99,9 +101,8 @@ telemetry:
 }
 
 /**
- * Validation commands to suggest at init. For script-based projects only
- * scripts that actually exist are suggested: handing someone a command that
- * cannot run would make their first `verify` fail for no reason.
+ * Validation candidates for init. Only existing npm scripts are candidates;
+ * availableValidationCommands additionally checks their local toolchains.
  */
 export function suggestedValidationCommands(
   preset: Preset,
@@ -125,5 +126,3 @@ export function suggestedValidationCommands(
       return [];
   }
 }
-
-export type { VispConfig };

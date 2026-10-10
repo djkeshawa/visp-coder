@@ -4,15 +4,41 @@ import { err, ok, type Result } from "../../core/result.js";
 import type { ProductReviewImage } from "../evidence/product-review.js";
 
 import type { WorkspaceState } from "../state.js";
+import { isBrowserCheckCommand } from "./check-command.js";
 import type { productReviewImageGroups } from "./image-groups.js";
 import { captureSchema, inspectProductImages } from "./images.js";
-import { assessmentSchema, type ProductOutcome, type ProductSlice } from "./model.js";
+import {
+  assessmentSchema,
+  checksFor,
+  closedSlice,
+  type ProductOutcome,
+  type ProductSlice,
+} from "./model.js";
 import { observationSequence } from "./observation-preview.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import { reproductionContextDigest } from "./reproduction-bindings.js";
 import type { ProductReviewOptions } from "./review.js";
 import { preferredReviewCaptures } from "./review-context.js";
 import type { ProductRecord } from "./store.js";
 import { productContractDigest } from "./subject.js";
+
+/** Closing this slice leaves no unfinished slice in the feature. */
+export function completesFeature(record: ProductRecord, task?: string): boolean {
+  return record.brief.slices.every(
+    (slice) => slice.id === task || closedSlice(record.state.slices[slice.id]?.status),
+  );
+}
+
+/** An implicit completing review assesses the assembled feature, even before closure. */
+export function reviewSlice(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  selected: ProductSlice | undefined,
+  explicit?: string,
+): ProductSlice | undefined {
+  const completing = reviewerRules(workspace) && completesFeature(record, selected?.id);
+  return explicit === undefined && (completing || completesFeature(record)) ? undefined : selected;
+}
 
 /** A bounded, reproducible selection, not authentication of a reviewer or proof of image viewing. */
 export const reviewSelectionSchema = z
@@ -102,16 +128,30 @@ export async function inspectSelectedImages(
     captures,
     [
       ...(selection.value?.images.map((entry) => entry.id) ?? []),
+      ...(workspace.config.workflow.reviewMode === "observation-preview" && !options.groups?.length
+        ? observationSequence(record, subject, slice).states.map((entry) => entry.id)
+        : []),
       ...reviewImageReferences(options, record, subject, slice, imageGroups.length > 0),
     ],
     imageGroups,
-    selection.value?.images.map((entry) => entry.id) ??
-      (workspace.config.workflow.reviewMode === "observation-preview" && !options.groups?.length
-        ? observationSequence(record, subject, slice).states.map((entry) => entry.id)
-        : undefined),
+    selection.value?.images.map((entry) => entry.id),
   );
   const selectedImages = validateSelectedImages(selection.value, images.images);
   if (!selectedImages.ok) return selectedImages;
+  const declared = declaredReviewViewports(record, slice);
+  images.gaps.push(
+    ...declared
+      .filter(
+        (viewport) =>
+          !images.images.some(
+            (image) => `${image.viewport.width}x${image.viewport.height}` === viewport,
+          ) && !images.gaps.some((gap) => gap.startsWith(`Viewport ${viewport}:`)),
+      )
+      .map(
+        (viewport) =>
+          `Viewport ${viewport}: no current representative capture available for this declared viewport`,
+      ),
+  );
   return ok(images);
 }
 
@@ -127,7 +167,7 @@ export function reviewImageGaps(
         outcome.expectations.some((expectation) => expectation.viewport),
     )
     ? gaps
-    : [];
+    : gaps.filter((gap) => gap.startsWith("Viewport "));
 }
 
 function reviewImageReferences(
@@ -180,4 +220,22 @@ function coverageCaptureReferences(input: unknown): string[] {
           : [],
       )
     : [];
+}
+
+function declaredReviewViewports(record: ProductRecord, slice?: ProductSlice) {
+  const expectations = record.brief.outcomes
+    .filter((outcome) => !slice || slice.outcomes.includes(outcome.id))
+    .flatMap((outcome) => outcome.expectations.flatMap((entry) => entry.viewport ?? []));
+  const journeys = checksFor(record.brief, slice).flatMap((check) => {
+    if (!isBrowserCheckCommand(check.command)) return [];
+    return [
+      ...(check.command.journey.viewport ? [check.command.journey.viewport] : []),
+      ...check.command.journey.actions.flatMap((action) =>
+        action.kind === "resize" ? [action.viewport] : [],
+      ),
+    ];
+  });
+  return [
+    ...new Set([...expectations, ...journeys].map((entry) => `${entry.width}x${entry.height}`)),
+  ];
 }

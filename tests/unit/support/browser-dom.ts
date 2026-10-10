@@ -11,6 +11,7 @@ export function browserDom() {
     perspective: "none",
     rotate: "none",
     scale: "none",
+    offsetPath: "none",
   };
   const attributes: Record<string, string> = {};
   let hiddenByAncestor = false;

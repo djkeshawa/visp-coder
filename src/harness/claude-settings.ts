@@ -35,9 +35,19 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-/** The command Claude Code runs. Relative to the project, so it survives a move. */
-export function hookCommand(hookPath: string): string {
-  return `node "$CLAUDE_PROJECT_DIR/${hookPath}"`;
+/**
+ * The command Claude Code runs. Relative to the project, so it survives a move.
+ *
+ * The script exits 0 on every path it handles, so `|| exit 2` only turns a crash or a
+ * missing `node` (GUI-launched hosts often lack the shell's node) into a block. That is
+ * wanted on the edit matcher, the scope-enforcement point, and harmful elsewhere: on a
+ * prompt it erases the user's message, on Stop it forces the worker to continue, on a
+ * shell command it blocks every command.
+ */
+export function hookCommand(hookPath: string, failClosed: boolean): string {
+  if (process.platform === "win32")
+    return `node "%CLAUDE_PROJECT_DIR%\\${hookPath.replaceAll("/", "\\")}"${failClosed ? " || exit /b 2" : ""}`;
+  return `node "$CLAUDE_PROJECT_DIR/${hookPath}"${failClosed ? " || exit 2" : ""}`;
 }
 
 /**
@@ -47,14 +57,19 @@ export function hookCommand(hookPath: string): string {
  */
 function sessionEntries(hookPath: string): Record<"UserPromptSubmit" | "Stop", HookEntry> {
   return {
-    UserPromptSubmit: { hooks: [{ type: "command", command: hookCommand(hookPath) }] },
-    Stop: { hooks: [{ type: "command", command: hookCommand(hookPath), timeout: 180 }] },
+    UserPromptSubmit: { hooks: [{ type: "command", command: hookCommand(hookPath, false) }] },
+    Stop: { hooks: [{ type: "command", command: hookCommand(hookPath, false), timeout: 180 }] },
   };
 }
 
 /** Shell commands that would delete VISP state are checked by the same script. */
 function shellEntryFor(hookPath: string): HookEntry {
-  return { matcher: "Bash", hooks: [{ type: "command", command: hookCommand(hookPath) }] };
+  return { matcher: "Bash", hooks: [{ type: "command", command: hookCommand(hookPath, false) }] };
+}
+
+/** The shell entry VISP generates, in any build: the Bash matcher pointing at the hook script. */
+function isGeneratedShellEntry(entry: HookEntry, hookPath: string): boolean {
+  return entry.matcher === "Bash" && referencesHook(entry, hookPath);
 }
 
 /** Other hooks for these events stay; VISP's own entries are replaced by generated ones. */
@@ -66,24 +81,24 @@ function withPromptHook(settings: ClaudeSettings, hookPath: string): ClaudeSetti
   }
   const tools = Array.isArray(hooks.PreToolUse) ? (hooks.PreToolUse as HookEntry[]) : [];
   const shell = shellEntryFor(hookPath);
-  hooks.PreToolUse = [...tools.filter((entry) => !isDeepStrictEqual(entry, shell)), shell];
+  hooks.PreToolUse = [...tools.filter((entry) => !isGeneratedShellEntry(entry, hookPath)), shell];
   return { ...settings, hooks: hooks as ClaudeSettings["hooks"] };
 }
 
 function withoutPromptHook(settings: ClaudeSettings, hookPath: string): ClaudeSettings {
   const hooks: Record<string, unknown> = { ...(settings.hooks ?? {}) };
-  for (const [event, expected] of Object.entries(sessionEntries(hookPath))) {
+  for (const event of Object.keys(sessionEntries(hookPath))) {
     if (!Array.isArray(hooks[event])) continue;
+    // By reference, so an entry an older build generated (with a different exit code) goes too.
     const remaining = (hooks[event] as HookEntry[]).filter(
-      (entry) => !isDeepStrictEqual(entry, expected),
+      (entry) => !referencesHook(entry, hookPath),
     );
     if (remaining.length) hooks[event] = remaining;
     else delete hooks[event];
   }
   if (Array.isArray(hooks.PreToolUse)) {
-    const shell = shellEntryFor(hookPath);
     hooks.PreToolUse = (hooks.PreToolUse as HookEntry[]).filter(
-      (entry) => !isDeepStrictEqual(entry, shell),
+      (entry) => !isGeneratedShellEntry(entry, hookPath),
     );
   }
   return { ...settings, hooks: hooks as ClaudeSettings["hooks"] };
@@ -101,16 +116,23 @@ function hasPromptHook(settings: ClaudeSettings, hookPath: string): boolean {
   );
 }
 
+export function hasClaudeSessionHooks(current: string | undefined, hookPath: string): boolean {
+  const settings = parseSettings(current);
+  return settings !== "malformed" && hasPromptHook(settings, hookPath);
+}
+
 function entryFor(hookPath: string): HookEntry {
   return {
     matcher: PRE_TOOL_USE_MATCHER,
-    hooks: [{ type: "command", command: hookCommand(hookPath) }],
+    hooks: [{ type: "command", command: hookCommand(hookPath, true) }],
   };
 }
 
 export interface PlannedClaudeRegistration {
   readonly status: RegistrationStatus;
   readonly content?: string;
+  /** The rewrite dropped structure the file had (unparseable text or a malformed hooks value). */
+  readonly discarded?: true;
 }
 
 export type UnregistrationStatus = "absent" | "removed" | "customized" | "malformed";
@@ -142,6 +164,7 @@ export function planPreToolUseRegistration(
           content: formatSettings(
             withPromptHook({ hooks: { PreToolUse: [entryFor(hookPath)] } }, hookPath),
           ),
+          discarded: true,
         })
       : ok({ status: "malformed" });
   }
@@ -153,8 +176,15 @@ export function planPreToolUseRegistration(
       ? ok({
           status: "replaced",
           content: formatSettings(
-            withPromptHook({ ...settings, hooks: { PreToolUse: [entryFor(hookPath)] } }, hookPath),
+            withPromptHook(
+              {
+                ...settings,
+                hooks: { ...siblingHooks(settings), PreToolUse: [entryFor(hookPath)] },
+              },
+              hookPath,
+            ),
           ),
+          discarded: true,
         })
       : ok({ status: "malformed" });
   }
@@ -254,13 +284,22 @@ export async function preToolUseRegistration(
 /**
  * A path reference identifies an edited VISP entry for conflict reporting.
  * It never establishes health: only the exact generated entry is active.
+ * Either separator matches: `hookCommand` writes backslashes on Windows.
  */
 function referencesHook(entry: HookEntry, hookPath: string): boolean {
   return Array.isArray(entry.hooks)
     ? entry.hooks.some(
-        (hook) => typeof hook?.command === "string" && hook.command.includes(hookPath),
+        (hook) =>
+          typeof hook?.command === "string" &&
+          hook.command.replaceAll("\\", "/").includes(hookPath),
       )
     : false;
+}
+
+/** The other hook events, when `hooks` is a plain object; anything else holds none to keep. */
+function siblingHooks(settings: ClaudeSettings): Record<string, unknown> {
+  const hooks = settings.hooks;
+  return typeof hooks === "object" && hooks !== null && !Array.isArray(hooks) ? hooks : {};
 }
 
 function preToolUseEntries(settings: ClaudeSettings): HookEntry[] | "malformed" {

@@ -11,7 +11,7 @@ import {
 const fields = productBriefInputSchema.shape;
 
 /** Arrays update entries by ID; omitted IDs append entries for the normal allocator. */
-export const productBriefPatchSchema = productBriefInputSchema
+const productBriefPatchSchema = productBriefInputSchema
   .omit({ version: true, feature: true, originalRequest: true, acceptanceBaseline: true })
   .partial()
   .extend({

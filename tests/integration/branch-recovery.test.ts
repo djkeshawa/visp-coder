@@ -1,0 +1,157 @@
+import { execFileSync } from "node:child_process";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { afterEach, expect, it } from "vitest";
+import { AUTHORIZATION_CHECK } from "../../src/harness/authorization-check.js";
+import { branchFeatures } from "../../src/workflow/product/branch-scope.js";
+import { updateProductBrief } from "../../src/workflow/product/brief.js";
+import { allocateFeatureId } from "../../src/workflow/product/feature-id.js";
+import { mergeProjectRules, removeProjectRule } from "../../src/workflow/product/project-rules.js";
+import { runProductNext, runProductStatus } from "../../src/workflow/product/status.js";
+import { runProductWork } from "../../src/workflow/product/work.js";
+import { authorizedScopes } from "../../src/workflow/state.js";
+import { productWorkspace } from "../unit/support/product-workspace.js";
+import type { TestWorkspace } from "../unit/support/workspace.js";
+
+let project: TestWorkspace;
+afterEach(async () => project?.destroy());
+
+it("recovers next, status and authorization after switching away from a feature", async () => {
+  ({ workspace: project } = await productWorkspace());
+  project.git("switch", "-c", "feature/test");
+  expect((await runProductWork(await project.state(), { task: "T001" })).ok).toBe(true);
+  project.commit("feature");
+  project.git("switch", "main");
+  const state = await project.state();
+  expect(state.status?.activeFeature).toBeUndefined();
+  const next = await runProductNext(state);
+  expect(next.ok).toBe(true);
+  expect(next.ok && next.value.objective).toContain("main");
+  expect(next.ok && next.value.command).not.toContain("visp feature");
+  expect((await runProductStatus(state)).ok).toBe(true);
+  expect(await authorizedScopes(state)).toEqual({ ok: true, value: [] });
+  expect(
+    execFileSync(process.execPath, ["-e", AUTHORIZATION_CHECK], {
+      cwd: project.root,
+      encoding: "utf8",
+    }).trim(),
+  ).toBe("inactive");
+  await project.write("ordinary.txt", "ordinary human edit\n");
+  project.commit("ordinary commit");
+});
+
+it("ignores an implicit task removed by stash but explains an explicit missing task", async () => {
+  ({ workspace: project } = await productWorkspace());
+  project.commit("brief");
+  const state = await project.state();
+  const status = await runProductStatus(state);
+  if (!status.ok || !status.value.brief) throw new Error("brief");
+  const first = status.value.brief.slices[0];
+  expect(
+    (
+      await updateProductBrief(state, {
+        patch: { slices: [{ ...first, id: "T999" }] },
+        reason: "Temporary slice",
+      })
+    ).ok,
+  ).toBe(true);
+  expect((await runProductWork(await project.state(), { task: "T999" })).ok).toBe(true);
+  project.git("stash", "push", "-m", "temporary slice");
+  expect((await runProductNext(await project.state())).ok).toBe(true);
+  expect((await runProductStatus(await project.state())).ok).toBe(true);
+  expect((await runProductWork(await project.state())).ok).toBe(true);
+  const explicit = await runProductWork(await project.state(), { task: "T999" });
+  expect(explicit.ok).toBe(false);
+  expect(!explicit.ok && explicit.error.message).toContain("T001");
+});
+
+it("allocates distinct feature and rule ids on parallel branches", async () => {
+  ({ workspace: project } = await productWorkspace());
+  const ids = await Promise.all(
+    Array.from({ length: 3 }, () => allocateFeatureId(project.root, [], "Add the same thing")),
+  );
+  expect(ids.every((id) => id.ok)).toBe(true);
+  expect(new Set(ids.map((id) => id.ok && id.value)).size).toBe(3);
+  const first = mergeProjectRules([], ["Use tabs"], "001-one", "now").added[0];
+  const second = mergeProjectRules([], ["Use spaces"], "001-two", "now").added[0];
+  expect(first?.id).not.toBe(second?.id);
+  expect(first?.id).toBe(mergeProjectRules([], ["Use tabs"], "001-two", "later").added[0]?.id);
+});
+
+// Codex's workspace-write sandbox keeps .git read-only; every reservation failed there and
+// visp feature reported "Git ref writers busy" 100 times over.
+it("allocates the local id when Git refs cannot be written", async () => {
+  ({ workspace: project } = await productWorkspace());
+  // A file where Git needs the refs/visp directory makes every update-ref fail.
+  await rm(join(project.root, ".git/refs/visp"), { recursive: true, force: true });
+  await writeFile(join(project.root, ".git/refs/visp"), "not a directory\n");
+  const id = await allocateFeatureId(project.root, ["041-earlier"], "Add the next thing");
+  expect(id).toEqual({ ok: true, value: "042-add-the-next-thing" });
+});
+
+it("refuses ambiguous legacy rule removal", async () => {
+  ({ workspace: project } = await productWorkspace());
+  await project.write(
+    ".visp/rules.json",
+    JSON.stringify({
+      version: 1,
+      rules: ["One", "Two"].map((text) => ({
+        id: "R001",
+        text,
+        feature: "001-old",
+        capturedAt: "now",
+      })),
+    }),
+  );
+  const removed = await removeProjectRule(await project.state(), "R001");
+  expect(removed.ok).toBe(false);
+  expect(!removed.ok && removed.error.message).toContain("ambiguous");
+});
+
+it("selects every changed feature after branch rename and merge", async () => {
+  ({ workspace: project } = await productWorkspace());
+  const base = project.git("rev-parse", "HEAD").trim();
+  const feature = (await project.state()).status?.activeFeature;
+  project.git("switch", "-c", "first");
+  project.commit("first feature");
+  project.git("switch", "-c", "second", base);
+  await project.withFeature("002-second");
+  project.commit("second feature");
+  project.git("merge", "first", "--no-edit");
+  const selected = await branchFeatures(await project.state(), { base, branch: "renamed" });
+  expect(selected.ok && selected.value.sort()).toEqual([feature, "002-second"].sort());
+});
+
+it("reserves ordinals across linked worktrees, including simultaneous allocation", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  ({ workspace: project } = await productWorkspace());
+  project.commit("feature");
+  const linked = await mkdtemp(join(tmpdir(), "visp-branch-audit-"));
+  try {
+    project.git("worktree", "add", "-b", "parallel", linked, "main");
+    const allocated = await Promise.all([
+      allocateFeatureId(project.root, [], "Identical goal"),
+      allocateFeatureId(linked, [], "Identical goal"),
+    ]);
+    expect(allocated.every((result) => result.ok)).toBe(true);
+    expect(new Set(allocated.map((result) => result.ok && result.value)).size).toBe(2);
+  } finally {
+    project.git("worktree", "remove", linked);
+    await rm(linked, { recursive: true, force: true });
+  }
+});
+
+it("selects the newest intent in a fresh checkout instead of the highest name", async () => {
+  const { rm, readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  ({ workspace: project } = await productWorkspace());
+  const feature = (await project.state()).status?.activeFeature;
+  await project.withFeature("999-older");
+  const path = ".visp/features/999-older/intent.json";
+  const intent = JSON.parse(await readFile(join(project.root, path), "utf8"));
+  await project.write(path, JSON.stringify({ ...intent, createdAt: "2000-01-01T00:00:00.000Z" }));
+  await rm(join(project.root, ".visp/status.json"));
+  expect((await project.state()).status?.activeFeature).toBe(feature);
+});

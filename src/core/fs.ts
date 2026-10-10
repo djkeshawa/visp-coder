@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
 import {
   access,
@@ -6,16 +7,18 @@ import {
   mkdir,
   readdir,
   readFile,
+  readlink,
   realpath,
   rename as renamePath,
   rmdir,
+  symlink,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { STATE_DIR } from "./constants.js";
-import { fromUnknown, isNodeError, type VispError, vispError } from "./errors.js";
-import { canonicalProjectRoot, isInside, isPortableAbsolute } from "./paths.js";
+import { fromUnknown, isNodeError, vispError } from "./errors.js";
+import { canonicalProjectRoot, hasParentSegment, isInside, isPortableAbsolute } from "./paths.js";
 import { err, ok, type Result } from "./result.js";
 
 export async function exists(path: string): Promise<boolean> {
@@ -27,15 +30,7 @@ export async function exists(path: string): Promise<boolean> {
   }
 }
 
-export async function isDirectory(path: string): Promise<boolean> {
-  try {
-    return (await lstat(path)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-export async function ensureDir(path: string): Promise<Result<void>> {
+async function ensureDir(path: string): Promise<Result<void>> {
   try {
     await mkdir(path, { recursive: true });
     return ok(undefined);
@@ -67,20 +62,6 @@ export async function readTextIfExists(path: string): Promise<Result<string | un
   return result.error.code === "ARTIFACT_MISSING" ? ok(undefined) : result;
 }
 
-/** Reads exact file bytes, refusing symlinks and distinguishing an absent file. */
-export async function readBytesIfExists(path: string): Promise<Result<Uint8Array | undefined>> {
-  try {
-    const stats = await lstat(path);
-    if (stats.isSymbolicLink()) {
-      return err(vispError("IO_ERROR", `Refusing to read symlink: ${path}`));
-    }
-    return ok(await readFile(path));
-  } catch (cause) {
-    if (isNodeError(cause) && cause.code === "ENOENT") return ok(undefined);
-    return err(fromUnknown(cause, "IO_ERROR"));
-  }
-}
-
 /** Writes via a temporary file and rename so readers never see a partial file. */
 export async function writeTextAtomic(path: string, content: string): Promise<Result<void>> {
   const directory = dirname(path);
@@ -104,16 +85,6 @@ export async function readJson<T>(
 ): Promise<Result<T>> {
   const text = await readText(path);
   if (!text.ok) return text;
-  return parseJson(text.value, parse, path);
-}
-
-export async function readJsonIfExists<T>(
-  path: string,
-  parse: (value: unknown) => Result<T>,
-): Promise<Result<T | undefined>> {
-  const text = await readTextIfExists(path);
-  if (!text.ok) return text;
-  if (text.value === undefined) return ok(undefined);
   return parseJson(text.value, parse, path);
 }
 
@@ -175,8 +146,6 @@ function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-export type { VispError };
-
 export interface ProjectFileMetadata {
   readonly type: "file" | "directory" | "other";
   readonly mode: number;
@@ -186,6 +155,11 @@ export interface ProjectFileMetadata {
 export interface ProjectDirectoryEntry {
   readonly name: string;
   readonly type: "file" | "directory" | "symlink" | "other";
+}
+
+interface ReadPass {
+  targets: Map<string, Result<string>>;
+  managed: Map<string, boolean>;
 }
 
 /**
@@ -200,10 +174,16 @@ export interface ProjectDirectoryEntry {
 export class ProjectFileSystem {
   readonly root: string;
   private readonly requestedRoot: string;
+  private readonly readPass = new AsyncLocalStorage<ReadPass>();
 
   constructor(root: string) {
     this.requestedRoot = resolve(root);
     this.root = canonicalProjectRoot(root);
+  }
+
+  /** Cache lexical path calculations only; filesystem components are checked on every access. */
+  async withReadPass<T>(read: () => Promise<T>): Promise<T> {
+    return this.readPass.run({ targets: new Map(), managed: new Map() }, read);
   }
 
   async exists(path: string): Promise<Result<boolean>> {
@@ -212,17 +192,6 @@ export class ProjectFileSystem {
     try {
       await access(target.value, constants.F_OK);
       return ok(true);
-    } catch (cause) {
-      if (isNodeError(cause) && cause.code === "ENOENT") return ok(false);
-      return err(fromUnknown(cause, "IO_ERROR"));
-    }
-  }
-
-  async isDirectory(path: string): Promise<Result<boolean>> {
-    const target = await this.validate(path);
-    if (!target.ok) return target;
-    try {
-      return ok((await lstat(target.value)).isDirectory());
     } catch (cause) {
       if (isNodeError(cause) && cause.code === "ENOENT") return ok(false);
       return err(fromUnknown(cause, "IO_ERROR"));
@@ -296,8 +265,15 @@ export class ProjectFileSystem {
     return this.writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`, mode);
   }
 
-  async writeBytesAtomic(path: string, content: Uint8Array, mode = 0o644): Promise<Result<void>> {
-    const target = await this.validate(path);
+  async writeBytesAtomic(
+    path: string,
+    content: Uint8Array,
+    mode = 0o644,
+    replaceLink = false,
+  ): Promise<Result<void>> {
+    const validate = (path: string) =>
+      replaceLink ? this.validateEntryTarget(path) : this.validate(path);
+    const target = await validate(path);
     if (!target.ok) return target;
     const directory = dirname(target.value);
     const created = await this.ensureDir(directory);
@@ -305,10 +281,11 @@ export class ProjectFileSystem {
 
     const temporary = join(directory, `.${randomSuffix()}.tmp`);
     try {
-      const ready = await this.validateMutationTarget(target.value);
+      const ready = await validate(target.value);
       if (!ready.ok) return ready;
       await writeFile(temporary, content, { flag: "wx", mode });
-      const stillSafe = await this.validateMutationTarget(target.value);
+      await chmodPath(temporary, mode);
+      const stillSafe = await validate(target.value);
       if (!stillSafe.ok) return stillSafe;
       const safeTemporary = await this.validate(temporary);
       if (!safeTemporary.ok) return safeTemporary;
@@ -321,8 +298,10 @@ export class ProjectFileSystem {
     }
   }
 
-  async removeFile(path: string): Promise<Result<void>> {
-    const target = await this.validateMutationTarget(path);
+  async removeFile(path: string, removeLink = false): Promise<Result<void>> {
+    const target = await (removeLink
+      ? this.validateEntryTarget(path)
+      : this.validateMutationTarget(path));
     if (!target.ok) return target;
     try {
       await unlink(target.value);
@@ -330,6 +309,45 @@ export class ProjectFileSystem {
     } catch (cause) {
       if (isNodeError(cause) && cause.code === "ENOENT") return ok(undefined);
       return err(fromUnknown(cause, "IO_ERROR"));
+    }
+  }
+
+  /** Inspect the link itself, including dangling and external targets; never traverse it. */
+  async readSymbolicLink(path: string): Promise<Result<Uint8Array | undefined>> {
+    const target = await this.validateEntryTarget(path);
+    if (!target.ok) return target;
+    try {
+      return ok(
+        (await lstat(target.value)).isSymbolicLink()
+          ? await readlink(target.value, { encoding: "buffer" })
+          : undefined,
+      );
+    } catch (cause) {
+      return isNodeError(cause) && cause.code === "ENOENT"
+        ? ok(undefined)
+        : err(fromUnknown(cause, "IO_ERROR"));
+    }
+  }
+
+  /** Atomic entry replacement, with the same strict parent confinement as ordinary writes. */
+  async writeSymlinkAtomic(path: string, content: Uint8Array): Promise<Result<void>> {
+    const target = await this.validateEntryTarget(path);
+    if (!target.ok) return target;
+    if (this.isManagedTarget(target.value))
+      return err(vispError("IO_ERROR", "Managed state cannot contain symlinks"));
+    const created = await this.ensureDir(dirname(target.value));
+    if (!created.ok) return created;
+    const temporary = join(dirname(target.value), `.${randomSuffix()}.tmp`);
+    try {
+      await symlink(Buffer.from(content), temporary);
+      const ready = await this.validateEntryTarget(path);
+      if (!ready.ok) return ready;
+      await renamePath(temporary, ready.value);
+      return ok(undefined);
+    } catch (cause) {
+      return err(fromUnknown(cause, "IO_ERROR"));
+    } finally {
+      await unlink(temporary).catch(() => undefined);
     }
   }
 
@@ -460,6 +478,36 @@ export class ProjectFileSystem {
     return this.validate(path);
   }
 
+  private async validateEntryTarget(path: string): Promise<Result<string>> {
+    const target = this.confinedTarget(path);
+    if (!target.ok) return target;
+    if (target.value === this.root || this.isManagedTarget(target.value))
+      return this.validate(path);
+    const parent = await this.validate(dirname(target.value));
+    return parent.ok ? target : parent;
+  }
+
+  /** Resolve an authored file link before planning an atomic replacement. */
+  async authoredWriteTarget(path: string): Promise<Result<string>> {
+    const target = this.confinedTarget(path);
+    if (!target.ok) return target;
+    try {
+      const canonical = await realpath(target.value);
+      if (!isInside(this.root, canonical) || this.isManagedTarget(canonical)) {
+        return err(
+          vispError(
+            "IO_ERROR",
+            `${path} links outside the project; replace the link with a local file or use an in-project target`,
+          ),
+        );
+      }
+      return this.validate(canonical);
+    } catch (cause) {
+      if (isNodeError(cause) && cause.code === "ENOENT") return this.validate(target.value);
+      return err(fromUnknown(cause, "IO_ERROR"));
+    }
+  }
+
   /**
    * Authored repository files may use a symlink whose resolved target remains
    * inside this project. Machine state and every mutation stay on the stricter
@@ -490,8 +538,13 @@ export class ProjectFileSystem {
   }
 
   private isManagedTarget(path: string): boolean {
+    const managed = this.readPass.getStore()?.managed;
+    const cached = managed?.get(path);
+    if (cached !== undefined) return cached;
     const rel = relative(this.root, path).split(sep).join("/");
-    return rel === STATE_DIR || rel.startsWith(`${STATE_DIR}/`);
+    const result = rel === STATE_DIR || rel.startsWith(`${STATE_DIR}/`);
+    managed?.set(path, result);
+    return result;
   }
 
   private async validate(path: string): Promise<Result<string>> {
@@ -524,6 +577,15 @@ export class ProjectFileSystem {
   }
 
   private confinedTarget(path: string): Result<string> {
+    const targets = this.readPass.getStore()?.targets;
+    const cached = targets?.get(path);
+    if (cached) return cached;
+    const target = this.resolveConfinedTarget(path);
+    targets?.set(path, target);
+    return target;
+  }
+
+  private resolveConfinedTarget(path: string): Result<string> {
     if (hasParentSegment(path)) {
       return err(vispError("IO_ERROR", `Refusing path with parent traversal: ${path}`));
     }
@@ -553,8 +615,4 @@ export class ProjectFileSystem {
     const target = this.confinedTarget(path);
     return target.ok ? target.value : path;
   }
-}
-
-function hasParentSegment(path: string): boolean {
-  return path.split(/[\\/]+/).includes("..");
 }

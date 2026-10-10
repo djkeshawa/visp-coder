@@ -1,7 +1,7 @@
 import { Command, Option } from "commander";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { parseRiskLevel, parseWorkflowMode } from "../../core/input.js";
-import { err, type Result } from "../../core/result.js";
+import { err, ok, type Result } from "../../core/result.js";
 import { BRIEF_INPUT_HELP } from "../../harness/command-guide.js";
 import { productCheckTemplate } from "../../workflow/product/check-guidance.js";
 import {
@@ -12,11 +12,11 @@ import {
   runProductNextAfterReview,
 } from "../../workflow/product/done-review.js";
 import {
-  codexTester,
+  beginFeatureTester,
   configuredTestsStarter,
-  createProductFeatureWithTests,
+  createProductFeatureChecked,
   testsWaitMs,
-  writeIndependentTests,
+  writeConfiguredTests,
 } from "../../workflow/product/independent-tests.js";
 import {
   readProductBrief,
@@ -37,6 +37,7 @@ import {
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {
+  compactProductStatus,
   productNextCommand,
   productResultFailed,
   productWithoutImageBytes,
@@ -60,6 +61,9 @@ interface ProductOptions extends GlobalOptions {
   feature?: string;
   task?: string;
   retryEnvironment?: boolean;
+  signal?: AbortSignal;
+  deadline?: number;
+  onProgress?: (event: { check: string; status: string }) => void;
   from?: string;
   patch?: string;
   inspect?: boolean;
@@ -70,13 +74,16 @@ interface ProductOptions extends GlobalOptions {
   template?: boolean;
   checkTemplate?: string;
   detail?: boolean;
+  full?: boolean;
   handoff?: boolean;
   dispatch?: boolean;
   prepare?: boolean;
   writeTests?: boolean;
+  retryTests?: boolean;
   check?: string;
   session?: string;
   group?: string[];
+  dispute?: string[];
 }
 
 type Operation = (state: WorkspaceState, opts: ProductOptions) => Promise<Result<unknown>>;
@@ -104,8 +111,16 @@ function command(
   });
 }
 
-/** Models read CLI text through a shell; --json keeps the complete result for tools. */
+/** Models read CLI text through a shell; --full keeps complete status data for tools. */
 function cliText(name: string, opts: ProductOptions, value: unknown): string {
+  if (name === "status" || name === "handoff") {
+    const status = value as {
+      feature?: string;
+      outcomes?: unknown[];
+      next?: { action?: string; objective?: string };
+    };
+    return `${status.feature ?? "No active feature"}: ${status.outcomes?.length ?? 0} outcomes\n${status.next?.action ?? "next"}: ${status.next?.objective ?? "Run visp next"}`;
+  }
   // Brief reads and review output are documents the actor edits and submits back.
   const document =
     name === "review" || (name === "brief" && opts.from === undefined && opts.patch === undefined);
@@ -114,7 +129,20 @@ function cliText(name: string, opts: ProductOptions, value: unknown): string {
   );
 }
 
-async function execute(name: string, opts: ProductOptions, mutate: boolean, run: Operation) {
+/**
+ * `after` runs once the result is printed and stdout is flushed, before the command
+ * releases; the work it starts (a tester) is awaited in this process, and its failures
+ * belong to its own record, so they are not reported here.
+ */
+async function execute(
+  name: string,
+  opts: ProductOptions,
+  mutate: boolean,
+  run: Operation,
+  after?: () => Promise<unknown>,
+) {
+  const execution = cliExecutionOptions(name, opts);
+  opts = execution.options;
   try {
     const mode = productCommandMode(name, opts);
     if (!mode.ok) {
@@ -143,9 +171,15 @@ async function execute(name: string, opts: ProductOptions, mutate: boolean, run:
       return;
     }
     const result = await run(loaded.value, opts);
+    const presented =
+      result.ok && ["status", "handoff"].includes(name) && !opts.full
+        ? compactProductStatus(result.value)
+        : result.ok
+          ? result.value
+          : undefined;
     process.exitCode = emit(
       name,
-      result.ok ? { ok: true, value: productWithoutImageBytes(result.value) } : result,
+      result.ok ? { ok: true, value: productWithoutImageBytes(presented) } : result,
       {
         json: isJson(opts),
         text: (value) => cliText(name, opts, value),
@@ -153,11 +187,42 @@ async function execute(name: string, opts: ProductOptions, mutate: boolean, run:
       },
     );
     if (result.ok && productResultFailed(result.value)) process.exitCode = 1;
+    if (after) {
+      await new Promise((resolve) => process.stdout.write("", resolve));
+      await after().catch(() => undefined);
+    }
   } catch (cause) {
     process.exitCode = emitError(name, fromUnknown(cause, "ARTIFACT_INVALID"), {
       json: isJson(opts),
     });
+  } finally {
+    execution.release();
   }
+}
+
+function cliExecutionOptions(name: string, opts: ProductOptions) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  const cancellable = ["verify", "done", "accept", "next"].includes(name);
+  if (cancellable) {
+    process.once("SIGINT", cancel);
+    process.once("SIGTERM", cancel);
+  }
+  opts = {
+    ...opts,
+    signal: controller.signal,
+    deadline: Math.floor(Date.now() - process.uptime() * 1000) + 100_000,
+    onProgress: (event) => {
+      process.stderr.write(`VISP ${event.check}: ${event.status}\n`);
+    },
+  };
+  return {
+    options: opts,
+    release() {
+      process.removeListener("SIGINT", cancel);
+      process.removeListener("SIGTERM", cancel);
+    },
+  };
 }
 
 function productCommandMode(name: string, opts: ProductOptions): Result<void> {
@@ -217,21 +282,41 @@ export function featureCommand(): Command {
         );
         return;
       }
-      await execute("feature", opts, true, async (state) =>
-        createProductFeatureWithTests(
-          state,
-          {
-            goal,
-            // Long requests with quotes are hard to pass as one shell argument.
-            sourceBrief:
-              opts.sourceBrief === "-"
-                ? (await readStandardInput()).toString("utf8")
-                : opts.sourceBrief,
-            branch: opts.branch,
-            riskLevel: risk.value,
-          },
-          configuredTestsStarter(state),
-        ),
+      // The tester runs after the result is printed; `execute` awaits it in this process.
+      let finished: Promise<void> | undefined;
+      await execute(
+        "feature",
+        opts,
+        true,
+        async (state) => {
+          const starter = configuredTestsStarter(state);
+          if ((starter || state.config.critic?.launch === "codex-exec") && !isJson(opts))
+            process.stderr.write(
+              "visp feature: recording the request takes up to 30 s (rule and memory checks). If your tool returns early, keep polling; never run visp feature twice.\n",
+            );
+          const created = await createProductFeatureChecked(
+            state,
+            {
+              goal,
+              // Long requests with quotes are hard to pass as one shell argument.
+              sourceBrief:
+                opts.sourceBrief === "-"
+                  ? (await readStandardInput()).toString("utf8")
+                  : opts.sourceBrief,
+              branch: opts.branch,
+              riskLevel: risk.value,
+            },
+            starter,
+          );
+          if (!created.ok) return created;
+          const started = await beginFeatureTester(state, created.value, starter);
+          finished = started.finished;
+          return ok({
+            ...created.value,
+            ...(started.testsNote ? { testsNote: started.testsNote } : {}),
+          });
+        },
+        () => finished ?? Promise.resolve(),
       );
     });
 }
@@ -288,13 +373,19 @@ export function briefCommand(): Command {
 
 export const workCommand = () =>
   command("work", "Deliver context and authorize the next usable slice", true, (state, opts) =>
-    opts.writeTests && opts.feature
-      ? writeIndependentTests(state, opts.feature, codexTester())
-      : opts.inspect
-        ? runProductContext(state, opts)
-        : runProductWork(state, opts, configuredTestsStarter(state), testsWaitMs(state, "cli")),
+    opts.retryTests && !opts.feature
+      ? Promise.resolve(err(vispError("CONFIG_INVALID", "--retry-tests requires --feature")))
+      : (opts.writeTests || opts.retryTests) && opts.feature
+        ? writeConfiguredTests(state, opts.feature, opts.retryTests === true)
+        : opts.inspect
+          ? runProductContext(state, opts)
+          : runProductWork(state, opts, configuredTestsStarter(state), testsWaitMs(state, "cli")),
   )
     .option("--inspect", "Read context without authorization, environment probing or graph refresh")
+    .option(
+      "--retry-tests",
+      "Retry an independent tester that failed for an environment reason (requires --feature)",
+    )
     .option(
       "--check <command>",
       "Test command for the slice; on a feature without slices, work the whole request as one slice",
@@ -311,26 +402,48 @@ export const statusCommand = () =>
     "Show outcomes, progress, evidence and unresolved review",
     false,
     runProductStatus,
-  );
+  ).option("--full", "Include the full brief and product state in --json output");
 export const verifyCommand = () =>
   command("verify", "Run the selected slice's behavior checks", true, runProductVerify);
+const DISPUTE_HELP = `\nA pinned acceptance test that fails and contradicts the request can be disputed instead of edited: --dispute "<test name>" --reason "<quote the request sentence + why>". The independent reviewer rules; only failing tests can be disputed, and a rejected dispute needs a product change before it is filed again. When critic.launch is codex-exec or claude-exec, VISP starts the independent reviewer during the command; you never delegate it.`;
+const disputeOptions = (operation: Command) =>
+  operation
+    .option("--dispute <tests...>", "Dispute failing pinned acceptance tests by name")
+    .option("--reason <text>", "Why the disputed test contradicts the request (with --dispute)")
+    .addHelpText("after", DISPUTE_HELP);
 export const doneCommand = () =>
-  command("done", "Check, review and close the selected slice", true, (state, opts) =>
-    runProductDoneReviewed(state, opts, configuredReviewStarter(state), reviewWaitMs(state, "cli")),
+  disputeOptions(
+    command("done", "Check, review and close the selected slice", true, (state, opts) =>
+      runProductDoneReviewed(
+        state,
+        { ...opts, disputeReason: opts.reason },
+        configuredReviewStarter(state),
+        reviewWaitMs(state, "cli"),
+      ),
+    ),
   );
 export const acceptCommand = () =>
-  command("accept", "Check the assembled product against preserved outcomes", true, (state, opts) =>
-    runProductAcceptReviewed(
-      state,
-      opts,
-      configuredReviewStarter(state),
-      reviewWaitMs(state, "cli"),
+  disputeOptions(
+    command(
+      "accept",
+      "Check the assembled product against preserved outcomes",
+      true,
+      (state, opts) =>
+        runProductAcceptReviewed(
+          state,
+          { ...opts, disputeReason: opts.reason },
+          configuredReviewStarter(state),
+          reviewWaitMs(state, "cli"),
+        ),
     ),
   );
 export const prCommand = () =>
   command("pr", "Generate the reviewer handoff from current evidence", false, runProductReport);
 export const handoffCommand = () =>
-  command("handoff", "Show the current product handoff", false, runProductStatus);
+  command("handoff", "Alias for the current product status", false, runProductStatus).option(
+    "--full",
+    "Include the full brief and product state in --json output",
+  );
 export const migrateCommand = () =>
   command(
     "migrate",
@@ -401,9 +514,11 @@ export function reviewCommand(): Command {
     .addHelpText(
       "after",
       `
-Prefer visp review --prepare, then read packetPath and its actual images. Submit
-the packet's judgments with --session <id> --from -; VISP supplies identity, so
-do not add subjectDigest, selection or captures to a prepared-session response.
+Run only when \`visp next\` prints a review command. If \`visp done\` runs VISP's own
+reviewer, wait for it; a review you write yourself is not the independent review.
+When next does print one, read packetPath and its actual images, then submit the
+packet's judgments with --session <id> --from -; VISP supplies identity, so do
+not add subjectDigest, selection or captures to a prepared-session response.
 
 For legacy --template submissions, read visp review --json. Current evidence identifiers
 are in data.evidence and data.sources. Keep subjectDigest and selection from that
@@ -419,7 +534,7 @@ Use reviewer.context=current unless a genuinely fresh reviewer performed the
 review. Do not submit canned satisfied judgments; preserve unclear, unavailable
 and failed results with the evidence that supports them.
 
---dispatch needs an attached host adapter; retrying it cannot start a reviewer.
+When next printed the review command, --dispatch needs an attached host adapter; retrying it cannot start a reviewer.
 If no adapter is available, send --handoff to a reviewer through your host, or
 perform a current-context review of the bundle and submit a completed --template
 through --from -. Missing fresh-context dispatch does not prevent current-context

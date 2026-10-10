@@ -1,13 +1,16 @@
+import { resolve } from "node:path";
 import { Command } from "commander";
 import { HARNESSES, PRODUCT_NAME } from "../../core/constants.js";
 import { parseHarness } from "../../core/input.js";
 import { runInit } from "../../workflow/stages/init.js";
-import { isJson, options, projectRoot } from "../context.js";
+import { isJson, options } from "../context.js";
 import { emit, emitError } from "../output.js";
 
 export function initCommand(): Command {
   return new Command("init")
-    .description("Set up visp in this project")
+    .description(
+      "Set up visp in this project; suggested project checks run once and are adopted only if they pass",
+    )
     .option("--harness <name>", `AI coder to configure for (${HARNESSES.join(", ")})`)
     .option("--force", "Rewrite existing configuration")
     .action(async (_flags: unknown, command: Command) => {
@@ -19,9 +22,13 @@ export function initCommand(): Command {
       }
 
       const result = await runInit({
-        root: projectRoot(opts),
+        root: resolve(opts.project ?? process.cwd()),
         ...(harness?.ok ? { harness: harness.value } : {}),
         ...(opts.force ? { force: true } : {}),
+        onVerifyChecks: (commands, budgetMs) =>
+          process.stderr.write(
+            `visp init: running ${commands.join(", ")} once (up to ${Math.round(budgetMs / 1000)} s in total) to confirm each passes here before adopting it as a project check. Project scripts and their pre/post hooks run as usual and may modify files.\n`,
+          ),
       });
 
       process.exitCode = emit("init", result, {
@@ -30,6 +37,10 @@ export function initCommand(): Command {
           [
             `Set up visp for a ${outcome.preset} project.`,
             outcome.createdConfig ? `Wrote ${outcome.configPath}` : "Kept your existing visp.yml",
+            ...outcome.skippedValidationCommands.map(
+              ({ command, reason }) =>
+                `Skipped ${command}: ${reason}. Once available, add "${command}" to workflow.validationCommands in visp.yml.`,
+            ),
             // Choosing go or rust used to buy the workflow half silently: the
             // index parsed nothing and packs, queries and covering-tests all
             // fell back without anything saying so.

@@ -8,7 +8,12 @@ describe("learned skill context selection", () => {
   let activeFeature: string;
 
   beforeEach(async () => {
-    project = await TestProject.create({
+    // Setup is a dozen CLI calls, so it is built once per file and each test gets a copy.
+    ({ project, value: activeFeature } = await TestProject.cached("skills-context", buildFixture));
+  });
+
+  async function buildFixture() {
+    const project = await TestProject.create({
       "src/auth/login.ts": "export const login = () => null;\n",
       "src/billing/invoice.ts": "export const invoice = () => null;\n",
     });
@@ -45,7 +50,7 @@ describe("learned skill context selection", () => {
       ],
     }));
     const created = project.json<{ brief: { feature: string } }>("feature", "Active skill context");
-    activeFeature = created.envelope.data?.brief.feature ?? "";
+    const activeFeature = created.envelope.data?.brief.feature ?? "";
     expect(created.result.exitCode, created.result.stdout).toBe(0);
     // These fixtures exercise context selection; critic scheduling has dedicated coverage.
     expect(project.run("critic", "--off").exitCode).toBe(0);
@@ -71,7 +76,8 @@ describe("learned skill context selection", () => {
         },
       ],
     });
-  });
+    return { project, value: activeFeature };
+  }
 
   function taskShape(id: string) {
     return {
@@ -185,7 +191,16 @@ Run the generator, then commit both files together.
     it("never puts an unadmitted skill in a pack", async () => {
       await proposeSkill("auth-skill", "  paths:\n    - src/auth/**\n");
 
-      expect(contextFor("T004")).not.toContain("auth-skill");
+      const { result, envelope } = project.json<ProductWorkContext>(
+        "work",
+        "--task",
+        "T004",
+        "--feature",
+        activeFeature,
+      );
+      expect(result.exitCode, result.stdout).toBe(0);
+      expect(envelope.data?.skills).toEqual([]);
+      expect(result.stdout).not.toContain("Do the thing carefully.");
     });
 
     it("keeps a retired skill out again", async () => {
@@ -193,7 +208,16 @@ Run the generator, then commit both files together.
       project.run("skill", "admit", "auth-skill", "--by", "someone");
       project.run("skill", "retire", "auth-skill", "--reason", "Superseded");
 
-      expect(contextFor("T004")).not.toContain("auth-skill");
+      const { result, envelope } = project.json<ProductWorkContext>(
+        "work",
+        "--task",
+        "T004",
+        "--feature",
+        activeFeature,
+      );
+      expect(result.exitCode, result.stdout).toBe(0);
+      expect(envelope.data?.skills).toEqual([]);
+      expect(result.stdout).not.toContain("Do the thing carefully.");
     });
 
     it("says why it chose the file, like every other entry", async () => {

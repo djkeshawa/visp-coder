@@ -5,7 +5,6 @@ import {
   entityRegions,
   type GraphProjection,
   projectGraph,
-  reverseImportClosure,
   structuralDistances,
   structuralNeighbourhood,
 } from "../../../../src/graph/projection.js";
@@ -64,25 +63,8 @@ describe("collapseToFileGraph", () => {
 
   it("names files no parser covered", () => {
     const graph = collapseToFileGraph(projection);
-    expect(graph.unparsedFiles).toContain("notes.md");
+    expect(graph.unparsedFiles).not.toContain("notes.md");
     expect(graph.unparsedFiles).not.toContain("src/app.ts");
-  });
-});
-
-describe("reverseImportClosure", () => {
-  it("walks a deterministic reverse closure through an import cycle", async () => {
-    await repo.write("src/cycle-a.ts", 'import { b } from "./cycle-b.js";\nexport const a = b;\n');
-    await repo.write("src/cycle-b.ts", 'import { a } from "./cycle-a.js";\nexport const b = a;\n');
-    await repo.write(
-      "src/cycle-consumer.ts",
-      'import { a } from "./cycle-a.js";\nexport const result = a;\n',
-    );
-    const cycleProjection = projectGraph(await indexFixture(repo));
-
-    const closure = reverseImportClosure(cycleProjection, ["src/cycle-b.ts", "src/cycle-a.ts"]);
-
-    expect(closure).toEqual(["src/cycle-a.ts", "src/cycle-b.ts", "src/cycle-consumer.ts"]);
-    expect(reverseImportClosure(cycleProjection, ["src/cycle-a.ts"])).toEqual(closure);
   });
 });
 

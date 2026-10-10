@@ -1,4 +1,15 @@
-import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  link,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -6,6 +17,26 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { confineBrowserFiles, readBrowserFile } from "../../../src/testing/browser-files.js";
 import type { ChromeTransport } from "../../../src/testing/chrome-transport.js";
 
+const race = vi.hoisted(() => ({
+  beforeOpen: undefined as undefined | (() => void),
+  afterRecheck: undefined as undefined | (() => void),
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    // The reader's own calls only: open before the read, and the bigint lstat of a path recheck.
+    open: ((...args: Parameters<typeof actual.open>) => {
+      race.beforeOpen?.();
+      return actual.open(...args);
+    }) as typeof actual.open,
+    lstat: (async (...args: Parameters<typeof actual.lstat>) => {
+      const stats = await actual.lstat(...args);
+      if ((args[1] as { bigint?: boolean } | undefined)?.bigint) race.afterRecheck?.();
+      return stats;
+    }) as typeof actual.lstat,
+  };
+});
 let root: string;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "visp-file-reader-"));
@@ -20,7 +51,9 @@ it("serves real project bytes with a media type", async () => {
     type: "text/html",
   });
   expect(
-    Buffer.from((await readBrowserFile(root, url(join(root, "index.html")))).bytes).toString(),
+    Buffer.from(
+      (await readBrowserFile(root, url(join(root, "index.html")))).bytes ?? [],
+    ).toString(),
   ).toBe("<html>Safe bytes</html>");
   await writeFile(join(root, "other.bin"), "binary");
   expect((await readBrowserFile(root, url(join(root, "other.bin")))).type).toBe(
@@ -34,13 +67,18 @@ it("rejects traversal, encoded separators, remote file hosts and directory/symli
     "https://example.com",
     url(join(root, "..", "outside.html")),
     url(root),
-    url(join(root, "missing")),
     url(join(root, "linked.html")),
     url(join(root, "linked-dir", "index.html")),
     `${url(root)}/a%2Fb`,
     "file://remotehost/share/index.html",
   ])
     await expect(readBrowserFile(root, input)).rejects.toThrow();
+});
+it("returns a missing confined asset for an HTTP-style 404 response", async () => {
+  expect(await readBrowserFile(root, url(join(root, "missing.png")))).toMatchObject({
+    bytes: null,
+    type: "image/png",
+  });
 });
 it("rejects configured and default blocked paths and oversized inputs", async () => {
   await writeFile(join(root, ".env"), "not public");
@@ -55,6 +93,177 @@ it("rejects configured and default blocked paths and oversized inputs", async ()
   );
   await truncate(join(root, "index.html"), 33 * 1024 * 1024);
   await expect(readBrowserFile(root, url(join(root, "index.html")))).rejects.toThrow(/32 MiB/);
+});
+it("never returns bytes from a file swapped for a link between the check and the read", async () => {
+  const outside = await mkdtemp(join(tmpdir(), "visp-file-outside-"));
+  try {
+    await writeFile(join(outside, "secret.txt"), "OUTSIDE-SECRET");
+    await writeFile(join(root, ".env"), "ENV-SECRET");
+    await mkdir(join(root, "sub"));
+    await writeFile(join(root, "sub", "page.html"), "PUBLIC");
+    await mkdir(join(root, "dist"));
+    await writeFile(join(root, "dist", "page.html"), "DIST-SECRET");
+    const page = join(root, "page.html");
+    await writeFile(page, "PUBLIC");
+    let stop = false;
+    const swapper = (async () => {
+      for (let i = 0; !stop; i += 1) {
+        const scratch = join(root, `swap-${i % 2}`);
+        try {
+          await rm(scratch, { force: true, recursive: true });
+          if (i % 4 === 0) await symlink(join(outside, "secret.txt"), scratch);
+          else if (i % 4 === 1) await symlink(join(root, ".env"), scratch);
+          else await writeFile(scratch, "PUBLIC");
+          await rename(scratch, page);
+          // The directory component is swapped as well: sub -> dist (a blocked in-root directory).
+          const dir = join(root, `dir-${i % 2}`);
+          await rm(dir, { force: true, recursive: true });
+          if (i % 2 === 0) await symlink(join(root, "dist"), dir);
+          else await mkdir(dir);
+          await rename(dir, join(root, "sub-swap")).catch(() => {});
+        } catch {
+          // A racing rename may fail; the reader is what is under test.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    })();
+    let leaks = 0;
+    let reads = 0;
+    const until = Date.now() + 2500;
+    while (Date.now() < until) {
+      for (const target of [page, join(root, "sub-swap", "page.html")]) {
+        try {
+          const loaded = await readBrowserFile(root, url(target));
+          reads += 1;
+          if (/SECRET/.test(Buffer.from(loaded.bytes ?? []).toString())) leaks += 1;
+        } catch {
+          // Refusing a swapped file is the correct outcome.
+        }
+      }
+    }
+    stop = true;
+    await swapper;
+    expect(reads).toBeGreaterThan(0);
+    expect(leaks).toBe(0);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+it("never reads through a parent directory swapped for a link to outside or to .git", async () => {
+  const outside = await mkdtemp(join(tmpdir(), "visp-parent-outside-"));
+  try {
+    await mkdir(join(outside, "d"));
+    await writeFile(join(outside, "d", "page.html"), "OUTSIDE-SECRET");
+    await mkdir(join(root, ".git"));
+    await writeFile(join(root, ".git", "page.html"), "GIT-SECRET");
+    const dir = join(root, "d");
+    await mkdir(dir);
+    await writeFile(join(dir, "page.html"), "PUBLIC");
+    let stop = false;
+    let round = 0;
+    const swapper = (async () => {
+      while (!stop) {
+        // Synchronous steps keep the window between them as small as an attacker's would be.
+        try {
+          if (round++ % 2 === 0) {
+            const scratch = join(root, "d.tmp");
+            symlinkSync(round % 4 === 1 ? join(outside, "d") : join(root, ".git"), scratch);
+            rmSync(dir, { recursive: true });
+            renameSync(scratch, dir);
+          } else {
+            rmSync(dir, { recursive: true, force: true });
+            mkdirSync(dir);
+            writeFileSync(join(dir, "page.html"), "PUBLIC");
+          }
+        } catch {
+          // A racing step may fail; the reader is what is under test.
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    })();
+    let leaks = 0;
+    let reads = 0;
+    const readOnce = async () => {
+      try {
+        const loaded = await readBrowserFile(root, url(join(dir, "page.html")));
+        reads += 1;
+        if (/SECRET/.test(Buffer.from(loaded.bytes ?? []).toString())) leaks += 1;
+      } catch {
+        // Refusing a swapped parent is the correct outcome.
+      }
+    };
+    const until = Date.now() + 3000;
+    while (Date.now() < until) await Promise.all(Array.from({ length: 4 }, readOnce));
+    stop = true;
+    await swapper;
+    expect(reads).toBeGreaterThan(0);
+    expect(leaks).toBe(0);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+it.skipIf(process.platform !== "linux")(
+  "refuses a file opened through a parent that was a link when opened, even if the path looks right again",
+  async () => {
+    const outside = await mkdtemp(join(tmpdir(), "visp-parent-race-"));
+    try {
+      await mkdir(join(outside, "d"));
+      await writeFile(join(outside, "d", "page.html"), "OUTSIDE-SECRET");
+      const dir = join(root, "d");
+      const realDirectory = () => {
+        rmSync(dir, { recursive: true, force: true });
+        mkdirSync(dir);
+        writeFileSync(join(dir, "page.html"), "PUBLIC");
+      };
+      realDirectory();
+      // The check passes on a real directory; the directory is a link to outside when the file is
+      // opened, and is a real directory again by the time the path is looked at afterwards.
+      race.beforeOpen = () => {
+        rmSync(dir, { recursive: true, force: true });
+        symlinkSync(join(outside, "d"), dir);
+      };
+      race.afterRecheck = () => {
+        race.afterRecheck = undefined;
+        rmSync(dir, { force: true });
+        mkdirSync(dir);
+        writeFileSync(join(dir, "page.html"), "PUBLIC");
+      };
+      const read = readBrowserFile(root, url(join(dir, "page.html"))).then(
+        (loaded) => Buffer.from(loaded.bytes ?? []).toString(),
+        () => "refused",
+      );
+      expect(await read).not.toContain("SECRET");
+    } finally {
+      race.beforeOpen = undefined;
+      race.afterRecheck = undefined;
+      await rm(outside, { recursive: true, force: true });
+    }
+  },
+);
+it("refuses a file with more than one hard link (an alias of a blocked file)", async () => {
+  await writeFile(join(root, ".env"), "ENV-SECRET");
+  await link(join(root, ".env"), join(root, "innocent.html"));
+  await expect(readBrowserFile(root, url(join(root, "innocent.html")))).rejects.toThrow(
+    /single-link/,
+  );
+});
+it("applies the blocked paths when the root is spelled through a symlink", async () => {
+  const alias = `${root}-alias`;
+  await symlink(root, alias);
+  try {
+    await writeFile(join(root, ".env"), "ENV-SECRET");
+    await expect(readBrowserFile(alias, url(join(alias, ".env")))).rejects.toThrow(
+      /allowed project content/,
+    );
+    expect(
+      Buffer.from(
+        (await readBrowserFile(alias, url(join(alias, "index.html")))).bytes ?? [],
+      ).toString(),
+    ).toBe("<html>Safe bytes</html>");
+    expect(await realpath(alias)).toBe(await realpath(root));
+  } finally {
+    await rm(alias, { force: true });
+  }
 });
 function transportFixture() {
   let emit: Parameters<ChromeTransport["onEvent"]>[0] = () => {};
@@ -107,6 +316,19 @@ it("fulfills confined requests with owned bytes and fails forbidden requests", a
   });
   policy.dispose();
   expect(f.dispose).toHaveBeenCalledOnce();
+});
+it("fulfills missing assets as 404 without a browser security gap", async () => {
+  const f = transportFixture();
+  const policy = await confineBrowserFiles(f.transport, f.send, root);
+  f.emit("Fetch.requestPaused", {
+    requestId: "missing",
+    request: { url: url(join(root, "missing.png")), method: "GET" },
+  });
+  await policy.check();
+  expect(f.send).toHaveBeenCalledWith(
+    "Fetch.fulfillRequest",
+    expect.objectContaining({ requestId: "missing", responseCode: 404 }),
+  );
 });
 it("stops new blank popups while ignoring Chrome-owned surfaces and the controlled page", async () => {
   const f = transportFixture();

@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { EXIT, PACKAGE_NAME } from "../core/constants.js";
-import { fromUnknown } from "../core/errors.js";
+import { fromUnknown, vispError } from "../core/errors.js";
 import { emitError } from "./output.js";
 import { buildProgram } from "./program.js";
 
@@ -15,9 +15,18 @@ export async function main(argv: readonly string[]): Promise<number> {
     await program.parseAsync([...argv]);
     return typeof process.exitCode === "number" ? process.exitCode : EXIT.ok;
   } catch (cause) {
-    if (isCommanderExit(cause)) return cause.exitCode;
+    if (isCommanderExit(cause)) {
+      if (cause.exitCode === 0) return EXIT.ok;
+      return emitError(
+        PACKAGE_NAME,
+        vispError("UNSUPPORTED", cause.message ?? "Invalid command line"),
+        {
+          json: argv.includes("--json"),
+        },
+      );
+    }
     return emitError(PACKAGE_NAME, fromUnknown(cause), {
-      json: process.argv.includes("--json"),
+      json: argv.includes("--json"),
     });
   }
 }
@@ -37,6 +46,7 @@ function ignoreClosedOutput(): void {
 interface CommanderExit {
   readonly code: string;
   readonly exitCode: number;
+  readonly message?: string;
 }
 
 function isCommanderExit(cause: unknown): cause is CommanderExit {

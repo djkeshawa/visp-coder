@@ -1,7 +1,9 @@
 """Score benchmark runs with a task's hidden tests.
 
-Usage: score.py <task> <run_name> [<run_name> ...]
-Writes hidden.json beside each project and prints one line per run.
+Usage: score.py <task> [--stage 1] <run_name> [<run_name> ...]
+Writes hidden.json (hidden-stage1.json with --stage 1) beside each project and prints one line
+per run. A two-session run's modes are scored as <run>/<mode>; run_carryover.py scores the first
+session itself.
 """
 import json
 import pathlib
@@ -11,12 +13,16 @@ import sys
 from common import RUNS
 
 BENCH = pathlib.Path(__file__).resolve().parent
-task = sys.argv[1]
-for name in sys.argv[2:]:
+GROUPS = ("ext", "new", "code", "memory", "ui")
+task, names = sys.argv[1], sys.argv[2:]
+stage = []
+if names[:1] == ["--stage"]:
+    stage, names = names[:2], names[2:]
+for name in names:
     project = RUNS / "runs" / name / "project"
-    out = subprocess.run([sys.executable, str(BENCH / "tasks" / task / "hidden_test.py"), str(project)],
+    out = subprocess.run([sys.executable, str(BENCH / "tasks" / task / "hidden_test.py"), str(project), *stage],
                          capture_output=True, text=True, timeout=600)
-    (project.parent / "hidden.json").write_text(out.stdout)
+    (project.parent / ("hidden-stage1.json" if stage else "hidden.json")).write_text(out.stdout)
     try:
         result = json.loads(out.stdout)
     except ValueError:
@@ -24,7 +30,7 @@ for name in sys.argv[2:]:
         continue
     groups = {}
     for r in result["results"]:
-        prefix = r["name"].split(":", 1)[0] if r["name"].startswith(("ext:", "new:")) else "core"
+        prefix = r["name"].split(":", 1)[0] if r["name"].startswith(tuple(f"{g}:" for g in GROUPS)) else "core"
         groups.setdefault(prefix, []).append(r)
     failed = [r["name"] for r in result["results"] if not r["passed"]]
     score = " ".join(

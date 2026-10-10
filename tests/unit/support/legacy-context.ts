@@ -36,7 +36,6 @@ import { updateStatus } from "./writers.js";
 export type {
   ContextOptions,
   ContextOutcome,
-  GraphFacts,
 } from "./legacy-context/types.js";
 
 import { legacyStore } from "./legacy-store.js";

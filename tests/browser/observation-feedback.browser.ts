@@ -135,7 +135,7 @@ it("rejects transformed coordinate claims instead of inventing a canvas mapping"
   });
   expect(result).toMatchObject({
     status: "failed",
-    failure: { message: expect.stringContaining("untransformed") },
+    failure: { message: expect.stringContaining("rotated, skewed or perspective") },
   });
 });
 

@@ -1,8 +1,10 @@
-import { spawn } from "node:child_process";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { run as execRun } from "../../core/exec.js";
+import { redactStrings } from "../../core/redaction.js";
+import { sweepStaleTempDirectories } from "../../core/stale-temp.js";
 import type { ProductCriticHost } from "./critic.js";
 import type { CriticPacket } from "./critic-packet.js";
 
@@ -29,7 +31,9 @@ export function codexExecCriticHost(options: {
         return { unavailable: "critic.launch: codex-exec requires critic.harness: codex" };
       const version = await run(executable, ["--version"], { signal: config.signal });
       if (version.exitCode !== 0)
-        return { unavailable: `Codex CLI is not runnable: ${version.error ?? version.stderr}` };
+        return {
+          unavailable: `Codex CLI is not runnable${process.platform === "win32" ? " (check the npm codex.cmd shim and PATH)" : ""}: ${version.error ?? version.stderr}`,
+        };
       if (!(await reachesModel(lookup)))
         return {
           unavailable:
@@ -46,6 +50,9 @@ export function codexExecCriticHost(options: {
       };
     },
     async review(packet, config) {
+      // Directories from reviews that were killed before they could clean up hold a copy of
+      // the sign-in; a review takes minutes, so an hour-old one is abandoned.
+      await sweepStaleTempDirectories(STALE_REVIEW_NAMES, STALE_REVIEW_MS);
       const directory = await mkdtemp(join(tmpdir(), "visp-critic-"));
       try {
         const images = await writeImages(directory, packet);
@@ -70,11 +77,187 @@ export function codexExecCriticHost(options: {
           response,
         };
       } finally {
-        await rm(directory, { recursive: true, force: true });
+        await rm(directory, REMOVE_TEMPORARY);
       }
     },
   };
 }
+
+/**
+ * VISP launches a Claude reviewer itself: one `claude -p` per reserved call in the project,
+ * restricted to the read-only file tools (Read, Grep, Glob), with no settings files, hooks or
+ * MCP servers, no saved session, and the packet's response schema as structured output. It
+ * uses the operator's Claude sign-in. The project opts in with `critic.launch: claude-exec`
+ * and `critic.harness: claude-code`.
+ */
+export function claudeExecCriticHost(options: {
+  root: string;
+  executable?: string;
+  /** Resolves a model endpoint; injectable so tests need no network. */
+  lookup?: (host: string) => Promise<unknown>;
+}): ProductCriticHost {
+  const executable = options.executable ?? "claude";
+  const lookup = options.lookup ?? ((host: string) => dnsLookup(host));
+  return {
+    async inspect(config) {
+      if (config.harness !== "claude-code")
+        return { unavailable: "critic.launch: claude-exec requires critic.harness: claude-code" };
+      const version = await run(executable, ["--version"], { signal: config.signal });
+      if (version.exitCode !== 0)
+        return {
+          unavailable: `Claude Code CLI is not runnable: ${version.error ?? version.stderr}`,
+        };
+      if (!(await claudeSignedIn(executable, config.signal)))
+        return {
+          unavailable:
+            "Claude Code is not signed in for this process (claude auth status); sign in with claude and rerun visp done. No review call was spent.",
+        };
+      if (!(await reachesModel(lookup, CLAUDE_HOSTS)))
+        return {
+          unavailable:
+            "The reviewer cannot reach its model from this process; the host sandbox likely blocks network. Rerun visp done with sandbox escalation. No review call was spent.",
+        };
+      return {
+        harness: "claude-code",
+        model: config.model,
+        ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
+        freshContext: true,
+        images: true,
+        readOnly: true,
+        delegationAllowed: true,
+      };
+    },
+    async review(packet, config) {
+      await sweepStaleTempDirectories(STALE_REVIEW_NAMES, STALE_REVIEW_MS);
+      const directory = await mkdtemp(join(tmpdir(), "visp-critic-"));
+      try {
+        const images = await writeImages(directory, packet);
+        const response = await runClaudeStructured({
+          executable,
+          root: options.root,
+          directory,
+          model: config.model,
+          reasoningEffort: config.reasoningEffort,
+          schema: packet.responseSchema,
+          prompt: claudeReviewerPrompt(images.packet),
+          signal: config.signal,
+        });
+        // Claude refuses an unknown model or effort, so a successful result ran the configured pair.
+        return {
+          model: config.model,
+          ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
+          context: "fresh" as const,
+          response,
+        };
+      } finally {
+        await rm(directory, REMOVE_TEMPORARY);
+      }
+    },
+  };
+}
+
+export const CLAUDE_HOSTS = ["api.anthropic.com", "claude.ai"];
+/** Linux limits one argument to 128 KiB (bytes); the schema travels as an argument. */
+const CLAUDE_SCHEMA_LIMIT = 120 * 1024;
+
+/**
+ * One read-only `claude -p` session in the project that answers `prompt` with JSON matching
+ * `schema`. Only Read, Grep and Glob are available, confined to the project and `directory`
+ * (which holds images); `--restricted` also ignores user, project and local settings, so
+ * project hooks do not run in the reviewer.
+ */
+export async function runClaudeStructured(options: {
+  executable?: string;
+  root: string;
+  directory: string;
+  model: string;
+  reasoningEffort?: string;
+  schema: unknown;
+  prompt: string;
+  signal?: AbortSignal;
+}): Promise<unknown> {
+  const schema = JSON.stringify(options.schema);
+  if (Buffer.byteLength(schema) > CLAUDE_SCHEMA_LIMIT)
+    throw new Error(`The review response schema exceeds ${CLAUDE_SCHEMA_LIMIT} characters`);
+  const args = [
+    "-p",
+    "--model",
+    options.model,
+    ...(options.reasoningEffort ? ["--effort", options.reasoningEffort] : []),
+    "--output-format",
+    "json",
+    "--json-schema",
+    schema,
+    "--tools",
+    "Read,Grep,Glob",
+    "--restricted",
+    // Project CLAUDE.md, skills, plugins and hooks could carry worker-authored instructions.
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--no-session-persistence",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
+    "--add-dir",
+    options.directory,
+  ];
+  const termination = forwardTermination(options.signal);
+  let result: RunResult;
+  try {
+    result = await run(options.executable ?? "claude", args, {
+      signal: termination.signal,
+      stdin: options.prompt,
+      cwd: options.root,
+    });
+  } finally {
+    termination.release();
+  }
+  const reply = claudeReply(result.stdout);
+  if (
+    result.exitCode !== 0 ||
+    !reply ||
+    reply.is_error === true ||
+    reply.structured_output === undefined ||
+    reply.structured_output === null
+  )
+    throw new Error(
+      `claude -p ${result.exitCode === 0 ? "returned no structured result" : `exited ${result.exitCode ?? "without a status"}`}: ${(typeof reply?.result === "string" ? reply.result : (result.error ?? result.stderr)).slice(-1200)}`,
+    );
+  return reply.structured_output;
+}
+
+/** `claude auth status` prints JSON with `loggedIn`; anything else counts as signed out. */
+export async function claudeSignedIn(executable: string, signal?: AbortSignal): Promise<boolean> {
+  const status = await run(executable, ["auth", "status", "--json"], { signal });
+  return status.exitCode === 0 && claudeReply(status.stdout)?.loggedIn === true;
+}
+
+function claudeReply(stdout: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(stdout);
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function claudeReviewerPrompt(packet: unknown): string {
+  return [
+    "You are an independent reviewer. You did not write this code. Follow `instructions` and answer `question` in the JSON packet below.",
+    "Inspect the repository in the current directory with the Read, Grep and Glob tools where it helps. Do not modify files.",
+    "Images listed under `current.images` are files: open each `file` with the Read tool before judging it.",
+    "Respond only with JSON that matches the provided output schema.",
+    "",
+    JSON.stringify(packet),
+  ].join("\n");
+}
+
+/** Exactly what `mkdtemp` makes (prefix plus six characters), so named directories survive. */
+const STALE_REVIEW_NAMES = [/^visp-(?:critic|review)-[A-Za-z0-9]{6}$/];
+const STALE_REVIEW_MS = 60 * 60_000;
+/** The child may still be releasing files as it dies, so removal retries briefly. */
+const REMOVE_TEMPORARY = { recursive: true, force: true, maxRetries: 4, retryDelay: 100 } as const;
 
 /**
  * One read-only, ephemeral `codex exec` session in the project that answers `prompt` with
@@ -134,28 +317,96 @@ export async function runCodexStructured(options: {
     responsePath,
     "-",
   ];
-  const result = await run(options.executable ?? "codex", args, {
-    signal: options.signal,
-    stdin: options.prompt,
-    env: { ...process.env, CODEX_HOME: await privateCodexHome(options.directory) },
-  });
+  const codexHome = await privateCodexHome(options.directory);
+  const termination = forwardTermination(options.signal);
+  let result: RunResult;
+  try {
+    result = await run(options.executable ?? "codex", args, {
+      signal: termination.signal,
+      stdin: options.prompt,
+      env: { CODEX_HOME: codexHome },
+    });
+  } finally {
+    // The sign-in copy goes as soon as the process group is gone, not when the caller's
+    // directory is removed: the tester's directory lives for the whole session.
+    await rm(codexHome, REMOVE_TEMPORARY).catch(() => undefined);
+    termination.release();
+  }
   // Awaited so a CLI that exits right after still has the log; a logging failure is ignored.
   await Promise.resolve()
     .then(() => options.onActivity?.(sessionActivity(result.stdout)))
     .catch(() => undefined);
   if (result.exitCode !== 0)
     throw new Error(
-      `codex exec exited ${result.exitCode ?? "without a status"}: ${(result.error ?? result.stderr).slice(-1200)}`,
+      `codex exec exited ${result.exitCode ?? "without a status"}: ${(result.error ?? result.stderr).slice(-1200)}${process.platform === "win32" && result.error ? " Check the npm codex.cmd shim and PATH." : ""}`,
     );
   return JSON.parse(await readFile(responsePath, "utf8"));
 }
 
 /**
+ * A background reviewer or tester process has no abort handler of its own, so an external
+ * SIGTERM/SIGINT would leave Codex running. This aborts the run on either signal and, once
+ * the runs have had time to clean up, delivers the signal again so the process still ends
+ * as it would have. When something else already handles the signal, that handler decides.
+ * Listeners of other concurrent runs are ours, not a sign that someone else handles it.
+ */
+function forwardTermination(signal?: AbortSignal): { signal: AbortSignal; release: () => void } {
+  const controller = new AbortController();
+  let received: TerminationSignal | undefined;
+  const handled = new Set<TerminationSignal>();
+  const attached = new Set<TerminationSignal>();
+  const listeners = TERMINATION_SIGNALS.map((name) => {
+    if (process.listenerCount(name) > ownListeners[name]) handled.add(name);
+    const listener = () => {
+      received ??= name;
+      // A `once` listener is gone after it fires.
+      if (attached.delete(name)) ownListeners[name] -= 1;
+      controller.abort();
+    };
+    process.once(name, listener);
+    attached.add(name);
+    ownListeners[name] += 1;
+    return [name, listener] as const;
+  });
+  return {
+    signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+    release() {
+      for (const [name, listener] of listeners) {
+        process.removeListener(name, listener);
+        if (attached.delete(name)) ownListeners[name] -= 1;
+      }
+      if (received && !handled.has(received)) reraiseLater(received);
+    },
+  };
+}
+
+type TerminationSignal = "SIGTERM" | "SIGINT";
+const TERMINATION_SIGNALS: readonly TerminationSignal[] = ["SIGTERM", "SIGINT"];
+/** Listeners forwardTermination has attached for runs that are still active. */
+const ownListeners: Record<TerminationSignal, number> = { SIGTERM: 0, SIGINT: 0 };
+const pendingReraise = new Set<TerminationSignal>();
+
+/** Delayed so concurrent runs and their callers' `finally` blocks finish first; once per signal. */
+function reraiseLater(name: TerminationSignal): void {
+  if (pendingReraise.has(name)) return;
+  pendingReraise.add(name);
+  setTimeout(() => {
+    pendingReraise.delete(name);
+    process.kill(process.pid, name);
+  }, RERAISE_DELAY_MS).unref();
+}
+
+const RERAISE_DELAY_MS = 1000;
+
+/**
  * Codex without network retries for over a minute before failing, after the call is
  * reserved. Sandboxed shells deny sockets, so name resolution fails fast there.
  */
-export async function reachesModel(lookup: (host: string) => Promise<unknown>): Promise<boolean> {
-  const attempts = ["chatgpt.com", "api.openai.com"].map((host) =>
+export async function reachesModel(
+  lookup: (host: string) => Promise<unknown>,
+  hosts: readonly string[] = ["chatgpt.com", "api.openai.com"],
+): Promise<boolean> {
+  const attempts = hosts.map((host) =>
     Promise.race([
       lookup(host).then(() => true),
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000).unref()),
@@ -192,7 +443,7 @@ async function recordActivity(
   const feature = (packet.selection as { feature?: unknown } | undefined)?.feature;
   if (typeof feature !== "string" || !/^[A-Za-z0-9._-]+$/.test(feature)) return;
   const task = (packet.selection as { task?: unknown } | undefined)?.task;
-  const line = `${JSON.stringify({ at: new Date().toISOString(), model, ...(typeof task === "string" ? { task } : {}), ...activity })}\n`;
+  const line = `${JSON.stringify(redactStrings({ at: new Date().toISOString(), model, ...(typeof task === "string" ? { task } : {}), ...activity }, root))}\n`;
   const directory = join(root, ".visp", "features", feature);
   await appendFile(join(directory, REVIEWER_ACTIVITY_FILE), line).catch(() => undefined);
 }
@@ -262,38 +513,24 @@ function sessionActivity(events: string): SessionActivity {
   return { webSearches, commands };
 }
 
-function run(
+/** Runs Codex in its own process group, so an abort or timeout also ends its descendants. */
+async function run(
   executable: string,
   args: string[],
-  options: { signal?: AbortSignal; stdin?: string; env?: NodeJS.ProcessEnv },
+  options: { signal?: AbortSignal; stdin?: string; env?: Record<string, string>; cwd?: string },
 ): Promise<RunResult> {
-  return new Promise((resolve) => {
-    let stderr = "";
-    const stdout: Buffer[] = [];
-    let stdoutBytes = 0;
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      signal: options.signal,
-      killSignal: "SIGTERM",
-      ...(options.env ? { env: options.env } : {}),
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-8000);
-    });
-    // Event log for monitoring; bounded so a runaway session cannot exhaust memory.
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stdoutBytes > 4 * 1024 * 1024) return;
-      stdoutBytes += chunk.length;
-      stdout.push(chunk);
-    });
-    const text = () => Buffer.concat(stdout).toString("utf8");
-    child.on("error", (error) =>
-      resolve({ exitCode: null, stdout: text(), stderr, error: error.message }),
-    );
-    child.on("close", (exitCode) => resolve({ exitCode, stdout: text(), stderr }));
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(options.stdin ?? "");
+  const result = await execRun(executable, args, {
+    cwd: options.cwd ?? process.cwd(),
+    timeoutMs: 0,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.stdin === undefined ? {} : { input: options.stdin }),
+    ...(options.env ? { env: options.env } : {}),
   });
+  if (!result.ok) return { exitCode: null, stdout: "", stderr: "", error: result.error.message };
+  const { exitCode, stdout, stderr, aborted } = result.value;
+  return aborted
+    ? { exitCode: null, stdout, stderr, error: "The operation was aborted" }
+    : { exitCode, stdout, stderr };
 }
 
 /** The reviewer VISP may launch for this project, or undefined when the host delegates. */
@@ -301,10 +538,9 @@ export function configuredCriticLauncher(workspace: {
   config: { critic?: { launch?: string; webSearch?: boolean } };
   paths: { root: string };
 }): ProductCriticHost | undefined {
-  return workspace.config.critic?.launch === "codex-exec"
-    ? codexExecCriticHost({
-        root: workspace.paths.root,
-        webSearch: workspace.config.critic.webSearch === true,
-      })
+  const critic = workspace.config.critic;
+  if (critic?.launch === "claude-exec") return claudeExecCriticHost({ root: workspace.paths.root });
+  return critic?.launch === "codex-exec"
+    ? codexExecCriticHost({ root: workspace.paths.root, webSearch: critic.webSearch === true })
     : undefined;
 }

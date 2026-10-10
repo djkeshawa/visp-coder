@@ -6,7 +6,9 @@ import {
   STATE_DIR,
 } from "../core/constants.js";
 import { runtimeIdentity } from "../core/version.js";
+import { HOST_SESSION_FILE } from "../workflow/product/host-prompts.js";
 import { AUTHORIZATION_CHECK } from "./authorization-check.js";
+import { hookCommand } from "./claude-settings.js";
 
 /**
  * Enforcement surfaces. Each one shells out to `visp guard` rather than
@@ -16,7 +18,7 @@ import { AUTHORIZATION_CHECK } from "./authorization-check.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 9;
+export const HOOK_TEMPLATE_VERSION = 16;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -24,16 +26,18 @@ export const HOOK_TEMPLATE_VERSION = 9;
  * can still be prevented rather than merely reported.
  */
 export function renderPreToolUseHook(): string {
+  const cli = JSON.stringify(runtimeIdentity().executable);
   return `#!/usr/bin/env node
 // ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 // Refuses edits outside the active task's declared scope.
 // Decisions come from \`${PRODUCT_NAME} guard\`, so this file holds no rules of its own.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const ALLOW = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } };
+const cli = ${cli};
 
 function deny(reason) {
   return {
@@ -57,7 +61,15 @@ const input = readInput();
 
 // Claude Code names the project in its environment; Codex passes the session cwd instead.
 function projectRoot() {
-  return process.env.CLAUDE_PROJECT_DIR ?? input?.cwd ?? process.cwd();
+  const start = resolve(process.env.CLAUDE_PROJECT_DIR ?? input?.cwd ?? process.cwd());
+  let directory = start;
+  while (true) {
+    if (existsSync(join(directory, ".visp", "project.json"))) return directory;
+    if (existsSync(join(directory, ".git"))) return start;
+    const parent = dirname(directory);
+    if (parent === directory) return start;
+    directory = parent;
+  }
 }
 
 // The user's own words are the contract the tester and reviewer judge against; workers
@@ -73,42 +85,108 @@ if (input?.hook_event_name === "UserPromptSubmit") {
     } catch {}
     lines.push(JSON.stringify({ at: new Date().toISOString(), prompt: String(input.prompt ?? "") }));
     writeFileSync(file, \`\${lines.slice(-20).join("\\n")}\\n\`);
+    recordSession();
   } catch {}
   process.exit(0);
 }
 
 // A weak worker stopped with slices open and no acceptance, so the pinned tests never ran
-// as final checks. Send it back to the next step a few times, only for recent work.
+// as final checks. Send it back to the next step, only for recent work. A block is a nudge
+// about one step: the same step is raised at most twice, and again only when the feature
+// changed since the last nudge; a handoff or an unusable environment is raised once.
 if (input?.hook_event_name === "Stop") {
   const root = projectRoot();
   try {
     const status = JSON.parse(readFileSync(join(root, ".visp", "status.json"), "utf8"));
-    const recent = Date.now() - Date.parse(status.updatedAt) < 60 * 60 * 1000;
-    if (!status.activeFeature || !recent) process.exit(0);
+    if (!status.activeFeature) process.exit(0);
+    // Recent work moves the feature's state file; status.json alone misses a long check.
+    let touched = Date.parse(status.updatedAt);
+    try {
+      touched = Math.max(
+        Number.isFinite(touched) ? touched : 0,
+        statSync(join(root, ".visp", "features", String(status.activeFeature), "product-state.json")).mtimeMs,
+      );
+    } catch {}
+    if (!(Date.now() - touched < 60 * 60 * 1000)) process.exit(0);
     const envelope = JSON.parse(
-      execFileSync("${PRODUCT_NAME}", ["next", "--feature", status.activeFeature, "--json"], {
+      // Unselected, so a later session's untaken request is sent to a feature of its own.
+      // The observer marker makes \`${PRODUCT_NAME} next\` trust the worker's recorded browser
+      // capability and report a \`progress\` token; it changes nothing else.
+      execFileSync(process.execPath, [cli, "next", "--json"], {
         cwd: root,
+        env: { ...process.env, VISP_OBSERVER: "stop-hook" },
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 170000,
       }).toString(),
     );
     const next = envelope?.data;
+    if (!next?.feature && typeof input.session_id === "string") {
+      const edits = join(root, ".visp", "session", "edits", encodeURIComponent(input.session_id) + ".json");
+      try { readFileSync(edits); } catch { process.exit(0); }
+    }
     if (!envelope?.ok || !next?.action || next.action === "complete") process.exit(0);
+    const day = 24 * 60 * 60 * 1000;
+    const plain = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    const now = Date.now();
+    const kind =
+      next.completion === "handoff" ? "handoff" : next.completion === "unresolved-environment" ? "environment" : "work";
+    const limit = kind === "work" ? 2 : 1;
+    // Ids and values change from call to call; the command's verb and flags name the step.
+    const words = String(next.command ?? "").split(/\\s+/).filter(Boolean);
+    const shape = words.filter((word, index) => index < 2 || word.startsWith("-"));
+    const fingerprint = createHash("sha256")
+      .update(JSON.stringify([status.activeFeature, next.action, next.completion ?? "", next.task ?? "", shape]))
+      .digest("hex");
+    const progress = typeof next.progress === "string" ? next.progress : "";
     const counts = join(root, ".visp", "session", "stop-blocks.json");
-    let blocked = {};
+    let entries = {};
     try {
-      blocked = JSON.parse(readFileSync(counts, "utf8"));
+      const stored = JSON.parse(readFileSync(counts, "utf8"));
+      if (stored?.version === 2 && plain(stored.entries)) entries = stored.entries;
     } catch {}
-    // Once reviews are spent the loop ends in a handoff: one reminder to write it.
-    const handoff = next.completion === "handoff";
-    const key = handoff ? \`\${status.activeFeature}:handoff\` : status.activeFeature;
-    const used = blocked[key] ?? 0;
-    if (used >= (handoff ? 1 : 3)) process.exit(0);
-    mkdirSync(join(root, ".visp", "session"), { recursive: true });
-    writeFileSync(counts, JSON.stringify({ ...blocked, [key]: used + 1 }));
-    const reason = handoff
-      ? \`Independent review of \${status.activeFeature} is spent with findings open. Run \${next.command} and summarize the open findings in your final message for the human reviewer.\`
-      : \`Feature \${status.activeFeature} is not accepted yet. Next: \${next.objective} Run: \${next.command}. Continue until visp accept succeeds, or state in your final message why it cannot.\`;
+    for (const [name, entry] of Object.entries(entries)) {
+      if (!plain(entry) || !(now - Date.parse(entry.at) < day)) delete entries[name];
+      else if (plain(entry.fps))
+        for (const [id, seen] of Object.entries(entry.fps))
+          if (!plain(seen) || !(now - Date.parse(seen.at) < day)) delete entry.fps[id];
+    }
+    const key = [input.session_id ?? "unknown", status.activeFeature].join(":");
+    const entry = plain(entries[key]) && plain(entries[key].fps) ? entries[key] : { total: 0, fps: {} };
+    const seen = plain(entry.fps[fingerprint]) ? entry.fps[fingerprint] : undefined;
+    if ((Number(entry.total) || 0) >= 6) process.exit(0);
+    // The same step blocks up to its limit whatever the worker did in between: in weak-worker
+    // runs most repeated nudges were followed, and waiting for a progress change let a worker
+    // that did nothing stop after one nudge.
+    if (seen && (Number(seen.count) || 0) >= limit) process.exit(0);
+    // The counter is on disk before the block is emitted; if it cannot be written the
+    // worker is not blocked, since nothing would bound the repeats.
+    const at = new Date(now).toISOString();
+    entries[key] = {
+      total: (Number(entry.total) || 0) + 1,
+      at,
+      fps: { ...entry.fps, [fingerprint]: { count: (Number(seen?.count) || 0) + 1, progress, at } },
+    };
+    const temporary = counts + "." + process.pid + ".tmp";
+    try {
+      mkdirSync(join(root, ".visp", "session"), { recursive: true });
+      writeFileSync(temporary, JSON.stringify({ version: 2, entries }));
+      renameSync(temporary, counts);
+    } catch {
+      try { unlinkSync(temporary); } catch {}
+      process.exit(0);
+    }
+    const objective = String(next.objective ?? "").trim().replace(/[.\\s]+$/, "");
+    const feature = status.activeFeature;
+    const command = next.command;
+    const reason = !next.feature
+      ? command ? \`\${objective}. Run: \${command}\` : \`\${objective}.\`
+      : kind === "handoff"
+      ? command
+        ? \`\${objective}. Run: \${command} once, then say in your final message what is still open and that \${feature} needs the human reviewer.\`
+        : \`\${objective}. Say in your final message what is still open and that \${feature} needs the human reviewer.\`
+      : kind === "environment"
+      ? \`VISP cannot verify \${feature} until its execution environment works: \${objective}.\${command ? \` Run: \${command} once.\` : ""} If it is still unavailable, say in your final message which capability is missing and that \${feature} is not verified; do not retry it repeatedly.\`
+      : \`VISP's next step for \${feature}: \${objective}.\${command ? \` Run: \${command}.\` : ""} If your own \\\`${PRODUCT_NAME} next\\\` shows a different step, follow that one. If you cannot finish, say in your final message what is left and why.\`;
     process.stdout.write(JSON.stringify({ decision: "block", reason }));
   } catch {}
   process.exit(0);
@@ -117,18 +195,44 @@ if (input?.hook_event_name === "Stop") {
 // A worker deleted .visp and the pinned tests with shell commands to get past a scope
 // error. Only such commands are refused; every other command gets no decision here, so
 // the host's own permission rules still apply.
+// \`${PRODUCT_NAME} work\` stamps its authorization with the session that runs it: record the
+// session of each shell command just before it runs, as prompts do.
+function recordSession() {
+  if (typeof input?.session_id !== "string" || !input.session_id) return;
+  try {
+    const directory = join(projectRoot(), ".visp", "session");
+    mkdirSync(directory, { recursive: true });
+    mkdirSync(join(directory, "hosts"), { recursive: true });
+    writeFileSync(join(directory, "hosts", encodeURIComponent(input.session_id) + ".json"),
+      JSON.stringify({ session: input.session_id, at: new Date().toISOString() }));
+    writeFileSync(
+      join(directory, "${HOST_SESSION_FILE}"),
+      JSON.stringify({ session: input.session_id, at: new Date().toISOString() }),
+    );
+  } catch {}
+}
+
 if (input?.tool_name === "Bash") {
+  recordSession();
   const command = String(input?.tool_input?.command ?? "");
-  const touchesState = /(^|[\\s'"=/])(\\.visp|acceptance)(\\/|[\\s'"]|$)/.test(command);
-  const destructive =
-    /\\bgit\\s+clean\\b/.test(command) ||
-    /\\bgit\\s+stash\\b.*(\\s-u\\b|--include-untracked|\\s-a\\b|--all)/.test(command) ||
-    (touchesState && /\\b(rm|mv|git\\s+(checkout|restore|rm|reset))\\b/.test(command));
+  const destructive = destructiveShellReason(command);
   if (destructive) {
     process.stdout.write(
       JSON.stringify(
+        deny(destructive),
+      ),
+    );
+    process.exit(0);
+  }
+  const lost = discardedChanges(command);
+  if (lost.length > 0) {
+    process.stdout.write(
+      JSON.stringify(
         deny(
-          "This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead.",
+          "This command would discard uncommitted changes to " +
+            lost.slice(0, 5).join(", ") +
+            (lost.length > 5 ? " and " + (lost.length - 5) + " more" : "") +
+            ". They may be earlier work: commit them instead (git add -A && git commit -m '<what they are>'); if the commit fails because Git is read-only, leave them uncommitted. To undo an edit of your own, edit the file back.",
         ),
       ),
     );
@@ -136,20 +240,173 @@ if (input?.tool_name === "Bash") {
   process.exit(0);
 }
 
+// A worker discarded a previous session's uncommitted work with git checkout to get the
+// clean tree a new feature needs. Commands that would discard uncommitted changes are
+// refused: checkout or restore of changed files, forced checkouts and switches, and hard
+// resets (untracked files included, which a reset to another commit can overwrite).
+// Branch switches that keep changes, staged-only restores and stashes are left alone.
+function shellCommands(command) {
+  const commands = [[]];
+  let word = "";
+  let inWord = false;
+  let quote = "";
+  const end = () => {
+    if (inWord) commands[commands.length - 1].push(word);
+    word = "";
+    inWord = false;
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote) {
+      if (c === quote) quote = "";
+      else if (c === "\\\\" && quote === '"' && i + 1 < command.length) word += command[++i];
+      else word += c;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      inWord = true;
+    } else if (c === "\\\\" && i + 1 < command.length) {
+      word += command[++i];
+      inWord = true;
+    } else if (c === "\\n" || c === ";" || c === "&" || c === "|") {
+      end();
+      commands.push([]);
+    } else if (/\\s/.test(c)) {
+      end();
+    } else {
+      word += c;
+      inWord = true;
+    }
+  }
+  end();
+  return commands.filter((words) => words.length > 0);
+}
+
+function destructiveShellReason(command) {
+  const protectedOperand = (word) => /^(?:\\.\\/)?(?:\\.visp|acceptance)(?:\\/|$)/.test(word);
+  for (const words of shellCommands(command)) {
+    const executable = words[0];
+    const operands = words.slice(1).filter((word) => !word.startsWith("-"));
+    // A dry run only lists what a clean would delete.
+    const dryRun = words.slice(2).some((word) => word === "--dry-run" || /^-[A-Za-z]*n[A-Za-z]*$/.test(word));
+    if (executable === "git" && words[1] === "clean" && !dryRun)
+      return "git clean may delete untracked VISP state or acceptance tests; inspect and remove individual files instead.";
+    if (executable === "git" && words[1] === "stash" && words.slice(2).some((word) => /^(?:-[A-Za-z]*[ua]|--include-untracked|--all)$/.test(word)))
+      return "git stash of untracked files may hide VISP state or acceptance tests; commit the work instead.";
+    const gitDestructive = executable === "git" && ["checkout", "restore", "rm", "reset"].includes(words[1]);
+    const fileDestructive = ["rm", "mv"].includes(executable);
+    const findDelete = executable === "find" && words.includes("-delete");
+    if ((gitDestructive || fileDestructive || findDelete) && operands.some(protectedOperand))
+      return "This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead.";
+  }
+  return undefined;
+}
+
+function workingTreeChanges() {
+  const entries = execFileSync("git", ["status", "--porcelain", "-z"], {
+    cwd: projectRoot(),
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+    .toString()
+    .split("\\0");
+  const tracked = [];
+  const untracked = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) continue;
+    const code = entry.slice(0, 2);
+    (code === "??" ? untracked : tracked).push(entry.slice(3));
+    if (code[0] === "R" || code[0] === "C") i++;
+  }
+  return { tracked, untracked };
+}
+
+function discardedChanges(command) {
+  const targets = [];
+  let forced = false;
+  let hard = false;
+  for (const words of shellCommands(command)) {
+    const git = words.indexOf("git");
+    if (git < 0) continue;
+    const [sub, ...rest] = words.slice(git + 1);
+    const separator = rest.indexOf("--");
+    const operands = (separator >= 0 ? rest.slice(separator + 1) : rest).filter(
+      (word) => separator >= 0 || !word.startsWith("-"),
+    );
+    const flags = (separator >= 0 ? rest.slice(0, separator) : rest).filter((word) => word.startsWith("-"));
+    if (sub === "reset" && flags.includes("--hard")) hard = true;
+    else if (sub === "checkout" && flags.some((flag) => flag === "--force" || /^-[A-Za-z]*f/.test(flag)))
+      forced = true;
+    else if (sub === "switch" && flags.some((flag) => ["-f", "--force", "--discard-changes"].includes(flag)))
+      forced = true;
+    else if (sub === "checkout" && !flags.some((flag) => ["-b", "-B", "--orphan"].includes(flag)))
+      targets.push(...operands);
+    else if (
+      sub === "restore" &&
+      !(flags.includes("--staged") && !flags.includes("--worktree") && !flags.includes("-W"))
+    )
+      targets.push(...operands);
+  }
+  if (!hard && !forced && targets.length === 0) return [];
+  let changes;
+  try {
+    changes = workingTreeChanges();
+  } catch {
+    return [];
+  }
+  if (hard) return [...changes.tracked, ...changes.untracked];
+  if (forced) return changes.tracked;
+  const prefixes = targets.map((target) => target.replace(/^\\.\\//, "").replace(/\\/$/, ""));
+  return changes.tracked.filter((path) =>
+    prefixes.some((prefix) => prefix === "." || path === prefix || path.startsWith(prefix + "/")),
+  );
+}
+
 const target = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
 
 if (!target) {
-  process.stdout.write(JSON.stringify(ALLOW));
   process.exit(0);
 }
 
 const root = projectRoot();
-const path = isAbsolute(target) ? relative(root, target) : target;
+function realPath(path, depth = 0) {
+  if (depth > 40) throw new Error("Too many symlinks in " + path);
+  try {
+    return realpathSync.native(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    try {
+      if (lstatSync(path).isSymbolicLink())
+        return realPath(resolve(dirname(path), readlinkSync(path)), depth + 1);
+    } catch (cause) {
+      if (cause?.code !== "ENOENT") throw cause;
+    }
+    const parent = dirname(path);
+    if (parent === path) return path;
+    return resolve(realPath(parent, depth + 1), path.slice(parent.length + 1));
+  }
+}
+
+function outside(path) {
+  return path === ".." || path.startsWith(".." + sep) || isAbsolute(path);
+}
+
+const absoluteTarget = isAbsolute(target) ? target : resolve(input?.cwd ?? root, target);
+const logical = relative(root, absoluteTarget);
+const physical = relative(realPath(root), realPath(absoluteTarget));
+if (isAbsolute(target) && outside(logical) && outside(physical)) process.exit(0);
+if (!outside(logical) && outside(physical)) {
+  process.stdout.write(JSON.stringify(deny(String(target) + " resolves outside the project root")));
+  process.exit(0);
+}
+const path = isAbsolute(target) ? (outside(logical) ? physical : logical) : target;
+const paths = physical !== path && !outside(physical) ? [path, physical] : [path];
 
 // VISP state changes only through visp commands, which validate and record it. A worker
 // that hand-edited the brief left it unreadable and abandoned the workflow. Drafts are
 // the one place the workflow asks agents to write.
-const statePath = path.replaceAll(String.fromCharCode(92), "/");
+const statePath = path.replaceAll(String.fromCharCode(92), "/").toLowerCase();
 if (
   (statePath === "${STATE_DIR}" || statePath.startsWith("${STATE_DIR}/")) &&
   !statePath.startsWith("${STATE_DIR}/drafts/") &&
@@ -207,7 +464,9 @@ function guardEnvelope(stdout) {
 let status = 0;
 let stdout;
 try {
-  stdout = execFileSync("${PRODUCT_NAME}", ["guard", "--path", path, "--json"], {
+  const asking =
+    typeof input?.session_id === "string" && input.session_id ? ["--session", input.session_id] : [];
+  stdout = execFileSync(process.execPath, [cli, "guard", "--path", ...paths, "--json", ...asking], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -220,9 +479,20 @@ try {
 const envelope = guardEnvelope(stdout);
 
 if (envelope === undefined) {
-  const cause = status === 0 || status === ${EXIT.refused}
-    ? \`no guard result on stdout — is \\\`${PRODUCT_NAME}\\\` on PATH the right one?\`
-    : \`exit \${status}\`;
+  let authorization = "unknown";
+  try {
+    authorization = execFileSync(process.execPath, ["-e", ${JSON.stringify(AUTHORIZATION_CHECK)}], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim();
+  } catch {}
+  // No task is active, so there is nothing to enforce: leave Claude's own permission decision in place.
+  if (authorization === "inactive") process.exit(0);
+  let guardError;
+  try { guardError = JSON.parse(stdout?.toString() ?? "").error?.message; } catch {}
+  const cause = guardError || (status === 0 || status === ${EXIT.refused}
+    ? \`no guard result on stdout — is the installed VISP CLI intact?\`
+    : \`exit \${status}\`);
   process.stdout.write(
     JSON.stringify(
       deny(
@@ -234,7 +504,13 @@ if (envelope === undefined) {
 }
 
 if (status === 0 && envelope.ok) {
-  process.stdout.write(JSON.stringify(ALLOW));
+  if (typeof input?.session_id === "string") {
+    try {
+      const directory = join(root, ".visp", "session", "edits");
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, encodeURIComponent(input.session_id) + ".json"), JSON.stringify({ at: new Date().toISOString() }));
+    } catch {}
+  }
   process.exit(0);
 }
 
@@ -248,6 +524,8 @@ if (first?.message) {
     reason = \`\${first.message}. No task is authorized right now — run \\\`${PRODUCT_NAME} next\\\` to see what is next, then \\\`${PRODUCT_NAME} work --task <id>\\\`.\`;
   } else if (first.reason === "outside-allowed-files") {
     reason = \`\${first.message}. Authorize the task that owns this file, or widen its allowedFiles — do not work around the refusal.\`;
+  } else if (first.reason === "transaction-pending") {
+    reason = first.message;
   } else {
     reason = \`\${first.message}. This path cannot be written by any task.\`;
   }
@@ -264,7 +542,7 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
         PreToolUse: [
           {
             matcher: "Edit|Write|NotebookEdit",
-            hooks: [{ type: "command", command: `node "$CLAUDE_PROJECT_DIR/${hookPath}"` }],
+            hooks: [{ type: "command", command: hookCommand(hookPath, true) }],
           },
         ],
       },
@@ -275,11 +553,12 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
 }
 
 /** Pre-commit hook: the last checkpoint before out-of-scope work is recorded. */
-export function renderPreCommitHook(): string {
-  const installedNode = shellLiteral(process.execPath);
+export function renderPreCommitHook(chained = false): string {
+  const installedCli = shellLiteral(runtimeIdentity().executable);
   return `#!/bin/sh
 # ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 # Refuses a commit whose staged files fall outside the active task's scope.
+${chained ? '\n# Preserve the project hook that preceded VISP.\nif [ -x "$0.local" ]; then "$0.local" "$@" || exit $?; fi\n' : ""}
 
 authorization_dir=".visp/state/implement-allowed"
 product_authorization_dir=".visp/state/product-authorizations"
@@ -289,9 +568,6 @@ has_authorization=0
 # an interrupted older closure. A malformed marker or graph stays conservative:
 # without enough state to prove it stale, the hook treats it as active.
 node_runtime=$(command -v node 2>/dev/null)
-if [ -z "$node_runtime" ] && [ -x ${installedNode} ]; then
-  node_runtime=${installedNode}
-fi
 if [ -n "$node_runtime" ]; then
   authorization_state=$("$node_runtime" - "$authorization_dir" <<'VISP_AUTHORIZATION_CHECK' 2>/dev/null
 ${AUTHORIZATION_CHECK}
@@ -325,8 +601,8 @@ unchecked() {
   return 0
 }
 
-if ! command -v ${PRODUCT_NAME} >/dev/null 2>&1; then
-  unchecked "${PRODUCT_NAME} is not on PATH"
+if [ -z "$node_runtime" ]; then
+  unchecked "node is not on PATH"
   exit $?
 fi
 
@@ -334,13 +610,12 @@ fi
 # ordinary commits are left alone.
 # --include-done: work from a task visp already closed is still in the tree and
 # must remain committable, or finishing a task would strand it.
-output=$(${PRODUCT_NAME} guard --staged --if-authorized --include-done --json 2>/dev/null)
+output=$("$node_runtime" ${installedCli} guard --staged --if-authorized --include-done --json 2>/dev/null)
 
-# The exit code alone cannot be trusted. Another program named \`${PRODUCT_NAME}\` on
-# PATH — an older release, say — exits 1 for its own reasons, and 1 is also the
-# refusal code. Only a parseable guard envelope proves this check actually ran,
+# The exit code alone cannot be trusted. A stale or corrupted CLI might also
+# exit 1, the refusal code. Only a parseable guard envelope proves this check ran,
 # so that is what the decision reads.
-verdict=$(printf '%s' "$output" | node -e '
+verdict=$(printf '%s' "$output" | "$node_runtime" -e '
 let raw = "";
 process.stdin.on("data", (chunk) => { raw += chunk; });
 process.stdin.on("end", () => {
@@ -414,6 +689,9 @@ export function renderCiWorkflow(version: string): string {
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   scope-and-evidence:
     runs-on: ubuntu-latest
@@ -428,13 +706,22 @@ jobs:
       - name: Check the diff against what the feature declared it would touch
         # actions/checkout detaches HEAD for a pull_request, so git cannot name
         # the branch and visp is told it explicitly.
-        run: ${PRODUCT_NAME} guard --base \${{ github.event.pull_request.base.sha }} --scope tasks --branch \${{ github.head_ref }}
+        env:
+          HEAD_REF: \${{ github.head_ref }}
+        run: ${PRODUCT_NAME} guard --base \${{ github.event.pull_request.base.sha }} --scope tasks --branch "$HEAD_REF"
 `;
 }
 
-/** Codex runs hooks through a shell from the session directory; resolve the project root. */
+/**
+ * Codex runs hooks through a shell from the session directory; resolve the project root.
+ * The command keeps its earlier text on purpose: Codex trusts a hook by a hash of its command,
+ * so changing it would make upgraded projects skip every hook silently.
+ */
 export const CODEX_HOOK_SCRIPT = ".visp/hooks/codex-hooks.mjs";
-const CODEX_HOOK_COMMAND = `node "$(git rev-parse --show-toplevel)/${CODEX_HOOK_SCRIPT}"`;
+const CODEX_HOOK_COMMAND =
+  process.platform === "win32"
+    ? `for /f %i in ('git rev-parse --show-toplevel') do @node "%i\\${CODEX_HOOK_SCRIPT.replaceAll("/", "\\")}" || exit /b 2`
+    : `node "$(git rev-parse --show-toplevel)/${CODEX_HOOK_SCRIPT}" || exit 2`;
 
 /**
  * Codex reads `.codex/hooks.json` in Claude Code's format. The same script records user

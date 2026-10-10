@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** The explanation is reviewer-reported; execution and capture identity remain runner-owned. */
-export const experimentResolutionSchema = z
+const experimentResolutionSchema = z
   .object({
     provenance: z.literal("agent-reported").default("agent-reported"),
     runId: z.string().min(1),

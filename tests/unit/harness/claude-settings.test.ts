@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ok } from "../../../src/core/result.js";
 import {
   CLAUDE_SETTINGS_FILE,
   hookCommand,
@@ -45,6 +47,26 @@ async function read(): Promise<Settings> {
 }
 
 describe("registerPreToolUseHook", () => {
+  it.skipIf(process.platform === "win32")(
+    "turns an unstartable edit hook into a blocking exit, and no other hook",
+    () => {
+      const statusOf = (failClosed: boolean): number | undefined => {
+        try {
+          execFileSync("/bin/sh", ["-c", hookCommand(HOOK_PATH, failClosed)], {
+            cwd: root,
+            env: { ...process.env, CLAUDE_PROJECT_DIR: root, PATH: "/nonexistent" },
+            stdio: "ignore",
+          });
+          return 0;
+        } catch (error) {
+          return (error as { status?: number }).status;
+        }
+      };
+      expect(statusOf(true)).toBe(2);
+      // Claude Code treats any other non-zero status as a non-blocking error.
+      expect(statusOf(false)).not.toBe(2);
+    },
+  );
   it("creates the file when none exists", async () => {
     const result = await registerPreToolUseHook(root, HOOK_PATH, false);
     expect(result.ok && result.value).toBe("added");
@@ -54,7 +76,13 @@ describe("registerPreToolUseHook", () => {
     expect(entries).toHaveLength(2);
     expect(entries[0]?.matcher).toBe(PRE_TOOL_USE_MATCHER);
     expect(entries[1]?.matcher).toBe("Bash");
-    expect(entries[0]?.hooks?.[0]?.command).toBe(hookCommand(HOOK_PATH));
+    expect(entries[0]?.hooks?.[0]?.command).toBe(hookCommand(HOOK_PATH, true));
+    expect(entries[0]?.hooks?.[0]?.command).toContain("|| exit 2");
+    // Only the edit matcher fails closed; prompt, Stop and shell entries never block a crash.
+    expect(entries[1]?.hooks?.[0]?.command).toBe(hookCommand(HOOK_PATH, false));
+    const { hooks } = (await read()) as { hooks: Record<string, HookEntry[]> };
+    for (const entry of [entries[1], ...(hooks.UserPromptSubmit ?? []), ...(hooks.Stop ?? [])])
+      expect(entry?.hooks?.[0]?.command).not.toContain("exit");
   });
 
   it("keeps hooks the project already configured", async () => {
@@ -101,7 +129,10 @@ describe("registerPreToolUseHook", () => {
       JSON.stringify({
         hooks: {
           PreToolUse: [
-            { matcher: "Write", hooks: [{ type: "command", command: hookCommand(HOOK_PATH) }] },
+            {
+              matcher: "Write",
+              hooks: [{ type: "command", command: hookCommand(HOOK_PATH, true) }],
+            },
           ],
         },
       }),
@@ -117,7 +148,10 @@ describe("registerPreToolUseHook", () => {
       JSON.stringify({
         hooks: {
           PreToolUse: [
-            { matcher: "Write", hooks: [{ type: "command", command: hookCommand(HOOK_PATH) }] },
+            {
+              matcher: "Write",
+              hooks: [{ type: "command", command: hookCommand(HOOK_PATH, true) }],
+            },
           ],
         },
       }),
@@ -184,6 +218,52 @@ describe("registerPreToolUseHook", () => {
   });
 });
 
+describe("planPreToolUseRegistration discarding", () => {
+  it("recognizes its own entry written with Windows path separators", () => {
+    const command = 'node "%CLAUDE_PROJECT_DIR%\\.visp\\hooks\\claude-pretooluse.mjs" || exit /b 2';
+    const current = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: "Write", hooks: [{ type: "command", command }] },
+          { matcher: "Bash", hooks: [{ type: "command", command: "node .\\tools\\lint.mjs" }] },
+        ],
+      },
+    });
+
+    expect(planPreToolUseRegistration(current, HOOK_PATH, false)).toEqual(
+      ok({ status: "customized" }),
+    );
+  });
+
+  it("marks a forced rewrite of unparseable or malformed hooks as discarding", () => {
+    for (const current of ["{ not json", JSON.stringify({ hooks: { PreToolUse: "x" } })]) {
+      const plan = planPreToolUseRegistration(current, HOOK_PATH, true);
+      expect(plan.ok && plan.value).toMatchObject({ status: "replaced", discarded: true });
+    }
+  });
+
+  it("does not mark an ordinary merge as discarding", () => {
+    const plan = planPreToolUseRegistration(JSON.stringify({ model: "opus" }), HOOK_PATH, true);
+    expect(plan.ok && plan.value.discarded).toBeUndefined();
+  });
+
+  it("keeps sibling hook events when PreToolUse is not an array, and none when hooks is not an object", () => {
+    const sibling = { matcher: "Bash", hooks: [{ command: "./log.sh" }] };
+    const kept = planPreToolUseRegistration(
+      JSON.stringify({ hooks: { PreToolUse: "x", PostToolUse: [sibling] } }),
+      HOOK_PATH,
+      true,
+    );
+    expect(kept.ok && JSON.parse(kept.value.content ?? "").hooks.PostToolUse).toEqual([sibling]);
+    const none = planPreToolUseRegistration(JSON.stringify({ hooks: [sibling] }), HOOK_PATH, true);
+    expect(none.ok && Object.keys(JSON.parse(none.value.content ?? "").hooks).sort()).toEqual([
+      "PreToolUse",
+      "Stop",
+      "UserPromptSubmit",
+    ]);
+  });
+});
+
 describe("preToolUseRegistration", () => {
   it("reports absent when nothing is wired", async () => {
     const result = await preToolUseRegistration(root, HOOK_PATH);
@@ -215,7 +295,7 @@ describe("preToolUseRegistration", () => {
           PreToolUse: [
             {
               matcher: PRE_TOOL_USE_MATCHER,
-              hooks: [{ type: "command", command: `${hookCommand(HOOK_PATH)} || true` }],
+              hooks: [{ type: "command", command: `${hookCommand(HOOK_PATH, true)} || true` }],
             },
           ],
         },
@@ -244,7 +324,7 @@ describe("planPreToolUseUnregistration", () => {
             { matcher: "Bash", hooks: [{ type: "command", command: "./audit.sh" }] },
             {
               matcher: PRE_TOOL_USE_MATCHER,
-              hooks: [{ type: "command", command: hookCommand(HOOK_PATH) }],
+              hooks: [{ type: "command", command: hookCommand(HOOK_PATH, true) }],
             },
           ],
           PostToolUse: [{ matcher: "Edit", hooks: [{ command: "./format.sh" }] }],
@@ -274,7 +354,7 @@ describe("planPreToolUseUnregistration", () => {
         PreToolUse: [
           {
             matcher: PRE_TOOL_USE_MATCHER,
-            hooks: [{ type: "command", command: `${hookCommand(HOOK_PATH)} || true` }],
+            hooks: [{ type: "command", command: `${hookCommand(HOOK_PATH, true)} || true` }],
           },
         ],
       },
@@ -302,10 +382,12 @@ describe("planPreToolUseUnregistration", () => {
 describe("session hooks", () => {
   const editOnly = {
     matcher: PRE_TOOL_USE_MATCHER,
-    hooks: [{ type: "command", command: hookCommand(HOOK_PATH) }],
+    hooks: [{ type: "command", command: hookCommand(HOOK_PATH, true) }],
   };
   const notify = { hooks: [{ type: "command", command: "./notify.sh" }] };
-  const staleStop = { hooks: [{ type: "command", command: hookCommand(HOOK_PATH), timeout: 5 }] };
+  const staleStop = {
+    hooks: [{ type: "command", command: hookCommand(HOOK_PATH, false), timeout: 5 }],
+  };
 
   it("adds the prompt, Stop and shell hooks to an older install without touching the project's", () => {
     const current = JSON.stringify({
@@ -345,6 +427,47 @@ describe("session hooks", () => {
   });
 });
 
+// Older builds gave every entry `|| exit 2`; uninstall and reinstall find them by reference.
+describe("entries an older build generated", () => {
+  const old = (extra: Record<string, unknown> = {}) => ({
+    hooks: [{ type: "command", command: `${hookCommand(HOOK_PATH, false)} || exit 2`, ...extra }],
+  });
+  const legacy = {
+    PreToolUse: [
+      { matcher: PRE_TOOL_USE_MATCHER, ...old() },
+      { matcher: "Bash", ...old() },
+    ],
+    UserPromptSubmit: [old()],
+    Stop: [old({ timeout: 180 })],
+  };
+
+  it("are removed on uninstall, with the project's own hooks kept", () => {
+    const notify = { hooks: [{ type: "command", command: "./notify.sh" }] };
+    const removed = planPreToolUseUnregistration(
+      JSON.stringify({ hooks: { ...legacy, Stop: [notify, ...legacy.Stop] } }),
+      HOOK_PATH,
+    );
+    expect(removed.status).toBe("removed");
+    expect(JSON.parse(removed.content ?? "null")).toEqual({
+      hooks: { PreToolUse: [], Stop: [notify] },
+    });
+  });
+
+  it("are replaced, not duplicated, on install", () => {
+    const planned = planPreToolUseRegistration(JSON.stringify({ hooks: legacy }), HOOK_PATH, false);
+    if (!planned.ok) throw new Error(planned.error.message);
+    expect(planned.value.status).toBe("replaced");
+    const next = JSON.parse(planned.value.content ?? "null") as {
+      hooks: Record<string, HookEntry[]>;
+    };
+    expect(next.hooks.PreToolUse).toHaveLength(2);
+    expect(next.hooks.PreToolUse?.[1]?.hooks?.[0]?.command).toBe(hookCommand(HOOK_PATH, false));
+    expect(next.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(next.hooks.Stop).toHaveLength(1);
+    expect(next.hooks.Stop?.[0]?.hooks?.[0]?.command).toBe(hookCommand(HOOK_PATH, false));
+  });
+});
+
 // Codex reads Claude-format hooks from .codex/hooks.json; a Codex worker gets the same
 // prompt recording, stop continuation and state protection.
 describe("Codex hooks", () => {
@@ -355,6 +478,8 @@ describe("Codex hooks", () => {
     expect(Object.keys(hooks).sort()).toEqual(["PreToolUse", "Stop", "UserPromptSubmit"]);
     expect(hooks.PreToolUse[0].matcher).toBe("Bash");
     expect(hooks.Stop[0].hooks[0].command).toContain(".visp/hooks/codex-hooks.mjs");
+    // The command text is unchanged from earlier builds: Codex trusts hooks by a hash of it.
+    expect(hooks.Stop[0].hooks[0].command).toMatch(/\|\| exit 2$/);
     expect(planFor("codex").manualSteps.join(" ")).toContain("/hooks");
     expect(planFor("claude-code").assets.some((asset) => asset.path === ".codex/hooks.json")).toBe(
       false,

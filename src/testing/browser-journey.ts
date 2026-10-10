@@ -12,7 +12,7 @@ import {
   scrollToElement,
   waitForObservation,
 } from "./browser-observations.js";
-import { actAtPoint } from "./browser-points.js";
+import { actAtPoint, resolveElementPoint } from "./browser-points.js";
 import {
   type BrowserOperation,
   type BrowserSession,
@@ -20,6 +20,12 @@ import {
 } from "./browser-session.js";
 import { BrowserRuntimeError } from "./chrome-transport.js";
 import { bounded } from "./deadline.js";
+import {
+  PROJECT_SCHEME,
+  type ProjectServer,
+  parseProjectUrl,
+  startProjectServer,
+} from "./project-server.js";
 
 const viewport = z
   .object({
@@ -36,9 +42,15 @@ export const browserJourneySchema = z
       .string()
       .url()
       .refine(
-        (value) => ["http:", "https:", "file:"].includes(new URL(value).protocol),
-        "Application URL must use HTTP(S) or a confined project file URL",
-      ),
+        (value) => ["http:", "https:", "file:", PROJECT_SCHEME].includes(new URL(value).protocol),
+        'Application URL must use HTTP(S), a confined project file URL or "project:/<file>"',
+      )
+      .superRefine((value, context) => {
+        const parsed =
+          new URL(value).protocol === PROJECT_SCHEME ? parseProjectUrl(value) : undefined;
+        if (parsed && "error" in parsed)
+          context.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
+      }),
     viewport: viewport.optional(),
     actions: z
       .array(
@@ -100,12 +112,35 @@ export const browserJourneySchema = z
                 .object({ x: z.number().finite(), y: z.number().finite() })
                 .strict()
                 .optional(),
-              to: z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
+              /** Start as fractions of the element's border box; the alternative to `from`. */
+              position: relativePoint.optional(),
+              /** Viewport pixels; the alternative to `by`. */
+              to: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(),
+              /** Travel as fractions of the element's border box width and height. */
+              by: z
+                .object({ x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) })
+                .strict()
+                .optional(),
               input: z.enum(["pointer", "touch"]).optional(),
               cancel: z.boolean().optional(),
               steps: z.number().int().min(2).max(60).optional(),
               durationMs: z.number().min(0).max(2000).optional(),
+              /** Capture the held state at full pull, before release. */
               captureDuring: z.boolean().optional(),
+              /**
+               * Capture again this many ms after release (1-3 increasing offsets). Each counts toward
+               * the six captures; `capture: true` is redundant with it.
+               */
+              captureAfterMs: z
+                .array(z.number().int().min(50).max(2000))
+                .min(1)
+                .max(3)
+                .refine(
+                  (offsets) =>
+                    offsets.every((offset, i) => i === 0 || offset > (offsets[i - 1] ?? 0)),
+                  "captureAfterMs offsets must be strictly increasing",
+                )
+                .optional(),
               capture: z.boolean().default(false),
             })
             .strict(),
@@ -138,6 +173,10 @@ export const browserJourneySchema = z
       1 +
       journey.actions.filter((action) => action.capture).length +
       journey.actions.filter((action) => action.kind === "drag" && action.captureDuring).length +
+      journey.actions.reduce(
+        (sum, action) => sum + (action.kind === "drag" ? (action.captureAfterMs?.length ?? 0) : 0),
+        0,
+      ) +
       (journey.actions.length > 0 && !journey.actions.at(-1)?.capture ? 1 : 0);
     if (captures > 6)
       context.addIssue({
@@ -146,12 +185,7 @@ export const browserJourneySchema = z
         message: "Journey exceeds six representative captures",
       });
     journey.actions.forEach((action, index) => {
-      if (action.kind === "drag" && action.cancel && action.input !== "touch")
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["actions", index, "cancel"],
-          message: "Native gesture cancellation requires touch input",
-        });
+      if (action.kind === "drag") checkDragAction(action, index, context);
       if (
         action.kind === "compare" &&
         action.mode === "text" &&
@@ -176,6 +210,24 @@ export const browserJourneySchema = z
         });
     });
   });
+type DragAction = Extract<BrowserJourney["actions"][number], { kind: "drag" }>;
+
+function checkDragAction(action: DragAction, index: number, context: z.RefinementCtx) {
+  const issue = (field: string, message: string) =>
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["actions", index, field], message });
+  if (action.to && action.by)
+    issue("by", "Use to (viewport pixels) or by (fractions of the element box), not both");
+  if (!action.to && !action.by)
+    issue("to", "A drag needs to (viewport pixels) or by (fractions of the element box)");
+  if (action.from && action.position)
+    issue(
+      "position",
+      "Use from (viewport pixels) or position (fractions of the element box), not both",
+    );
+  if (action.cancel && action.input !== "touch")
+    issue("cancel", "Native gesture cancellation requires touch input");
+}
+
 export type BrowserJourney = z.infer<typeof browserJourneySchema>;
 
 export interface BrowserJourneyFailure {
@@ -210,22 +262,48 @@ export async function runBrowserJourney(options: {
       operations: [],
       failure: { kind: "environment", message: "Browser journey cancelled before startup" },
     };
-  const localFile = new URL(journey.url).protocol === "file:";
+  const protocol = new URL(journey.url).protocol;
+  const localFile = protocol === "file:";
   if (localFile) {
     if (!options.projectRoot)
       throw new Error("Local-file journeys require an explicit project root");
     await readBrowserFile(options.projectRoot, journey.url, options.blockedPaths);
   }
+  if (protocol === PROJECT_SCHEME && !options.projectRoot)
+    throw new Error("Project journeys require an explicit project root");
+  // The capture owns the server for exactly the journey: every exit path below closes it.
+  const server =
+    protocol === PROJECT_SCHEME && options.projectRoot
+      ? await startProjectServer({
+          root: options.projectRoot,
+          blockedPaths: options.blockedPaths,
+        })
+      : undefined;
+  try {
+    return await runOpenJourney({ ...options, journey }, localFile, server);
+  } finally {
+    await server?.close();
+  }
+}
+
+async function runOpenJourney(
+  options: Parameters<typeof runBrowserJourney>[0] & { readonly journey: BrowserJourney },
+  localFile: boolean,
+  server: ProjectServer | undefined,
+): Promise<BrowserJourneyResult> {
+  const { journey } = options;
   const session = await openBrowserSession({
     ...options,
     viewport: journey.viewport,
     fileRoot: localFile ? options.projectRoot : undefined,
+    present: server ? (url: string) => server.present(url) : undefined,
   });
   const captures: ProductReviewCapture[] = [];
   const deadline = Date.now() + 60_000;
   const progress: { actionIndex?: number } = {};
   const cancel = () => {
     void session.close().catch(() => {});
+    void server?.close();
   };
   options.signal?.addEventListener("abort", cancel, { once: true });
   try {
@@ -241,10 +319,13 @@ export async function runBrowserJourney(options: {
         capture,
         progress,
         options.signal ? AbortSignal.any([signal, options.signal]) : signal,
+        server,
       );
+      noteRefusals(session, server);
       return { status: "completed" as const, captures, operations: session.operations };
     });
   } catch (cause) {
+    noteRefusals(session, server);
     return await failedJourney(
       session,
       captures,
@@ -259,15 +340,39 @@ export async function runBrowserJourney(options: {
   }
 }
 
+/** A blocked or over-budget request leaves a broken page; say so where the operations are read. */
+function noteRefusals(session: BrowserSession, server: ProjectServer | undefined) {
+  if (!server?.refusalCount) return;
+  const listed = server.refusals.length;
+  const count = server.refusalCount;
+  try {
+    session.record(
+      "observe",
+      `VISP's project server refused ${count} request(s)${count > listed ? `, first ${listed}` : ""}: ${server.refusals.join("; ")}`,
+      server.refusals,
+    );
+  } catch {
+    // A closed session has nothing left to annotate.
+  }
+}
+
 async function executeJourney(
   session: BrowserSession,
   journey: BrowserJourney,
   capture: () => Promise<void>,
   progress: { actionIndex?: number },
   signal: AbortSignal,
+  server?: ProjectServer,
 ) {
   signal.throwIfAborted();
-  await session.navigate(journey.url);
+  if (server)
+    await session.navigate(server.resolve(journey.url), {
+      annotate: (url) => {
+        const digest = server.digestOf(url);
+        return digest && `served by VISP from the project, sha256 ${digest.slice(0, 12)}`;
+      },
+    });
+  else await session.navigate(journey.url);
   await capture();
   session.assertHealthy?.();
   for (const [index, action] of journey.actions.entries()) {
@@ -343,7 +448,7 @@ async function captureFailureImage(
     if (captures.length < 6)
       captures.push(
         await bounded("Failure capture", Math.max(1, Math.min(10_000, deadline - Date.now())), () =>
-          session.capture(),
+          session.capture({ allowErrorPage: true }),
         ),
       );
     return [];
@@ -364,7 +469,7 @@ async function performAction(
     await actAtPoint(session, action);
   else if (action.kind === "compare") await compareBrowserValues(session, action);
   else if (action.kind === "key") await session.page.keyboard.press(action.key);
-  else if (action.kind === "drag") await performDrag(session, action, capture);
+  else if (action.kind === "drag") await performDrag(session, action, capture, journeySignal);
   else if (action.kind === "wait-for") await waitForObservation(session, action, journeySignal);
   else if (action.kind === "scroll") await scrollToElement(session, action, journeySignal);
   else if (action.kind === "resize") await session.resize(action.viewport);
@@ -375,16 +480,12 @@ async function performAction(
 
 async function performDrag(
   session: BrowserSession,
-  action: Extract<BrowserJourney["actions"][number], { kind: "drag" }>,
+  action: DragAction,
   capture: () => Promise<void>,
+  journeySignal: AbortSignal,
 ): Promise<void> {
-  const control = await session.page.evaluate(
-    measureControl,
-    action.from ? { selector: action.selector, point: action.from } : action.selector,
-  );
-  if (!control.reachable)
-    throw new BrowserBehaviorFailure(`${action.selector}: ${control.reasons.join("; ")}`);
-  const from = action.from ?? { x: control.x, y: control.y };
+  const { selector } = action;
+  const { from, to } = await resolveDragPoints(session, action);
   const geometry = await session.page.evaluate(
     ({ selector, from, to }) => {
       const element = document.querySelector(selector);
@@ -402,14 +503,16 @@ async function performDrag(
         destination: to.x >= 0 && to.x < innerWidth && to.y >= 0 && to.y < innerHeight,
       };
     },
-    { selector: action.selector, from, to: action.to },
+    { selector, from, to },
   );
   if (!geometry.origin || !geometry.destination)
-    throw new BrowserBehaviorFailure("Drag must start on the control and end within the viewport");
+    throw new BrowserBehaviorFailure(
+      `Drag must start on the control and end within the viewport (from ${roundPoint(from)} to ${roundPoint(to)})`,
+    );
   await session.drag(
     {
       from,
-      to: action.to,
+      to,
       input: action.input ?? DRAG_DEFAULTS.input,
       cancel: action.cancel ?? DRAG_DEFAULTS.cancel,
       steps: action.steps ?? DRAG_DEFAULTS.steps,
@@ -417,4 +520,50 @@ async function performDrag(
     },
     action.captureDuring ? capture : undefined,
   );
+  const released = performance.now();
+  for (const offset of action.captureAfterMs ?? []) {
+    const wait = offset - (performance.now() - released);
+    if (wait > 0) await delay(wait, undefined, { signal: journeySignal });
+    await capture();
+  }
+}
+
+function roundPoint(point: { x: number; y: number }): string {
+  return `${Math.round(point.x * 10) / 10},${Math.round(point.y * 10) / 10}`;
+}
+
+/** Start and end in viewport pixels, whether the action gave pixels or fractions of the element box. */
+async function resolveDragPoints(session: BrowserSession, action: DragAction) {
+  const { selector, position } = action;
+  const control = await session.page.evaluate(
+    measureControl,
+    action.from ? { selector, point: action.from } : position ? { selector, position } : selector,
+  );
+  if (!control.reachable)
+    throw new BrowserBehaviorFailure(`${selector}: ${control.reasons.join("; ")}`);
+  const resolved = position || action.by ? await resolveFractionalBox(session, action) : undefined;
+  const origin = action.from ?? resolved ?? control;
+  const from = { x: origin.x, y: origin.y };
+  const box = resolved?.borderBox;
+  const to = action.by
+    ? box && { x: from.x + action.by.x * box.width, y: from.y + action.by.y * box.height }
+    : action.to;
+  if (!to) throw new BrowserBehaviorFailure(`${selector}: Drag travel could not be resolved`);
+  return { from, to };
+}
+
+/**
+ * Fractions of a rotated, skewed or flipped box are not the box the author sees, so the geometry
+ * guard applies to `by` as well as `position`. Only `position` also needs a receivable start point.
+ */
+async function resolveFractionalBox(session: BrowserSession, action: DragAction) {
+  const { selector, position } = action;
+  const resolved = await session.page.evaluate(resolveElementPoint, {
+    selector,
+    position: position ?? { x: 0.5, y: 0.5 },
+    exact: true,
+  });
+  if (resolved.unsupportedGeometry || (position && resolved.error))
+    throw new BrowserBehaviorFailure(`${selector}: ${resolved.error}`);
+  return resolved;
 }

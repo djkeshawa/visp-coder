@@ -104,7 +104,7 @@ describe("planFor", () => {
     expect(agents?.content).toContain("Missing product evidence stays unresolved");
     expect(agents?.content).toContain("Before the final answer");
     expect(agents?.content).toContain("visp work");
-    expect(agents?.content).toContain("visp review");
+    expect(agents?.content).toContain("visp critic/review");
   });
 
   it("tells Codex to restart after its project instructions are connected", () => {
@@ -113,6 +113,20 @@ describe("planFor", () => {
 });
 
 describe("the minimal profile", () => {
+  it("omits the critic agent and reviewer prose when the critic is disabled", () => {
+    const plan = planFor("codex", "minimal", null);
+    expect(plan.assets.map((asset) => asset.path)).not.toContain(".codex/agents/visp-critic.toml");
+    const guide = plan.assets.find((asset) => asset.path === "VISP.commands.md")?.content ?? "";
+    expect(guide).not.toContain("## Reviewer execution");
+  });
+
+  it("installs the same command guide whatever the critic setting", () => {
+    const guide = (critic: Parameters<typeof planFor>[2]) =>
+      planFor("codex", "minimal", critic).assets.find((asset) => asset.path === "VISP.commands.md")
+        ?.content;
+    expect(guide(null)).toBe(guide(undefined));
+    expect(guide(null)).toContain("| `visp critic feedback");
+  });
   it("installs only one short guide for a generic harness", () => {
     for (const harness of HARNESSES.filter((name) => name === "generic")) {
       const paths = planFor(harness, "minimal").assets.map((asset) => asset.path);
@@ -167,14 +181,38 @@ describe("the minimal profile", () => {
     const guide = planFor("generic", "minimal").assets[0]?.content ?? "";
 
     // chars/4 as a coarse token proxy; the point is an enforced ceiling.
-    expect(guide.length / 4).toBeLessThanOrEqual(300);
+    // 300 -> 329: room for the one-line labeled-text UI rule, with no other rule shortened.
+    // 329 -> 404: room for the review-routing, early-return and preview rules (1616 chars).
+    // A goal-replay rule (ceiling 432) was reverted after it sent a game worker into building
+    // per-level win replays for the whole hour; the per-kind count example (`Stone: 2`) fits
+    // within 404 with the shorter preview rule.
+    expect(guide.length / 4).toBeLessThanOrEqual(404);
+    expect(guide).toContain("At its id, run visp work");
+    expect(guide).toContain("Leave feature running; background it on blocking hosts");
+    expect(guide).toContain(
+      "feature/done/verify/accept/next with the host's maximum shell timeout",
+    );
     expect(guide).toContain("scope.allowed");
     expect(guide).toContain("runnable");
     expect(guide).toContain("execution refusals");
     expect(guide).toContain("Source strings and screenshots alone do not prove behavior");
     expect(guide).toContain("Missing product evidence stays unresolved");
     expect(guide).toContain("Before the final answer");
+    expect(guide).toContain("word-labeled text");
+    expect(guide).toContain("not only canvas/icons");
+    expect(guide).toContain("function and start point");
+    expect(guide).toContain("Do not delete or shrink requested content");
   });
+
+  it.each(["codex", "claude-code"] as const)(
+    "installs the labeled-text rule in the resident %s minimal guide",
+    (harness) => {
+      const guide = planFor(harness, "minimal").assets.find(
+        (asset) => asset.path === "AGENTS.visp.md",
+      )?.content;
+      expect(guide).toContain("word-labeled text (`Score: 1500`, `Stone: 2`)");
+    },
+  );
 
   it("defaults to the minimal profile", () => {
     expect(planFor("claude-code")).toEqual(planFor("claude-code", "minimal"));
@@ -195,14 +233,32 @@ describe("generated workflow routing", () => {
       const guide = planFor("generic", profile).assets[0]?.content ?? "";
       expect(guide).toContain('kind:"browser-journey"');
       expect(guide).toContain("Browser journeys must not mutate VISP state");
-      expect(guide).toContain("visp review --prepare");
-      expect(guide).toContain("--session <id> --from -");
-      expect(guide).toContain("An accepted critic response records the review");
+      expect(guide).toContain("only when visp next prints it");
+      expect(guide).toContain("run or delegate no review");
+      expect(guide).toContain("Poll; never duplicate");
+      expect(guide).toContain("At its id, run visp work");
+      expect(guide).not.toContain("visp review --prepare");
       expect(commandGuide()).toContain("No category declarations, example-coverage ledger");
       expect(guide).toContain("reviewer.context honestly");
       expect(guide).toContain("Do not force extra review rounds");
     },
   );
+
+  it("routes review commands through visp next in the installed command guide", () => {
+    const guide = commandGuide(false, true);
+    expect(guide).toContain("Only when `visp next` prints a review command");
+    expect(guide).toContain("Only when `visp next` prints a critic command");
+    expect(guide).not.toContain("--source-only");
+    expect(guide).toContain(
+      "on a blocking shell (Claude Code Bash) start it with run_in_background:true and read its output for the id",
+    );
+    expect(guide).toContain(
+      'Once it prints the feature id, run visp work --feature <id> --check "<test command>" for one slice.',
+    );
+    expect(guide).toContain("Never start feature again: a repeat can create a second feature.");
+    expect(guide).not.toContain("wait for it to return");
+    expect(guide).not.toContain("never run it twice");
+  });
 
   it("keeps dispatch details on demand rather than repeating them in the resident guide", () => {
     const guide = planFor("generic", "standard").assets[0]?.content ?? "";
@@ -277,10 +333,21 @@ describe("hook templates", () => {
   it("fails closed on an unchecked active authorization", () => {
     const hook = renderPreCommitHook();
 
-    expect(hook).toContain("command -v visp");
+    expect(hook).toContain("command -v node");
     expect(hook).toContain("implement-allowed");
-    expect(hook).toContain(process.execPath);
+    expect(hook).not.toContain(process.execPath);
     expect(hook).not.toContain("Committing anyway");
+  });
+
+  it("renders the same pre-commit hook under a different Node executable", () => {
+    const original = process.execPath;
+    const first = renderPreCommitHook();
+    try {
+      process.execPath = "/another/node";
+      expect(renderPreCommitHook()).toBe(first);
+    } finally {
+      process.execPath = original;
+    }
   });
 
   /**

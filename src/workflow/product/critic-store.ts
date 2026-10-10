@@ -10,7 +10,9 @@ import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { planCriticBudgetMutation } from "./critic-budget.js";
 import { type CriticPhase, type CriticState, criticStateSchema } from "./critic-model.js";
-import { closedSlice, type ProductBrief, type ProductSlice, type ProductState } from "./model.js";
+import type { ProductBrief, ProductSlice, ProductState } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
+import { completesFeature } from "./review-selection.js";
 import { selectProductSlice } from "./scopes.js";
 import {
   briefPath,
@@ -25,19 +27,30 @@ import { productContractDigest } from "./subject.js";
 export async function criticSelection(
   workspace: WorkspaceState,
   input: ProductSelection & { phase?: CriticPhase },
+  wholeFeature = false,
 ) {
   const loaded = await readProductRecord(workspace, input);
   if (!loaded.ok) return loaded;
   const selected = selectProductSlice(workspace, loaded.value, input);
   if (!selected.ok) return selected;
   const record = loaded.value;
+  const scope =
+    wholeFeature ||
+    (input.task === undefined &&
+      completesFeature(
+        record,
+        input.phase === "understanding" || !reviewerRules(workspace)
+          ? undefined
+          : selected.value?.id,
+      ))
+      ? undefined
+      : selected.value;
   const slice =
-    input.task === undefined &&
-    record.brief.slices.every((s) => closedSlice(record.state.slices[s.id]?.status))
+    scope === undefined
       ? record.brief.slices.length === 1
         ? record.brief.slices[0]
         : undefined
-      : selected.value;
+      : scope;
   const task = slice?.id;
   return ok({
     phase: input.phase ?? "product",

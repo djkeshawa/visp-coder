@@ -33,6 +33,7 @@ interface TreeSitterModule {
     init(options?: { locateFile: (file: string, folder: string) => string }): Promise<void>;
     new (): {
       setLanguage(language: unknown): unknown;
+      reset(): void;
       parse(
         source: string,
         oldTree?: unknown,
@@ -101,9 +102,13 @@ export async function parseSource(grammar: Grammar, source: string): Promise<Par
   try {
     raw = parser.parse(source, null, { progressCallback: () => Date.now() > deadline });
   } catch (cause) {
+    parser.reset();
     return { kind: "failed", detail: describe(cause) };
   }
-  if (raw === null) return { kind: "timeout" };
+  if (raw === null) {
+    parser.reset();
+    return { kind: "timeout" };
+  }
 
   const handle = raw;
   const tree: ParsedTree = { grammar, root: handle.rootNode, hasError: handle.rootNode.hasError };

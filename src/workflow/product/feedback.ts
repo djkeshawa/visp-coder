@@ -12,12 +12,21 @@ import {
   productCaptureRunSchema,
   supportsBehaviorEvidence,
 } from "./evidence-references.js";
+import {
+  exploratoryFailureHistory,
+  historicalFailureReferences,
+  historicalFindingJourney,
+} from "./exploratory-history.js";
 import { productFailureSignature } from "./failures.js";
 import { findingAppliesToSlice, outstandingFeedback } from "./findings.js";
 
 export { findingAppliesToSlice, outstandingFeedback } from "./findings.js";
 
-import { type ProductFeedback, productFeedbackSchema } from "./feedback-model.js";
+import {
+  type ProductFeedback,
+  productFeedbackSchema,
+  resolutionClosesFinding,
+} from "./feedback-model.js";
 import { functionalRegressionEvidenceGap } from "./functional-regression.js";
 import { findFunctionalRepair, functionalDisproofEvidenceGap } from "./functional-resolution.js";
 import type { ProductBrief, ProductReviewerContext, ProductSlice } from "./model.js";
@@ -27,7 +36,7 @@ import { repairRecheck } from "./repair-recheck.js";
 import { findingReproductions } from "./reproduction-bindings.js";
 import type { ProductRecord } from "./store.js";
 import { productContractDigest } from "./subject.js";
-import { visualCheckpoint } from "./visual-checkpoint.js";
+import { type ReviewerPointer, visualCheckpoint } from "./visual-checkpoint.js";
 
 export function feedbackIntentDigest(brief: ProductBrief) {
   return hashValue({
@@ -121,6 +130,7 @@ export function productFeedbackPlan(
   subject: string,
   slice?: ProductSlice,
   reviewMode: "current" | "observation-preview" = "current",
+  options: { readonly reviewer?: ReviewerPointer } = {},
 ) {
   const findings = outstandingFeedback(record).filter((entry) =>
     findingAppliesToSlice(entry, slice),
@@ -145,7 +155,7 @@ export function productFeedbackPlan(
     ),
     probeResponses: [...responses.values()].map(({ kind, status }) => ({ kind, status })),
     checkSetup: productCheckGuidance(record.brief, slice),
-    visualCheckpoint: visualCheckpoint(record, subject, slice, reviewMode),
+    visualCheckpoint: visualCheckpoint(record, subject, slice, reviewMode, options.reviewer),
     focus: feedbackFocus(findings.some((entry) => entry.required) || !!failure, gaps.length > 0),
     research: researchQuestion
       ? {
@@ -262,7 +272,7 @@ export function validateProductFeedback(
     ids.map((id) =>
       catalogue.entries.find((entry) => entry.id === (catalogue.aliases.get(id) ?? id)),
     );
-  const references = validateFeedbackReferences(feedback, catalogue);
+  const references = validateFeedbackReferences(feedback, catalogue, record, slice);
   if (!references.ok) return references;
   const probes = validateProbeResponses(feedback, record, catalogue, reviewer, slice);
   if (!probes.ok) return probes;
@@ -277,7 +287,20 @@ export function validateProductFeedback(
   );
   const findings = feedback.findings.map((entry) => ({
     ...entry,
-    evidence: resolve(entry.evidence).flatMap((reference) => (reference ? [reference.id] : [])),
+    evidence: [
+      ...new Set(
+        resolve(entry.evidence).flatMap((reference) =>
+          reference
+            ? [
+                reference.id,
+                ...(reference.historicalFailure && reference.captureRunId
+                  ? [`HIST-${reference.captureRunId}`]
+                  : []),
+              ]
+            : [],
+        ),
+      ),
+    ],
   }));
 
   return ok({
@@ -291,7 +314,12 @@ export function validateProductFeedback(
 function validateFeedbackReferences(
   feedback: ProductFeedback,
   catalogue: ProductEvidenceCatalogue,
+  record: ProductRecord,
+  slice?: ProductSlice,
 ): Result<void> {
+  const historical = new Set(
+    exploratoryFailureHistory(record, slice).runs.flatMap(historicalFailureReferences),
+  );
   const ambiguous = ambiguousEvidenceIds(catalogue.entries);
   const resolve = (ids: readonly string[]) =>
     ids.map((id) =>
@@ -306,13 +334,16 @@ function validateFeedbackReferences(
     ),
     ...(feedback.probes ?? []),
   ]) {
-    const unavailableAssessment =
-      "status" in entry && ["unclear", "unavailable"].includes(entry.status);
+    const unavailableAssessment = unavailableFeedbackAssessment(entry);
     for (const [index, reference] of resolve(entry.evidence).entries()) {
       const id = entry.evidence[index];
       if (id && ambiguous.has(catalogue.aliases.get(id) ?? id))
         return err(vispError("EVIDENCE_FAILED", `Ambiguous evidence reference: ${id}`));
-      if (feedbackReferenceUsable(reference, unavailableAssessment)) continue;
+      if (
+        historicalFindingReference(entry, feedback.phase, reference, historical) ||
+        feedbackReferenceUsable(reference, unavailableAssessment)
+      )
+        continue;
       return err(
         vispError(
           "EVIDENCE_FAILED",
@@ -327,6 +358,28 @@ function validateFeedbackReferences(
     }
   }
   return ok(undefined);
+}
+
+function unavailableFeedbackAssessment(entry: {
+  readonly evidence: readonly string[];
+  readonly status?: string;
+}) {
+  return entry.status !== undefined && ["unclear", "unavailable"].includes(entry.status);
+}
+
+function historicalFindingReference(
+  entry: { readonly evidence: readonly string[]; readonly required?: boolean },
+  phase: ProductFeedback["phase"],
+  reference: ProductEvidenceCatalogue["entries"][number] | undefined,
+  historical: ReadonlySet<string>,
+) {
+  return (
+    phase === "product" &&
+    entry.required === true &&
+    reference?.status === "stale" &&
+    reference.historicalFailure &&
+    historical.has(reference.id)
+  );
 }
 
 function feedbackReferenceUsable(
@@ -377,10 +430,6 @@ function validateResolution(
   record: ProductRecord,
   slice?: ProductSlice,
 ): Result<void> {
-  const resolve = (ids: readonly string[]) =>
-    ids.map((id) =>
-      catalogue.entries.find((entry) => entry.id === (catalogue.aliases.get(id) ?? id)),
-    );
   if (!finding)
     return err(vispError("ARTIFACT_INVALID", `Unknown unresolved feedback ${resolution.id}`));
   if (slice && finding.task && finding.task !== slice.id)
@@ -389,6 +438,22 @@ function validateResolution(
         "EVIDENCE_FAILED",
         `Finding ${finding.id} belongs to ${finding.task}; assess it in its own slice or feature-wide review`,
       ),
+    );
+  if (!resolutionClosesFinding(resolution)) return ok(undefined);
+  return validateClosingResolution(resolution, finding, catalogue, reviewer, record);
+}
+
+/** Successful closure retains the existing counterevidence and functional repair guards. */
+function validateClosingResolution(
+  resolution: ProductFeedback["resolutions"][number],
+  finding: ReturnType<typeof outstandingFeedback>[number],
+  catalogue: ProductEvidenceCatalogue,
+  reviewer: ProductReviewerContext,
+  record: ProductRecord,
+): Result<void> {
+  const resolve = (ids: readonly string[]) =>
+    ids.map((id) =>
+      catalogue.entries.find((entry) => entry.id === (catalogue.aliases.get(id) ?? id)),
     );
   if (
     resolution.environmentChange &&
@@ -469,7 +534,13 @@ function functionalResolutionGap(
   // Workers usually repair before anyone records a failing reproduction. A fresh
   // independent reviewer that re-checked the finding against current passing executions
   // may close it; the human reviewer document labels this weaker kind of closure.
-  if (!repair && reviewerVerifiedRepair(finding, ids, catalogue, reviewer)) return undefined;
+  // A retained historical journey already has a witness and still requires its actual replay.
+  if (
+    !repair &&
+    !historicalFindingJourney(record, finding.evidence) &&
+    reviewerVerifiedRepair(finding, ids, catalogue, reviewer)
+  )
+    return undefined;
   if (!repair)
     return "Functional repair requires a recorded failing reproduction and a later successful rerun of the same input and assertions in a known matching environment. Restore the reproduction environment or record a new comparable failure/rerun pair. For an intentional environment repair, assess environmentChange with the exact observed from/to identities and rationale; verifier identity and adjacent regression requirements still apply. Unrelated fresh evidence, changed assertions or an unknown environment cannot close this finding";
   return functionalRegressionEvidenceGap(record, finding, resolution, repair, catalogue);

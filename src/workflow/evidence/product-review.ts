@@ -1,5 +1,5 @@
 import { sha256 } from "../../core/hash.js";
-import { imageDimensions } from "./observations/media.js";
+import { imageDimensions, imageMimeType } from "./observations/media.js";
 
 /** Capturing pixels records an observation; it never supplies the reviewer judgment. */
 export interface ProductReviewCapture {
@@ -9,6 +9,8 @@ export interface ProductReviewCapture {
   readonly subjectDigest: string;
   readonly route: string;
   readonly steps: readonly string[];
+  /** Position in the run's full operation log; steps are a bounded local summary. */
+  readonly operationIndex?: number;
   readonly viewport: { readonly width: number; readonly height: number };
   readonly createdAt: string;
   readonly provenance: "runner-captured" | "agent-supplied";
@@ -77,16 +79,4 @@ function inspectImage(
   if (capture.viewport.width <= 0 || capture.viewport.height <= 0)
     return "capture has no usable viewport";
   return { bytes, mimeType };
-}
-
-function imageMimeType(bytes: Buffer): string | undefined {
-  if (bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") return "image/png";
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
-  if (/^GIF8[79]a$/.test(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
-  if (
-    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
-    bytes.subarray(8, 12).toString("ascii") === "WEBP"
-  )
-    return "image/webp";
-  return undefined;
 }

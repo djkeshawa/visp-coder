@@ -62,6 +62,7 @@ it("offers and validates recorded counterevidence for an off-screen click withou
     const failed = value(
       await runProductCapture(state, {
         task: "T001",
+        outcomes: ["O001"],
         journey: { ...journey, actions: [{ kind: "click", selector: "#save" }] },
       }),
     );
@@ -69,6 +70,7 @@ it("offers and validates recorded counterevidence for an off-screen click withou
     const recovered = value(
       await runProductCapture(state, {
         task: "T001",
+        outcomes: ["O001"],
         journey: {
           ...journey,
           actions: [

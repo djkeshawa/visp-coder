@@ -26,9 +26,11 @@ import {
   verifyCommand,
   workCommand,
 } from "./commands/product.js";
+import { rulesCommand } from "./commands/rules.js";
 import { serveCommand } from "./commands/serve.js";
 import { initCommand } from "./commands/setup.js";
 import { skillCommand } from "./commands/skill.js";
+import { trailCommand } from "./commands/trail.js";
 import { usageCommand } from "./commands/usage.js";
 
 export function buildProgram(
@@ -72,12 +74,25 @@ export function buildProgram(
   program.addCommand(doctorCommand());
   program.addCommand(learnCommand());
   program.addCommand(recallCommand());
+  program.addCommand(rulesCommand());
+  program.addCommand(trailCommand());
   program.addCommand(reportCommand());
   program.addCommand(usageCommand());
   program.addCommand(policyCommand());
   program.addCommand(overrideCommand());
   program.addCommand(skillCommand());
   program.addCommand(serveCommand());
+
+  const enableUsageErrors = (command: Command): void => {
+    command.exitOverride();
+    command.configureOutput({
+      writeErr: (message) => {
+        if (!process.argv.includes("--json")) process.stderr.write(message);
+      },
+    });
+    for (const child of command.commands) enableUsageErrors(child);
+  };
+  enableUsageErrors(program);
 
   return program;
 }

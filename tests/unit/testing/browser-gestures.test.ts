@@ -24,10 +24,37 @@ it.each(["pointer", "touch"] as const)(
         ? ["Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }]
         : [
             "Input.dispatchMouseEvent",
-            { type: "mouseReleased", x: 50, y: 20, button: "left", buttons: 0, clickCount: 1 },
+            { type: "mouseReleased", x: 90, y: 20, button: "left", buttons: 0, clickCount: 1 },
           ],
     );
     expect(record).toHaveBeenCalledTimes(1);
+  },
+);
+it.each(["pointer", "touch"] as const)(
+  "captures the fully pulled %s state after the last move and a settle, before release",
+  async (input) => {
+    const log: string[] = [];
+    let lastMove = 0;
+    const send = vi.fn(async (_method: string, params?: Record<string, unknown>) => {
+      const type = String(params?.type);
+      log.push(`${type}:${params?.x ?? ""}`);
+      if (/Move/i.test(type)) lastMove = Date.now();
+      return {};
+    });
+    let settled = 0;
+    await dispatchDrag(send as never, vi.fn(), { ...gesture, input }, async () => {
+      settled = Date.now() - lastMove;
+      log.push("held");
+    });
+    const held = log.indexOf("held");
+    expect(log.filter((entry) => entry === "held")).toHaveLength(1);
+    // Every move step precedes the capture; release follows it.
+    expect(log.slice(0, held).filter((entry) => /Move/i.test(entry))).toHaveLength(
+      input === "touch" ? 4 : 5,
+    );
+    expect(held).toBe(log.length - 2);
+    expect(log.at(-1)).toMatch(/touchEnd|mouseReleased/);
+    expect(settled).toBeGreaterThanOrEqual(50);
   },
 );
 it("rejects unbounded or invalid gestures before browser input", async () => {

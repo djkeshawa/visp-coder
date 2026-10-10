@@ -2,7 +2,8 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openBrowserSession } from "../../../src/testing/browser-session.js";
+import { BrowserBehaviorFailure } from "../../../src/testing/browser-observations.js";
+import { interactionPage, openBrowserSession } from "../../../src/testing/browser-session.js";
 import { pngHeader } from "../support/workspace.js";
 
 const transport = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ vi.mock("../../../src/testing/chrome-transport.js", () => ({
 let root: string;
 beforeEach(async () => {
   vi.clearAllMocks();
+  transport.onEvent.mockImplementation(() => () => {});
   root = await mkdtemp(join(tmpdir(), "visp-session-test-"));
   transport.send.mockImplementation(async (method: string) => {
     if (method === "Target.createTarget") return { targetId: "target" };
@@ -32,6 +34,28 @@ afterEach(async () => {
 });
 
 describe("browser session ownership", () => {
+  it("maps invalid CSS selectors to a behavior failure", async () => {
+    const send = Object.assign(
+      vi.fn(async () => ({
+        exceptionDetails: {
+          text: "Uncaught",
+          exception: {
+            className: "DOMException",
+            description:
+              "SyntaxError: Failed to execute 'querySelectorAll' on 'Document': 'button:contains(Start)' is not a valid selector.",
+          },
+        },
+      })),
+      { sessionId: "session", targetId: "target" },
+    );
+    const page = interactionPage(send, () => {});
+    await expect(
+      page.evaluate(
+        (selector) => document.querySelectorAll(selector).length,
+        "button:contains(Start)",
+      ),
+    ).rejects.toThrow(BrowserBehaviorFailure);
+  });
   it("records viewport changes and preserves earlier capture dimensions", async () => {
     const initial = { width: 390, height: 844 };
     const session = await openBrowserSession({
@@ -98,6 +122,7 @@ describe("browser session ownership", () => {
       "Move pointer to 30,40",
       "Click 30,40",
     ]);
+    expect(capture.operationIndex).toBe(session.operations.length - 1);
     expect(session.operations.filter((entry) => entry.kind === "pointer")).toHaveLength(2);
     expect(session.operations.find((entry) => entry.kind === "capture")?.captureId).toBe(
       capture.id,
@@ -111,6 +136,191 @@ describe("browser session ownership", () => {
     expect(session.operations.length).toBeGreaterThan(0);
     await session.close();
     expect(transport.close).toHaveBeenCalledOnce();
+  });
+  it.each([
+    [200, "http://localhost:1234/a", "Navigate http://localhost:1234/a (HTTP 200)"],
+    [
+      200,
+      "http://localhost:1234/b",
+      "Navigate http://localhost:1234/a (HTTP 200, redirected to http://localhost:1234/b)",
+    ],
+    [404, "http://localhost:1234/a", "Navigate http://localhost:1234/a (HTTP 404)"],
+  ])("records the main document answer %s from %s", async (status, finalUrl, description) => {
+    const listeners = new Set<(event: Record<string, unknown>) => void>();
+    transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as never);
+    const emit = (params: Record<string, unknown>, sessionId = "session") => {
+      for (const listener of listeners)
+        listener({ method: "Network.responseReceived", sessionId, params });
+    };
+    const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
+    transport.send.mockImplementation(async (method: string) => {
+      if (method === "Page.navigate") {
+        // Subresources, other loaders and other sessions never describe this navigation.
+        emit({ type: "Script", loaderId: "L1", response: { status: 500, url: "x" } });
+        emit({ type: "Document", loaderId: "L0", response: { status: 500, url: "x" } });
+        emit({ type: "Document", loaderId: "L1", response: { status, url: finalUrl } }, "other");
+        emit({ type: "Document", loaderId: "L1", response: { status, url: finalUrl } });
+        return { loaderId: "L1" };
+      }
+      return {};
+    });
+    const navigation = session.navigate("http://localhost:1234/a");
+    if (status >= 400) {
+      await expect(navigation).rejects.toThrow(`answered HTTP ${status}`);
+      await expect(navigation).rejects.toBeInstanceOf(BrowserBehaviorFailure);
+    } else await navigation;
+    expect(session.operations.map((entry) => entry.description)).toEqual([description]);
+    await session.close();
+  });
+  describe("URLs VISP serves itself", () => {
+    const origin = "http://127.0.0.1:5555";
+    const present = (url: string) =>
+      url.startsWith(`${origin}/`) ? `project:${url.slice(origin.length)}` : url;
+    const navigateAnswering = async (
+      status: number,
+      finalUrl: string,
+      annotate?: (url: string) => string | undefined,
+    ) => {
+      const listeners = new Set<(event: Record<string, unknown>) => void>();
+      transport.onEvent.mockImplementation(((
+        listener: (event: Record<string, unknown>) => void,
+      ) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      }) as never);
+      const session = await openBrowserSession({
+        directory: root,
+        subjectDigest: "a".repeat(64),
+        present,
+      });
+      transport.send.mockImplementation(async (method: string) => {
+        if (method === "Page.navigate") {
+          for (const listener of listeners)
+            listener({
+              method: "Network.responseReceived",
+              sessionId: "session",
+              params: { type: "Document", loaderId: "L1", response: { status, url: finalUrl } },
+            });
+          return { loaderId: "L1" };
+        }
+        return {};
+      });
+      const navigation = session.navigate(`${origin}/index.html#go`, { annotate });
+      return { session, navigation };
+    };
+
+    it("names the project URL and adds the served digest", async () => {
+      const { session, navigation } = await navigateAnswering(200, `${origin}/index.html`, (url) =>
+        url === `${origin}/index.html` ? "served by VISP from the project, sha256 abc" : undefined,
+      );
+      await navigation;
+      expect(session.operations.map((entry) => entry.description)).toEqual([
+        "Navigate project:/index.html#go (HTTP 200), served by VISP from the project, sha256 abc",
+      ]);
+      await session.close();
+    });
+
+    it("shows a redirect target as a project URL, without the port", async () => {
+      const { session, navigation } = await navigateAnswering(200, `${origin}/sub/`);
+      await navigation;
+      expect(session.operations[0]?.description).toBe(
+        "Navigate project:/index.html#go (HTTP 200, redirected to project:/sub/)",
+      );
+      await session.close();
+    });
+
+    it("names a capture by its project URL, never the ephemeral port, but navigates the real one", async () => {
+      const { session, navigation } = await navigateAnswering(200, `${origin}/index.html`);
+      await navigation;
+      transport.send.mockImplementation(async (method: string) => {
+        if (method === "Runtime.evaluate") return { result: { value: `${origin}/index.html#go` } };
+        if (method === "Page.captureScreenshot")
+          return { data: pngHeader(1280, 720).toString("base64") };
+        return {};
+      });
+      const capture = await session.capture();
+      expect(capture.route).toBe("project:/index.html#go");
+      expect(capture.steps).toEqual(["Navigate project:/index.html#go (HTTP 200)"]);
+      expect(session.operations.find((entry) => entry.kind === "capture")?.description).toBe(
+        "Capture project:/index.html#go",
+      );
+      await session.close();
+    });
+
+    it("explains a missing project file and does not annotate a failed answer", async () => {
+      const annotate = vi.fn(() => "sha");
+      const { session, navigation } = await navigateAnswering(
+        404,
+        `${origin}/index.html`,
+        annotate,
+      );
+      await expect(navigation).rejects.toThrow(
+        "project:/index.html#go does not exist in the project (HTTP 404); check the path relative to the project root.",
+      );
+      await expect(navigation).rejects.toBeInstanceOf(BrowserBehaviorFailure);
+      expect(annotate).not.toHaveBeenCalled();
+      expect(session.operations[0]?.description).toBe("Navigate project:/index.html#go (HTTP 404)");
+      await session.close();
+    });
+
+    it("explains a refused project path and points built apps to their own server", async () => {
+      const { session, navigation } = await navigateAnswering(403, `${origin}/index.html`);
+      await expect(navigation).rejects.toThrow(
+        /could not be served from the project \(HTTP 403\).*dist\/.*own server/,
+      );
+      await session.close();
+    });
+  });
+  it("points an HTTP 4xx from another server to the project: URL", async () => {
+    const listeners = new Set<(event: Record<string, unknown>) => void>();
+    transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as never);
+    const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
+    transport.send.mockImplementation(async (method: string) => {
+      if (method === "Page.navigate") {
+        for (const listener of listeners)
+          listener({
+            method: "Network.responseReceived",
+            sessionId: "session",
+            params: {
+              type: "Document",
+              loaderId: "L1",
+              response: { status: 404, url: "http://localhost:1234/a" },
+            },
+          });
+        return { loaderId: "L1" };
+      }
+      return {};
+    });
+    await expect(session.navigate("http://localhost:1234/a")).rejects.toThrow(
+      'for a static page use "project:/<file>" as the journey url',
+    );
+    await session.close();
+  });
+  it("ignores an application exception event arriving after close began", async () => {
+    const listeners = new Set<(event: Record<string, unknown>) => void>();
+    transport.onEvent.mockImplementation(((listener: (event: Record<string, unknown>) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }) as never);
+    const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });
+    const exception = {
+      method: "Runtime.exceptionThrown",
+      sessionId: "session",
+      params: { exceptionDetails: { text: "Uncaught" } },
+    };
+    const closing = session.close();
+    expect(() => {
+      for (const listener of listeners) listener(exception);
+    }).not.toThrow();
+    await closing;
+    expect(session.operations).toEqual([]);
+    expect(() => session.assertHealthy?.()).not.toThrow();
   });
   it("does not record a successful click when browser input fails", async () => {
     const session = await openBrowserSession({ directory: root, subjectDigest: "a".repeat(64) });

@@ -1,5 +1,142 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **A VISP-launched Claude reviewer** (`critic.launch: claude-exec` with `critic.harness: claude-code`). VISP-launched review existed only through `codex exec`, so projects without Codex access, or whose Codex plan no longer offers the reviewer model, got no independent review unless the worker's host delegated one. VISP now runs one `claude -p` per reserved call: `--restricted --safe-mode` with only Read, Grep and Glob, no settings files, hooks, MCP servers or saved session, the configured model and effort, and the packet's response schema as structured output. `visp doctor` checks the CLI and its sign-in.
+- **An independent tester with `claude-exec`.** The tester started only with `critic.launch: codex-exec` and a Codex critic, so `claude-exec` and host reviews got no acceptance tests and no notice. `claude-exec` now starts a restricted `claude -p` tester in an empty temporary directory after a bounded sign-in check (new projects; tests of an existing codebase stay with the Codex tester). `work` reports a skipped tester with its reason, `--retry-tests` refuses when no tester is configured, and a critic without its own harness uses the project's, so `codex-exec` in a Codex project also gets the tester.
+- **Flip check in the product loop** (`workflow.flipCheck`, default `auto`). Each passing declared check runs once more on the pre-change implementation in a temporary copy of the project, and its execution records `failsWithoutChange`. A check that passes either way is shown to the worker and reviewer as a coverage gap; the result is display only and never gates acceptance. The check's external side effects happen twice, so set `off` for checks that must not run twice; spellings of the project path the copy cannot rewrite are listed in `docs/configuration.md`.
+- Workers are pointed at up to eight existing tests that exercise the source they changed, and reviewers must report weakening, skipping, deleting or deselecting an existing test unless the request changes that behavior (quoting the request sentence).
+- **Disputing a wrong pinned test.** In 3 of 15 Codex-worker benchmark runs a pinned acceptance test that was itself wrong blocked the whole loop, so the independent reviewer never ran and the worker ended stuck: a browser suite passed every assertion but exited non-zero because deleting Chrome's temporary profile threw `ENOTEMPTY` (about 15 `done` calls), a suite asserted an object key order the request does not state, and a spreadsheet suite put `=MIN(A1:C1)` in B1, a cycle by the request's own definition, and expected 0. The only guidance was a sentence asking for an intent change, which no worker managed and which an unreviewed intent change could not settle anyway. The worker can now run `visp done --dispute "<test name>" --reason "<request quote + why>"` (also `accept`, and MCP `dispute`/`reason`) for a test that failed in that run. A disputed failure no longer keeps `done` from launching the independent reviewer, which receives the test name, the tester's quote, the reason, the bounded failure output and the test source, and rules `upheld` or `rejected`, quoting the request. An upheld test is waived (the suite skips it through `VISP_WAIVED_TESTS`) and the waiver and reasoning are recorded in `acceptance-tests.json` and `visp pr`; a rejected test stays required and cannot be disputed again on the same source. Only failing declared tests can be disputed, a reason is required, and the worker never rules. Failing pinned tests now also reach `next` on the last open slice, with the dispute command once per reply (or, with no VISP-launched reviewer, a plain statement that nothing can be waived). A dispute names a test on a `FAIL:` line of a blocking run; the reviewer is launched despite the failure only when every failing test is disputed; only a review VISP launched and observed can rule, and an upheld waiver is verified against the critic state, so editing `acceptance-tests.json` waives nothing; a dispute the reviewer leaves unruled gets one more review and then goes to `visp pr`; a suite that cannot skip tests counts as passed when every failing test is waived. The tester prompt gains rules that only the assertions may fail the run (teardown errors are caught), that assertions never depend on incidental ordering, that failing tests print `FAIL: <name>`, and that the suite skips waived tests.
+- Independent testers surface ambiguous request rules, their reasonable readings and the conventional choice without freezing ambiguous assertions. Notes are saved in `acceptance-tests.json`, delivered as "Decide explicitly" notes in CLI/MCP `work` replies, and included in reviewer packets.
+- **Visp Memory as the long-term store** (experimental, opt-in with `memory.service: {command: visp-memory}`). When a feature starts, VISP records the earlier features' requests in Visp Memory, paragraph by paragraph, and adds the decisions Visp Memory selects for the new request (none when nothing is relevant enough) to that request and to every `work` reply, so the worker, tester and reviewer see them without looking anything up. `memory.enabled: false` switches it off too. With a VISP-launched Codex reviewer, its model chooses among a wide candidate set (`memory.service.select: model`, the default; `keyword` uses Visp Memory's selection alone): with ten unrelated earlier features in the store, keyword relevance scored everything alike and delivered fourteen notes, near-miss limits from other endpoints included, while missing a needed one; the model chose exactly the three that applied.
+- **Project rules.** When a user's recorded prompt states rules for later work ("these conventions apply to this change and to all later work", "from now on, …", "going forward, …"), `visp feature` records them in `.visp/rules.json` without the worker's help. The tester and reviewer judge against the current rules and every `work` reply shows them as plain numbered lines; they are read when used, not copied into a feature's fixed request, so a removed rule stops applying at once. All recorded prompts are read together, so a later message that replaces or withdraws a rule wins. `visp rules` lists them; `visp rules remove <id>` removes one captured by mistake. With a VISP-launched Codex reviewer (`critic.launch: codex-exec`), the reviewer's model reads the rules at low effort (about ten seconds, seeing only the prompt), and a rule is kept only when it quotes the prompt verbatim; phrase matching, the fallback, found 4 of 18 held-out prompts that stated lasting rules, and the model found all 18 with none in 12 ordinary requests. In a two-session benchmark, fresh sessions applied 3 of 24 convention checks when the conventions were only in VISP's records and 24 of 24 when they were restated in the request.
+
+### Fixed
+- **Existing repositories.** On SWE-bench Verified Mini, VISP's review never ran on Django or Sphinx. Each of these causes is fixed:
+  - `visp init` picks its preset from the dominant tracked source language, not from a stray `package.json`. It adopts a suggested whole-project check only if its toolchain is available and the check passes now (90 s shared budget), and lists the others with the command to add once they pass.
+  - A configured check whose tool or npm script is missing is an environment failure, not a product failure.
+  - Review sources are decoded only from valid UTF-8 bytes; others are delivered as binary. A Latin-1 test fixture made every review fail with "Source changed while preparing review".
+  - When a slice scope covers more than about 64 files (the default `**` on Django is 6,148), the review core is the files changed since authorization, not the whole scope, which overflowed the packet in every run.
+  - Reviews of products too large for one restorable candidate copy (2,000 files / 32 MiB) keep file identities and refuse restoration instead of refusing review.
+  - Reviewers see a bounded diff of changes to existing files before other context, so a small change inside a large file is not missed.
+  - `brief.yaml` is written so every string reads back exactly; a pasted issue with tab-only lines made VISP reject its own brief.
+  - Refreshing the code graph no longer overflows the stack on large repositories (about 135,000 relations).
+- On Node 22, every command printed "ExperimentalWarning: SQLite is an experimental feature" to stderr, which hosts and `--json` callers read. VISP now holds back that one warning when it loads `node:sqlite`.
+- On native Windows, `npm` and other commands named without an extension resolved to Node's extensionless `npm` shell script, which Windows cannot start, so npm checks failed. VISP now tries only the extensions in `PATHEXT` when a name has none of them, as Windows does.
+- On native Windows, `visp install` did not recognize its own Claude hook entries (written with backslashes), so an edited entry was not reported as customized, and an install over an older build's entries added new ones beside them instead of replacing them.
+- Product source snapshots hash files with bounded concurrency and batched Git identities: `visp next` on Django went from about 4.8 to 2.1 s and `visp done` from about 45 to 26 s, with the same path checks on every access.
+- MCP `visp_query` with `operation: "unknowns"` lists the unknowns as its answer, with their detail. It said `no results` and then listed them under "Not determined", which the CLI had already stopped doing. Both surfaces now share one renderer; a CLI query with no rows but some unknowns now says `no results` before listing them.
+- Independent acceptance baselines run against private launch-time source copies, so concurrent implementation no longer discards the suite. Each baseline uses a fresh copy; temporary files are cleaned up and environment filtering, process cleanup and output redaction remain in place.
+- Independent review sweeps every stated rule and common input variants before spending its three findings on optional robustness. Unstated extreme limits are advisory and do not trigger repair cycles or extra middle-slice reviews.
+- The memory gate carries decisions about a kind of argument or value to new operations that take the same kind: on a spreadsheet engine it never passed "digits must be a whole number from 0 to 10", stated for `ROUND`, to a request for `ROUNDUP` and `ROUNDDOWN` (0 of 5); now 5 of 5, still without near-miss limits of other arguments.
+- A worker no longer discards earlier uncommitted work to start a feature. `visp feature` refused a working tree holding a previous session's uncommitted changes with "git commit the project baseline", and the worker ran `git checkout` on those files instead, losing the earlier feature. The refusal now names `git add -A && git commit -m "<what these changes are>"` and says not to discard them, and the Claude Code hook refuses `git checkout`/`git restore` of files with uncommitted changes and `git reset --hard` on a dirty tree. Branch switches, staged-only restores and stashes are unaffected.
+- `visp feature` starts on uncommitted earlier work when Git cannot be written. Codex's workspace-write sandbox keeps `.git` read-only, so the commit the refusal asked for always failed, `visp next` kept pointing at `visp feature`, and workers gave up or edited without VISP (3 of 3 benchmark runs). A write probe of the git directories now decides: where Git is writable the refusal stays, worded for that case (commit, fixing a missing author identity or a failing hook; never discard); where it is not, the feature records the changed files' content in `.visp/state/inherited-changes/<feature>.json` and the reply says they are earlier work not to be discarded. Slice scope was already judged on content from `visp work`, so unchanged inherited files are not the feature's changes and files it changes further are; `visp guard`'s working-tree diff, input warnings and the `visp pr` document now agree.
+- An edit authorization belongs to the host session that ran `visp work`. A first session ended with its slice open after the review budget ran out, and a later session with a new request edited under that leftover authorization without starting a feature for its own request (seen in three of nine second sessions of a two-session benchmark). The hooks now record the host session of each prompt and shell command (`.visp/session/host-session.json`, git-ignored), `visp work` stamps the session that runs it on the authorization, and the editor hook passes the editing session to `visp guard --session`, refusing writes under a grant from another session, naming both ways on: `visp feature` for a new request or `visp work --task <id>` to continue. Re-authorizing keeps the slice's baseline. Hosts whose prompt hook reports no session keep the previous behavior; installed hooks update with `visp install`.
+
+### Fixed from the 28 September audit
+
+Issues found by an internal audit on 28 September, outside the review loop.
+
+**Scope enforcement and hooks**
+
+- Commands and MCP tools started in a project subdirectory now find the initialized root, and `visp init` refuses to create a second project below it. Absolute input paths and edit hooks also accept symlinked spellings of files inside the root.
+- Claude's edit hook now leaves normal host permission prompts in place for allowed and non-project files, while refusing in-project symlink escapes, protected VISP state and control files, and blocked paths at any depth regardless of case. Hook startup failures exit as blocking errors.
+- `visp guard`, MCP `visp_guard`, `visp done` and pre-commit now agree on active scope policy, overrides and protected paths. Authorization freezes blocked-path settings and hashes ignored `.env*` files so later config tampering and secret-file changes are refused.
+- The Claude shell hook checks destructive command operands rather than unrelated words in a compound command; doctor labels Claude's edit-tool boundary and warns that Codex scope checks occur at commit time.
+- MCP browser capture no longer accepts an agent-selected executable; documentation explains that MCP-run checks execute outside the coding host's sandbox.
+
+**Runtime pinning and Windows**
+
+- Installed hooks and MCP registrations launch the recorded VISP CLI, so a different `visp` on PATH cannot change enforcement; switching builds now requires `visp install --replace-runtime` and a host restart.
+- `visp doctor` names both runtimes on a mismatch, avoids misleading asset repairs and readiness advice, and shows when the shell's `visp` differs from the installed CLI.
+- Native Windows can launch npm, pnpm and Codex `.cmd`/`.bat` shims for checks and independent review, while installation and Claude hooks run the pinned CLI through Node.
+- Generated hook scripts are local checkout assets; ordinary Claude edits remain available when VISP cannot answer and no task is authorized.
+- Runtime build IDs ignore editor debris and CRLF differences, and the MCP SDK minimum includes the APIs VISP imports at startup.
+
+**Installation and doctor**
+
+- Installer merges JSONC MCP configuration without discarding models, permissions or other servers; malformed files remain untouched even with `--force`.
+- Cursor and Copilot receive MCP registrations in their host-specific project files, and Cursor installation removes an exact legacy root VISP entry. Codex registration can be added to an existing project TOML without replacing other settings.
+- Installer preserves an existing untracked Git pre-commit hook as `pre-commit.local` when `--force` is used, while refusing to replace a tracked hook.
+- Claude Code installs through an in-project `CLAUDE.md` symlink, and doctor detects missing prompt, Stop, Bash and MCP registrations, Codex trust and sign-in gaps, and unavailable browsers required by active checks.
+- Generic-host activation and non-host-hook enforcement limits are reported accurately; Codex-exec independent tests are skipped with an explanation when the critic host is not Codex.
+- Generated CI quotes pull-request branch names safely and uses read-only repository permissions. Installation documentation keeps local hooks when adding CI, and suite-specific test scripts rebuild `dist/` first.
+
+**Evidence identity and snapshots**
+
+- Product evidence stays current across terminal settings, sandbox routing variables and new Claude or Codex sessions. Freshness uses runtime environment variables and optional check `environmentVariables`; the full inherited environment is hashed separately for execution comparisons. The docs now state that checks inherit operator credentials and record their output.
+- Mid-slice merges, pulls and rebases no longer count incoming committed files that still match `HEAD` against the slice scope or changed-file limit. Verification reports those paths separately and recovery guidance preserves committed content.
+- Repository file, directory, dangling and external symlinks are snapshotted as links. Candidate capture and recoverable restore preserve their target text without following it; symlinked parent directories and managed-state links remain refused.
+- Large repositories no longer exhaust source and candidate budgets solely because of unrelated tracked files. VISP uses Git identities outside declared inputs, captures candidates for the selected slice, and skips reviewer handoff construction until a current execution has passed.
+- `work`, `next` and verification name untracked files outside all declared scopes and check inputs, so generated logs can be ignored before they invalidate evidence.
+- Declared Node verifiers recognize test options with separate values, including `--test-timeout 5000`; ambiguous entries explain the `--flag=value` workaround. Checks without declared verifier inputs no longer hash their executable.
+- Python bytecode defaults to a private per-user cache with verified ownership and permissions, refusing unsafe or symlinked cache directories instead of using a shared writable `/tmp` location.
+- `doctor --check-command` describes its separate smoke-check environment accurately, and test-result parsing recognizes Node’s spec reporter as well as TAP.
+
+**Locks, cancellation and processes**
+
+- Restrictive umasks no longer strand file transactions. Recovery tolerates mode-only differences, guard waits briefly for live writers, and product reads retry brief/state pairs observed during a concurrent update.
+- State locks record Linux process identity to detect reused PIDs and avoid guessing across PID namespaces. `doctor --fix --recover-lock <owner-token>` recovers a confirmed stopped ambiguous owner; busy errors include owner details and MCP-specific recovery.
+- Command checks retain bounded head and tail output without failing at 8 MB. POSIX subprocess groups are terminated on exit, cancellation and timeout; checks accept `timeoutMs`, and timeouts are recorded separately from product failures.
+- `verify`, `done`, `accept` and browser captures release the worktree lock while executing. MCP cancellation reaches subprocesses, completed checks are persisted individually, interrupted runs resume current passing checks, and CLI/MCP report progress.
+- Review waits use the remaining whole-call budget (100 seconds on CLI, 50 over MCP); pending reviews point to `visp next`, and acceptance no longer runs the same checks twice around a review. Installed instructions request the host's maximum shell timeout.
+- Feature rule extraction and memory model calls run before taking the lock that allocates and saves the feature.
+- Browser connection failures name the app URL to restart; journey timeouts point to check authoring, and missing shared libraries are no longer classified as permissions. Startup probes use the journey's 10-second budget and cache only deterministic missing-browser failures.
+- Sandbox diagnostics recognize process-spawn denials and outside-workspace filesystem denials, while uncertain permission errors retain their failure status with contextual advice.
+
+**Secrets, branches and sessions**
+
+- Check and independent-test diagnostics mask environment values, credential patterns and local paths before entering the committed feature trail; raw command output stays under ignored session state. Preserved requests and project rules mask credentials, and feature replies disclose request redaction.
+- Candidate checkpoints keep only hashes for ignored, secret-named and blocked inputs, and refuse to restore their omitted contents. Candidates no longer duplicate the brief, full product state or image bytes.
+- Switching branches or stashing a temporary slice no longer traps `next`, `status`, `work` or commit hooks behind stale local selections. Missing explicit task IDs list the valid slices.
+- Feature ordinals are allocated across Git refs and atomically reserved across linked worktrees; new project rules use content-derived IDs, ambiguous legacy rule removal is refused, and fresh checkouts select features by creation time.
+- Concurrent host sessions no longer stamp anonymous work grants with another session's identity. Bare `work` respects new-session request routing, question-only new sessions avoid Stop reminders, and reminder budgets are scoped to each session and feature.
+- CI scope checks use all features carried by a pull request or matching its branch, including renamed and detached branches. Authorization updates the feature's recorded branch, and CI refusals give CI-specific recovery guidance.
+- Migration archives exclude private session and derived graph state. Preview reports invalid artifacts by feature and path while continuing through unaffected features; apply names the failure and explains how to migrate other features individually.
+- Captures and candidates are ignored by default, diagnostic history has rolling retention targets that preserve referenced evidence, and `visp trail prune` removes unreferenced local artifacts. Doctor respects a deliberate choice to keep the whole trail local.
+
+**Agent guidance and replies**
+
+- Resident guidance starts a one-slice feature with `visp work --check`, keeps critic review material out of the default command guide, and shows a quoted-heredoc form for verbatim requests.
+- Brief revisions preserve an authorized slice's original file baseline, report revoked edit authority and reopened slices, and keep unlinked advisory decisions from reopening completed work.
+- `visp next` handles existing outcomes, incomplete briefs, and outcome-less slices without sending agents through dead-end work commands.
+- MCP replies provide structured next actions, avoid duplicating full results in text, and keep index refreshes to counts and short samples unless detail is requested; doctor identifies a different `visp` build on PATH.
+- CLI status, handoff, capture, control, and observations return focused summaries with recovery commands and relevant image paths; `--full` retains complete status and handoff JSON.
+- Browser checks summarize failures first and reuse matching completed captures during `done`; capture replies avoid duplicate image metadata and cumulative step histories.
+- Usage errors return the JSON error envelope and exit code 2; quoted check arguments remain literal; usage import errors and docs explain how to copy external rollouts into the project.
+
+**Independent tester and memory**
+
+- Independent acceptance tests no longer pin when their interpreter cannot start, when the launch-time source snapshot cannot be captured consistently, or when the suite explicitly admits it checks only file structure. Later worker edits are isolated by the launch-time baseline copy.
+- New-project testers run in an empty temporary directory; candidate and pinned test processes receive a limited environment, and Node acceptance files avoid automatic `node --test` discovery.
+- Tester recording and pinning wait through state-lock contention, retain a validated candidate on a busy pin, and allow failed attempts to be retried with `visp work --feature <id> --retry-tests`.
+- Live testers remain `running` beyond ten minutes, missing Codex installations do not launch doomed background testers, tester logs stay with their feature, and later tester starts remove abandoned temporary auth copies.
+- Visp Memory records successful request chunks as they complete, so a failed chunk no longer causes earlier decisions to be submitted again.
+- Configuration and doctor settings now explain `memory.recall`, `memory.service.*`, and the narrower effect of `telemetry.enabled`.
+- The library API identifies `loadWorkspace()` as the source of a loaded workspace for product and observation services; the unused artifact-store reader is removed.
+
+**Repository graph**
+
+- Graph queries now resolve exact symbols without a search limit, report ambiguous names with candidate IDs, show the selected IDs, accept both ends of `tracePath`, and expose snapshot identity and freshness in replies.
+- Incremental indexing keeps calls through unchanged barrels and newly added Python modules, reparses only direct importers and affected re-export chains, and avoids small-snapshot VACUUM work.
+- Python src-layout and module-qualified imports, Vite root-absolute script links, and package-based tsconfig inheritance now produce the expected graph edges or actionable unknowns.
+- The graph walker indexes nested source directories while excluding agent worktrees and non-source assets; parser cancellation no longer contaminates the next file.
+- Read-only graph queries no longer wait for the state writer lock; concurrent graph writers receive a retryable GRAPH_BUSY error, and repeated MCP queries reuse a bounded snapshot cache.
+- Graph query documentation now uses a symbol for `callers` and shows the two-endpoint `tracePath` command; missing-index recovery points to `visp index`.
+
+**visp-runner and browser testing**
+
+- Resumed Codex turns now reapply the pinned sandbox, approval policy and isolated configuration, while transient reconnecting errors no longer fail successful turns.
+- Claude runner attempts accept separately recorded auxiliary-model usage, require explicit tool permissions for writable runs, and load only a pinned `.mcp.json` instead of ambient MCP servers.
+- Study allocation is reserved only after worktree, resume and harness preflight succeeds; host executables are resolved to a pinned real path and verified before each turn.
+- Required command observations recognize bash, zsh and sh wrappers by absolute-path basename, including `/usr/bin/bash`.
+- Evaluator reports up to 16 MiB can arrive as a single JSON line, preserving blank lines without hitting the host event-line limit.
+- Runner host processes inherit proxy and CA settings while retaining the credential allowlist; Claude auto-updates are disabled during attempts.
+- `visp-runner inspect` prints a compact run summary by default; `--full` prints the complete verified manifest and snapshots.
+- Local browser journeys serve missing confined assets as 404 responses and report invalid CSS selectors as indexed behavior failures with captures.
+- Runner documentation now states that Codex's dollar estimate can be enforced only after a turn reports usage.
+
 ## 0.5.0-beta.2 - 2026-09-27
 
 ### Added

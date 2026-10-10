@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { type FileHandle, lstat, mkdtemp, open, realpath, rm } from "node:fs/promises";
+import { type FileHandle, lstat, mkdtemp, open, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fromUnknown, type VispError, vispError } from "./errors.js";
 import { resolvedProductExecutionEnvironment } from "./execution-environment.js";
 import { err, type Result } from "./result.js";
+import { removeTreeBestEffort } from "./stale-temp.js";
 
 export const PRODUCT_CHECK_CONTEXT = "VISP_PRODUCT_CHECK_CONTEXT";
 interface CheckContext {
@@ -50,7 +51,7 @@ export async function productCheckEnvironment(
 export async function withProductCheckContext<T>(
   root: string,
   check: string,
-  execute: (environment: Record<string, string>) => Promise<Result<T>>,
+  execute: (environment: Record<string, string>, directory: string) => Promise<Result<T>>,
 ): Promise<Result<T>> {
   const directory = await mkdtemp(join(await realpath(tmpdir()), "visp-check-"));
   const context: CheckContext = {
@@ -63,7 +64,10 @@ export async function withProductCheckContext<T>(
     original = await open(join(directory, "receipt"), "wx+", 0o600);
     await original.writeFile(receiptHeader(context));
     const before = await original.stat();
-    const result = await execute(await productCheckEnvironment(root, check, context.receipt));
+    const result = await execute(
+      await productCheckEnvironment(root, check, context.receipt),
+      directory,
+    );
     const current = await openCheckReceipt(context);
     try {
       const after = await current.stat();
@@ -88,7 +92,8 @@ export async function withProductCheckContext<T>(
     );
   } finally {
     await original?.close();
-    await rm(directory, { recursive: true, force: true });
+    // The private HOME of a pinned run lives here; cleanup never changes the check's result.
+    await removeTreeBestEffort(directory);
   }
 }
 

@@ -1,17 +1,22 @@
 import { vispError } from "../../core/errors.js";
+import type { FileMutation } from "../../core/file-transaction.js";
 import { filePrecondition } from "../../core/file-transaction.js";
+import { currentBranch, headCommit } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { requireImplementationFoundation } from "../gates/readiness.js";
 import type { WorkspaceState } from "../state.js";
 import { updateProductBrief } from "./brief.js";
 import { validateProductCheckCommand } from "./check-command.js";
+import { uninstalledAlias } from "./check-executable.js";
 import { buildProductContext } from "./context.js";
 import type { ProductWorkContext } from "./context-types.js";
 import { correctionReasons } from "./corrections.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
 import { criticUnderstanding } from "./critic-understanding.js";
 import { prepareWorkEnvironment } from "./environment.js";
+import { firstDoneAdvice, withFirstDoneAdvice } from "./first-done-advice.js";
+import { currentHostSession } from "./host-prompts.js";
 import { independentTestsBeforeWork, type TestsStarter } from "./independent-tests.js";
 import {
   checksFor,
@@ -20,13 +25,17 @@ import {
   type ProductState,
   sliceDigest,
 } from "./model.js";
+import { protectedEnvSnapshot } from "./protected-env.js";
+import { retainRegressionScopeBaseline } from "./regression-scope-advice.js";
 import { withProductMutation } from "./runtime.js";
 import {
   type ProductAuthorization,
+  productAuthorizationSchema,
   readProductAuthorization,
   selectProductSlice,
+  staleTaskNote,
 } from "./scopes.js";
-import { runProductNext } from "./status.js";
+import { featureStartingNext, newSessionRequestNext, runProductNext } from "./status.js";
 import {
   authorizationPath,
   json,
@@ -50,8 +59,8 @@ export async function runProductContext(
   if (!selected.ok) return selected;
   if (!selected.value)
     return err(
-      vispError("NO_ACTIVE_TASK", "Add the next usable slice to the brief", {
-        recovery: "visp brief",
+      vispError("NO_ACTIVE_TASK", "Start the request as one slice with a check", {
+        recovery: 'visp work --check "<command that runs your tests>"',
       }),
     );
   const snapshot = await productSourceSnapshot(workspace, record.value.brief);
@@ -79,6 +88,24 @@ export async function runProductWork(
   tests?: TestsStarter,
   testsWaitMs = 0,
 ): Promise<Result<ProductWorkContext>> {
+  if (!options.feature && !options.task) {
+    const starting = await featureStartingNext(workspace, options);
+    if (starting) return err(vispError("STAGE_BLOCKED", starting.objective));
+    const routing = await withProductMutation(workspace, async () => {
+      const record = await readProductRecord(workspace, options);
+      if (!record.ok) return record;
+      const next = await newSessionRequestNext(workspace, record.value, options);
+      if (!next.ok) return next;
+      return next.value
+        ? err(
+            vispError("STAGE_BLOCKED", next.value.objective, {
+              recovery: next.value.evidence.join("\n"),
+            }),
+          )
+        : ok(undefined);
+    });
+    if (!routing.ok) return routing;
+  }
   if (options.check?.trim()) {
     const quick = await singleSliceBrief(workspace, options.feature, options.check.trim());
     if (!quick.ok) return quick;
@@ -110,10 +137,19 @@ async function singleSliceBrief(
   const record = await readProductRecord(workspace, feature ? { feature } : {});
   if (!record.ok) return record;
   const { brief } = record.value;
+  if (brief.incomplete || (brief.slices.length > 0 && !brief.outcomes.length))
+    return err(
+      vispError("ARTIFACT_INVALID", "Complete the brief before working", {
+        recovery: `visp brief --feature ${brief.feature}; set incomplete:false and declare outcomes`,
+      }),
+    );
   if (brief.slices.length) {
     const open = brief.slices.find((slice) => !slice.checks.length);
     if (!open) return ok(undefined);
-    const id = `${open.id}-C1`;
+    const id = unusedId(
+      brief.checks.map((entry) => entry.id),
+      `${open.id}-C`,
+    );
     const added = await updateProductBrief(workspace, {
       feature: brief.feature,
       reason: "Declare the slice check",
@@ -124,32 +160,55 @@ async function singleSliceBrief(
     });
     return added.ok ? ok(undefined) : added;
   }
+  const outcomes = brief.outcomes.length
+    ? brief.outcomes.filter((outcome) => outcome.priority === "must").map((outcome) => outcome.id)
+    : [unusedId([], "O")];
+  const linkedOutcomes = outcomes.length ? outcomes : brief.outcomes.map((outcome) => outcome.id);
+  const checkId = unusedId(
+    brief.checks.map((entry) => entry.id),
+    "C",
+  );
+  const taskId = unusedId(
+    brief.slices.map((entry) => entry.id),
+    "T",
+  );
   const created = await updateProductBrief(workspace, {
     feature: brief.feature,
     reason: "Work the whole request as one slice",
     patch: {
-      outcomes: [
-        {
-          id: "O001",
-          kind: "functional",
-          statement: `The original request is fulfilled: ${brief.goal}`,
-          priority: "must",
-          provenance: "user-stated",
-        },
-      ],
-      checks: [{ id: "C001", command: check, outcomes: ["O001"] }],
+      ...(!brief.outcomes.length
+        ? {
+            outcomes: [
+              {
+                id: linkedOutcomes[0],
+                kind: "functional",
+                statement: `The original request is fulfilled: ${brief.goal}`,
+                priority: "must",
+                provenance: "user-stated",
+              },
+            ],
+          }
+        : {}),
+      checks: [{ id: checkId, command: check, outcomes: linkedOutcomes }],
       slices: [
         {
-          id: "T001",
+          id: taskId,
           goal: "Deliver the original request",
-          outcomes: ["O001"],
+          outcomes: linkedOutcomes,
           scope: { allowed: ["**"] },
-          checks: ["C001"],
+          checks: [checkId],
         },
       ],
     },
   });
   return created.ok ? ok(undefined) : created;
+}
+
+function unusedId(existing: readonly string[], prefix: string): string {
+  const used = new Set(existing);
+  let ordinal = 1;
+  while (used.has(`${prefix}${String(ordinal).padStart(3, "0")}`)) ordinal++;
+  return `${prefix}${String(ordinal).padStart(3, "0")}`;
 }
 
 /**
@@ -165,18 +224,24 @@ async function runWorkAndReviewRoute(
   );
   if (!worked.ok) return worked;
   const next = await runProductNext(workspace, {
-    feature: worked.value.feature,
-    task: worked.value.task,
+    feature: worked.value.context.feature,
+    task: worked.value.context.task,
   });
-  return next.ok && next.value.criticAdvice
-    ? ok({ ...worked.value, criticAdvice: next.value.criticAdvice })
-    : worked;
+  return ok({
+    ...worked.value.context,
+    ...(next.ok
+      ? {
+          next: withFirstDoneAdvice(next.value, worked.value.advice),
+          ...(next.value.criticAdvice ? { criticAdvice: next.value.criticAdvice } : {}),
+        }
+      : {}),
+  });
 }
 
 async function runProductWorkLocked(
   workspace: WorkspaceState,
   options: ProductSelection,
-): Promise<Result<ProductWorkContext>> {
+): Promise<Result<{ context: ProductWorkContext; advice?: string }>> {
   const record = await readProductRecord(workspace, options);
   if (!record.ok) return record;
   const selected = readyProductSlice(workspace, record.value, options);
@@ -216,31 +281,93 @@ async function runProductWorkLocked(
   const path = authorizationPath(workspace, record.value.brief.feature);
   const before = await workspace.files.readTextIfExists(path);
   if (!before.ok) return before;
-  const prior = await readProductAuthorization(workspace, record.value);
-  if (!prior.ok) return prior;
   const timestamp = new Date().toISOString();
-  const auth: ProductAuthorization = {
-    version: 2,
-    feature: record.value.brief.feature,
-    task: slice.id,
-    createdAt: timestamp,
-    root: hashValue(workspace.paths.root),
-    contractDigest: sliceDigest(record.value.brief, slice),
-    baseline: prior.value?.task === slice.id ? prior.value.baseline : snapshot.value,
-  };
+  const granted = await grantAuthorization(
+    workspace,
+    record.value,
+    slice,
+    snapshot.value,
+    timestamp,
+  );
+  if (!granted.ok) return granted;
+  const auth = granted.value.authorization;
   const status = await statusMutation(workspace, record.value.brief.feature, slice.id, "work");
   if (!status.ok) return status;
   const next = workingState(current, slice, auth, timestamp, reopen, subject.value, findings);
+  const branch = await workBranchMutation(workspace, record.value);
+  if (!branch.ok) return branch;
   const saved = await saveProductState(workspace, record.value, next, [
+    ...branch.value,
     { kind: "write", path, content: json(auth), expectedBefore: filePrecondition(before.value) },
     status.value,
   ]);
+  await retainRegressionScopeBaseline(workspace, auth, saved.ok);
   return saved.ok
     ? ok({
-        ...context.value,
-        criticUnderstanding: understanding.value,
+        context: {
+          ...context.value,
+          notes: [...context.value.notes, ...staleTaskNote(workspace, record.value)],
+          criticUnderstanding: understanding.value,
+        },
+        advice: firstDoneAdvice(record.value, slice, granted.value.prior, subject.value),
       })
     : saved;
+}
+
+/**
+ * Re-authorizing the same slice keeps its baseline, so edits made under an earlier grant
+ * still count as the slice's own. The grant records the host session that asked for it.
+ */
+async function grantAuthorization(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice,
+  snapshot: Record<string, string>,
+  createdAt: string,
+): Promise<Result<{ authorization: ProductAuthorization; prior?: ProductAuthorization }>> {
+  const prior = await readProductAuthorization(workspace, record);
+  if (!prior.ok) return prior;
+  const retained = await workspace.files.readTextIfExists(
+    authorizationPath(workspace, record.brief.feature),
+  );
+  if (!retained.ok) return retained;
+  let grant = prior.value?.task === slice.id ? prior.value : undefined;
+  if (!prior.value && retained.value) {
+    try {
+      const stale = productAuthorizationSchema.safeParse(JSON.parse(retained.value));
+      if (
+        stale.success &&
+        stale.data.feature === record.brief.feature &&
+        stale.data.task === slice.id &&
+        stale.data.root === hashValue(workspace.paths.root)
+      )
+        grant = stale.data;
+    } catch {
+      // A malformed old grant cannot supply a baseline.
+    }
+  }
+  const session = await currentHostSession(workspace, true);
+  if (!session.ok) return session;
+  const protectedEnv = await protectedEnvSnapshot(workspace.paths.root);
+  if (!protectedEnv.ok) return protectedEnv;
+  const head = await headCommit(workspace.paths.root);
+  if (!head.ok) return head;
+  return ok({
+    prior: prior.value,
+    authorization: {
+      version: 2,
+      feature: record.brief.feature,
+      task: slice.id,
+      createdAt,
+      root: hashValue(workspace.paths.root),
+      contractDigest: sliceDigest(record.brief, slice),
+      baseline: grant?.baseline ?? snapshot,
+      blockedPaths: grant?.blockedPaths ?? workspace.config.workflow.blockedPaths,
+      envBaseline: grant?.envBaseline ?? protectedEnv.value,
+      headCommit: grant?.headCommit ?? head.value,
+      ...(session.value ? { session: session.value } : {}),
+    },
+  });
 }
 
 async function workUnderstanding(
@@ -291,7 +418,26 @@ function readyProductSlice(
       }),
     );
   const ready = validateReadySlice(record, slice);
-  return ready.ok ? ok(slice) : ready;
+  if (!ready.ok) return ready;
+  const missing = uninstalledInterpreter(record, slice);
+  return missing ? err(missing) : ok(slice);
+}
+
+/**
+ * A check that runs `python` where only `python3` exists fails at its first `done` as an
+ * environment failure. Say so before edits begin, with the patch that fixes it; never
+ * rewrite the check here.
+ */
+function uninstalledInterpreter(record: ProductRecord, slice: ProductSlice) {
+  for (const check of checksFor(record.brief, slice)) {
+    const found = uninstalledAlias(check);
+    if (found)
+      return vispError(
+        "STAGE_BLOCKED",
+        `Check ${check.id} runs "${found.argv0}", which is not installed here; "${found.alias}" is. ${found.fix}`,
+      );
+  }
+  return undefined;
 }
 
 function workingState(
@@ -387,4 +533,26 @@ function reopeningBlocked(
   findings: string[],
 ): boolean {
   return reopen && (explicitTask === undefined || findings.length === 0);
+}
+
+async function workBranchMutation(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+): Promise<Result<FileMutation[]>> {
+  const branch = await currentBranch(workspace.paths.root);
+  if (!branch.ok) return branch;
+  const intent = await workspace.store.readIntent(record.brief.feature);
+  if (!intent.ok) return intent;
+  if (branch.value === "HEAD" || intent.value.branch === branch.value) return ok([]);
+  const path = workspace.paths.featureFile(record.brief.feature, "intent.json");
+  const before = await workspace.files.readText(path);
+  if (!before.ok) return before;
+  return ok([
+    {
+      kind: "write",
+      path,
+      content: json({ ...intent.value, branch: branch.value }),
+      expectedBefore: filePrecondition(before.value),
+    },
+  ]);
 }

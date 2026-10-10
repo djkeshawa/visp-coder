@@ -1,5 +1,9 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseCommand, resolveCommand, run } from "../../../src/core/exec.js";
+import { prepareCommand } from "../../../src/core/windows-command.js";
 
 describe("parseCommand", () => {
   it("splits a plain command into an argv vector", () => {
@@ -10,6 +14,24 @@ describe("parseCommand", () => {
   it("keeps quoted segments together", () => {
     const result = parseCommand('node -e "a b"');
     expect(result.ok && result.value).toEqual(["node", "-e", "a b"]);
+  });
+
+  it("passes quoted test glob and pytest IDs literally", () => {
+    expect(parseCommand('node --test "test/**/*.test.mjs"')).toEqual({
+      ok: true,
+      value: ["node", "--test", "test/**/*.test.mjs"],
+    });
+    expect(parseCommand("pytest 'test_api.py::test_case[a]' ")).toEqual({
+      ok: true,
+      value: ["pytest", "test_api.py::test_case[a]"],
+    });
+  });
+
+  it("accepts Windows path separators as literal argv content", () => {
+    expect(parseCommand("node test\\a.test.mjs")).toEqual({
+      ok: true,
+      value: ["node", "test\\a.test.mjs"],
+    });
   });
 
   it("refuses shell syntax rather than passing it to a shell", () => {
@@ -24,7 +46,127 @@ describe("parseCommand", () => {
   });
 });
 
+it("resolves Windows npm shims through PATHEXT and escapes metacharacters", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "visp-windows-command-"));
+  try {
+    await writeFile(join(directory, "npm.cmd"), "@echo off\r\n");
+    const prepared = prepareCommand(
+      "npm",
+      ["test", "a&b", "%USERPROFILE%"],
+      {
+        PATH: directory,
+        PATHEXT: ".cmd;.exe",
+      },
+      "win32",
+    );
+    expect(prepared.file).toBe("cmd.exe");
+    expect(prepared.windowsVerbatimArguments).toBe(true);
+    expect(prepared.args).toEqual(["/d", "/s", "/c", expect.stringContaining("^&")]);
+    expect(prepared.args[3]).toContain("^%USERPROFILE^%");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("prefers a PATHEXT shim over Node's extensionless Windows npm shell script", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "visp-windows-command-"));
+  try {
+    await writeFile(join(directory, "npm"), "#!/usr/bin/env bash\n");
+    await writeFile(join(directory, "npm.cmd"), "@echo off\r\n");
+    const prepared = prepareCommand(
+      "npm",
+      ["--version"],
+      { PATH: directory, PATHEXT: ".exe;.cmd" },
+      "win32",
+    );
+    expect(prepared.file).toBe("cmd.exe");
+    expect(prepared.args[3]).toContain("npm.cmd");
+    const explicit = prepareCommand(
+      "npm.cmd",
+      ["--version"],
+      { PATH: directory, PATHEXT: ".exe;.cmd" },
+      "win32",
+    );
+    expect(explicit.args[3]).toContain("npm.cmd");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 describe("run", () => {
+  it("delivers explicit stdin and closes it after the input", async () => {
+    const input = "first line\nUnicode: café\n";
+    const result = await run(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], {
+      cwd: process.cwd(),
+      input,
+      timeoutMs: 2000,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { exitCode: 0, stdout: input, timedOut: false },
+    });
+  });
+
+  it("tolerates a subprocess closing stdin before consuming all input", async () => {
+    const result = await run(process.execPath, ["-e", "process.exit(0)"], {
+      cwd: process.cwd(),
+      input: "x".repeat(1024 * 1024),
+      timeoutMs: 2000,
+    });
+    expect(result).toMatchObject({ ok: true, value: { exitCode: 0, timedOut: false } });
+  });
+
+  it("retains bounded head and tail output without killing a verbose check", async () => {
+    const result = await run(
+      process.execPath,
+      [
+        "-e",
+        "console.log('HEAD'); process.stdout.write('x'.repeat(9 * 1024 * 1024)); console.log('TAIL');",
+      ],
+      { cwd: process.cwd() },
+    );
+    expect(result).toMatchObject({ ok: true, value: { exitCode: 0 } });
+    if (!result.ok) return;
+    expect(result.value.stdout).toContain("HEAD");
+    expect(result.value.stdout).toContain("TAIL");
+    expect(result.value.stdout).toContain("output truncated");
+    expect(result.value.stdout.length).toBeLessThan(8 * 1024 * 1024 + 100);
+  });
+
+  it("does not wait for inherited pipes after the direct child exits", async () => {
+    const result = await run(
+      process.execPath,
+      [
+        "-e",
+        `
+      const {spawn} = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], {stdio: 'inherit'});
+      child.unref();
+    `,
+      ],
+      { cwd: process.cwd(), timeoutMs: 10_000 },
+    );
+    expect(result).toMatchObject({ ok: true, value: { exitCode: 0, timedOut: false } });
+    // The grandchild sleeps 20 s; anything under 5 s means it was not waited for.
+    if (result.ok) expect(result.value.durationMs).toBeLessThan(5000);
+  });
+
+  it("aborts a running command promptly", async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 100);
+    try {
+      const result = await run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        cwd: process.cwd(),
+        signal: controller.signal,
+        timeoutMs: 10_000,
+      });
+      expect(result).toMatchObject({ ok: true, value: { aborted: true, timedOut: false } });
+      if (result.ok) expect(result.value.durationMs).toBeLessThan(5000);
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
   it("captures stdout and a zero exit code", async () => {
     const result = await run("node", ["-e", "process.stdout.write('hi')"], {
       cwd: process.cwd(),

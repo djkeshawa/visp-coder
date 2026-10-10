@@ -23,7 +23,7 @@ export function text(row: Row, column: string): string {
   return value;
 }
 
-export function integer(row: Row, column: string): number {
+function integer(row: Row, column: string): number {
   const value = row[column];
   if (typeof value === "number") return value;
   if (typeof value === "bigint") return Number(value);

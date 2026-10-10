@@ -3,7 +3,7 @@ import { err, ok, type Result } from "../../core/result.js";
 import type { ProductReviewImage } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableReviews } from "./assessment.js";
-import { reviewCodeSources } from "./code-context.js";
+import { reviewChangedPaths, reviewCodeSources } from "./code-context.js";
 import {
   currentCoverage,
   type ProductReviewChallenge,
@@ -14,36 +14,39 @@ import type { experimentReviewContext } from "./experiments.js";
 import type { productFeedbackPlan } from "./feedback.js";
 import { productReviewImageGroups } from "./image-groups.js";
 import type { DeliveredProductImageGroup } from "./images.js";
+import { readTestsRecord } from "./independent-tests.js";
 import {
-  closedSlice,
   type PRODUCT_REVIEW_POLICY,
   type ProductAssessment,
   type ProductCoverageAssessment,
   type ProductExecution,
   type ProductOutcome,
   type ProductReviewerContext,
-  type ProductSlice,
   reviewerContextSchema,
 } from "./model.js";
 import type { observationSequence } from "./observation-preview.js";
+import { rulesForRequest } from "./project-rules.js";
+import { regressionScopeLimitations } from "./regression-scope-advice.js";
 import { assembleReviewBundle } from "./review-bundle.js";
 import {
   previousReviewAssessments,
   type productReviewAgenda,
   type reviewInteractionEvidence,
 } from "./review-context.js";
+import type { DeliveredReviewEvidence } from "./review-delivery-validation.js";
 import type { ProductReviewRecurrence } from "./review-recurrence.js";
 import {
   inspectSelectedImages,
   type ReviewSelection,
   reviewImageGaps,
+  reviewSlice,
   suppliedCaptures,
 } from "./review-selection.js";
 import { submitReview } from "./review-submission.js";
 import { withProductMutation } from "./runtime.js";
 import { selectProductSlice } from "./scopes.js";
 import type { ProductSource, sourceClaims } from "./sources.js";
-import { type ProductRecord, type ProductSelection, readProductRecord } from "./store.js";
+import { type ProductSelection, readProductRecord } from "./store.js";
 import {
   productContractDigest,
   productImplementationDigest,
@@ -63,6 +66,7 @@ export interface ProductReviewOptions extends ProductSelection {
   readonly experimentResolutions?: unknown;
 }
 export interface ProductReviewBundle {
+  readonly ambiguities?: readonly import("./request-ambiguities.js").RequestAmbiguity[];
   readonly observationSequence?: ReturnType<typeof observationSequence>;
   readonly policyVersion: typeof PRODUCT_REVIEW_POLICY;
   readonly feedbackPlan: ReturnType<typeof productFeedbackPlan>;
@@ -83,6 +87,7 @@ export interface ProductReviewBundle {
   readonly assessments: readonly ProductAssessment[];
   readonly images: readonly ProductReviewImage[];
   readonly gaps: readonly string[];
+  readonly limitations?: readonly string[];
   readonly agenda: ReturnType<typeof productReviewAgenda>;
   readonly interactionEvidence: ReturnType<typeof reviewInteractionEvidence>;
   readonly experiments: ReturnType<typeof experimentReviewContext>;
@@ -112,22 +117,24 @@ export interface ProductReviewBundle {
 export function runProductReview(
   workspace: WorkspaceState,
   options: ProductReviewOptions = {},
+  deliveredEvidence?: DeliveredReviewEvidence,
 ): Promise<Result<ProductReviewBundle>> {
   return options.assessments === undefined
-    ? review(workspace, options)
-    : withProductMutation(workspace, () => review(workspace, options));
+    ? review(workspace, options, deliveredEvidence)
+    : withProductMutation(workspace, () => review(workspace, options, deliveredEvidence));
 }
 
 async function review(
   workspace: WorkspaceState,
   options: ProductReviewOptions,
+  deliveredEvidence?: DeliveredReviewEvidence,
 ): Promise<Result<ProductReviewBundle>> {
   const loaded = await readProductRecord(workspace, options);
   if (!loaded.ok) return loaded;
   let record = loaded.value;
   const selected = selectProductSlice(workspace, record, options);
   if (!selected.ok) return selected;
-  const slice = reviewSlice(record, selected.value, options.task);
+  const slice = reviewSlice(workspace, record, selected.value, options.task);
   const snapshot = await productSourceSnapshot(workspace, record.brief);
   if (!snapshot.ok) return snapshot;
   const subject = await productSourceDigest(workspace, record.brief, snapshot.value);
@@ -169,7 +176,16 @@ async function review(
   const outcomes = record.brief.outcomes.filter(
     (outcome) => !slice || slice.outcomes.includes(outcome.id),
   );
-  const codeSources = await reviewCodeSources(workspace, record, snapshot.value);
+  const changes = await reviewChangedPaths(workspace, record, snapshot.value, slice);
+  if (!changes.ok) return changes;
+  const codeSources = await reviewCodeSources(
+    workspace,
+    record,
+    snapshot.value,
+    subject.value,
+    slice,
+    changes.value,
+  );
   const catalogue = await productEvidenceCatalogue(
     workspace,
     record,
@@ -196,6 +212,7 @@ async function review(
       record,
       slice,
       options,
+      deliveredEvidence,
       subject: subject.value,
       implementation: implementationDigest,
       contractDigest,
@@ -215,9 +232,20 @@ async function review(
       ).values(),
     ];
   }
-  return ok(
-    assembleReviewBundle({
+  const rules = await rulesForRequest(workspace, record.brief.feature);
+  const tests = await readTestsRecord(workspace, record.brief.feature);
+  if (!tests.ok) return tests;
+  const regressionContext = await regressionScopeLimitations(
+    workspace,
+    record,
+    slice,
+    snapshot.value,
+  );
+  return ok({
+    ...regressionContext,
+    ...assembleReviewBundle({
       workspace,
+      rules,
       record,
       slice,
       subject: subject.value,
@@ -233,7 +261,8 @@ async function review(
       coverage,
       reviewer: reviewer.data,
     }),
-  );
+    ...(tests.value?.ambiguities?.length ? { ambiguities: tests.value.ambiguities } : {}),
+  });
 }
 
 function reviewerInput(options: ProductReviewOptions, previous?: ProductReviewerContext) {
@@ -241,15 +270,4 @@ function reviewerInput(options: ProductReviewOptions, previous?: ProductReviewer
     options.reviewer ??
     (options.assessments === undefined ? previous : undefined) ?? { context: "unspecified" }
   );
-}
-
-function reviewSlice(
-  record: ProductRecord,
-  selected: ProductSlice | undefined,
-  explicit?: string,
-): ProductSlice | undefined {
-  if (explicit !== undefined) return selected;
-  return record.brief.slices.every((entry) => closedSlice(record.state.slices[entry.id]?.status))
-    ? undefined
-    : selected;
 }

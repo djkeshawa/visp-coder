@@ -470,7 +470,10 @@ describe("review feedback interface parity", () => {
     );
     const missingMcp = await call<ProductReviewBundle>({ task: "T001", groups: [group] });
     expect(missingMcp.envelope.data).toEqual(missingCli.envelope.data);
-    expect(missingCli.envelope.data?.images).toEqual([]);
+    expect(missingCli.envelope.data?.images.map((image) => image.id)).toEqual([
+      "review-fixture-before",
+    ]);
+    expect(missingCli.envelope.data?.imageGroups[0]?.omittedCaptureCount).toBe(1);
     expect(missingCli.envelope.data?.gaps.join(" ")).toMatch(/missing|unavailable/);
   });
 

@@ -1,6 +1,8 @@
 import { ok, type Result } from "../../core/result.js";
 import { probeBrowserCapability } from "../../testing/browser-capability.js";
+import { BrowserUnavailableError } from "../../testing/chrome-transport.js";
 import type { WorkspaceState } from "../state.js";
+import { executionRecovery } from "./browser-recovery.js";
 import { isBrowserCheckCommand } from "./check-command.js";
 import {
   type BrowserCapability,
@@ -10,7 +12,6 @@ import {
 import { checksFor, type ProductBrief, type ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
 
-export { environmentRecovery } from "./environment-model.js";
 export function needsBrowser(brief: ProductBrief, slice?: ProductSlice) {
   if (checksFor(brief, slice).some((check) => isBrowserCheckCommand(check.command))) return true;
   const outcomes = brief.outcomes.filter((entry) => !slice || slice.outcomes.includes(entry.id));
@@ -39,7 +40,12 @@ export async function checkBrowserEnvironment(
   retry = false,
 ) {
   const environment = await browserEnvironmentIdentity(root);
-  if (!retry && previous?.environment === environment) return previous;
+  if (
+    !retry &&
+    previous?.environment === environment &&
+    (previous.status === "ready" || previous.kind === "missing-browser")
+  )
+    return previous;
   const base = { version: 1 as const, environment, checkedAt: new Date().toISOString() };
   try {
     await probeBrowserCapability();
@@ -54,23 +60,54 @@ export async function checkBrowserEnvironment(
     return failedBrowserCapability(
       environment,
       cause instanceof Error ? cause.message : String(cause),
+      cause instanceof BrowserUnavailableError ? cause.kind : undefined,
     );
   }
 }
 
-export function failedBrowserCapability(environment: string, detail: string): BrowserCapability {
+/**
+ * VISP's own observation that no browser starts here: the capability recorded for the
+ * current environment, else a fresh blank-page probe. Output a product or suite printed
+ * never counts.
+ */
+export async function browserUnavailable(
+  root: string,
+  cached?: BrowserCapability,
+): Promise<boolean> {
+  if (
+    cached?.status === "unavailable" &&
+    cached.environment === (await browserEnvironmentIdentity(root))
+  )
+    return true;
+  return (await checkBrowserEnvironment(root, cached)).status === "unavailable";
+}
+
+export function failedBrowserCapability(
+  environment: string,
+  detail: string,
+  kind?: unknown,
+): BrowserCapability {
   return {
     version: 1,
     environment,
     checkedAt: new Date().toISOString(),
     status: "unavailable",
-    kind: /ENOENT|not found/i.test(detail)
-      ? "missing-browser"
-      : /permission|permitted|sandbox/i.test(detail)
-        ? "permissions"
-        : "startup",
+    kind:
+      kind === "missing-browser" || kind === "permissions" || kind === "startup"
+        ? kind
+        : /ENOENT|browser[^\n]*not found|no installed browser/i.test(detail)
+          ? "missing-browser"
+          : /permission|permitted|sandbox/i.test(detail)
+            ? "permissions"
+            : "startup",
     detail: detail.slice(-4000),
   };
+}
+
+/** The short recovery a check that could not start records (check-execution.ts). */
+function missingCommandRecovery(evidence: readonly string[]) {
+  const missing = evidence.find((entry) => entry.includes("missing-command:"));
+  return missing?.slice(missing.indexOf("missing-command:")).split("\n")[0];
 }
 
 export function environmentNext(
@@ -79,17 +116,19 @@ export function environmentNext(
   evidence: string[],
   operation: "work" | "verify" = "work",
 ) {
+  const recovery = executionRecovery(evidence) ?? missingCommandRecovery(evidence);
   return {
     feature,
     ...(task ? { task } : {}),
     action: "understand" as const,
     objective:
+      recovery ??
       "Required execution environment is unavailable; recover the host capability before expanding this slice",
-    command: `visp ${operation} --feature ${feature}${task ? ` --task ${task}` : ""} --retry-environment`,
+    command: `visp ${operation} --feature ${feature}${task ? ` --task ${task}` : ""}${recovery ? "" : " --retry-environment"}`,
     evidence,
     mayEdit: false,
     completion: "unresolved-environment" as const,
-    recovery: environmentRecovery,
+    recovery: recovery ?? environmentRecovery,
   };
 }
 

@@ -17,7 +17,7 @@ describe("isolated capability probe", () => {
         .mockResolvedValue({ send, close, onEvent: () => () => {} });
       if (result === "valid") await expect(probeBrowserCapability()).resolves.toBeUndefined();
       else await expect(probeBrowserCapability()).rejects.toThrow();
-      expect(launch).toHaveBeenCalledWith({ startupTimeoutMs: 4000, operationTimeoutMs: 2000 });
+      expect(launch).toHaveBeenCalledWith({ startupTimeoutMs: 10000, operationTimeoutMs: 2000 });
       expect(close).toHaveBeenCalledOnce();
       expect(send.mock.calls.some(([method]) => method === "Page.navigate")).toBe(false);
     },

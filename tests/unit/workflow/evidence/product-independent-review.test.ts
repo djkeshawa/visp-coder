@@ -789,8 +789,10 @@ it("reuses observed evidence across host thread routing while retaining executio
       response: response(packet),
     }),
   ).toMatchObject({ ok: true, value: { action: "normal-acceptance", callsUsed: 1 } });
+  // Toolchain variables belong to the comparison identity; the capability keeps only the
+  // executable and the host security context.
   vi.stubEnv("NODE_ENV", "different-product-mode");
-  expect(await browserEnvironmentIdentity(p.workspace.root)).not.toBe(environment);
+  expect(await browserEnvironmentIdentity(p.workspace.root)).toBe(environment);
   vi.unstubAllEnvs();
   vi.stubEnv("CODEX_PERMISSION_PROFILE", "different-host-permissions");
   expect(await browserEnvironmentIdentity(p.workspace.root)).not.toBe(environment);
@@ -813,7 +815,7 @@ it("reuses browser evidence when only the host terminal color capability changes
     }),
   ).toMatchObject({ ok: true, value: { action: "normal-acceptance", callsUsed: 1 } });
   vi.stubEnv("FORCE_COLOR", "0");
-  expect(await browserEnvironmentIdentity(p.workspace.root)).not.toBe(environment);
+  expect(await browserEnvironmentIdentity(p.workspace.root)).toBe(environment);
   vi.unstubAllEnvs();
 });
 
@@ -930,10 +932,14 @@ it("delivers scoped stylesheet bytes alongside implementation without changing g
   const sources = await reviewCodeSources(state, record.value);
   const delivered = await independentSources(state, sources);
   if (!delivered.ok) throw new Error(delivered.error.message);
+  const stylesheet = sources.find((source) => source.reference === "styles.css");
+  expect(stylesheet?.available).toBe(true);
+  expect(stylesheet?.excerpt.length).toBeLessThanOrEqual(6000);
   expect(delivered.value.find((source) => source.reference === "styles.css")).toMatchObject({
     available: true,
     excerpt: css,
     truncated: false,
+    omittedRegions: [],
   });
   expect(delivered.value.some((source) => source.reference === "outside.css")).toBe(false);
   expect(delivered.value.find((source) => source.reference === "src/main.mjs")).toMatchObject({

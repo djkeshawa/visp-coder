@@ -13,7 +13,7 @@ import { closedSlice } from "./model.js";
 import { briefPath, json, type ProductRecord, productStatePath } from "./store.js";
 
 const findingId = z.string().regex(/^FB-[a-f0-9]{16}$/);
-export const findingIdentityMigrationSchema = z
+const findingIdentityMigrationSchema = z
   .object({
     version: z.literal(1),
     feature: z.string().min(1),

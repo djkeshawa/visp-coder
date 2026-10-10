@@ -22,13 +22,6 @@ Prefer --patch - --reason "<decision>" for changed fields (arrays merge by ID); 
 /** One discoverability catalogue for generated host instructions and their examples. */
 export const VISP_COMMANDS = [
   {
-    command: "reproduce",
-    when: "A finding needs a later failing reproduction",
-    example:
-      'visp reproduce --finding <finding-id> --execution <execution-id> --reason "<relationship to report>"',
-    next: "Run a declared behavioral check first and attach its failed execution before editing. Repair, rerun the same check and an adjacent behavior, then obtain separate assessment. Attachment is not resolution.",
-  },
-  {
     command: "next",
     when: "Start or resume",
     example: "visp next",
@@ -37,8 +30,8 @@ export const VISP_COMMANDS = [
   {
     command: "feature",
     when: "New request",
-    example: 'visp feature "<goal>" --source-brief "<original request>"',
-    next: "Read brief --template; preserve the request.",
+    example: 'visp feature "<goal>" --source-brief -',
+    next: 'Pass the request with a quoted heredoc and the host\'s maximum timeout. It keeps running while VISP writes acceptance tests: on Codex keep its session open and poll it; on a blocking shell (Claude Code Bash) start it with run_in_background:true and read its output for the id; if the host can do neither, wait for it. Once it prints the feature id, run visp work --feature <id> --check "<test command>" for one slice. Never start feature again: a repeat can create a second feature. After a kill or error, run visp work --feature <id>; add --retry-tests only when work reports the acceptance tests failed or stopped. Use brief --template for several usable slices.',
   },
   {
     command: "brief",
@@ -49,7 +42,7 @@ export const VISP_COMMANDS = [
   {
     command: "work",
     when: "Implement a slice",
-    example: "visp work --task <id>",
+    example: 'visp work --check "<test command>"',
     next: "Read relevant outcomes/code, then edit only the authorized scope. --inspect reads without authorizing.",
   },
   {
@@ -66,27 +59,27 @@ export const VISP_COMMANDS = [
   },
   {
     command: "critic",
-    when: "Independent product feedback",
+    when: "Only when `visp next` prints a critic command",
     example: "visp critic --preflight",
-    next: "Setup-needed means inspect capabilities; ready means prepare/delegate/submit, or dispatch through an attached adapter.",
+    next: "Host-delegated review only (with VISP's own reviewer `visp done` runs it). Setup-needed: inspect capabilities; ready: prepare, delegate, submit, or dispatch through an attached adapter.",
   },
   {
     command: "critic feedback",
-    when: "Manual feedback enabled; first usable slice or consequential design uncertainty",
+    when: "Only when `visp next` shows a manual-feedback request",
     example: 'visp critic feedback --ask "What should I improve in this version?"',
-    next: "Use the host user-question popup; submit the user's words. Defer without approval; continue unrelated work.",
+    next: "Ask the user with the host's question tool only if it exists and questions are allowed; otherwise `--id <request-id> --defer`. Continue unrelated work.",
   },
   {
     command: "review",
-    when: "Host review requested by next or critic is off",
+    when: "Only when `visp next` prints a review command",
     example: "visp review --task <id> --prepare",
-    next: "Pause actor edits while reviewing. Read packetPath and images; submit judgments with --session <id> --from -.",
+    next: "Pause edits until it returns. Read packetPath and images; submit with --session <id> --from -.",
   },
   {
     command: "done",
     when: "The slice is usable",
     example: "visp done --task <id>",
-    next: "Follow its returned fix/critic/accept action; no duplicate worker approval.",
+    next: "Follow its returned action. It may run VISP's reviewer (about 1-2 min): wait, then `visp next`.",
   },
   {
     command: "accept",
@@ -96,11 +89,13 @@ export const VISP_COMMANDS = [
   },
 ] as const;
 
-export function commandMap(includeNext = true) {
+export function commandMap(includeNext = true, includeCritic = includeNext) {
   return [
     includeNext ? "| When | Command | Next |" : "| When | Command |",
     includeNext ? "|---|---|---|" : "|---|---|",
-    ...VISP_COMMANDS.map((entry) =>
+    ...VISP_COMMANDS.filter(
+      (entry) => includeCritic || !["critic", "critic feedback", "review"].includes(entry.command),
+    ).map((entry) =>
       includeNext
         ? `| ${entry.when} | \`${entry.example}\` | ${entry.next} |`
         : `| ${entry.when} | \`${entry.example}\` |`,
@@ -108,14 +103,29 @@ export function commandMap(includeNext = true) {
   ].join("\n");
 }
 
-export function commandGuide() {
-  return `# VISP command guide
+/**
+ * The installed guide must not depend on critic settings: readiness compares installed
+ * assets with the plan, so a later `visp critic --on` would make it look uninstalled. It
+ * leaves out the long reviewer prose, which work/next deliver when it applies, and keeps
+ * the short critic rows so those commands stay discoverable.
+ */
+export function commandGuide(criticEnabled = true, criticCommands = criticEnabled) {
+  const guide = `# VISP command guide
 
 The executable is \`visp\`; the package is \`visp-coder\`. Commands accept \`--help\`.
 
 \`visp next\` only reports the next action; it does not record final acceptance. Run \`visp accept\` when that action directs it.
 
-${commandMap()}
+${commandMap(true, criticCommands)}
+
+For a literal request containing backticks, dollar signs or quotes, use a quoted heredoc:
+
+\`\`\`sh
+visp feature "<goal>" --source-brief - <<'REQUEST'
+<verbatim request>
+REQUEST
+visp work --check "<test command>"
+\`\`\`
 
 ## Understand, build, observe
 
@@ -141,20 +151,25 @@ For a legacy feature or current product history needing upgrade, use the install
 in the migration transaction. Stop old writers before applying and restart MCP with the upgraded
 executable afterward. \`visp next\` and \`visp status\` only read state; they never migrate it.
 
-For UI work, recover the browser and capture the usable interaction before spending a product critic call. Source advice is optional for a concrete code question: \`visp critic --source-only --preflight\`. It spends the same call budget and cannot assess visuals; keep capacity for rendered feedback. Continue the same build–observe–fix loop when the critic is unavailable.
+For UI work, recover the browser and capture the usable interaction before spending a product critic call. Continue the same build–observe–fix loop when the critic is unavailable.
 
 For a browser capture, pipe YAML/JSON to \`visp capture --task <id> --from -\`:
 
 \`\`\`yaml
-url: http://127.0.0.1:3000
+url: project:/index.html
 viewport: {width: 1280, height: 720}
 actions:
   - {kind: click, selector: "#start", capture: true}
-  - {kind: wait, durationMs: 300, capture: false}
+  - kind: drag
+    selector: "#handle"
+    position: {x: 0.5, y: 0.5}
+    by: {x: -0.4, y: 0.2}
+    captureDuring: true
+    captureAfterMs: [300, 900]
   - {kind: wait-for, selector: "#result", visibility: visible, capture: true}
 \`\`\`
 
-Waits use \`durationMs\` (1–10000). Follow settling waits with \`wait-for\` or \`compare\` to establish the expected state. Use the actual permitted URL and real controls. For local-file projects use a confined project file URL where the host permits it. Each journey allows six total captures, including the automatic initial capture, the final capture when the last action does not request one, \`capture: true\`, and drag \`captureDuring: true\`. Operation records are generated. Capture and verify return matching before/after observations; investigate possible regressions and execution gaps, and inspect actual images. Work and review handoffs attach a recheck to findings linked to recorded execution: use its command to revisit the original path, then inspect the result and one nearby behavior affected by the edit. A matching rerun is observed-unassessed, not a resolved finding. These comparisons are advisory, not quality approval. Legacy runs without a saved journey still need --from. A different input that succeeds does not resolve an earlier failed input.
+Waits use \`durationMs\` (1–10000). Follow settling waits with \`wait-for\` or \`compare\` to establish the expected state. Use real controls. \`project:/index.html\` serves a static page (HTML/JS/CSS, no backend) from the project on a port VISP chooses, so start nothing; for an app with a backend or build step, start your server on a free port you choose (not a fixed common one such as 3000, which another process may hold) and use its URL. A drag ends at viewport-pixel \`to\` or, as fractions of the element's box, \`by\`; it starts at \`from\` (pixels) or \`position\` (fractions). \`captureDuring: true\` captures the held state at full pull before release and \`captureAfterMs: [300, 900]\` captures again that many ms after release; \`position\`/\`by\` refuse rotated, skewed, flipped or offset-path elements, so use pixels there. Each journey allows six total captures, including the automatic initial capture, the final capture when the last action does not request one, \`capture: true\`, drag \`captureDuring: true\` and each \`captureAfterMs\` offset. Operation records are generated. Capture and verify return matching before/after observations; investigate possible regressions and execution gaps, and inspect actual images. Work and review handoffs attach a recheck to findings linked to recorded execution: use its command to revisit the original path, then inspect the result and one nearby behavior affected by the edit. A matching rerun is observed-unassessed, not a resolved finding. These comparisons are advisory, not quality approval. Legacy runs without a saved journey still need --from. A different input that succeeds does not resolve an earlier failed input.
 
 ## Reviewer execution
 
@@ -188,4 +203,5 @@ An outside-session reference requires preparing a session with the relevant --gr
 
 Opt in to \`workflow.reviewMode: observation-preview\` in visp.yml to inspect original goals and representative states without worker judgments. Report visible contradictions, locations, consequences, corrections and next checks; zero to three findings, not forced criticism. This preview is unvalidated by live model comparisons. Optional style advice never blocks acceptance.
 `;
+  return criticEnabled ? guide : (guide.split("## Reviewer execution")[0] ?? guide);
 }

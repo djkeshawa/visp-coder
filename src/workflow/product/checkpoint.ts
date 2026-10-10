@@ -4,8 +4,9 @@ import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
 import { prepareCandidate } from "./candidate.js";
 import { criticSelection } from "./critic-store.js";
-import { runProductReviewerHandoff } from "./reviewer-handoff.js";
+import { reviewerHandoffCandidates } from "./reviewer-handoff.js";
 import { type ProductSelection, saveProductState } from "./store.js";
+import { productSourceDigest } from "./subject.js";
 
 /** One first-observed baseline per slice, without another agent-authored document or model call. */
 export async function ensureProductCheckpoint(workspace: WorkspaceState, input: ProductSelection) {
@@ -15,7 +16,21 @@ export async function ensureProductCheckpoint(workspace: WorkspaceState, input: 
   if (!selection.task || record.state.status === "historical-complete") return ok(undefined);
   const existing = record.state.checkpoints?.find((entry) => entry.task === selection.task);
   if (existing) return ok(existing);
-  const handoff = await runProductReviewerHandoff(workspace, selection);
+  if (
+    !record.state.executions.some(
+      (entry) => entry.task === selection.task && entry.status === "passed",
+    )
+  )
+    return ok(undefined);
+  const subject = await productSourceDigest(workspace, record.brief);
+  if (!subject.ok) return subject;
+  if (
+    !applicableExecutions(record, subject.value).some(
+      (entry) => entry.task === selection.task && entry.status === "passed",
+    )
+  )
+    return ok(undefined);
+  const handoff = await reviewerHandoffCandidates(workspace, selection);
   if (!handoff.ok) return handoff;
   const visual = record.brief.outcomes.some(
     (outcome) =>

@@ -129,3 +129,12 @@ it("uses only an explicit task class and leaves an unspecified class unknown", a
     ".visp/skills/repair-review/SKILL.md",
   ]);
 });
+
+it("matches path skills against files in a catch-all light-path scope", async () => {
+  await seed("api-work", "paths: [src/api/**]");
+  const broad = productSliceSchema.parse({ ...slice, scope: { allowed: ["**"] } });
+  const selected = await productSkills(await workspace.state(), broad, 6000, ["src/api/route.ts"]);
+  expect(selected.ok && selected.value.skills.map((entry) => entry.path)).toContain(
+    ".visp/skills/api-work/SKILL.md",
+  );
+});

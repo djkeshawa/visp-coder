@@ -143,6 +143,69 @@ describe("required experience journey evidence", () => {
       expect(productJourneyKey(changed as BrowserJourney, "T001")).not.toBe(key);
     expect(productJourneyKey(journey, "T002")).not.toBe(key);
   });
+  it("ignores post-release capture offsets but keys on fractional drag start and travel", () => {
+    const drag = {
+      kind: "drag" as const,
+      selector: "canvas",
+      position: { x: 0.5, y: 0.5 },
+      by: { x: -0.25, y: 0.1 },
+    };
+    const journey = (action: object) =>
+      browserJourneySchema.parse({ url: "https://example.test", actions: [action] });
+    const key = productJourneyKey(journey(drag), "T001");
+    expect(productJourneyKey(journey({ ...drag, captureAfterMs: [100, 400] }), "T001")).toBe(key);
+    expect(
+      productJourneyKey(journey({ ...drag, captureAfterMs: [50], captureDuring: true }), "T001"),
+    ).toBe(key);
+    for (const changed of [
+      { ...drag, position: { x: 0.5, y: 0.6 } },
+      { ...drag, by: { x: -0.25, y: 0.2 } },
+      { ...drag, by: undefined, to: { x: 5, y: 5 } },
+    ])
+      expect(productJourneyKey(journey(changed), "T001")).not.toBe(key);
+  });
+  it.each([
+    ["localhost:3000", "http://localhost:3000/play?level=2#go"],
+    ["127.0.0.1 on another port", "http://127.0.0.1:8123/play?level=2#go"],
+    ["[::1] without a port", "http://[::1]/play?level=2#go"],
+  ])("gives a loopback origin (%s) one journey key", (_name, url) => {
+    const key = (value: string) =>
+      productJourneyKey(browserJourneySchema.parse({ url: value, actions: [] }), "T001");
+    expect(key(url)).toBe(key("http://localhost:3000/play?level=2#go"));
+    expect(key(url)).toMatch(/^journey-v3:/);
+  });
+
+  it.each([
+    ["path", "http://localhost:3000/other?level=2#go"],
+    ["query", "http://localhost:3000/play?level=3#go"],
+    ["hash", "http://localhost:3000/play?level=2#stop"],
+    ["scheme", "https://localhost:3000/play?level=2#go"],
+    ["another loopback address", "http://127.0.0.2:3000/play?level=2#go"],
+    ["a remote host", "http://example.com:3000/play?level=2#go"],
+  ])("still tells apart a journey whose %s differs", (_name, url) => {
+    const key = (value: string) =>
+      productJourneyKey(browserJourneySchema.parse({ url: value, actions: [] }), "T001");
+    expect(key(url)).not.toBe(key("http://localhost:3000/play?level=2#go"));
+  });
+
+  it("keeps the key of every non-loopback journey byte-identical to earlier builds", () => {
+    const key = (url: string) =>
+      productJourneyKey(
+        browserJourneySchema.parse({ url, actions: [{ kind: "click", selector: "#go" }] }),
+        "T001",
+      );
+    // Golden values computed with the build that hashed the raw URL.
+    expect(key("https://example.test/app?level=2#play")).toBe(
+      "journey-v3:73a4b1a863aaf81200b2f14460ebef06e6245aa8579c8b3ff4d619934e1d7a0d",
+    );
+    expect(key("file:///work/project/index.html")).toBe(
+      "journey-v3:702083d432609dc1213ba5098f83d828b2a9029ec61d6c90d0372a0e8dc7705c",
+    );
+    expect(key("http://127.0.0.2:3000/x")).toBe(
+      "journey-v3:539b7b7f83c1d03641fcd7066acae6fe36efa7969bac5ab8787f40ee09e64c07",
+    );
+  });
+
   it("distinguishes a held pointer from an immediate press and changed movement steps", () => {
     const journey = browserJourneySchema.parse({
       url: "https://example.test",

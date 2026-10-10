@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_BLOCKED_PATHS } from "../../../src/core/constants.js";
 import { checkPaths, decideScope, missingExpectedFiles } from "../../../src/orchestrate/guard.js";
 import type { ImplementMarker } from "../../../src/workflow/artifacts/evidence.js";
 
@@ -15,7 +16,7 @@ function marker(overrides: Partial<ImplementMarker> = {}): ImplementMarker {
   };
 }
 
-const blockedPaths = [".env", ".env.*", "node_modules", "dist"];
+const blockedPaths = [...DEFAULT_BLOCKED_PATHS];
 
 describe("decideScope", () => {
   it("allows a path inside the task's allowed files", () => {
@@ -68,9 +69,37 @@ describe("decideScope", () => {
     expect(decision.reason).toBe("no-authorization");
   });
 
-  it("allows writes to the tool's own state directory", () => {
-    const decision = decideScope({ path: ".visp/status.json", markers: [], blockedPaths });
-    expect(decision.allowed).toBe(true);
+  it("protects VISP state at write time but permits drafts", () => {
+    expect(
+      decideScope({
+        path: ".visp/features/x/brief.yaml",
+        markers: [],
+        blockedPaths,
+        writeTime: true,
+      }),
+    ).toMatchObject({ allowed: false, reason: "protected-path" });
+    expect(
+      decideScope({ path: ".visp/drafts/note.md", markers: [], blockedPaths, writeTime: true })
+        .allowed,
+    ).toBe(true);
+    expect(decideScope({ path: ".visp/status.json", markers: [], blockedPaths }).allowed).toBe(
+      true,
+    );
+  });
+
+  it("protects control files and matches blocked paths without regard to case or depth", () => {
+    const broad = marker({ allowedFiles: ["**"] });
+    for (const path of [
+      "visp.yml",
+      ".GIT/hooks/pre-commit",
+      "apps/api/.ENV",
+      "packages/web/Node_Modules/pkg/index.js",
+    ]) {
+      expect(
+        decideScope({ path, markers: [broad], blockedPaths, writeTime: true }).allowed,
+        path,
+      ).toBe(false);
+    }
   });
 
   it.each([

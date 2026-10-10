@@ -31,7 +31,7 @@ function inputSequence(run: { journey?: BrowserJourney; journeyDigest?: string }
     .filter((action) => action.kind !== "wait-for")
     .map(({ capture: _capture, ...action }) => {
       if (action.kind !== "drag") return action;
-      const { captureDuring: _heldCapture, ...input } = action;
+      const { captureDuring: _heldCapture, captureAfterMs: _releasedCaptures, ...input } = action;
       return input;
     });
   return actions.length
@@ -70,7 +70,7 @@ export function compareObservations(before: Observation | undefined, after: Obse
   };
 }
 
-export function describeObservation(run: Observation) {
+function describeObservation(run: Observation) {
   return {
     runId: run.id,
     subjectDigest: run.subjectDigest,

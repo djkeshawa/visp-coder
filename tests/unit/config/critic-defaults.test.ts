@@ -97,6 +97,31 @@ it("preserves global and host settings when toggling and applies enabled precede
   });
 });
 
+it("reads critic defaults through a symlinked user config directory", async () => {
+  const config = await mkdtemp(join(tmpdir(), "visp-dotfiles-"));
+  try {
+    await mkdir(join(config, "visp"));
+    await writeFile(
+      join(config, "visp/critic-defaults.json"),
+      '{"version":1,"hosts":{"codex":{"model":"chosen"}}}',
+    );
+    await symlink(config, join(home, ".config"), "dir");
+    expect(await resolveCriticPolicy("codex", undefined, home)).toMatchObject({
+      ok: true,
+      value: { config: { model: "chosen" } },
+    });
+  } finally {
+    await rm(config, { recursive: true, force: true });
+  }
+});
+
+it("ignores invalid personal critic defaults when no critic preset exists", async () => {
+  await mkdir(join(home, ".config/visp"), { recursive: true });
+  await writeFile(join(home, ".config/visp/critic-defaults.json"), "{invalid");
+  expect((await resolveCriticPolicy("generic", undefined, home)).ok).toBe(true);
+  expect((await resolveCriticPolicy("codex", undefined, home)).ok).toBe(false);
+});
+
 it("serializes concurrent switches without losing host overrides", async () => {
   const saved = await Promise.all([
     saveCriticEnabled(false, home),
@@ -167,15 +192,21 @@ it("supports CLI global and host switches without resetting model or limits", as
     ok: true,
     value: { enabled: false, manual: true },
   });
-  const before = await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8");
-  await expect(run("--mode", "manual")).rejects.toThrow("Use --save");
-  await expect(run("--save", "--mode", "manual", "--on")).rejects.toThrow("Choose mode");
-  await expect(run("--save", "--on", "--off")).rejects.toThrow("either --on or --off");
-  await expect(run("--on")).rejects.toThrow("Use --save");
-  await expect(run("--save", "--model", "chosen")).rejects.toThrow("Use --harness");
-  await expect(run("--save")).rejects.toThrow("Use --on or --off");
-  expect(await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8")).toBe(before);
   expect(output.mock.calls.at(-1)?.[0]).toContain("existing feature");
+  const before = await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8");
+  for (const [args, message] of [
+    [["--mode", "manual"], "Use --save"],
+    [["--save", "--mode", "manual", "--on"], "Choose mode"],
+    [["--save", "--on", "--off"], "either --on or --off"],
+    [["--on"], "Use --save"],
+    [["--save", "--model", "chosen"], "Use --harness"],
+    [["--save"], "Use --on or --off"],
+  ] as const) {
+    await run(...args);
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).error.message).toContain(message);
+  }
+  expect(await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8")).toBe(before);
 });
 
 it("reads without creating state, saves one host transactionally and applies project overrides", async () => {
@@ -213,13 +244,13 @@ it("reads without creating state, saves one host transactionally and applies pro
   expect(await readFile(join(home, ".config/visp/critic-defaults.json"), "utf8")).toBe(before);
 });
 
-it("does not follow a user defaults symlink", async () => {
+it("does not write through a user defaults symlink", async () => {
   const other = await mkdtemp(join(tmpdir(), "visp-critic-outside-"));
   try {
     await symlink(other, join(home, ".config"));
     expect((await saveCriticDefaults("codex", { model: "chosen" }, home)).ok).toBe(false);
     expect((await saveCriticEnabled(false, home)).ok).toBe(false);
-    expect((await resolveCriticPolicy("generic", undefined, home)).ok).toBe(false);
+    expect((await resolveCriticPolicy("generic", undefined, home)).ok).toBe(true);
     expect(await readdir(other)).toEqual([]);
   } finally {
     await rm(other, { recursive: true, force: true });

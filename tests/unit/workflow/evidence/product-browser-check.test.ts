@@ -9,6 +9,7 @@ import { inspectStateLock, withStateLock } from "../../../../src/core/state-lock
 import * as probe from "../../../../src/testing/browser-capability.js";
 import type { BrowserOperation } from "../../../../src/testing/browser-session.js";
 import { BrowserUnavailableError } from "../../../../src/testing/chrome-transport.js";
+import { runProductCapture } from "../../../../src/workflow/evidence/product-capture.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { productCheckSchema } from "../../../../src/workflow/product/model.js";
@@ -118,6 +119,24 @@ async function fixture() {
 }
 
 describe("runner-owned browser product checks", () => {
+  it("reuses a completed capture with the same subject and journey during done", async () => {
+    const workspace = await fixture();
+    const record = await store.readProductRecord(await workspace.state());
+    if (!record.ok) throw new Error(record.error.message);
+    const command = record.value.brief.checks[0]?.command;
+    if (!command || typeof command !== "object" || Array.isArray(command))
+      throw new Error("Missing browser check");
+    const captured = await runProductCapture(await workspace.state(), {
+      task: "T001",
+      journey: command.journey,
+    });
+    expect(captured.ok).toBe(true);
+    const done = await runProductDone(await workspace.state());
+    expect(done.ok && done.value.executions).toContainEqual(
+      expect.objectContaining({ provenance: "supervisor-reused", status: "passed" }),
+    );
+    expect(browser.open).toHaveBeenCalledOnce();
+  });
   it("uses the shared journey engine and atomically publishes observed evidence with the execution", async () => {
     const workspace = await fixture();
     const result = await runProductVerify(await workspace.state());
@@ -284,6 +303,49 @@ describe("runner-owned browser product checks", () => {
     expect(browser.close).toHaveBeenCalledOnce();
   });
 
+  it("reports navigation failure with the app URL and restart recovery", async () => {
+    const workspace = await fixture();
+    browser.open.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_REFUSED"));
+    const result = await runProductVerify(await workspace.state());
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        executions: [
+          {
+            status: "environment-failed",
+            output: expect.stringContaining(
+              "app-unreachable: Start or restart the app at http://localhost/",
+            ),
+          },
+        ],
+        recovery: expect.stringContaining("Start or restart the app"),
+        next: {
+          command: expect.not.stringContaining("--retry-environment"),
+          objective: expect.stringContaining("Start or restart"),
+        },
+      },
+    });
+  });
+
+  it("names a browser that closed mid-journey, with a rerun-once recovery", async () => {
+    const workspace = await fixture();
+    browser.open.mockRejectedValueOnce(new Error("browser disconnected"));
+    const result = await runProductVerify(await workspace.state());
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        executions: [
+          {
+            status: "environment-failed",
+            output: expect.stringContaining("browser-disconnected: The browser closed"),
+          },
+        ],
+        recovery: expect.stringContaining("Rerun the same journey once"),
+        next: { objective: expect.stringContaining("Rerun the same journey once") },
+      },
+    });
+  });
+
   it("keeps browser startup failures separate from behavior failures", async () => {
     const workspace = await fixture();
     browser.open.mockRejectedValueOnce(new BrowserUnavailableError("No installed browser"));
@@ -291,7 +353,9 @@ describe("runner-owned browser product checks", () => {
       ok: true,
       value: {
         passed: false,
-        executions: [{ status: "environment-failed", output: "No installed browser" }],
+        executions: [
+          { status: "environment-failed", output: expect.stringContaining("No installed browser") },
+        ],
       },
     });
     const record = await store.readProductRecord(await workspace.state());
@@ -318,7 +382,7 @@ describe("runner-owned browser product checks", () => {
     expect(await inspectStateLock(workspace.root)).toEqual(ok({ state: "unlocked" }));
   });
 
-  it("holds the existing mutation lock throughout the browser run", async () => {
+  it("allows another writer while the browser journey runs", async () => {
     const workspace = await fixture();
     let entered = () => {},
       release = () => {};
@@ -339,7 +403,7 @@ describe("runner-owned browser product checks", () => {
     try {
       expect(
         await withStateLock(workspace.root, async () => ok("other writer"), { timeoutMs: 0 }),
-      ).toMatchObject({ ok: false, error: { code: "STATE_BUSY" } });
+      ).toMatchObject({ ok: true });
       const record = await store.readProductRecord(await workspace.state());
       expect(record.ok && record.value.state.captureRuns).toEqual([]);
     } finally {

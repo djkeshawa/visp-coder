@@ -1,6 +1,11 @@
 import { basename } from "node:path";
 import { detectPreset, readPackageJson } from "../../config/detect.js";
-import { renderConfigTemplate, suggestedValidationCommands } from "../../config/template.js";
+import { renderConfigTemplate } from "../../config/template.js";
+import {
+  availableValidationCommands,
+  type SkippedValidationCommand,
+  verifiedValidationCommands,
+} from "../../config/validation.js";
 import {
   HARNESSES,
   type Harness,
@@ -19,6 +24,7 @@ import {
 import { ProjectFileSystem } from "../../core/fs.js";
 import { isRepository, repositoryRequiredError } from "../../core/git.js";
 import { ProjectPaths } from "../../core/paths.js";
+import { initializedProjectRoot } from "../../core/project-root.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { now } from "../artifacts/common.js";
 import { emptyStatus } from "../artifacts/project.js";
@@ -27,6 +33,8 @@ export interface InitOptions {
   readonly root: string;
   readonly harness?: Harness;
   readonly force?: boolean;
+  /** Told which suggested project checks will run once, and the shared time limit. */
+  readonly onVerifyChecks?: (commands: readonly string[], budgetMs: number) => void;
 }
 
 export interface InitRuntime {
@@ -44,6 +52,7 @@ export interface InitOutcome {
   readonly configPath: string;
   readonly createdConfig: boolean;
   readonly hasGit: boolean;
+  readonly skippedValidationCommands: readonly SkippedValidationCommand[];
 }
 
 interface InitPlan {
@@ -51,6 +60,7 @@ interface InitPlan {
   readonly harness: Harness;
   readonly configExists: boolean;
   readonly mutations: FileMutation[];
+  readonly skippedValidationCommands: readonly SkippedValidationCommand[];
 }
 
 /**
@@ -70,6 +80,14 @@ export async function runInit(
     );
   }
   const paths = new ProjectPaths(options.root);
+  const ancestor = initializedProjectRoot(paths.root);
+  if (ancestor && ancestor !== paths.root) {
+    return err(
+      vispError("ALREADY_INITIALIZED", `VISP is already initialized at ${ancestor}`, {
+        recovery: `Run visp from ${ancestor} or pass --project ${ancestor}`,
+      }),
+    );
+  }
   const files = new ProjectFileSystem(paths.root);
   const ready = await ensureInitReady(paths, files, options.force === true, options.harness);
   if (!ready.ok) return ready;
@@ -85,6 +103,7 @@ export async function runInit(
     configPath: paths.config,
     createdConfig: !plan.value.configExists || Boolean(options.force),
     hasGit: true,
+    skippedValidationCommands: plan.value.skippedValidationCommands,
   });
 }
 
@@ -150,7 +169,14 @@ async function planInit(
   if (!projectMutation.ok) return projectMutation;
   const statusMutation = await plannedWrite(files, paths.status, json(emptyStatus(timestamp)));
   if (!statusMutation.ok) return statusMutation;
-  const config = await plannedConfigMutation(files, paths, preset, harness, options.force === true);
+  const config = await plannedConfigMutation(
+    files,
+    paths,
+    preset,
+    harness,
+    options.force === true,
+    options.onVerifyChecks,
+  );
   if (!config.ok) return config;
   const ignored = await planDerivedStateIgnore(files, paths.root);
   if (!ignored.ok) return ignored;
@@ -158,6 +184,7 @@ async function planInit(
     preset,
     harness,
     configExists: config.value.exists,
+    skippedValidationCommands: config.value.skipped,
     mutations: [
       projectMutation.value,
       statusMutation.value,
@@ -173,18 +200,29 @@ async function plannedConfigMutation(
   preset: Preset,
   harness: Harness,
   force: boolean,
-): Promise<Result<{ exists: boolean; mutation?: FileMutation }>> {
+  onVerifyChecks?: InitOptions["onVerifyChecks"],
+): Promise<
+  Result<{ exists: boolean; mutation?: FileMutation; skipped: readonly SkippedValidationCommand[] }>
+> {
   const configPresent = await files.exists(paths.config);
   if (!configPresent.ok) return configPresent;
-  if (configPresent.value && !force) return ok({ exists: true });
+  if (configPresent.value && !force) return ok({ exists: true, skipped: [] });
   const manifest = await readPackageJson(paths.root, files);
+  const validation = await verifiedValidationCommands(
+    paths.root,
+    await availableValidationCommands(paths.root, preset, manifest?.scripts ?? {}),
+    undefined,
+    onVerifyChecks,
+  );
   const template = renderConfigTemplate({
     preset,
     harness,
-    validationCommands: suggestedValidationCommands(preset, manifest?.scripts ?? {}),
+    validationCommands: validation.commands,
   });
   const mutation = await plannedWrite(files, paths.config, template);
-  return mutation.ok ? ok({ exists: configPresent.value, mutation: mutation.value }) : mutation;
+  return mutation.ok
+    ? ok({ exists: configPresent.value, mutation: mutation.value, skipped: validation.skipped })
+    : mutation;
 }
 
 async function plannedWrite(

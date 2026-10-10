@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { FileMutation } from "../../core/file-transaction.js";
@@ -8,11 +8,51 @@ import type { WorkspaceState } from "../state.js";
 
 /** Written by the Claude Code hook on every user prompt; git-ignored session state. */
 export const HOST_PROMPTS_FILE = "user-prompts.jsonl";
+/** The host session of the latest user prompt, written beside the prompts; never consumed. */
+export const HOST_SESSION_FILE = "host-session.json";
+
+/** Written while `visp feature` records a request; its age tells `next` and `work` to wait. */
+export const FEATURE_STARTING_FILE = "feature-starting.json";
+/** Older markers are left by a killed `visp feature`; a later command ignores them. */
+const FEATURE_STARTING_MS = 120_000;
+
+/** Mark that `visp feature` is recording a request. A failed write only loses the hint. */
+export async function beginFeatureStart(workspace: WorkspaceState): Promise<void> {
+  try {
+    await mkdir(workspace.paths.sessionDir, { recursive: true });
+    await writeFile(
+      join(workspace.paths.sessionDir, FEATURE_STARTING_FILE),
+      `${JSON.stringify({ at: Date.now() })}\n`,
+    );
+  } catch {}
+}
+
+export async function endFeatureStart(workspace: WorkspaceState): Promise<void> {
+  await rm(join(workspace.paths.sessionDir, FEATURE_STARTING_FILE), { force: true }).catch(
+    () => undefined,
+  );
+}
+
+/** How long a `visp feature` has been recording a request, when one started recently. */
+export async function featureStartingAge(workspace: WorkspaceState): Promise<number | undefined> {
+  try {
+    const text = await readFile(join(workspace.paths.sessionDir, FEATURE_STARTING_FILE), "utf8");
+    const at = Number(JSON.parse(text).at);
+    const age = Date.now() - at;
+    return Number.isFinite(age) && age >= 0 && age < FEATURE_STARTING_MS ? age : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface HostRequest {
   /** The request to preserve: a verbatim excerpt the worker quoted, or the latest prompt. */
   readonly request: string;
   readonly origin: "worker-quoted-host-prompt" | "host-prompt";
+  /** Every recorded user prompt since the last feature, oldest first. */
+  readonly prompts: readonly string[];
+  /** Whether a host prompt hook recorded them; false when they were read from the Codex session. */
+  readonly recordedByHook: boolean;
   /** Consumes the recorded prompts so the next feature starts from newer ones. */
   readonly mutation?: FileMutation;
 }
@@ -51,9 +91,64 @@ export async function hostRequest(
     return ok({
       request: quoted,
       origin: "worker-quoted-host-prompt",
+      prompts,
+      recordedByHook: recorded.length > 0,
       ...(mutation ? { mutation } : {}),
     });
-  return ok({ request: latest, origin: "host-prompt", ...(mutation ? { mutation } : {}) });
+  return ok({
+    request: latest,
+    origin: "host-prompt",
+    prompts,
+    recordedByHook: recorded.length > 0,
+    ...(mutation ? { mutation } : {}),
+  });
+}
+
+/**
+ * Codex runs project hooks only once the user trusts them with /hooks, and a headless
+ * `codex exec` in an untrusted project runs none: no prompt record, no shell protection and
+ * no Stop reminder, with nothing saying so. VISP installs a Codex prompt hook, so a request
+ * that could only be read from the Codex session file means the hooks did not run.
+ */
+export function codexHooksWarning(
+  harness: string,
+  host: Pick<HostRequest, "recordedByHook"> | undefined,
+): string | undefined {
+  return harness === "codex" && host && !host.recordedByHook
+    ? "Codex did not run VISP's project hooks in this session (they are probably not trusted), so the Stop reminder and shell protection are off. Open Codex in this project and trust them once with /hooks, including before headless codex exec runs."
+    : undefined;
+}
+
+/** Whether the host recorded user prompts that no feature has taken yet. */
+export async function hasUntakenPrompts(workspace: WorkspaceState): Promise<Result<boolean>> {
+  const text = await workspace.files.readTextIfExists(
+    join(workspace.paths.sessionDir, HOST_PROMPTS_FILE),
+  );
+  if (!text.ok) return text;
+  return ok(text.value !== undefined && promptLines(text.value).length > 0);
+}
+
+/** The host session that sent the latest user prompt, when the host's hook reports one. */
+export async function currentHostSession(
+  workspace: WorkspaceState,
+  forGrant = false,
+): Promise<Result<string | undefined>> {
+  if (forGrant) {
+    const active = await activeHostSessions(workspace);
+    if (!active.ok) return active;
+    if (active.value.size > 1) return ok(undefined);
+  }
+
+  const text = await workspace.files.readTextIfExists(
+    join(workspace.paths.sessionDir, HOST_SESSION_FILE),
+  );
+  if (!text.ok || text.value === undefined) return text.ok ? ok(undefined) : text;
+  try {
+    const session = (JSON.parse(text.value) as { session?: unknown }).session;
+    return ok(typeof session === "string" && session ? session : undefined);
+  } catch {
+    return ok(undefined);
+  }
 }
 
 function promptLines(text: string): string[] {
@@ -70,6 +165,10 @@ function promptLines(text: string): string[] {
 /**
  * The user messages of the Codex session running this command: Codex sets CODEX_THREAD_ID
  * for commands and records the session as `sessions/<yyyy>/<mm>/<dd>/rollout-*-<id>.jsonl`.
+ * `codex exec` records `event_msg` items of type UserMessage; Codex Desktop records
+ * `event_msg` payloads `user_message` with a string message, used when no item form exists.
+ * `response_item` messages are never read: they carry injected AGENTS.md and environment
+ * context, which would become the "request".
  */
 export async function codexSessionPrompts(
   environment: NodeJS.ProcessEnv = process.env,
@@ -80,22 +179,43 @@ export async function codexSessionPrompts(
   const file = await findRollout(join(home, "sessions"), thread, 3);
   if (!file) return [];
   const text = await readFile(file, "utf8").catch(() => "");
-  return text.split("\n").flatMap((line) => {
-    try {
-      const event = JSON.parse(line) as {
-        type?: string;
-        payload?: { type?: string; item?: { type?: string; content?: { text?: unknown }[] } };
-      };
-      const item = event.payload?.item;
-      if (event.type !== "event_msg" || item?.type !== "UserMessage") return [];
-      const joined = (item.content ?? [])
-        .map((part) => (typeof part.text === "string" ? part.text : ""))
-        .join("");
-      return joined.trim() ? [joined] : [];
-    } catch {
-      return [];
-    }
-  });
+  const items: string[] = [];
+  const messages: string[] = [];
+  for (const line of text.split("\n")) {
+    const prompt = rolloutUserMessage(line);
+    if (prompt) (prompt.form === "item" ? items : messages).push(prompt.text);
+  }
+  return items.length ? items : messages;
+}
+
+interface RolloutEvent {
+  readonly type?: string;
+  readonly payload?: {
+    readonly type?: string;
+    readonly message?: unknown;
+    readonly item?: { readonly type?: string; readonly content?: { readonly text?: unknown }[] };
+  };
+}
+
+function rolloutUserMessage(line: string): { form: "item" | "message"; text: string } | undefined {
+  let event: RolloutEvent;
+  try {
+    event = JSON.parse(line) as RolloutEvent;
+  } catch {
+    return undefined;
+  }
+  if (event.type !== "event_msg") return undefined;
+  const item = event.payload?.item;
+  if (typeof item?.type === "string" && /^user_?message$/i.test(item.type)) {
+    const joined = (item.content ?? [])
+      .map((part) => (typeof part.text === "string" ? part.text : ""))
+      .join("");
+    return joined.trim() ? { form: "item", text: joined } : undefined;
+  }
+  const message = event.payload?.message;
+  return event.payload?.type === "user_message" && typeof message === "string" && message.trim()
+    ? { form: "message", text: message }
+    : undefined;
 }
 
 async function findRollout(
@@ -119,4 +239,24 @@ async function findRollout(
 
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+async function activeHostSessions(workspace: WorkspaceState): Promise<Result<Set<string>>> {
+  const entries = await workspace.files.listDir(join(workspace.paths.sessionDir, "hosts"));
+  if (!entries.ok) return entries;
+  const active = new Set<string>();
+  for (const entry of entries.value.filter((name) => name.endsWith(".json"))) {
+    const read = await workspace.files.readTextIfExists(
+      join(workspace.paths.sessionDir, "hosts", entry),
+    );
+    if (!read.ok) return read;
+    try {
+      const item = JSON.parse(read.value ?? "{}");
+      if (typeof item.session === "string" && Date.now() - Date.parse(item.at) < 60 * 60 * 1000)
+        active.add(item.session);
+    } catch {
+      /* An interrupted heartbeat is not a caller identity. */
+    }
+  }
+  return ok(active);
 }

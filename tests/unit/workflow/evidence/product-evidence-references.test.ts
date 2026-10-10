@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { hashValue, sha256 } from "../../../../src/core/hash.js";
 import { err, ok } from "../../../../src/core/result.js";
 import { browserJourneySchema } from "../../../../src/testing/browser-journey.js";
-import { productJourneyKey } from "../../../../src/workflow/evidence/product-journey.js";
+import {
+  productJourneyKey,
+  rawUrlJourneyKey,
+} from "../../../../src/workflow/evidence/product-journey.js";
 import {
   outcomeStatuses,
   productEvidenceGaps,
@@ -161,6 +164,77 @@ describe("derived evidence identities", () => {
       }),
     );
     expect(currentJourneyFailures(input, subject)).toEqual([]);
+  });
+
+  it("counts a replay on another loopback port as the replay of a failed journey", () => {
+    const input = record();
+    const journeyAt = (origin: string) =>
+      browserJourneySchema.parse({
+        url: `${origin}/play`,
+        actions: [{ kind: "click", selector: "#launch" }],
+      });
+    const failed = journeyAt("http://localhost:3000");
+    const replayed = journeyAt("http://127.0.0.1:8123");
+    input.state.captureRuns = [
+      run(input, {
+        id: "failed-on-3000",
+        journey: failed,
+        journeyKey: productJourneyKey(failed),
+        journeyDigest: hashValue(failed),
+        status: "failed",
+        failure: { kind: "behavior", message: "Launch did nothing" },
+      }),
+    ];
+    expect(currentJourneyFailures(input, subject)).toHaveLength(1);
+    input.state.captureRuns.push(
+      run(input, {
+        id: "replayed-on-8123",
+        journey: replayed,
+        journeyKey: productJourneyKey(replayed),
+        journeyDigest: hashValue(replayed),
+      }),
+    );
+    expect(currentJourneyFailures(input, subject)).toEqual([]);
+  });
+
+  it("lets a replay clear a failure stored under the raw-URL key an earlier build wrote", () => {
+    const input = record();
+    const journey = browserJourneySchema.parse({
+      url: "http://localhost:3000/play",
+      actions: [{ kind: "click", selector: "#launch" }],
+    });
+    const previousKey = rawUrlJourneyKey(journey);
+    expect(previousKey).not.toBe(productJourneyKey(journey));
+    // Golden value computed with the build that hashed the URL as written.
+    expect(previousKey).toBe(
+      "journey-v3:ed08a8a5444e4d79cbd121b792aca1c2032d5125f06d78a2195aa672e1ed8e5a",
+    );
+    const recorded = run(input, {
+      id: "recorded-by-earlier-build",
+      journey,
+      journeyKey: previousKey,
+      journeyDigest: hashValue(journey),
+      status: "failed",
+      failure: { kind: "behavior", message: "Launch did nothing" },
+    });
+    input.state.captureRuns = [recorded];
+    expect(currentJourneyFailures(input, subject)).toHaveLength(1);
+    const replayed = browserJourneySchema.parse({ ...journey, url: "http://127.0.0.1:9000/play" });
+    input.state.captureRuns.push(
+      run(input, {
+        id: "replayed-by-this-build",
+        journey: replayed,
+        journeyKey: productJourneyKey(replayed),
+        journeyDigest: hashValue(replayed),
+      }),
+    );
+    expect(currentJourneyFailures(input, subject)).toEqual([]);
+    // A stored key that is neither the current nor the raw-URL key is not trusted as this journey.
+    input.state.captureRuns = [
+      { ...recorded, journeyKey: `journey-v3:${"0".repeat(64)}` },
+      ...input.state.captureRuns.slice(1),
+    ];
+    expect(currentJourneyFailures(input, subject)).toHaveLength(1);
   });
 
   it.each([1, 2])(
@@ -666,3 +740,73 @@ it.each([false, true])(
     expect(JSON.stringify(input.state)).toBe(before);
   },
 );
+
+it.each(["passed", "failed", "environment-failed"] as const)(
+  "keeps CHECK aliases bound to the canonical execution's %s status",
+  async (status) => {
+    const input = record();
+    input.state.executions = [execution(input, { status })];
+    const source = {
+      id: "CHECK-EXEC-1",
+      kind: "executed-check" as const,
+      reference: "Executed C001",
+      sha256: "digest",
+      available: true,
+      excerpt: "Recorded results",
+    };
+    const catalogue = await buildCatalogue(workspace, input, subject, [], [], [source]);
+    const canonical = catalogue.entries.find((entry) => entry.id === "EXEC-1");
+    expect(catalogue.aliases.get(source.id)).toBe("EXEC-1");
+    expect(catalogue.entries.find((entry) => entry.id === source.id)).toEqual({
+      ...canonical,
+      id: source.id,
+    });
+    expect(
+      resolveAssessmentEvidence(
+        {
+          outcome: "O001",
+          provenance: "agent-reported",
+          status: "satisfied",
+          summary: "Executed",
+          evidence: [source.id],
+          expectations: [],
+        },
+        catalogue,
+      ),
+    ).toMatchObject({ ok: true, value: { evidence: ["EXEC-1"] } });
+  },
+);
+
+it("preserves stale, out-of-slice and syntax-only eligibility for CHECK aliases", async () => {
+  const input = record();
+  const slice = input.brief.slices[0];
+  if (!slice) throw new Error("Missing slice");
+  const check = input.brief.checks[0];
+  if (!check) throw new Error("Missing check");
+  check.command = ["node", "--check", "app.mjs"];
+  input.state.executions = [execution(input, { subjectDigest: "old", task: "T001" })];
+  const source = {
+    id: "CHECK-EXEC-1",
+    kind: "executed-check" as const,
+    reference: "Executed C001",
+    sha256: "digest",
+    available: true,
+    excerpt: "Recorded results",
+  };
+  const catalogue = await buildCatalogue(workspace, input, subject, [], [], [source], slice);
+  expect(catalogue.entries.find((entry) => entry.id === source.id)).toMatchObject({
+    status: "stale",
+    supportsBehavior: false,
+  });
+  expect(evidenceSupportGaps([source.id], catalogue, "O001", true)).not.toHaveLength(0);
+  const unbound = await buildCatalogue(
+    workspace,
+    input,
+    subject,
+    [],
+    [],
+    [{ ...source, id: "CHECK-invented" }],
+  );
+  expect(unbound.entries.find((entry) => entry.id === "CHECK-invented")?.kind).toBe("source");
+  expect(evidenceSupportGaps(["CHECK-invented"], unbound, "O001", true)).not.toHaveLength(0);
+});

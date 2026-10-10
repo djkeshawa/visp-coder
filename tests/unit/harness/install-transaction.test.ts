@@ -1,9 +1,10 @@
-import { mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { vispError } from "../../../src/core/errors.js";
 import { exists, ProjectFileSystem } from "../../../src/core/fs.js";
-import { err } from "../../../src/core/result.js";
+import { err, ok } from "../../../src/core/result.js";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import { hookCommand } from "../../../src/harness/claude-settings.js";
 import { defaultHooks, installHarness, readAssetManifest } from "../../../src/harness/install.js";
 import { buildInstallPlan } from "../../../src/harness/install-plan.js";
@@ -33,7 +34,7 @@ describe("transactional harness installation", () => {
 
     expect(first.ok).toBe(true);
     expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(true);
-    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(true);
+    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(false);
 
     const second = await installHarness(state.paths, {
       harness: "codex",
@@ -80,7 +81,7 @@ describe("transactional harness installation", () => {
     if (!result.ok) throw new Error(result.error.message);
     expect(result.ok).toBe(true);
     expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(true);
-    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(true);
+    expect(await exists(join(workspace.root, ".codex/agents/visp-critic.toml"))).toBe(false);
   });
 
   it("refuses a reviewer policy changed between planning reads without writing assets", async () => {
@@ -164,7 +165,7 @@ describe("transactional harness installation", () => {
     const blocked = vi
       .spyOn(ProjectFileSystem.prototype, "writeBytesAtomic")
       .mockImplementation(function (this: ProjectFileSystem, path, bytes, mode) {
-        return path.includes(".codex/agents/")
+        return path.includes(".agents/skills/")
           ? Promise.resolve(err(vispError("IO_ERROR", "injected nested asset failure")))
           : write.call(this, path, bytes, mode);
       });
@@ -290,7 +291,10 @@ describe("transactional harness installation", () => {
             {
               matcher: "Write",
               hooks: [
-                { type: "command", command: hookCommand(".visp/hooks/claude-pretooluse.mjs") },
+                {
+                  type: "command",
+                  command: hookCommand(".visp/hooks/claude-pretooluse.mjs", true),
+                },
               ],
             },
           ],
@@ -321,6 +325,67 @@ describe("transactional harness installation", () => {
       expect(await exists(join(workspace.root, "AGENTS.visp.md"))).toBe(false);
     },
   );
+
+  describe("install --force over Claude settings it cannot merge", () => {
+    const forceClaude = async () => {
+      const result = await installHarness(
+        (await workspace.state()).paths,
+        { harness: "claude-code", hooks: ["claude"], mcp: false, force: true },
+        { guardHandshake: async () => ok(undefined) },
+      );
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value;
+    };
+    const backups = async () =>
+      (await readdir(join(workspace.root, ".claude"))).filter((name) =>
+        name.startsWith("settings.json.visp-backup-"),
+      );
+
+    it("saves unparseable settings before rewriting them and names the copy", async () => {
+      const original = "{ not json, but the user's permissions are in here\n";
+      await workspace.write(".claude/settings.json", original);
+      const installed = await forceClaude();
+      const [backup, ...others] = await backups();
+      expect(others).toEqual([]);
+      expect(await readFile(join(workspace.root, ".claude", backup ?? ""), "utf8")).toBe(original);
+      expect(installed.manualSteps.join(" ")).toContain(`.claude/${backup}`);
+      expect(installed.manualSteps.join(" ")).toContain("could not be merged");
+      expect(installed.manualSteps.join(" ")).toContain("may contain env secrets");
+      expect(
+        JSON.parse(await readFile(join(workspace.root, ".claude/settings.json"), "utf8")).hooks
+          .PreToolUse,
+      ).toHaveLength(2);
+    });
+
+    it("keeps sibling hook events when PreToolUse is not an array", async () => {
+      const original = JSON.stringify({
+        model: "opus",
+        hooks: {
+          PreToolUse: "x",
+          PostToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "./log.sh" }] }],
+        },
+      });
+      await workspace.write(".claude/settings.json", original);
+      await forceClaude();
+      const next = JSON.parse(
+        await readFile(join(workspace.root, ".claude/settings.json"), "utf8"),
+      );
+      expect(next.model).toBe("opus");
+      expect(next.hooks.PostToolUse).toEqual([
+        { matcher: "Bash", hooks: [{ type: "command", command: "./log.sh" }] },
+      ]);
+      expect(next.hooks.PreToolUse.length).toBeGreaterThan(0);
+      const [backup] = await backups();
+      expect(await readFile(join(workspace.root, ".claude", backup ?? ""), "utf8")).toBe(original);
+    });
+
+    it("writes no backup when the settings merge cleanly", async () => {
+      await workspace.write(".claude/settings.json", JSON.stringify({ model: "opus" }));
+      const installed = await forceClaude();
+      expect(await backups()).toEqual([]);
+      expect(installed.manualSteps.join(" ")).not.toContain("could not be merged");
+    });
+  });
 
   it("uses harness-appropriate local enforcement defaults", () => {
     expect(defaultHooks("claude-code")).toEqual(["claude", "git"]);
@@ -355,7 +420,7 @@ describe("transactional harness installation", () => {
     },
   );
 
-  it("writes no assets or config choice when a requested MCP surface is unsafe", async () => {
+  it("installs Codex assets while leaving an unsafe MCP surface for manual repair", async () => {
     const state = await workspace.state();
     const originalConfig = await readFile(state.paths.config, "utf8");
     await mkdir(join(workspace.root, ".codex"), { recursive: true });
@@ -368,14 +433,38 @@ describe("transactional harness installation", () => {
       configUpdates: { harness: "codex" },
     });
 
-    expect(result.ok).toBe(false);
-    expect(await exists(join(workspace.root, "AGENTS.visp.md"))).toBe(false);
-    expect(await exists(join(workspace.root, "AGENTS.md"))).toBe(false);
-    expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(false);
-    expect(await readFile(state.paths.config, "utf8")).toBe(originalConfig);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.manualSteps.join(" ")).toContain("--no-mcp");
+    expect(await exists(join(workspace.root, "AGENTS.visp.md"))).toBe(true);
+    expect(await exists(join(workspace.root, "AGENTS.md"))).toBe(true);
+    expect(await exists(join(workspace.root, ".agents/skills/visp/SKILL.md"))).toBe(true);
+    expect(await readFile(state.paths.config, "utf8")).not.toBe(originalConfig);
     expect(await readFile(join(workspace.root, CODEX_CONFIG_FILE), "utf8")).toBe(
       "mcp_servers = [\n",
     );
+  });
+
+  it("registers Cursor in its project config and removes the old root VISP entry", async () => {
+    const state = await workspace.state();
+    await writeFile(
+      join(workspace.root, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          visp: { command: "visp", args: ["serve", "--mcp"] },
+          github: { command: "github" },
+        },
+      }),
+    );
+    const result = await installHarness(state.paths, { harness: "cursor", hooks: [], mcp: true });
+    expect(result.ok).toBe(true);
+    const cursor = JSON.parse(await readFile(join(workspace.root, ".cursor/mcp.json"), "utf8"));
+    const old = JSON.parse(await readFile(join(workspace.root, ".mcp.json"), "utf8"));
+    expect(cursor.mcpServers.visp).toEqual({
+      command: "node",
+      args: [runtimeIdentity().executable, "serve", "--mcp"],
+    });
+    expect(old.mcpServers.visp).toBeUndefined();
+    expect(old.mcpServers.github).toEqual({ command: "github" });
   });
 
   it("writes no planned assets when a requested Git hook conflicts", async () => {

@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { applyFileTransaction } from "../../../src/core/file-transaction.js";
 import { err, ok } from "../../../src/core/result.js";
@@ -40,7 +40,74 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await workspace.destroy();
+});
+
+it("warns when an active browser journey has no available browser", async () => {
+  await workspace.destroy();
+  const product = await productWorkspace();
+  workspace = product.workspace;
+  const revised = await updateProductBrief(await workspace.state(), {
+    brief: {
+      ...product.brief,
+      checks: [
+        ...product.brief.checks,
+        {
+          id: "C002",
+          outcomes: ["O001"],
+          command: {
+            kind: "browser-journey" as const,
+            journey: { url: "http://localhost/", actions: [] },
+          },
+        },
+      ],
+    },
+    reason: "Check the browser journey",
+  });
+  expect(revised.ok).toBe(true);
+  vi.stubEnv("CHROME_BIN", "/missing/chrome-for-doctor");
+  expect(await check("browser")).toMatchObject({
+    status: "warn",
+    recovery: expect.stringContaining("CHROME_BIN"),
+  });
+});
+
+it("reports Codex hook trust as unknown until the project and hooks are trusted", async () => {
+  await setConfigScalar((await workspace.state()).paths, "harness", "codex");
+  const codexHome = join(workspace.root, "codex-home");
+  await mkdir(codexHome);
+  vi.stubEnv("CODEX_HOME", codexHome);
+  expect(await check("codex hooks trust")).toMatchObject({ status: "unknown" });
+  const hook = `${workspace.root}/.codex/hooks.json`;
+  await writeFile(
+    join(codexHome, "config.toml"),
+    [
+      `[projects.${JSON.stringify(workspace.root)}]`,
+      'trust_level = "trusted"',
+      ...["user_prompt_submit", "pre_tool_use", "stop"].flatMap((event) => [
+        `[hooks.state.${JSON.stringify(`${hook}:${event}:0:0`)}]`,
+        'trusted_hash = "sha256:test"',
+      ]),
+    ].join("\n"),
+  );
+  expect(await check("codex hooks trust")).toMatchObject({ status: "ok" });
+});
+
+it("repeats the manual activation step for a generic host", async () => {
+  expect(await check("harness activation")).toMatchObject({
+    status: "warn",
+    recovery: expect.stringContaining("AGENTS.visp.md"),
+  });
+});
+
+it("warns when codex-exec is selected but the Codex CLI is unavailable", async () => {
+  const state = await workspace.state();
+  const config = parse(await readFile(state.paths.config, "utf8"));
+  config.critic = { ...(config.critic ?? {}), harness: "codex", launch: "codex-exec" };
+  await writeFile(state.paths.config, stringify(config));
+  vi.stubEnv("PATH", "");
+  expect(await check("codex critic CLI")).toMatchObject({ status: "warn" });
 });
 
 async function check(name: string, runtime: DoctorRuntime = healthyDoctorRuntime): Promise<Check> {
@@ -65,6 +132,35 @@ async function installEverything(): Promise<void> {
 }
 
 describe("the enforcement check", () => {
+  it("detects and restores missing Claude prompt, Stop and Bash registrations", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    const path = join(workspace.root, ".claude/settings.json");
+    const settings = JSON.parse(await readFile(path, "utf8"));
+    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(
+      (entry: { matcher?: string }) => entry.matcher !== "Bash",
+    );
+    delete settings.hooks.UserPromptSubmit;
+    delete settings.hooks.Stop;
+    await writeFile(path, JSON.stringify(settings));
+    expect(await check("enforcement")).toMatchObject({ status: "warn" });
+    const state = await workspace.state();
+    await applyFixes(state, [await check("enforcement")], { guardHandshake: healthyGuard });
+    expect(await check("enforcement")).toMatchObject({ status: "ok" });
+  });
+  it("detects and repairs a deleted Codex MCP registration", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "codex");
+    const state = await workspace.state();
+    const installed = await installHarness(state.paths, { harness: "codex", hooks: [], mcp: true });
+    expect(installed.ok).toBe(true);
+    await rm(join(workspace.root, CODEX_CONFIG_FILE));
+    expect(await check("mcp registration")).toMatchObject({ status: "warn" });
+    const refreshed = await workspace.state();
+    const repairs = await applyFixes(refreshed, [await check("mcp registration")]);
+    expect(repairs.some((repair) => repair.done)).toBe(true);
+    expect(await check("mcp registration")).toMatchObject({ status: "ok" });
+  });
+
   it("keeps a project or environment recovery instead of prescribing a global reinstall", async () => {
     await installEverything();
     const result = await check("enforcement", {
@@ -141,6 +237,24 @@ describe("the enforcement check", () => {
     expect(result.detail).not.toContain("mcp");
   });
 
+  it("warns that Codex scope checks happen at commit time", async () => {
+    const state = await workspace.state();
+    await setConfigScalar(state.paths, "harness", "codex");
+    const installed = await installHarness(
+      state.paths,
+      {
+        harness: "codex",
+        hooks: ["git"],
+        mcp: false,
+      },
+      { guardHandshake: healthyGuard },
+    );
+    if (!installed.ok) throw new Error(installed.error.message);
+    const result = await check("enforcement");
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("commit-time only");
+  });
+
   /**
    * The script on disk does nothing on its own: Claude Code runs the hooks its
    * settings file names, so an unwired script is not an installed surface.
@@ -207,15 +321,17 @@ describe("the enforcement check", () => {
    * Installed but unrunnable is worse than not installed: the edit hook then
    * denies every write, and the pre-commit hook lets every commit through.
    */
-  it("fails when the hooks are installed but visp is not on PATH", async () => {
+  it("checks the pinned guard while reporting a missing PATH visp separately", async () => {
+    // A host with edit hooks, so enforcement can be fully "ok" (generic hosts are Git-only and warn).
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
     await installEverything();
 
     const original = process.env.PATH;
-    process.env.PATH = "/nonexistent";
+    process.env.PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
     try {
       const result = await check("enforcement", {});
-      expect(result.status, result.detail).toBe("fail");
-      expect(result.detail).toContain("not on PATH");
+      expect(result.status, result.detail).toBe("ok");
+      expect((await check("PATH visp")).status).toBe("warn");
     } finally {
       process.env.PATH = original;
     }
@@ -264,6 +380,17 @@ describe("the harness assets check", () => {
       mcp: false,
     });
     if (!installed.ok) throw new Error(installed.error.message);
+
+    const result = await check("harness assets");
+    expect(result.status).toBe("ok");
+  });
+
+  it("treats a CRLF checkout of a generated text asset as installed", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    const path = join(workspace.root, "AGENTS.visp.md");
+    const generated = await readFile(path, "utf8");
+    await writeFile(path, generated.replace(/\n/g, "\r\n"), "utf8");
 
     const result = await check("harness assets");
     expect(result.status).toBe("ok");
@@ -884,12 +1011,13 @@ describe("the repository index check", () => {
 });
 
 describe("the evidence trail check", () => {
-  /** The whole trail hidden is the state that made CI and review impossible. */
-  it("reports a .gitignore that hides the trail", async () => {
+  /** A project may deliberately keep its evidence local. */
+  it("respects a deliberate .gitignore that keeps the trail local", async () => {
     await writeFile(join(workspace.root, ".gitignore"), ".visp/\n", "utf8");
 
     const result = await check("evidence trail");
-    expect(result.status).not.toBe("ok");
+    expect(result.status).toBe("ok");
+    expect(result.detail).toContain("deliberately");
   });
 
   it("does not claim evidence is tracked when Git is unavailable", async () => {

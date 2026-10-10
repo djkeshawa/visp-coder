@@ -1,5 +1,5 @@
-import { rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { projectRoot, workspaceWithFeature } from "../../../src/cli/context.js";
 import { productWorkspace } from "../support/product-workspace.js";
@@ -17,6 +17,16 @@ afterEach(async () => {
 });
 
 describe("CLI trust-boundary adapters", () => {
+  it("finds the initialized repository from a nested working directory and refuses nested init", async () => {
+    const nested = join(workspace.root, "src", "nested");
+    await mkdir(nested, { recursive: true });
+    expect(projectRoot({ project: nested })).toBe(workspace.root);
+    const status = await runJson(nested, "status");
+    expect(status.envelope.error?.code).not.toBe("NOT_INITIALIZED");
+    const init = await runJson(nested, "init", "--harness", "generic");
+    expect(init.envelope.error?.code).toBe("ALREADY_INITIALIZED");
+    expect(init.envelope.error?.message).toContain(workspace.root);
+  });
   it("defaults the project root and rejects invalid or absent feature selections", async () => {
     expect(projectRoot({})).toBe(resolve(process.cwd()));
 

@@ -1,10 +1,13 @@
+import { projectMemoryText } from "../memory/memory-service.js";
+import { projectRulesText } from "./product/project-rules.js";
+
 /** Where the reader runs: MCP tool text, or CLI text output read by a model through a shell. */
 export type ReplyChannel = "mcp" | "cli";
 
 const WORDING = {
   mcp: {
     full: "Read structuredContent.data for complete context.",
-    detail: "Full result: detail:true.",
+    detail: "Full data is already in structuredContent.data.",
     readBrief: (feature: string) => `visp_brief {feature:"${feature}"}`,
     template: (feature: string) =>
       `visp_work {feature:"${feature}", check:"<command that runs your tests>"} works the whole request as one slice. Only for several independently usable parts, plan slices: visp_brief {feature:"${feature}", template:true}`,
@@ -44,6 +47,12 @@ export function compactProductReply(
 }
 
 const SCALAR_FIELDS = [
+  "notice",
+  "information",
+  "expectation",
+  "retirement",
+  "originalStatus",
+  "canonicalRunId",
   "feature",
   "task",
   "taskClass",
@@ -73,6 +82,7 @@ const LIST_FIELDS = [
   "evidenceGaps",
   "journeyFailures",
   "imageGaps",
+  "runs",
 ] as const;
 const PLAN_FIELDS = ["capability", "firstSlice", "nextCheck", "findings", "gaps"] as const;
 const FEEDBACK_FIELDS = [
@@ -103,7 +113,41 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${skillText(data.skills)}${detailCommand(name, data)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}${skillText(data.skills)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+}
+
+function ambiguityText(tests: unknown): string {
+  const ambiguities = object(tests).ambiguities;
+  if (!Array.isArray(ambiguities)) return "";
+  const short = (text: unknown) =>
+    String(text ?? "")
+      .replace(/\s+/g, " ")
+      .slice(0, 240);
+  return ambiguities
+    .map((entry) => {
+      const ambiguity = object(entry);
+      return `\nAmbiguous: "${short(ambiguity.quote)}" — default reading (advice, not a requirement): ${short(ambiguity.conventionalReading)}. Use it unless the request, a pinned test or an explicit user decision says otherwise; report such a conflict instead of overriding it. Record your choice; alternatives are in the full result.`;
+    })
+    .join("");
+}
+
+function memoryText(memories: unknown, laterChanges?: unknown): string {
+  const text = Array.isArray(memories)
+    ? projectMemoryText(
+        memories.map(String),
+        Array.isArray(laterChanges) ? laterChanges.map(String) : [],
+      )
+    : "";
+  return text ? `\n${text}` : "";
+}
+
+/** Standing project rules are requirements, shown whole as plain lines on every reply that carries them. */
+function rulesText(rules: unknown): string {
+  if (!Array.isArray(rules)) return "";
+  const text = projectRulesText(
+    rules.map(object).map((rule) => ({ id: String(rule.id), text: String(rule.text) })),
+  );
+  return text ? `\n${text}` : "";
 }
 
 /** A skill is a procedure: plain numbered lines are followed where an escaped JSON string is skimmed. */
@@ -173,8 +217,10 @@ function addObservationSummary(data: Record<string, unknown>, summary: Record<st
   if (data.images) summary.images = Array.isArray(data.images) ? data.images.length : undefined;
 }
 
-function detailCommand(name: string, data: Record<string, unknown>): string {
+function detailCommand(name: string, data: Record<string, unknown>, channel: ReplyChannel): string {
   if (!name.endsWith("work") || typeof data.feature !== "string") return "";
+  if (channel === "mcp")
+    return `\nRead-only details: visp_work ${JSON.stringify({ feature: data.feature, ...(typeof data.task === "string" ? { task: data.task } : {}), inspect: true })}`;
   return `\nRead-only details: visp work --inspect --feature ${data.feature}${typeof data.task === "string" ? ` --task ${data.task}` : ""}`;
 }
 
@@ -210,7 +256,7 @@ function bounded(value: unknown): unknown {
  * output tail, what blocks closure and the next step; graph trace, digests and repeated
  * outcome statements stay in structured data.
  */
-export function compactVerificationText(
+function compactVerificationText(
   name: string,
   value: unknown,
   channel: ReplyChannel = "mcp",
@@ -221,6 +267,8 @@ export function compactVerificationText(
   const unresolved = rows(data.outcomes)
     .filter((outcome) => outcome.satisfied !== true)
     .map((outcome) => `${outcome.id}: behavior ${outcome.behavior}; review ${outcome.review}`);
+  // The hint is an instruction, not data: JSON escapes its quotes and bounding cuts it.
+  const { hint, ...pinned } = object(data.pinnedTests) as { hint?: unknown };
   const summary = {
     feature: data.feature,
     task: data.task,
@@ -229,19 +277,28 @@ export function compactVerificationText(
     delivery: data.delivery,
     recovery: data.recovery,
     recommendation: data.recommendation,
+    warnings:
+      Array.isArray(data.warnings) && data.warnings.length ? boundedRows(data.warnings) : undefined,
+    committedChanges:
+      Array.isArray(data.committedChanges) && data.committedChanges.length
+        ? boundedRows(data.committedChanges)
+        : undefined,
     checks: rows(data.executions).map(executionSummary),
+    flipExtraMs: data.flipDurationMs,
     unresolved,
     gaps: closureGaps(data.gaps, unresolved),
     findings:
       Array.isArray(plan.findings) && plan.findings.length ? bounded(plan.findings) : undefined,
     acceptanceTests: data.acceptanceTests ? bounded(data.acceptanceTests) : undefined,
+    pinnedTests: Object.keys(pinned).length ? bounded(pinned) : undefined,
     critic: data.critic ? bounded(data.critic) : undefined,
     nextProbe: plan.nextProbe ? bounded(object(plan.nextProbe).question) : undefined,
     next: data.next
       ? { action: next.action, objective: next.objective, command: next.command }
       : undefined,
   };
-  return `${name}: ${JSON.stringify(summary)}\n${WORDING[channel].detail} Tool success does not imply product acceptance.`;
+  const hintLine = typeof hint === "string" && hint ? `\n${hint}` : "";
+  return `${name}: ${JSON.stringify(summary)}${hintLine}\n${WORDING[channel].detail} Tool success does not imply product acceptance.`;
 }
 
 /** Gaps repeat outcome statuses first; the actionable environment or scope reason comes last. */
@@ -257,7 +314,23 @@ function closureGaps(gaps: unknown, unresolved: readonly string[]): unknown {
 }
 
 function executionSummary(execution: Record<string, unknown>): unknown {
-  if (execution.status === "passed") return `${execution.check}: passed`;
+  if (execution.status === "passed") {
+    const flip = object(execution.flip);
+    if (Object.keys(flip).length)
+      return {
+        check: execution.check,
+        status: "passed",
+        failsWithoutChange: flip.failsWithoutChange,
+        flipExtraMs: execution.flipDurationMs,
+        ...(flip.failsWithoutChange === false
+          ? {
+              advice: `${execution.check} also passes with your source change reverted, so it does not show the requested change. Add a test that fails on the old code and passes now (keep it), then rerun visp done.`,
+            }
+          : {}),
+        ...(flip.reason ? { flipReason: flip.reason } : {}),
+      };
+    return `${execution.check}: passed`;
+  }
   const output = typeof execution.output === "string" ? execution.output : "";
   return {
     check: execution.check,
@@ -268,11 +341,7 @@ function executionSummary(execution: Record<string, unknown>): unknown {
 }
 
 /** Feature creation and brief updates: the author already holds the content it wrote. */
-export function compactBriefText(
-  name: string,
-  value: unknown,
-  channel: ReplyChannel = "mcp",
-): string {
+function compactBriefText(name: string, value: unknown, channel: ReplyChannel = "mcp"): string {
   const data = object(value);
   const brief = data.brief === undefined ? data : object(data.brief);
   const summary = {
@@ -288,14 +357,31 @@ export function compactBriefText(
       checks: entry.checks,
     })),
     normalized: data.normalized,
+    authorizationRevoked: data.authorizationRevoked,
+    mayEdit: data.mayEdit,
+    resetSlices: data.resetSlices,
     branchCreated: data.branchCreated,
     branchWarning: data.branchWarning,
+    redactionNotice: data.redactionNotice,
   };
+  const warning = [data.hostHooksWarning, data.inheritedChangesNote]
+    .filter((text): text is string => typeof text === "string")
+    .map((text) => `\nWarning: ${text}`)
+    .join("");
+  const notes = [data.duplicateNote, data.testsNote]
+    .filter((text): text is string => typeof text === "string")
+    .map((text) => `\nNote: ${text}`)
+    .join("");
   // The adapter does not choose the next slice; visp_next owns that decision.
   const wording = WORDING[channel];
   const feature = String(brief.feature);
-  const next = name.endsWith("feature") ? wording.template(feature) : wording.next(feature);
-  return `${name}: ${JSON.stringify(summary)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
+  const next =
+    typeof data.nextCommand === "string"
+      ? data.nextCommand
+      : name.endsWith("feature")
+        ? wording.template(feature)
+        : wording.next(feature);
+  return `${name}: ${JSON.stringify(summary)}${warning}${notes}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}\nNext: ${next}\nRead the full brief with ${wording.readBrief(feature)}.`;
 }
 
 function rows(value: unknown): Record<string, unknown>[] {
@@ -306,11 +392,7 @@ function rows(value: unknown): Record<string, unknown>[] {
  * The next step. Critic findings arrive both as evidence lines and as criticAdvice
  * findings; the worker needs each once, with the action and command.
  */
-export function compactNextText(
-  name: string,
-  value: unknown,
-  channel: ReplyChannel = "mcp",
-): string {
+function compactNextText(name: string, value: unknown, channel: ReplyChannel = "mcp"): string {
   const data = object(value);
   const advice = object(data.criticAdvice);
   const evidence = Array.isArray(data.evidence) ? [...new Set(data.evidence)] : [];

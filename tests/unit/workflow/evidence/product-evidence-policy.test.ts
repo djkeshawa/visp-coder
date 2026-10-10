@@ -577,6 +577,12 @@ describe("supported product judgments", () => {
       },
     };
     expect(historicalAcceptanceNext(narrowerPass, selection, { feature })?.action).toBe("refine");
+    // Host projects hand the mismatch to the review handoff; VISP's own reviewer runs at accept.
+    expect(historicalAcceptanceNext(narrowerPass, selection, { feature })?.command).toContain(
+      "visp review --handoff",
+    );
+    const launchedNext = historicalAcceptanceNext(narrowerPass, selection, { feature }, true);
+    expect(launchedNext?.command).toBe(`visp accept --feature ${feature}`);
     const globalPass = {
       ...otherPass,
       task: undefined,
@@ -671,21 +677,25 @@ describe("supported product judgments", () => {
     value(await runProductVerify(await workspace.state()));
     const bundle = value(await runProductReview(await workspace.state()));
     const oldReference = reviewed.assessments[0]?.evidence ?? [];
-    const result = value(
-      await runProductReview(await workspace.state(), {
-        subjectDigest: bundle.subjectDigest,
-        feedback: moduleFeedback(bundle),
-        assessments: [
-          {
-            outcome: "O001",
-            status: "satisfied",
-            summary: "Claims old check is enough",
-            evidence: oldReference,
-          },
-        ],
-      }),
-    );
-    expect(result.assessments[0]?.status).toBe("unavailable");
+    const result = await runProductReview(await workspace.state(), {
+      subjectDigest: bundle.subjectDigest,
+      feedback: moduleFeedback(bundle),
+      assessments: [
+        {
+          outcome: "O001",
+          status: "satisfied",
+          summary: "Claims old check is enough",
+          evidence: oldReference,
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "EVIDENCE_FAILED",
+        message: expect.stringContaining("Unknown evidence reference"),
+      },
+    });
     expect(value(await runProductAccept(await workspace.state())).passed).toBe(false);
   });
 });

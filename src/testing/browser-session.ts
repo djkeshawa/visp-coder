@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha256 } from "../core/hash.js";
+import { redactText } from "../core/redaction.js";
 import { imageDimensions } from "../workflow/evidence/observations/media.js";
 import type { ProductReviewCapture } from "../workflow/evidence/product-review.js";
 import type { InteractionPage } from "./browser.js";
@@ -13,6 +14,9 @@ import { browserKey } from "./browser-keys.js";
 import { measureRenderedLayout } from "./browser-layout.js";
 import { BrowserBehaviorFailure } from "./browser-observations.js";
 import { type ChromeTransport, launchChrome } from "./chrome-transport.js";
+import { PROJECT_SCHEME } from "./project-server.js";
+
+const CHROME_ERROR_PAGE = "chrome-error://chromewebdata/";
 
 export interface BrowserOperation {
   readonly id: string;
@@ -32,6 +36,10 @@ export interface BrowserOperation {
   /** Bounded serialized observed value; truncation is explicit and never a passing assertion. */
   readonly measurement?: { readonly json: string; readonly truncated: boolean };
 }
+/** `annotate` adds a fact about the main document VISP itself served to the navigate operation. */
+export interface NavigateOptions {
+  readonly annotate?: (finalUrl: string) => string | undefined;
+}
 export interface BrowserSession {
   readonly page: InteractionPage;
   readonly operations: readonly BrowserOperation[];
@@ -39,11 +47,12 @@ export interface BrowserSession {
   assertHealthy?(): void;
   sample<R, A>(fn: (arg: A) => R, arg: A): Promise<R>;
   record(kind: "observe" | "scroll", description: string, result: unknown): string;
-  navigate(url: string): Promise<void>;
+  navigate(url: string, options?: NavigateOptions): Promise<void>;
   /** Change the viewport in place; preserves the current document and application state. */
   resize(viewport: { width: number; height: number }): Promise<void>;
   drag(gesture: DragGesture, intermediate?: () => Promise<void>): Promise<void>;
-  capture(): Promise<ProductReviewCapture>;
+  /** `allowErrorPage` is only for a failure image: Chrome's own error page is not product evidence. */
+  capture(options?: { allowErrorPage?: boolean }): Promise<ProductReviewCapture>;
   close(): Promise<void>;
 }
 
@@ -57,6 +66,12 @@ export async function openBrowserSession(options: {
   readonly viewport?: { width: number; height: number };
   readonly fileRoot?: string;
   readonly blockedPaths?: readonly string[];
+  /**
+   * How operations and capture routes name a URL VISP itself serves (`project:/index.html`, never
+   * the ephemeral port), so the same journey on another run has the same route. Navigation and
+   * confinement always use the real URL.
+   */
+  readonly present?: (url: string) => string;
 }): Promise<BrowserSession> {
   if (!/^[0-9a-f]{64}$/.test(options.subjectDigest))
     throw new Error("subjectDigest must be SHA-256");
@@ -114,31 +129,58 @@ export async function openBrowserSession(options: {
     };
     const errors: string[] = [];
     const unsubscribeErrors = transport.onEvent((event) => {
-      if (event.sessionId !== send.sessionId || event.method !== "Runtime.exceptionThrown") return;
-      const message = applicationException(event.params);
+      // close() is flagged before it unsubscribes; a late event must not throw from record().
+      if (
+        closed ||
+        event.sessionId !== send.sessionId ||
+        event.method !== "Runtime.exceptionThrown"
+      )
+        return;
+      const message = redactText(applicationException(event.params), { root: options.fileRoot });
       if (errors.length < 5) {
         errors.push(message);
         record("observe", "Uncaught application exception", message);
       }
     });
+    // Main-document responses by loader; a navigation reads its own entry after load.
+    const documents = new Map<string, { status: number; url: string }>();
+    const unsubscribeDocuments = transport.onEvent((event) => {
+      if (event.sessionId !== send.sessionId || event.method !== "Network.responseReceived") return;
+      const response = event.params.response as { status?: unknown; url?: unknown } | undefined;
+      if (event.params.type !== "Document" || typeof response?.status !== "number") return;
+      if (typeof event.params.loaderId !== "string") return;
+      documents.set(event.params.loaderId, {
+        status: response.status,
+        url: String(response.url),
+      });
+    });
     const assertHealthy = () => {
       if (errors.length) throw new BrowserBehaviorFailure(errors.join("\n"));
     };
     await send("Runtime.enable");
+    await send("Network.enable");
     const pointer = { x: 0, y: 0 };
     const page = interactionPage(inputSend, record, pointer);
     const quietPage = interactionPage(inputSend, () => {});
-    const navigate = async (url: string) => {
+    const present = options.present ?? ((value: string) => value);
+    const navigate = async (url: string, navigation?: NavigateOptions) => {
       await checkNavigation(url, options.fileRoot, options.blockedPaths);
+      documents.clear();
       const response = await inputSend("Page.navigate", { url });
-      if (response.errorText) throw new Error(String(response.errorText));
+      const served =
+        typeof response.loaderId === "string" ? documents.get(response.loaderId) : undefined;
+      if (response.errorText && !(served && served.status >= 400))
+        throw new Error(String(response.errorText));
       await inputSend("Runtime.evaluate", {
         expression:
           "new Promise(resolve => { if (document.readyState === 'complete') resolve(); else addEventListener('load', () => resolve(), {once:true}); })",
         awaitPromise: true,
       });
       await files?.check();
-      record("navigate", `Navigate ${url}`);
+      const note = servedDocumentNote(url, served, present);
+      const fact = served && served.status < 400 ? navigation?.annotate?.(served.url) : undefined;
+      record("navigate", `Navigate ${present(url)}${note.suffix}${fact ? `, ${fact}` : ""}`);
+      if (note.failure) throw new BrowserBehaviorFailure(note.failure);
     };
     return {
       page,
@@ -192,9 +234,11 @@ export async function openBrowserSession(options: {
       get operations() {
         return structuredClone(operations);
       },
-      async capture() {
+      async capture(captureOptions) {
         const route = await page.evaluate(() => location.href, undefined);
-        await checkNavigation(route, options.fileRoot, options.blockedPaths);
+        // Chrome's own error page (an empty 4xx/5xx answer) is a valid failure image, never evidence.
+        if (!(captureOptions?.allowErrorPage && route === CHROME_ERROR_PAGE))
+          await checkNavigation(route, options.fileRoot, options.blockedPaths);
         await files?.check();
         const id = `CAP-${randomUUID()}`;
         const layout = await quietPage.evaluate(measureRenderedLayout, undefined);
@@ -218,16 +262,18 @@ export async function openBrowserSession(options: {
         }
         assertOpen();
         await files?.check();
-        record("capture", `Capture ${route}`, bytes.toString("base64"), id);
+        record("capture", `Capture ${present(route)}`, bytes.toString("base64"), id);
         return {
           id,
           path,
           sha256: sha256(bytes),
           subjectDigest: options.subjectDigest,
-          route,
+          route: present(route),
           steps: operations
             .filter((operation) => operation.kind !== "measure" && operation.kind !== "capture")
+            .slice(-4)
             .map((operation) => operation.description),
+          operationIndex: operations.length - 1,
           viewport: { ...viewport },
           createdAt: new Date().toISOString(),
           provenance: "runner-captured",
@@ -239,6 +285,7 @@ export async function openBrowserSession(options: {
         closing = (async () => {
           await Promise.allSettled([...writes]);
           unsubscribeErrors();
+          unsubscribeDocuments();
           files?.dispose();
           await transport.close();
         })();
@@ -249,6 +296,33 @@ export async function openBrowserSession(options: {
     await transport.close();
     throw cause;
   }
+}
+
+/** What the server answered for the main document; file: documents are fulfilled locally, not served. */
+function servedDocumentNote(
+  url: string,
+  served: { status: number; url: string } | undefined,
+  present: (url: string) => string,
+): { suffix: string; failure?: string } {
+  const requested = new URL(url);
+  if (!served || requested.protocol === "file:") return { suffix: "" };
+  requested.hash = "";
+  const redirect = served.url === requested.href ? "" : `, redirected to ${present(served.url)}`;
+  const suffix = ` (HTTP ${served.status}${redirect})`;
+  if (served.status < 400) return { suffix };
+  const display = present(url);
+  if (display.startsWith(PROJECT_SCHEME))
+    return {
+      suffix,
+      failure:
+        served.status === 404
+          ? `${display} does not exist in the project (HTTP 404); check the path relative to the project root.`
+          : `${display} could not be served from the project (HTTP ${served.status}). .env files, .git, .visp, dist/, build/ and node_modules/ are never served; an app that needs them must run its own server on a free port and use its http://127.0.0.1:<port>/ URL as the journey url.`,
+    };
+  return {
+    suffix,
+    failure: `${url} answered HTTP ${served.status}. Either the server is serving a different directory or app than this project, or the page does not exist. Serve this project's files (for a static page use "project:/<file>" as the journey url) and confirm the URL returns 200 before rerunning.`,
+  };
 }
 
 function checkedViewport(viewport: { width: number; height: number }) {
@@ -326,7 +400,20 @@ export function interactionPage(
         returnByValue: true,
         awaitPromise: true,
       });
-      if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+      if (result.exceptionDetails) {
+        const details = result.exceptionDetails as {
+          text?: string;
+          exception?: { description?: string };
+        };
+        const description =
+          details.exception?.description ?? details.text ?? "Browser evaluation failed";
+        if (
+          /SyntaxError|DOMException/.test(description) &&
+          /querySelector|\.matches|\.closest|valid selector/i.test(description)
+        )
+          throw new BrowserBehaviorFailure(`Invalid CSS selector: ${description.slice(0, 512)}`);
+        throw new Error(JSON.stringify(result.exceptionDetails));
+      }
       const value = (result.result as { value: R }).value;
       record("measure", "Read browser state", value);
       return value;

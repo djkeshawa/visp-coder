@@ -6,6 +6,7 @@ import {
   type QueryRow,
   refreshRepository,
 } from "../../graph/index.js";
+import { featureMemories } from "../../memory/memory-service.js";
 import { recallRelevant } from "../../memory/store.js";
 import { recordActivity } from "../../orchestrate/session.js";
 import { checkOutputNotes } from "../product-output-guidance.js";
@@ -15,9 +16,13 @@ import { fitProductContext } from "./context-budget.js";
 import { queryCurrentProductPaths } from "./context-graph.js";
 import type { ProductWorkContext } from "./context-types.js";
 import { correctionChecks, failedCheckOwners } from "./corrections.js";
+import { reviewerPointer } from "./critic-capacity.js";
 import { currentJourneyFailures, currentJourneyFeedback } from "./evidence-references.js";
 import { productFeedbackPlan } from "./feedback.js";
+import { productInputWarnings } from "./input-warnings.js";
 import { checksFor, type ProductSlice } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
+import { type ProjectRule, readProjectRules } from "./project-rules.js";
 import { reviewExcerpt } from "./review-excerpts.js";
 import { productSkills } from "./skills.js";
 import { briefPath, type ProductRecord, productStatePath } from "./store.js";
@@ -47,11 +52,13 @@ export async function buildProductContext(
     subject.value,
     slice,
     workspace.config.workflow.reviewMode,
+    { reviewer: await reviewerPointer(workspace, brief.feature, subject.value, slice.id) },
   );
   const question = [
     feedbackPlan.trace.question,
     feedbackPlan.research?.question ?? "",
     slice.goal,
+    brief.originalRequest,
     ...productBehaviorProbes(record, slice).probes.map((probe) => probe.question),
   ].join(" ");
   // The problem is already delivered in findings; do not repeat its full prose in routing hints.
@@ -72,6 +79,22 @@ export async function buildProductContext(
   const neighborhood = await productNeighborhood(workspace, paths, refresh, question);
   if (!neighborhood.ok) return neighborhood;
   const { graph, notes } = neighborhood.value;
+  const excerptPaths = paths.filter(usefulExcerptPath).sort(
+    (a, b) =>
+      excerptScore(
+        b,
+        question,
+        graph,
+        checks.flatMap((check) => check.files),
+      ) -
+      excerptScore(
+        a,
+        question,
+        graph,
+        checks.flatMap((check) => check.files),
+      ),
+  );
+  notes.unshift(...(await productInputWarnings(workspace, brief)));
   notes.push(...checkOutputNotes(checks));
   const memory = await recallRelevant(workspace, {
     terms: [
@@ -98,11 +121,13 @@ export async function buildProductContext(
     notes.push(
       "Project memory is advisory and unverified; its freshness is unknown. Confirm it against current files.",
     );
-  const { files, remaining } = await productExcerpts(workspace, paths, question);
-  if (paths.length > files.length)
+  const { files, remaining } = await productExcerpts(workspace, excerptPaths, question);
+  if (excerptPaths.length > files.length)
     notes.push("Context is bounded; read additional relevant files when needed.");
-  const skills = await productSkills(workspace, slice, remaining);
+  const skills = await productSkills(workspace, slice, remaining, excerptPaths);
   if (!skills.ok) return skills;
+  const rules = await readProjectRules(workspace);
+  const recalled = await featureMemories(workspace, brief.feature);
   notes.push(...skills.value.notes);
   return ok(
     fitProductContext(
@@ -114,6 +139,7 @@ export async function buildProductContext(
         task: slice.id,
         ...(slice.taskClass === undefined ? {} : { taskClass: slice.taskClass }),
         originalRequest: brief.originalRequest,
+        ...standingContext(rules, recalled),
         objective: slice.goal,
         outcomes: brief.outcomes.filter((outcome) => slice.outcomes.includes(outcome.id)),
         examples: brief.examples.filter((example) =>
@@ -136,7 +162,12 @@ export async function buildProductContext(
         reviewFeedback: priorReviewFeedback(record, slice, subject.value),
         acceptanceBaseline: brief.acceptanceBaseline,
         journeyFailures: currentJourneyFailures(record, subject.value, slice.id),
-        journeyFeedback: currentJourneyFeedback(record, subject.value, slice.id),
+        journeyFeedback: currentJourneyFeedback(
+          record,
+          subject.value,
+          slice.id,
+          reviewerRules(workspace),
+        ),
         feedback: [
           ...new Map(
             record.state.executions
@@ -176,6 +207,29 @@ export async function buildProductContext(
           : []),
       ],
     ),
+  );
+}
+
+function usefulExcerptPath(path: string): boolean {
+  return (
+    !path.split("/").some((part) => part.startsWith(".")) &&
+    !["AGENTS.visp.md", "VISP.commands.md"].includes(path.split("/").at(-1) ?? "")
+  );
+}
+
+function excerptScore(
+  path: string,
+  question: string,
+  graph: QueryRow[],
+  checkFiles: string[],
+): number {
+  return (
+    Number(question.includes(path)) * 5 +
+    Number(checkFiles.includes(path)) * 4 +
+    graph.reduce(
+      (score, row) => score + (row.path === path ? (row.kind === "entrypoint" ? 3 : 1) : 0),
+      0,
+    )
   );
 }
 
@@ -285,4 +339,25 @@ function priorReviewFeedback(
       limitations: review.feedback?.limitations,
     }))
     .filter((review) => review.assessments.length || review.summary || review.limitations?.length);
+}
+
+/**
+ * Rules and recorded decisions the request carries, shown on every reply. An unreadable
+ * rules file fails `visp feature` and `visp rules`; work goes on without it.
+ */
+function standingContext(
+  rules: Result<{ rules: ProjectRule[] }>,
+  memory: { memories: readonly string[]; laterChanges: readonly string[] },
+): {
+  projectRules?: readonly ProjectRule[];
+  projectMemory?: readonly string[];
+  projectMemoryLaterChanges?: readonly string[];
+} {
+  return {
+    ...(rules.ok && rules.value.rules.length ? { projectRules: rules.value.rules } : {}),
+    ...(memory.memories.length ? { projectMemory: memory.memories } : {}),
+    ...(memory.memories.length && memory.laterChanges.length
+      ? { projectMemoryLaterChanges: memory.laterChanges }
+      : {}),
+  };
 }

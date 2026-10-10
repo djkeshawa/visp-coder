@@ -37,8 +37,8 @@ it("distinguishes explicit values, defaults and recorded policy without rewritin
   expect(report.value.settings).toContainEqual(
     expect.objectContaining({
       path: "workflow.flipCheck",
-      effect: "legacy-only",
-      note: expect.stringContaining("historical telemetry"),
+      effect: "conditional",
+      note: expect.stringContaining("display-only regression comparison"),
     }),
   );
   expect(await readFile(state.paths.config, "utf8")).toBe(before);
@@ -72,7 +72,7 @@ it("keeps new-feature critic defaults separate from an existing feature's pinned
   expect(report.value.activeFeatureCritic).toMatchObject({ ok: true, value: { enabled: false } });
 });
 
-it("explains that the retained flip setting no longer has an effect", async () => {
+it("explains the live display-only flip setting", async () => {
   ({ workspace: project } = await productWorkspace());
   const state = await project.state();
   const config = await readFile(state.paths.config, "utf8");
@@ -86,7 +86,24 @@ it("explains that the retained flip setting no longer has an effect", async () =
       path: "workflow.flipCheck",
       value: "off",
       source: "project",
-      effect: "legacy-only",
+      effect: "conditional",
     }),
   );
+});
+
+it("identifies active memory settings and telemetry's limited effect", async () => {
+  project = await TestWorkspace.create();
+  await project.write(
+    "visp.yml",
+    "memory:\n  service:\n    command: visp-memory\n    select: keyword\n",
+  );
+  const report = await explainSettings(await project.state());
+  if (!report.ok) throw new Error(report.error.message);
+  for (const path of ["memory.recall", "memory.service.command", "memory.service.select"])
+    expect(report.value.settings.find((setting) => setting.path === path)?.effect).toBe(
+      "conditional",
+    );
+  expect(
+    report.value.settings.find((setting) => setting.path === "telemetry.enabled")?.note,
+  ).toContain("usage import");
 });

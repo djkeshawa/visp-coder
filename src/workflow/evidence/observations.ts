@@ -123,8 +123,6 @@ export function reproductionSignature(receipt: ObservationReceipt): string {
   });
 }
 
-export { observationReproductionState } from "./observations/identity.js";
-
 async function readOneLog(
   state: WorkspaceState,
   feature: string,
@@ -150,7 +148,7 @@ export async function attachmentStaleReasons(
   );
 }
 
-export async function attachmentIssue(
+async function attachmentIssue(
   state: WorkspaceState,
   attachment: ObservationAttachment,
 ): Promise<"missing" | "changed" | undefined> {

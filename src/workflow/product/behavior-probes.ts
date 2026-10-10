@@ -35,7 +35,7 @@ export function productBehaviorProbes(record: ProductRecord, slice?: ProductSlic
       kind: "independent-result",
       ...anchor,
       question:
-        "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed.",
+        "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.",
     });
     if (
       example ||

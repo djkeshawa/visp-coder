@@ -150,7 +150,14 @@ export async function planProductMigration(
   const features: ProductMigrationOutcome["features"][number][] = [];
   for (const feature of ids.value) {
     const planned = await planFeatureMigration(workspace, feature);
-    if (!planned.ok) return planned;
+    if (!planned.ok)
+      return err(
+        vispError(planned.error.code, `Feature ${feature}: ${planned.error.message}`, {
+          details: { ...planned.error.details, feature },
+          recovery:
+            `Repair the named artifact, or migrate unaffected features separately with visp-migrate apply --feature <id>. ${planned.error.recovery ?? ""}`.trim(),
+        }),
+      );
     mutations.push(...planned.value.mutations);
     features.push(planned.value.feature);
   }
@@ -328,7 +335,15 @@ async function readLegacy(
     }
     const parsed = schema.safeParse(value);
     if (!parsed.success)
-      return err(vispError("ARTIFACT_INVALID", `Invalid legacy ${name}: ${parsed.error.message}`));
+      return err(
+        vispError(
+          "ARTIFACT_INVALID",
+          `Invalid legacy artifact ${path} for ${feature}: ${parsed.error.issues
+            .slice(0, 5)
+            .map((issue) => `${issue.path.join(".") || "record"}: ${issue.message}`)
+            .join("; ")}`,
+        ),
+      );
     const metadata = await workspace.files.metadata(path);
     if (!metadata.ok) return metadata;
     snapshots.push({ path, content: content.value, mode: metadata.value?.mode });

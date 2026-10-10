@@ -13,15 +13,18 @@ import {
   taskClassSchema,
   taskIdSchema,
 } from "../artifacts/common.js";
+import { flipCheckSchema } from "../artifacts/evidence.js";
 import { browserCapabilitySchema } from "./environment-model.js";
 import { experimentResolutionsSchema } from "./experiment-model.js";
 import { productFeedbackSchema } from "./feedback-model.js";
+import { journeyRetirementSchema } from "./journey-ownership.js";
 import { reproductionSchema } from "./reproduction-model.js";
+import { generatedSourceReferencesSchema } from "./review-delivery-validation.js";
 import { userFeedbackRecordSchema } from "./user-feedback-model.js";
 
 const id = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
 const provenance = z.enum(["user-stated", "independent", "agent-proposed", "legacy"]);
-export const productOutcomeSchema = z
+const productOutcomeSchema = z
   .object({
     id,
     kind: z.enum(["functional", "quality", "experience"]),
@@ -65,7 +68,9 @@ export const productCheckSchema = z
     outcomes: z.array(id).default([]),
     files: z.array(pathPatternSchema).default([]),
     verifierFiles: z.array(pathPatternSchema).optional(),
+    timeoutMs: z.number().int().positive().max(3_600_000).optional(),
     environment: z.enum(["node", "browser", "other"]).default("other"),
+    environmentVariables: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
   })
   .strict();
 
@@ -332,8 +337,7 @@ export function sliceDigest(brief: ProductBrief, slice: ProductSlice): string {
     checks: checksFor(brief, slice),
     decisions: brief.decisions.filter(
       (decision) =>
-        decision.outcomes.length === 0 ||
-        decision.outcomes.some((id) => slice.outcomes.includes(id)),
+        decision.outcomes.length > 0 && decision.outcomes.some((id) => slice.outcomes.includes(id)),
     ),
     // Pinned acceptance files are protected by their hashes and by the intent-change rule;
     // leaving them out lets tests written in the background be pinned mid-slice.
@@ -403,10 +407,24 @@ export const executionSchema = z
     contractDigest: z.string(),
     createdAt: z.string(),
     command: z.string(),
-    status: z.enum(["passed", "failed", "environment-failed"]),
+    status: z.enum(["passed", "failed", "environment-failed", "timed-out"]),
     exitCode: z.number(),
     durationMs: z.number(),
+    /** Display-only regression comparison; never passing evidence or a gate. */
+    flip: flipCheckSchema.optional(),
+    flipCacheKey: z.string().optional(),
+    flipDurationMs: z.number().nonnegative().optional(),
     output: z.string(),
+    /** Complete runner-derived failure attribution, independent of the displayed output budget. */
+    pinnedFailures: z
+      .object({
+        names: z.array(z.string()),
+        unattributed: z.number().int().nonnegative(),
+        /** Full-output missing results after verified intentional skips; absent on old receipts. */
+        unreported: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
     provenance: z.enum(["supervisor-executed", "supervisor-reused"]),
     assertions: z.enum(["agent-reported", "runner-observed"]),
     captureRunId: z.string().optional(),
@@ -520,9 +538,11 @@ export const productStateSchema = z
       )
       .default([]),
     executions: z.array(executionSchema).default([]),
+    pendingVerification: z.string().optional(),
     reproductions: z.array(reproductionSchema).optional(),
     captures: z.array(z.unknown()).default([]),
     captureRuns: z.array(z.unknown()).default([]),
+    journeyRetirements: z.array(journeyRetirementSchema).optional(),
     controls: z.array(z.unknown()).default([]),
     reviews: z
       .array(
@@ -532,6 +552,8 @@ export const productStateSchema = z
               .union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
               .optional(),
             findingIdentityVersion: z.literal(2).optional(),
+            // Delivered identities later catalogues cannot re-derive: diffs and broad-scope files.
+            deliveredDiffReferences: generatedSourceReferencesSchema.optional(),
             subjectDigest: z.string(),
             implementationDigest: z.string().optional(),
             contractDigest: z.string(),

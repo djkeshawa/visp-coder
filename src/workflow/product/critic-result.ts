@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { vispError } from "../../core/errors.js";
+import { fromUnknown, vispError } from "../../core/errors.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
@@ -13,7 +13,7 @@ import {
   type CriticState,
   criticResponseSchema,
 } from "./critic-model.js";
-import { SOURCE_ADVICE_LIMITATION } from "./critic-packet.js";
+import { type CriticPacket, SOURCE_ADVICE_LIMITATION } from "./critic-packet.js";
 import { criticStatus, hasFindings } from "./critic-status.js";
 import {
   type CriticSelection,
@@ -22,6 +22,14 @@ import {
   saveCriticState,
 } from "./critic-store.js";
 import { independentJudgments, independentReviewSchema } from "./independent-review.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
+import { applyDisputeRulings } from "./pinned-disputes.js";
+import { deliveredReviewEvidenceIds } from "./review-context.js";
+import {
+  type DeliveredReviewEvidence,
+  generatedSourceReferences,
+  reviewCitationGap,
+} from "./review-delivery-validation.js";
 import { runProductReviewRequest } from "./review-request.js";
 import { productSourceDigest } from "./subject.js";
 
@@ -42,9 +50,15 @@ export async function finishReview(
   const stored = await readCriticState(workspace, selected.value);
   if (!stored.ok) return stored;
   const state = stored.value.state;
-  const pending = state?.attempts.find((a) => a.id === id && a.status === "pending");
+  let pending = state?.attempts.find((a) => a.id === id && a.status === "pending");
   if (!state || !pending)
     return err(vispError("STATE_BUSY", "Critic reservation no longer exists"));
+  const delivery = await legacyDeliveredEvidence(workspace, state, pending);
+  if (!delivery.ok) return delivery;
+  pending = {
+    ...pending,
+    ...attemptDelivery(delivery.value),
+  };
   const subject = await productSourceDigest(workspace, selected.value.record.brief);
   if (!subject.ok) return subject;
   const validated = failure
@@ -63,10 +77,23 @@ export async function finishReview(
     selected.value,
     state,
     validated,
+    delivery.value,
   );
-  const gaps = result
-    ? await reviewGaps(workspace, current, subject.value, result, pending.sourceOnly)
-    : [];
+  const disputes = await recordDisputeRulings(
+    workspace,
+    current,
+    state,
+    pending,
+    request,
+    response,
+    result,
+  );
+  const gaps = [
+    ...(result
+      ? await reviewGaps(workspace, current, subject.value, result, pending.sourceOnly)
+      : []),
+    ...disputes.gaps,
+  ];
   const advisoryResponse = lateUnderstandingAdvice(
     state,
     pending,
@@ -75,12 +102,16 @@ export async function finishReview(
     response,
     failure,
   );
-  const completion: Pick<Attempt, "status" | "message" | "response" | "gaps" | "failureKind"> = {
+  const completion: Pick<
+    Attempt,
+    "status" | "message" | "response" | "gaps" | "failureKind" | "disputeRulings"
+  > = {
     status: result ? "reviewed" : "unavailable",
     failureKind: result ? undefined : rejectedResponseKind(request, response),
     message,
     response: result,
     gaps,
+    ...disputes.completion,
   };
   const next: CriticState = {
     ...state,
@@ -128,14 +159,70 @@ export async function finishReview(
   });
 }
 
+/**
+ * The reviewer's rulings on disputed pinned tests. Only a review VISP itself launched and
+ * observed (an attached adapter's `review`, never a native or host-submitted result) may
+ * rule, and only on the disputes recorded on the attempt at reservation. A review without
+ * rulings still uses up one of each dispute's reviews. If the disputes cannot be saved they
+ * stay open and the gap says so.
+ */
+async function recordDisputeRulings(
+  workspace: WorkspaceState,
+  selected: CriticSelection,
+  state: CriticState,
+  pending: Attempt,
+  request: CriticRequest,
+  response: HostResponse | undefined,
+  accepted: CriticResponse | undefined,
+): Promise<{ completion: Pick<Attempt, "disputeRulings">; gaps: string[] }> {
+  const asked = pending.disputes ?? [];
+  if (
+    !accepted ||
+    pending.sourceOnly ||
+    (pending.phase ?? "product") !== "product" ||
+    !asked.length
+  )
+    return { completion: {}, gaps: [] };
+  const independent =
+    request.operation === "review" &&
+    pending.execution?.provenance === "adapter-observed" &&
+    pending.execution.claimed === true;
+  const parsed = independentReviewSchema.safeParse(response?.response);
+  const rulings = independent && parsed.success ? (parsed.data.disputes ?? []) : [];
+  const applied = await applyDisputeRulings(workspace, selected.record.brief.feature, {
+    attempt: pending.id,
+    ...(selected.selection.task ? { task: selected.selection.task } : {}),
+    subject: pending.subject,
+    evidence: pending.evidenceDigest,
+    model: state.config.model,
+    asked,
+    rulings,
+  });
+  return applied.ok
+    ? { completion: rulings.length ? { disputeRulings: rulings } : {}, gaps: [] }
+    : {
+        completion: {},
+        gaps: [
+          `Pinned-test dispute rulings could not be recorded (${applied.error.message}); the disputes stay open. Run visp pr to hand them to the human reviewer`,
+        ],
+      };
+}
+
 async function applyValidatedReview(
   workspace: WorkspaceState,
   selected: CriticSelection,
   state: CriticState,
   validated: Result<CriticResponse>,
+  deliveredEvidence?: DeliveredReviewEvidence,
 ): Promise<{ current: CriticSelection; result?: CriticResponse; message?: string }> {
   if (!validated.ok) return { current: selected, message: validated.error.message };
-  const recorded = await recordResponse(workspace, selected, state, validated.value);
+  const recorded = await recordResponse(
+    workspace,
+    selected,
+    state,
+    validated.value,
+    deliveredEvidence,
+  );
   return recorded.ok
     ? {
         current: recorded.value,
@@ -282,7 +369,7 @@ function validateResult(
       `Critic returned invalid review JSON: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`,
     );
   const result = parsed.data;
-  const phaseGap = resultPhaseGap(pending, result);
+  const phaseGap = resultPhaseGap(pending, result, response.response);
   if (phaseGap) return reject(phaseGap);
   if (new Set(result.comparison.map((d) => d.dimension)).size !== result.comparison.length)
     return reject("Duplicate comparison dimensions");
@@ -318,6 +405,16 @@ function sourceAdvice(result: CriticResponse): CriticResponse {
   };
 }
 
+/** The response format allows rulings only for the disputes asked about, once each. */
+function disputeRulingGap(pending: Attempt, response: unknown): string | undefined {
+  const rulings = independentReviewSchema.safeParse(response).data?.disputes ?? [];
+  const tests = rulings.map((entry) => entry.test);
+  const asked = pending.disputes ?? [];
+  return tests.some((test, index) => !asked.includes(test) || tests.indexOf(test) !== index)
+    ? "Critic ruled on a pinned test that was not disputed, or ruled twice on one"
+    : undefined;
+}
+
 function normalizedResponse(response: unknown, pending: Attempt, selected: CriticSelection) {
   const independent = independentReviewSchema.safeParse(response);
   return independent.success && pending.selection
@@ -340,7 +437,11 @@ function outsideDeadline(state: CriticState, attempt: Attempt, receivedAt = Date
   return receivedAt < attempt.startedAt || receivedAt > attempt.startedAt + state.config.timeoutMs;
 }
 
-function resultPhaseGap(pending: Attempt, result: CriticResponse) {
+function resultPhaseGap(pending: Attempt, result: CriticResponse, raw?: unknown) {
+  const rulingGap =
+    reviewCitationGap(result, pending.deliveredEvidenceIds, pending.deliveredSourceManifest) ??
+    disputeRulingGap(pending, raw);
+  if (rulingGap) return rulingGap;
   const phase = pending.phase ?? "product";
   if (phase === "product" && !result.review.feedback) return undefined;
   if (result.review.feedback?.phase !== phase)
@@ -375,17 +476,23 @@ async function recordResponse(
   selected: CriticSelection,
   state: CriticState,
   response: CriticResponse,
+  deliveredEvidence?: DeliveredReviewEvidence,
 ) {
-  const recorded = await runProductReviewRequest(workspace, {
-    ...selected.selection,
-    ...response.review,
-    reviewer: {
-      context: "fresh",
-      model: state.config.model,
-      reason:
-        "Host-reported fresh critic review; model, effort and independence are not authenticated",
+  const recorded = await runProductReviewRequest(
+    workspace,
+    {
+      ...selected.selection,
+      ...response.review,
+      reviewer: {
+        context: "fresh",
+        model: state.config.model,
+        reason:
+          "Host-reported fresh critic review; model, effort and independence are not authenticated",
+      },
     },
-  });
+    undefined,
+    deliveredEvidence,
+  );
   return recorded.ok
     ? criticSelection(workspace, { ...selected.selection, phase: selected.phase })
     : recorded;
@@ -401,7 +508,12 @@ async function reviewGaps(
   if (selected.phase === "understanding") return [];
   const gaps = [
     ...(await productEvidenceGaps(workspace, selected.record, subject, selected.slice)),
-    ...finalProductAssessmentGaps(selected.record, subject, selected.slice),
+    ...finalProductAssessmentGaps(
+      selected.record,
+      subject,
+      selected.slice,
+      reviewerRules(workspace),
+    ),
   ];
   if (sourceOnly) gaps.push(SOURCE_ADVICE_LIMITATION);
   if (response.comparison.some((entry) => entry.change === "worse"))
@@ -449,4 +561,55 @@ function rejectedResponseKind(request: CriticRequest, response: HostResponse | u
     request.failureKind ??
     (response?.response !== undefined ? "schema-rejected" : "invocation-failed")
   );
+}
+
+function attemptDelivery(delivered: DeliveredReviewEvidence | undefined) {
+  return delivered
+    ? {
+        deliveredEvidenceIds: [...delivered.ids],
+        deliveredGeneratedReferences: [...delivered.generatedReferences],
+      }
+    : {};
+}
+
+/** Native attempts already kept their exact packet before the delivered-ID field existed. */
+async function legacyDeliveredEvidence(
+  workspace: WorkspaceState,
+  state: CriticState,
+  attempt: Attempt,
+): Promise<Result<DeliveredReviewEvidence | undefined>> {
+  if (attempt.deliveredEvidenceIds)
+    return ok({
+      ids: attempt.deliveredEvidenceIds,
+      generatedReferences: attempt.deliveredGeneratedReferences ?? [],
+    });
+  if (attempt.transport !== "native") return ok(undefined);
+  const read = await workspace.files.readTextIfExists(
+    join(
+      workspace.paths.featureDir(state.feature),
+      "critic",
+      "requests",
+      attempt.id,
+      "packet.json",
+    ),
+  );
+  if (!read.ok) return read;
+  if (read.value === undefined) return ok(undefined);
+  try {
+    const packet = JSON.parse(read.value) as CriticPacket;
+    return ok({
+      ids: deliveredReviewEvidenceIds(
+        packet.current.evidence,
+        packet.current.interactionEvidence,
+        packet.current.sources,
+        packet.current.experiments,
+      ),
+      generatedReferences: generatedSourceReferences(
+        packet.current.sources,
+        packet.current.evidence,
+      ),
+    });
+  } catch (cause) {
+    return err(fromUnknown(cause, "EVIDENCE_FAILED"));
+  }
 }

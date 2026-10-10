@@ -30,7 +30,10 @@ const workflowSchema = z
     validationCommands: z.array(commandSpecSchema).default([]),
     /** Operator-defined feature checks, pinned at feature creation and run by final-task verify. */
     acceptanceChecks: z.array(acceptanceCheckSchema).default([]),
-    /** Historical telemetry preference; current product verification does not dispatch flip checks. */
+    /**
+     * Display-only regression comparison for passing declared slice checks: the check runs again on
+     * the old implementation, repeating its external side effects. Never an acceptance gate; off stops it.
+     */
     flipCheck: z.enum(["off", "auto", "on"]).default("auto"),
   })
   .strict()
@@ -80,7 +83,23 @@ const skillsSchema = z
   .default({});
 
 const memorySchema = z
-  .object({ enabled: z.boolean().default(true) })
+  .object({
+    enabled: z.boolean().default(true),
+    /**
+     * With a VISP-launched reviewer, VISP records earlier requests and its model passes a new
+     * feature the recorded decisions that constrain it, usually none. Off skips that call.
+     */
+    recall: z.boolean().default(true),
+    /** Visp Memory as the long-term store: earlier requests are recorded there and new features briefed from it. */
+    service: z
+      .object({
+        command: z.string().trim().min(1).default("visp-memory"),
+        /** model: a VISP-launched reviewer's model chooses among candidates; keyword: Visp Memory alone. */
+        select: z.enum(["model", "keyword"]).default("model"),
+      })
+      .strict()
+      .optional(),
+  })
   .strict()
   .default({});
 
@@ -105,11 +124,7 @@ export const configSchema = z
   .strict();
 
 export type VispConfig = z.output<typeof configSchema>;
-export type VispConfigInput = z.input<typeof configSchema>;
-
-export type WorkflowConfig = VispConfig["workflow"];
 export type GraphConfig = VispConfig["graph"];
-export type ContextConfig = VispConfig["context"];
 
 /** The config that applies when no `visp.yml` exists. */
 export function defaultConfig(): VispConfig {

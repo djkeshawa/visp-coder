@@ -1,3 +1,5 @@
+import { compareCodeUnits } from "../core/hash.js";
+import { appendAll } from "./append.js";
 import { isExternalRef } from "./constants.js";
 import type { ExtractionOutcome } from "./extract/index.js";
 import { compareUnknowns } from "./extract/unknowns.js";
@@ -35,14 +37,14 @@ export function mergeFacts(
       entities.push(entity);
       if (entity.kind === "file") reusedParsedPaths.add(entity.path);
     }
-    relations.push(...reusable(previous.relations, reusablePaths));
-    unknowns.push(...reusable(previous.unknowns, reusablePaths));
-    entrypoints.push(...reusable(previous.entrypoints, reusablePaths));
+    appendAll(relations, reusable(previous.relations, reusablePaths));
+    appendAll(unknowns, reusable(previous.unknowns, reusablePaths));
+    appendAll(entrypoints, reusable(previous.entrypoints, reusablePaths));
   }
 
   const known = new Set(entities.map((entity) => entity.id));
   const kept = relations.filter((relation) => isLive(relation, known));
-  unknowns.push(...danglingUnknowns(relations, known, livePaths));
+  appendAll(unknowns, danglingUnknowns(relations, known, livePaths));
 
   return {
     entities: dedupeEntities(entities),
@@ -89,7 +91,8 @@ function dedupeEntities(entities: readonly Entity[]): Entity[] {
   const byId = new Map<string, Entity>();
   for (const entity of entities) if (!byId.has(entity.id)) byId.set(entity.id, entity);
   return [...byId.values()].sort(
-    (a, b) => compare(a.path, b.path) || a.startLine - b.startLine || compare(a.id, b.id),
+    (a, b) =>
+      compareCodeUnits(a.path, b.path) || a.startLine - b.startLine || compareCodeUnits(a.id, b.id),
   );
 }
 
@@ -111,13 +114,9 @@ function dedupeEntrypoints(entrypoints: readonly Entrypoint[]): Entrypoint[] {
   }
   return [...seen.values()].sort(
     (a, b) =>
-      compare(a.path, b.path) ||
+      compareCodeUnits(a.path, b.path) ||
       a.line - b.line ||
-      compare(a.kind, b.kind) ||
-      compare(a.name, b.name),
+      compareCodeUnits(a.kind, b.kind) ||
+      compareCodeUnits(a.name, b.name),
   );
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }

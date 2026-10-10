@@ -86,15 +86,20 @@ const operationNotes: Readonly<Record<string, string>> = {
   "context.maxSnippets":
     "Limits source excerpts in product context; does not limit all evidence or skill entries.",
   "memory.enabled": "Enables relevant project-memory recall; recalled notes remain advisory.",
+  "memory.recall":
+    "With a VISP-launched reviewer and no memory service, selects relevant earlier requests for each new feature.",
+  "memory.service.command":
+    "Executable used to record earlier requests and retrieve relevant decisions from Visp Memory.",
+  "memory.service.select": "Chooses reviewer-model or keyword selection of Visp Memory candidates.",
   "telemetry.enabled":
-    "Enables local activity recording; does not establish capability use or success.",
+    "Enables local usage import; activity recording remains enabled independently.",
 };
 
 function effect(path: string) {
   if (path === "workflow.flipCheck")
     return {
-      effect: "legacy-only",
-      note: "Retained so existing historical telemetry configuration still loads; flip checks and their reporting were removed, so nothing reads it.",
+      effect: "conditional",
+      note: "Runs a display-only regression comparison for passing slice checks: auto reverts changes to existing implementation, on includes added implementation, off skips. Never changes evidence credit or acceptance.",
     };
   if (path.startsWith("critic."))
     return {

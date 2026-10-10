@@ -4,6 +4,7 @@ import { afterEach, expect, it } from "vitest";
 import type { Result } from "../../../../src/core/result.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
+import { productSourceDigest } from "../../../../src/workflow/product/subject.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
@@ -79,20 +80,40 @@ it.each(["src/value.mjs", "outside.txt", ".visp/policy.json"])(
     );
   },
 );
-it("identifies generated cache files without certifying the changed product", async () => {
-  const workspace = await prepare([
+it("identifies generated cache files inside the declared scope without certifying the changed product", async () => {
+  const workspace = await prepare(
     [
-      process.execPath,
-      "-e",
-      "const fs=require('node:fs');fs.mkdirSync('__pycache__');fs.writeFileSync('__pycache__/server.pyc','cache')",
+      [
+        process.execPath,
+        "-e",
+        "const fs=require('node:fs');fs.mkdirSync('src/__pycache__');fs.writeFileSync('src/__pycache__/server.pyc','cache')",
+      ],
     ],
-  ]);
+    ["src/**"],
+  );
   const result = value(await runProductVerify(await workspace.state()));
   expect(result.executions[0]?.status).toBe("passed");
   expect(result.passed).toBe(false);
   expect(result.gaps.join(" ")).toContain("__pycache__/server.pyc");
   expect(result.gaps.join(" ")).toContain("py_compile");
   expect(result.gaps.join(" ")).toContain("even with -B");
+});
+
+it("treats untracked cache files outside every declared path as bookkeeping", async () => {
+  const workspace = await prepare([
+    [
+      process.execPath,
+      "-e",
+      "const fs=require('node:fs');fs.mkdirSync('__pycache__');fs.writeFileSync('__pycache__/server.pyc','cache');fs.writeFileSync('server.log','listening')",
+    ],
+  ]);
+  const before = value(await productSourceDigest(await workspace.state()));
+  const result = value(await runProductVerify(await workspace.state()));
+  expect(result.executions[0]?.status).toBe("passed");
+  expect(result.gaps).toEqual([]);
+  expect(result.passed).toBe(true);
+  expect(result.subjectDigest).toBe(before);
+  expect(value(await productSourceDigest(await workspace.state()))).toBe(before);
 });
 
 it("keeps explicit Python compilation stable with an intentional output policy and still tracks source", async () => {

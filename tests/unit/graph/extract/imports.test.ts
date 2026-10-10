@@ -65,6 +65,54 @@ describe("import resolution", () => {
     );
   });
 
+  it("resolves src-layout Python modules and qualified import calls", async () => {
+    repo = await makeRepo({
+      "src/mypkg/__init__.py": "",
+      "src/mypkg/utils.py": "def helper():\n    return 1\n",
+      "src/mypkg/app.py": "import mypkg.utils as utils\ndef run():\n    return utils.helper()\n",
+    });
+    const facts = await extractFixture(repo);
+    expect(targetsFrom(facts.relations, "src/mypkg/app.py", "imports")).toContain(
+      "src/mypkg/utils.py#file",
+    );
+    expect(targetsFrom(facts.relations, "src/mypkg/app.py", "calls")).toContain(
+      "src/mypkg/utils.py#function:helper",
+    );
+  });
+
+  it("resolves calls through a dotted Python import without an alias", async () => {
+    repo = await makeRepo({
+      "src/mypkg/__init__.py": "",
+      "src/mypkg/utils.py": "def helper():\n    return 1\n",
+      "src/mypkg/app.py": "import mypkg.utils\ndef run():\n    return mypkg.utils.helper()\n",
+    });
+    const facts = await extractFixture(repo);
+    expect(targetsFrom(facts.relations, "src/mypkg/app.py", "calls")).toContain(
+      "src/mypkg/utils.py#function:helper",
+    );
+  });
+
+  it("does not report calls through external Python module bindings as unknown", async () => {
+    repo = await makeRepo({
+      "app.py": "import os\nimport numpy as np\nos.getcwd()\nnp.array([1])\n",
+    });
+    const facts = await extractFixture(repo);
+    expect(facts.unknowns.filter((unknown) => unknown.kind === "unresolved_call")).toEqual([]);
+  });
+
+  it("treats missing modules in a namespace package as unresolved", async () => {
+    repo = await makeRepo({
+      "src/mypkg/utils.py": "def helper():\n    return 1\n",
+      "src/app.py": "import mypkg.missing\n",
+    });
+    const facts = await extractFixture(repo);
+    expect(facts.unknowns).toContainEqual({
+      kind: "unresolved_import",
+      path: "src/app.py",
+      detail: "mypkg.missing",
+    });
+  });
+
   it("marks a package outside the repository as external, not as an import", async () => {
     repo = await makeRepo({ "src/a.ts": 'import { z } from "zod";\nexport const s = z;\n' });
     const facts = await extractFixture(repo);

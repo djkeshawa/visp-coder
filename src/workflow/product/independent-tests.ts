@@ -1,8 +1,18 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  appendFile,
+  copyFile,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { resolveCriticPolicy } from "../../config/critic-defaults.js";
@@ -12,17 +22,48 @@ import { resolvedProductExecutionEnvironment } from "../../core/execution-enviro
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
+import { processIdentity } from "../../core/process-identity.js";
+import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { removeTreeBestEffort, sweepStaleTempDirectories } from "../../core/stale-temp.js";
+import { prepareCommand } from "../../core/windows-command.js";
 import type { WorkspaceState } from "../state.js";
+import { acceptanceEnvironment, privateTemporaryDirectory } from "./acceptance-environment.js";
 import {
   createProductFeature,
   type ProductFeatureOptions,
   type ProductFeatureOutcome,
   updateProductBrief,
 } from "./brief.js";
-import { reachesModel, runCodexStructured, type SessionActivity } from "./critic-exec.js";
+import {
+  CLAUDE_HOSTS,
+  claudeSignedIn,
+  reachesModel,
+  runClaudeStructured,
+  runCodexStructured,
+  type SessionActivity,
+} from "./critic-exec.js";
+import { browserUnavailable } from "./environment.js";
 import { hostRequest } from "./host-prompts.js";
+import {
+  disputeSchema,
+  environmentErrorLine,
+  environmentOnly,
+  failLineStats,
+  TESTS_RECORD,
+  WAIVED_TESTS_ENV,
+  waivedTestsEnv,
+} from "./pinned-dispute-model.js";
+import { rulesForRequest, withRules } from "./project-rules.js";
+import { type RequestAmbiguity, requestAmbiguitySchema } from "./request-ambiguities.js";
 import { type ProductRecord, readProductRecord } from "./store.js";
+import { productSourceSnapshot } from "./subject.js";
+import {
+  testerBrowserKitLines,
+  testerOwnContent,
+  withTesterBrowserKit,
+} from "./tester-browser-kit.js";
+import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./tester-snapshot.js";
 
 /**
  * Independent acceptance tests. Before the first slice is authorized, a tester that never
@@ -36,10 +77,11 @@ import { type ProductRecord, readProductRecord } from "./store.js";
  * signal a worker cannot quietly weaken (see docs/research-summary.md).
  */
 
-const RECORD = "acceptance-tests.json";
+const RECORD = TESTS_RECORD;
+const START_SOURCE = "tester-source-digest";
 const TESTER_TIMEOUT_MS = 720_000;
 const BASELINE_TIMEOUT_MS = 120_000;
-const STALE_RUNNING_MS = 10 * 60_000;
+const STALE_RUNNING_MS = 2 * TESTER_TIMEOUT_MS + BASELINE_TIMEOUT_MS;
 const MAX_FILE_BYTES = 64 * 1024;
 const MIN_ASSERTIONS = 3;
 
@@ -47,6 +89,7 @@ const testerResponseSchema = z.object({
   file: z.object({ name: z.string(), content: z.string() }).nullable(),
   existingBehavior: z.boolean().default(false),
   tests: z.array(z.object({ name: z.string(), quote: z.string() })),
+  ambiguities: z.array(requestAmbiguitySchema).default([]),
   notes: z.string(),
 });
 type TesterResponse = z.infer<typeof testerResponseSchema>;
@@ -55,7 +98,7 @@ type TesterResponse = z.infer<typeof testerResponseSchema>;
 const TESTER_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["file", "existingBehavior", "tests", "notes"],
+  required: ["file", "existingBehavior", "tests", "ambiguities", "notes"],
   properties: {
     existingBehavior: { type: "boolean" },
     file: {
@@ -79,26 +122,50 @@ const TESTER_OUTPUT_SCHEMA = {
       },
     },
     notes: { type: "string" },
+    ambiguities: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["quote", "readings", "conventionalReading"],
+        properties: {
+          quote: { type: "string" },
+          readings: { type: "array", items: { type: "string" }, minItems: 2 },
+          conventionalReading: { type: "string" },
+        },
+      },
+    },
   },
 } as const;
 
-export const independentTestsRecordSchema = z
+const independentTestsRecordSchema = z
   .object({
     version: z.literal(1),
     status: z.enum(["running", "pinned", "rejected", "failed", "declined"]),
     startedAt: z.string(),
     /** The writing process; a host that ends it (Codex's sandbox does) leaves no result. */
     pid: z.number().int().optional(),
+    /** The writer's pid namespace: a pid means nothing to a process in another one. */
+    pidNamespace: z.string().optional(),
     finishedAt: z.string().optional(),
     model: z.string().optional(),
     reason: z.string().optional(),
     file: z.string().optional(),
     command: z.array(z.string()).optional(),
     tests: z.array(z.object({ name: z.string(), quote: z.string() })).optional(),
+    ambiguities: z.array(requestAmbiguitySchema).optional(),
+    /** Failing tests the worker disputed, and the independent reviewer's rulings. */
+    disputes: z.array(disputeSchema).optional(),
     notes: z.string().optional(),
     content: z.string().optional(),
+    sourceDigest: z.string().optional(),
     baseline: z
-      .object({ exitCode: z.number(), timedOut: z.boolean(), output: z.string() })
+      .object({
+        exitCode: z.number(),
+        timedOut: z.boolean(),
+        spawnFailed: z.boolean().optional(),
+        output: z.string(),
+      })
       .optional(),
   })
   .strict();
@@ -106,15 +173,18 @@ export type IndependentTestsRecord = z.infer<typeof independentTestsRecordSchema
 
 /** What `work` tells the worker about the pinned tests. */
 export interface IndependentTestsSummary {
-  readonly status: IndependentTestsRecord["status"];
+  readonly status: IndependentTestsRecord["status"] | "skipped";
   readonly file?: string;
   readonly command?: readonly string[];
   readonly reason?: string;
   readonly instructions?: string;
+  readonly ambiguities?: readonly RequestAmbiguity[];
 }
 
 export interface TesterRequest {
   readonly root: string;
+  /** Private launch-time source copy, never exposed to a new-project tester. */
+  readonly sourceRoot?: string;
   readonly model: string;
   readonly reasoningEffort?: string;
   readonly prompt: string;
@@ -129,21 +199,44 @@ export interface TesterRequest {
 /** Returns the tester's raw structured answer; throws when the tester could not run. */
 export type IndependentTester = (request: TesterRequest) => Promise<unknown>;
 /** Starts the tester for a feature and reports its record once finished or after `waitMs`. */
-export type TestsStarter = (
+export type TestsStarter = ((
   workspace: WorkspaceState,
   feature: string,
   waitMs: number,
-) => Promise<Result<IndependentTestsRecord>>;
+  /** Also restart a tester that failed, not only one that stopped without a result. */
+  retryFailed?: boolean,
+) => Promise<Result<IndependentTestsRecord>>) & {
+  /** The tester runs inside the calling process, so that process must stay alive for it. */
+  readonly inProcess?: true;
+};
 
 /**
- * Testers usually return in 1–3 minutes. The CLI stays under the 2-minute shell timeout
- * common agent hosts apply; MCP stays under the ~60 s tool-call timeout. `work` asks the
+ * Testers usually return in 1–3 minutes. These are polling budgets, not a bound on
+ * the whole command; hosts should use their maximum shell timeout. `work` asks the
  * worker to run it again while the tester is still writing.
  */
 const TESTS_WAIT_MS = { cli: 100_000, mcp: 50_000 } as const;
 
 export function testsWaitMs(workspace: WorkspaceState, channel: "cli" | "mcp"): number {
-  return workspace.config.critic?.launch === "codex-exec" ? TESTS_WAIT_MS[channel] : 0;
+  return testerCli(workspace) ? TESTS_WAIT_MS[channel] : 0;
+}
+
+/**
+ * The CLI VISP launches the tester with, as for the reviewer: the critic's harness, or the
+ * project's when the critic names none. Undefined when VISP launches no tester.
+ */
+export function testerCli(workspace: WorkspaceState): "codex" | "claude" | undefined {
+  const { critic } = workspace.config;
+  const harness = critic?.harness ?? workspace.config.harness;
+  if (critic?.launch === "codex-exec" && harness === "codex") return "codex";
+  if (critic?.launch === "claude-exec" && harness === "claude-code") return "claude";
+  return undefined;
+}
+
+/** The tester session for this project's critic settings; undefined when VISP launches none. */
+export function configuredTester(workspace: WorkspaceState): IndependentTester | undefined {
+  const cli = testerCli(workspace);
+  return cli === "claude" ? claudeTester() : cli === "codex" ? codexTester() : undefined;
 }
 
 /** The tester VISP launches for this project, or undefined when it launches no model. */
@@ -151,14 +244,27 @@ export function configuredTestsStarter(
   workspace: WorkspaceState,
   channel: "cli" | "mcp" = "cli",
 ): TestsStarter | undefined {
-  if (workspace.config.critic?.launch !== "codex-exec") return undefined;
+  const cli = testerCli(workspace);
+  const tester = configuredTester(workspace);
+  if (!cli || !tester || !runnable(cli)) return undefined;
   // Codex's sandbox ends every process a shell command started, so a detached tester never
   // finished there; a Codex worker's CLI runs it inside `visp feature` instead. The MCP
   // server outlives each call, so it keeps the background process.
-  if (channel === "cli" && workspace.config.harness === "codex") return inlineTests(codexTester());
+  if (channel === "cli" && workspace.config.harness === "codex") return inlineTests(tester);
   // Bundled builds place the CLI entry beside this chunk; source runs test inline.
-  const cli = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
-  return existsSync(cli) ? backgroundTests(cli) : inlineTests(codexTester());
+  const entry = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
+  return existsSync(entry) ? backgroundTests(entry) : inlineTests(tester);
+}
+
+function runnable(cli: string): boolean {
+  const probe = prepareCommand(cli, ["--version"]);
+  return (
+    spawnSync(probe.file, probe.args, {
+      stdio: "ignore",
+      timeout: 3000,
+      windowsVerbatimArguments: probe.windowsVerbatimArguments,
+    }).status === 0
+  );
 }
 
 export function codexTester(
@@ -168,12 +274,16 @@ export function codexTester(
     const { lookup: dnsLookup } = await import("node:dns/promises");
     if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)))))
       throw new Error("The tester cannot reach its model from this process");
-    const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
-    try {
+    return testerSession(async (directory) => {
       const root = request.explore
-        ? await repositoryCopy(request.root, directory, request.blockedPaths ?? [])
-        : request.root;
-      return await runCodexStructured({
+        ? await repositoryCopy(
+            request.root,
+            directory,
+            request.blockedPaths ?? [],
+            request.sourceRoot,
+          )
+        : await emptyProject(directory);
+      return runCodexStructured({
         ...(options.executable ? { executable: options.executable } : {}),
         root,
         ...(request.explore ? { sandbox: "workspace-write" as const, network: true } : {}),
@@ -185,14 +295,89 @@ export function codexTester(
         signal: AbortSignal.timeout(TESTER_TIMEOUT_MS),
         ...(request.onActivity ? { onActivity: request.onActivity } : {}),
       });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    });
   };
 }
 
+/**
+ * The tester as one `claude -p` session with the reviewer's restrictions (read-only tools,
+ * no settings, hooks or MCP servers), confined to an empty temporary directory. It writes
+ * tests for new projects only: running an existing program needs the Codex tester's
+ * writable, networked sandbox.
+ */
+export function claudeTester(
+  options: { executable?: string; lookup?: (host: string) => Promise<unknown> } = {},
+): IndependentTester {
+  return async (request) => {
+    if (request.explore) throw new Error(CLAUDE_EXISTING_CODE);
+    if (!(await claudeSignedIn(options.executable ?? "claude", AbortSignal.timeout(30_000))))
+      throw new Error(
+        "Claude Code is not signed in for this process (claude auth status); sign in with claude, then run visp work --feature <id> --retry-tests",
+      );
+    const { lookup: dnsLookup } = await import("node:dns/promises");
+    if (!(await reachesModel(options.lookup ?? ((host) => dnsLookup(host)), CLAUDE_HOSTS)))
+      throw new Error("The tester cannot reach its model from this process");
+    return testerSession(async (directory) => {
+      const root = await emptyProject(directory);
+      return runClaudeStructured({
+        ...(options.executable ? { executable: options.executable } : {}),
+        root,
+        directory: root,
+        model: request.model,
+        ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
+        schema: request.schema,
+        prompt: request.prompt,
+        signal: AbortSignal.timeout(TESTER_TIMEOUT_MS),
+      });
+    });
+  };
+}
+
+const CLAUDE_EXISTING_CODE =
+  "The Claude tester writes tests for new projects only; tests of an existing codebase need critic.launch: codex-exec with critic.harness: codex";
+
+/** One tester session in a fresh temporary directory, removed afterwards. */
+async function testerSession(session: (directory: string) => Promise<unknown>): Promise<unknown> {
+  await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
+  const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
+  const started = Date.now();
+  try {
+    return await session(directory);
+  } catch (cause) {
+    // An abort here is the tester's own time limit; "The operation was aborted" hid that.
+    if (Date.now() - started >= TESTER_TIMEOUT_MS)
+      throw new Error(
+        `The tester did not answer within ${TESTER_TIMEOUT_MS / 60_000} minutes (${message(cause)})`,
+      );
+    throw cause;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function emptyProject(directory: string): Promise<string> {
+  const root = join(directory, "empty-project");
+  await mkdir(root, { recursive: true });
+  return root;
+}
+
+/** Exactly what `mkdtemp` makes (prefix plus six characters), so named directories survive. */
+const STALE_TESTER_NAMES = [
+  /^visp-tester-[A-Za-z0-9]{6}$/,
+  // The launch-time source copy and each baseline run's copy (tester-snapshot.ts).
+  /^visp-tester-(?:source|baseline)-[A-Za-z0-9]{6}$/,
+  // The private HOME of one baseline run (runBaseline).
+  /^visp-baseline-[A-Za-z0-9]{6}$/,
+];
+/** A tester is bounded by its deadline plus the baseline run; older copies are abandoned. */
+const STALE_TESTER_MS = 2 * 60 * 60_000;
+
 export function inlineTests(tester: IndependentTester): TestsStarter {
-  return (workspace, feature) => writeIndependentTests(workspace, feature, tester);
+  return Object.assign(
+    (workspace: WorkspaceState, feature: string, _waitMs: number, retryFailed?: boolean) =>
+      writeIndependentTests(workspace, feature, tester, retryFailed),
+    { inProcess: true as const },
+  );
 }
 
 /**
@@ -200,8 +385,8 @@ export function inlineTests(tester: IndependentTester): TestsStarter {
  * shell commands does not lose it; `work` waits up to its channel's limit for the record.
  */
 export function backgroundTests(cli: string): TestsStarter {
-  return async (workspace, feature, waitMs) => {
-    const logPath = join(await mkdtemp(join(tmpdir(), "visp-tester-")), "tester.json");
+  return async (workspace, feature, waitMs, retryFailed) => {
+    const logPath = workspace.paths.featureFile(feature, "tester-process.log");
     const output = openSync(logPath, "w");
     const child = spawn(
       process.execPath,
@@ -213,6 +398,7 @@ export function backgroundTests(cli: string): TestsStarter {
         "--feature",
         feature,
         "--write-tests",
+        ...(retryFailed ? ["--retry-tests"] : []),
         "--json",
       ],
       { detached: true, stdio: ["ignore", output, output] },
@@ -241,8 +427,8 @@ export function backgroundTests(cli: string): TestsStarter {
 }
 
 /**
- * Called by `work` before authorization. Pinning changes the slice contract, so the tests
- * must exist before the first slice is authorized, never in the middle of one.
+ * Called by `work` before authorization. Deliver existing tests and interpretation notes;
+ * a background tester can pin its suite while the worker continues.
  */
 export async function independentTestsBeforeWork(
   workspace: WorkspaceState,
@@ -250,7 +436,6 @@ export async function independentTestsBeforeWork(
   starter: TestsStarter | undefined,
   waitMs: number,
 ): Promise<Result<IndependentTestsSummary | undefined>> {
-  if (!starter) return ok(undefined);
   const loaded = await readProductRecord(workspace, feature ? { feature } : {});
   if (!loaded.ok) return ok(undefined);
   const { brief } = loaded.value;
@@ -261,12 +446,44 @@ export async function independentTestsBeforeWork(
   // Workers waited 1–2 minutes here. Pinned tests are not part of a slice's contract, so
   // work proceeds and the tests are pinned whenever the tester finishes.
   if (!record) {
-    if (!(await testerLaunches(workspace, loaded.value))) return ok(undefined);
+    if (!(await testerApplies(workspace, loaded.value))) return ok(undefined);
+    if (!starter || !(await testerLaunches(workspace, loaded.value)))
+      return ok(await skippedTester(workspace));
+    const source = await startingSourceDigest(workspace, brief.feature, brief);
+    if (!source.ok) return source;
     const started = await starter(workspace, brief.feature, waitMs);
     if (!started.ok) return started;
     record = started.value;
   }
-  return ok(summary(record));
+  return ok(await summary(record));
+}
+
+/** `work --write-tests` and `--retry-tests`: the configured tester, or why VISP launches none. */
+export async function writeConfiguredTests(
+  workspace: WorkspaceState,
+  feature: string,
+  retryFailed: boolean,
+): Promise<Result<IndependentTestsRecord>> {
+  const tester = configuredTester(workspace);
+  if (!tester)
+    return err(vispError("CONFIG_INVALID", (await skippedTester(workspace)).reason ?? ""));
+  return writeIndependentTests(workspace, feature, tester, retryFailed);
+}
+
+/** Why a feature that would get independent tests gets none, so the worker can say so. */
+async function skippedTester(workspace: WorkspaceState): Promise<IndependentTestsSummary> {
+  const critic = workspace.config.critic;
+  const cli = testerCli(workspace);
+  const reason = !cli
+    ? critic?.launch === "codex-exec"
+      ? "The independent tester requires critic.harness: codex"
+      : critic?.launch === "claude-exec"
+        ? "The independent tester requires critic.harness: claude-code"
+        : "VISP launches its independent tester only with critic.launch: codex-exec or claude-exec, so no acceptance tests are written for this feature"
+    : cli === "claude" && (await existingCode(workspace.paths.root))
+      ? CLAUDE_EXISTING_CODE
+      : `The independent tester needs the ${cli} CLI on PATH for this process`;
+  return { status: "skipped", reason };
 }
 
 /**
@@ -282,11 +499,54 @@ export async function startIndependentTests(
   const loaded = await readProductRecord(workspace, { feature });
   const existing = await readTestsRecord(workspace, feature);
   if (!loaded.ok || !existing.ok || existing.value) return;
-  if (await testerLaunches(workspace, loaded.value)) await starter(workspace, feature, 0);
+  if (await testerLaunches(workspace, loaded.value)) {
+    const source = await startingSourceDigest(workspace, feature, loaded.value.brief);
+    if (source.ok) await starter(workspace, feature, 0);
+  }
 }
 
-/** `visp feature`, then the tester in the background when VISP launches one. */
-export async function createProductFeatureWithTests(
+async function readStartingSource(
+  workspace: WorkspaceState,
+  feature: string,
+): Promise<Result<string | undefined>> {
+  const stored = await workspace.files.readTextIfExists(
+    workspace.paths.featureFile(feature, START_SOURCE),
+  );
+  if (!stored.ok) return stored;
+  if (stored.value === undefined) return ok(undefined);
+  const digest = stored.value.trim();
+  return /^[a-f0-9]{64}$/.test(digest)
+    ? ok(digest)
+    : err(vispError("ARTIFACT_INVALID", `Unreadable ${START_SOURCE}`));
+}
+
+async function startingSourceDigest(
+  workspace: WorkspaceState,
+  feature: string,
+  brief: ProductRecord["brief"],
+): Promise<Result<string>> {
+  const stored = await readStartingSource(workspace, feature);
+  if (!stored.ok) return stored;
+  if (stored.value) return ok(stored.value);
+  const source = await productSourceSnapshot(workspace, brief);
+  if (!source.ok) return source;
+  const digest = hashValue(source.value);
+  const saved = await retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "record-tester-source", [
+      {
+        kind: "write",
+        path: workspace.paths.featureFile(feature, START_SOURCE),
+        content: `${digest}\n`,
+        expectedBefore: { existed: false },
+      },
+    ]),
+  );
+  if (!saved.ok) return saved;
+  return ok(digest);
+}
+
+/** `visp feature` without the tester: the source-brief check, then the feature. */
+export async function createProductFeatureChecked(
   workspace: WorkspaceState,
   options: ProductFeatureOptions,
   starter: TestsStarter | undefined,
@@ -303,9 +563,88 @@ export async function createProductFeatureWithTests(
         },
       ),
     );
-  const created = await createProductFeature(workspace, options);
-  if (created.ok) await startIndependentTests(workspace, created.value.brief.feature, starter);
+  return createProductFeature(workspace, options);
+}
+
+/** `visp feature`, then the tester in the background when VISP launches one. */
+export async function createProductFeatureWithTests(
+  workspace: WorkspaceState,
+  options: ProductFeatureOptions,
+  starter: TestsStarter | undefined,
+): Promise<Result<ProductFeatureOutcome>> {
+  const created = await createProductFeatureChecked(workspace, options, starter);
+  if (created.ok) await startFeatureTester(workspace, created.value, starter);
   return created;
+}
+
+/** The tester of a new feature; of the earlier one when the request was a repeat. */
+function startFeatureTester(
+  workspace: WorkspaceState,
+  created: ProductFeatureOutcome,
+  starter: TestsStarter | undefined,
+): Promise<void> {
+  // A repeated request returns the earlier feature, which must still end with pinned tests.
+  return created.duplicateOf
+    ? restartTester(workspace, created.duplicateOf, starter)
+    : startIndependentTests(workspace, created.brief.feature, starter);
+}
+
+/** How long `visp feature` waits for the tester's record before it prints. */
+const RECORD_WAIT_MS = 3000;
+
+/**
+ * Starts the tester without waiting for it, so `visp feature` can print first. It waits only
+ * until the tests record shows running (or the start settled), so that `visp work` in another command
+ * finds a running tester instead of starting a second one. `finished` ends with the tester;
+ * its failures are in the tests record, never thrown.
+ */
+export async function beginFeatureTester(
+  workspace: WorkspaceState,
+  created: ProductFeatureOutcome,
+  starter: TestsStarter | undefined,
+): Promise<{ readonly testsNote?: string; readonly finished: Promise<void> }> {
+  const feature = created.duplicateOf ?? created.brief.feature;
+  let settled = false;
+  // The note is true only for a tester this process started and runs itself.
+  let started = false;
+  const watched: TestsStarter | undefined =
+    starter &&
+    Object.assign(
+      (...args: Parameters<TestsStarter>) => {
+        started = true;
+        return starter(...args);
+      },
+      starter.inProcess ? { inProcess: true as const } : {},
+    );
+  const finished = startFeatureTester(workspace, created, watched)
+    .catch(() => undefined)
+    .then(() => {
+      settled = true;
+    });
+  const deadline = Date.now() + RECORD_WAIT_MS;
+  for (;;) {
+    const record = await readTestsRecord(workspace, feature);
+    if (record.ok && record.value?.status === "running" && started && watched?.inProcess)
+      return {
+        finished,
+        testsNote: `Run visp work --feature ${feature} now; this command keeps running only to write VISP's acceptance tests — leave it running and do not run visp feature again.`,
+      };
+    if (settled || Date.now() >= deadline) return { finished };
+    await sleep(100);
+  }
+}
+
+/** The tester of an existing feature that has none, failed, or stopped without a result. */
+async function restartTester(
+  workspace: WorkspaceState,
+  feature: string,
+  starter: TestsStarter | undefined,
+): Promise<void> {
+  if (!starter) return;
+  const existing = await readTestsRecord(workspace, feature);
+  if (!existing.ok) return;
+  if (!existing.value) return startIndependentTests(workspace, feature, starter);
+  if (await mayRestartTester(existing.value, true)) await starter(workspace, feature, 0, true);
 }
 
 const SOURCE_FILE =
@@ -335,8 +674,11 @@ function hasFunctionalOutcome(brief: ProductRecord["brief"]): boolean {
   return brief.outcomes.some((outcome) => outcome.kind === "functional");
 }
 
-/** Once per feature, when the project pins no acceptance checks of its own. */
-async function testerLaunches(workspace: WorkspaceState, record: ProductRecord): Promise<boolean> {
+/**
+ * Whether a feature would get a tester, whichever CLI launches it: once per feature, when the
+ * critic is on and the project pins no acceptance checks of its own (existing code is opt-in).
+ */
+async function testerApplies(workspace: WorkspaceState, record: ProductRecord): Promise<boolean> {
   if (record.brief.acceptanceBaseline.length || record.state.status === "accepted") return false;
   if (
     workspace.config.critic?.existingCodeTests !== true &&
@@ -344,12 +686,24 @@ async function testerLaunches(workspace: WorkspaceState, record: ProductRecord):
   )
     return false;
   const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
-  return policy.ok && policy.value.enabled && policy.value.config?.harness === "codex";
+  return policy.ok && policy.value.enabled;
 }
 
-function summary(record: IndependentTestsRecord): IndependentTestsSummary {
+/**
+ * Whether a tester for the critic's harness can test this project: a Codex tester any
+ * project, a Claude tester new projects only. The starter decides which CLI launches it.
+ */
+async function testerLaunches(workspace: WorkspaceState, record: ProductRecord): Promise<boolean> {
+  if (!(await testerApplies(workspace, record))) return false;
+  const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
+  const harness = policy.ok ? policy.value.config?.harness : undefined;
+  if (harness === "codex") return true;
+  return harness === "claude-code" && !(await existingCode(workspace.paths.root));
+}
+
+async function summary(record: IndependentTestsRecord): Promise<IndependentTestsSummary> {
   if (record.status === "running")
-    return isStale(record)
+    return (await isStale(record))
       ? {
           status: "failed",
           reason:
@@ -365,58 +719,144 @@ function summary(record: IndependentTestsRecord): IndependentTestsSummary {
     ...(record.file ? { file: record.file } : {}),
     ...(record.command ? { command: record.command } : {}),
     ...(record.reason ? { reason: record.reason } : {}),
+    ...(record.ambiguities?.length ? { ambiguities: record.ambiguities } : {}),
     ...(record.status === "pinned"
       ? {
           instructions:
-            "These acceptance tests were written from the original request by an independent tester and are pinned: do not edit them. Run them while you work; `done` on the last slice and `accept` run them. If one contradicts the request, record an intent change that quotes the request instead of weakening it.",
+            "These acceptance tests were written from the original request by an independent tester and are pinned: do not edit them. `visp done` on the last open slice (the only slice of a one-slice feature) runs and records them with your checks: run it as soon as the slice works instead of waiting for every test to pass by hand. No review call is spent while a check fails, unless the only failures are pinned tests you disputed. Long failure output is shortened; use --json or the local check-output log for details. Direct runs help iteration but are not recorded.",
         }
       : {}),
   };
 }
 
-/** Runs the tester, keeps its file only if it fails on the current project, and pins it. */
+/** Runs the tester, keeps its file only if it fails on launch-time sources, and pins it. */
 export async function writeIndependentTests(
   workspace: WorkspaceState,
   feature: string,
   tester: IndependentTester,
+  retryFailed = false,
 ): Promise<Result<IndependentTestsRecord>> {
   const existing = await readTestsRecord(workspace, feature);
   if (!existing.ok) return existing;
-  if (existing.value && (existing.value.status !== "running" || !isStale(existing.value)))
+  if (existing.value && !(await mayRestartTester(existing.value, retryFailed)))
     return ok(existing.value);
+  if (retryFailed && existing.value?.status === "failed") {
+    const pending = await retryPendingPin(workspace, feature, existing.value);
+    if (pending) return pending;
+  }
   const loaded = await readProductRecord(workspace, { feature });
   if (!loaded.ok) return loaded;
-  const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
-  if (!policy.ok) return policy;
-  const model = policy.value.config?.model;
-  if (!model) return err(vispError("CONFIG_INVALID", "The tester needs a configured critic model"));
+  const setup = await testerSetup(workspace, feature, loaded.value.brief, existing.value);
+  if (!setup.ok) return setup;
+  const { model, sourceDigest } = setup.value;
   const startedAt = new Date().toISOString();
+  if (setup.value.sourceChanged) {
+    const declined: IndependentTestsRecord = {
+      version: 1,
+      status: "declined",
+      startedAt,
+      finishedAt: startedAt,
+      model,
+      sourceDigest,
+      reason:
+        "Product sources changed before the tester started; the before-implementation baseline is inconclusive",
+    };
+    const saved = await saveTestsRecord(workspace, feature, declined, existing.value);
+    return saved.ok ? ok(declined) : saved;
+  }
+  const { pidNamespace } = await processIdentity(process.pid);
   const running: IndependentTestsRecord = {
     version: 1,
     status: "running",
     startedAt,
     model,
     pid: process.pid,
+    ...(pidNamespace ? { pidNamespace } : {}),
+    sourceDigest,
   };
   const marked = await saveTestsRecord(workspace, feature, running, existing.value);
   if (!marked.ok) return marked;
-  const existingCodebase = await existingCode(workspace.paths.root);
-  const request = {
-    root: workspace.paths.root,
-    model,
-    ...testerEffort(policy.value.config?.reasoningEffort),
-    prompt: testerPrompt(loaded.value.brief.originalRequest, feature, existingCodebase),
-    schema: TESTER_OUTPUT_SCHEMA,
-    ...(existingCodebase
-      ? { explore: true, blockedPaths: workspace.config.workflow.blockedPaths }
-      : {}),
-    onActivity: (activity: SessionActivity) =>
-      recordTesterActivity(workspace, feature, model, existingCodebase, activity),
-  };
-  const fields = await testOutcome(workspace, feature, tester, request);
+  const fields = await testsFromSnapshot(
+    workspace,
+    feature,
+    tester,
+    loaded.value.brief,
+    setup.value,
+  );
   const record = { ...running, ...fields, finishedAt: new Date().toISOString() };
   const saved = await saveTestsRecord(workspace, feature, record, running);
   return saved.ok ? ok(independentTestsRecordSchema.parse(record)) : saved;
+}
+
+async function testsFromSnapshot(
+  workspace: WorkspaceState,
+  feature: string,
+  tester: IndependentTester,
+  brief: ProductRecord["brief"],
+  setup: { model: string; reasoningEffort?: string; sourceDigest: string },
+): Promise<TestFields> {
+  let snapshot: TesterSnapshot | undefined;
+  try {
+    const captured = await captureTesterSnapshot(workspace, brief, setup.sourceDigest);
+    if (!captured.ok) return { status: "failed", reason: captured.error.message };
+    snapshot = captured.value;
+    const existingCodebase = await existingCode(workspace.paths.root);
+    const rules = await rulesForRequest(workspace, feature);
+    const request: TesterRequest = {
+      root: workspace.paths.root,
+      sourceRoot: snapshot.root,
+      model: setup.model,
+      ...testerEffort(setup.reasoningEffort),
+      prompt: testerPrompt(withRules(brief.originalRequest, rules), feature, existingCodebase),
+      schema: TESTER_OUTPUT_SCHEMA,
+      ...(existingCodebase
+        ? { explore: true, blockedPaths: workspace.config.workflow.blockedPaths }
+        : {}),
+      onActivity: (activity) =>
+        recordTesterActivity(workspace, feature, setup.model, existingCodebase, activity),
+    };
+    return await testOutcome(workspace, feature, tester, request, snapshot, brief.originalRequest);
+  } catch (cause) {
+    return { status: "failed", reason: message(cause) };
+  } finally {
+    await snapshot?.dispose();
+  }
+}
+
+async function testerSetup(
+  workspace: WorkspaceState,
+  feature: string,
+  brief: ProductRecord["brief"],
+  previous: IndependentTestsRecord | undefined,
+): Promise<
+  Result<{ model: string; reasoningEffort?: string; sourceDigest: string; sourceChanged: boolean }>
+> {
+  const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
+  if (!policy.ok) return policy;
+  const model = policy.value.config?.model;
+  if (!model) return err(vispError("CONFIG_INVALID", "The tester needs a configured critic model"));
+  const source = await productSourceSnapshot(workspace, brief);
+  if (!source.ok) return source;
+  const startedSource = await readStartingSource(workspace, feature);
+  if (!startedSource.ok) return startedSource;
+  const current = hashValue(source.value);
+  const sourceDigest = previous?.sourceDigest ?? startedSource.value ?? current;
+  return ok({
+    model,
+    reasoningEffort: policy.value.config?.reasoningEffort,
+    sourceDigest,
+    sourceChanged: sourceDigest !== current,
+  });
+}
+
+async function mayRestartTester(
+  record: IndependentTestsRecord,
+  retryFailed: boolean,
+): Promise<boolean> {
+  return (
+    (retryFailed && record.status === "failed") ||
+    (record.status === "running" && (await isStale(record)))
+  );
 }
 
 type TestFields = Partial<IndependentTestsRecord>;
@@ -426,15 +866,29 @@ async function testOutcome(
   feature: string,
   tester: IndependentTester,
   request: TesterRequest,
+  snapshot: TesterSnapshot,
+  originalRequest: string,
 ): Promise<TestFields> {
-  const first = await attemptTests(workspace, feature, tester, request);
+  const first = await attemptTests(workspace, feature, tester, request, snapshot, originalRequest);
   if (first.status !== "rejected" || !first.content) return first;
+  if (
+    first.baseline &&
+    (first.baseline.spawnFailed || [127, 9009].includes(first.baseline.exitCode))
+  )
+    return first;
   // Execution feedback: live suites on an existing codebase assumed routes and formats the
   // code does not have. One repair round with the failure output, then the same checks.
-  return attemptTests(workspace, feature, tester, {
-    ...request,
-    prompt: repairPrompt(request.prompt, first.content, first.reason ?? ""),
-  });
+  return attemptTests(
+    workspace,
+    feature,
+    tester,
+    {
+      ...request,
+      prompt: repairPrompt(request.prompt, first.content, first.reason ?? ""),
+    },
+    snapshot,
+    originalRequest,
+  );
 }
 
 async function attemptTests(
@@ -442,6 +896,8 @@ async function attemptTests(
   feature: string,
   tester: IndependentTester,
   request: TesterRequest,
+  snapshot: TesterSnapshot,
+  originalRequest: string,
 ): Promise<TestFields> {
   let response: TesterResponse;
   try {
@@ -449,28 +905,78 @@ async function attemptTests(
   } catch (cause) {
     return { status: "failed", reason: message(cause) };
   }
-  const described = { tests: response.tests, notes: response.notes };
+  const described = {
+    tests: response.tests,
+    notes: response.notes,
+    ambiguities: redactStrings(response.ambiguities, workspace.paths.root),
+  };
   if (!response.file)
-    return { status: "declined", reason: "No testable interface in the request", ...described };
+    return { status: "declined", reason: declineReason(response.notes), ...described };
   // The rejected file stays in the record so a person can see what the tester wrote.
-  const content = response.file.content.slice(0, MAX_FILE_BYTES);
-  const invalid = invalidFile(response.file);
+  let content = response.file.content.slice(0, MAX_FILE_BYTES);
+  let invalid = invalidFile(response.file);
   if (invalid) return { status: "rejected", reason: invalid, content, ...described };
-  const kept = await keepFailingTests(workspace, feature, response.file, response.existingBehavior);
-  return { ...kept, ...(kept.status === "rejected" ? { content } : {}), ...described };
+  const file = await withTesterBrowserKit(originalRequest, response.file);
+  content = file.content.slice(0, MAX_FILE_BYTES);
+  invalid = invalidFile(file);
+  if (invalid) return { status: "rejected", reason: invalid, content, ...described };
+  if (onlyStructuralChecks(response))
+    return {
+      status: "declined",
+      reason: "The suite checks only file structure, not a functional outcome",
+      ...described,
+    };
+  const kept = await keepFailingTests(
+    workspace,
+    feature,
+    file,
+    response.existingBehavior,
+    response.tests.map((test) => test.name),
+    snapshot,
+  ).catch((cause) => ({ status: "failed" as const, reason: message(cause) }));
+  return {
+    ...kept,
+    ...(["rejected", "failed"].includes(kept.status ?? "") ? { content } : {}),
+    ...described,
+  };
+}
+
+async function retryPendingPin(
+  workspace: WorkspaceState,
+  feature: string,
+  record: IndependentTestsRecord,
+): Promise<Result<IndependentTestsRecord> | undefined> {
+  if (!record.file || !record.command || !record.content || !record.baseline) return undefined;
+  const file = await workspace.files.readTextIfExists(join(workspace.paths.root, record.file));
+  if (!file.ok || file.value !== record.content) return undefined;
+  const pinned = await pinTests(workspace, feature, record.file, record.command, record.content);
+  if (!pinned.ok) return pinned;
+  const complete: IndependentTestsRecord = {
+    ...record,
+    status: "pinned",
+    reason: undefined,
+    finishedAt: new Date().toISOString(),
+  };
+  const saved = await saveTestsRecord(workspace, feature, complete, record);
+  return saved.ok ? ok(complete) : saved;
 }
 
 function repairPrompt(prompt: string, content: string, reason: string): string {
   return [
     prompt,
     "",
-    "Your previous file was rejected when VISP ran it against the current repository:",
+    "Your previous file was rejected when VISP ran it against the launch-time repository copy:",
     reason,
     "",
-    "Previous file:",
-    content,
+    "Previous file (your own content; VISP supplies the browser kit):",
+    testerOwnContent(content),
     "",
-    "Read the repository and the failure again, then return the whole corrected file. Keep only assertions the request or the repository supports.",
+    "Read the repository and the failure again, then return the whole corrected file. Keep only assertions the request or the repository supports. If the run timed out, cut search iteration counts and stop each search at the first interface error.",
+    ...(reason.startsWith(NO_NAMED_FAILURE) || reason.startsWith(UNDECLARED_FAILURE)
+      ? [
+          "Print `FAIL: <exact name from tests[].name>: <reason>` for every test that fails, also when nothing is implemented. Import or start the product inside each test, or catch the import, missing-file or connection error per test, so a missing module, script or server is that test's failure and never a crash of the whole file. Do not use unittest's default runner output or any other framework output that prints its own FAIL lines. Exception: when the browser itself cannot start, print `ENVIRONMENT ERROR: <message>` once, close everything, exit non-zero and print no FAIL line.",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -480,41 +986,152 @@ async function keepFailingTests(
   feature: string,
   file: { name: string; content: string },
   existingBehavior: boolean,
+  declared: string[],
+  snapshot: TesterSnapshot,
 ): Promise<TestFields> {
-  const path = `acceptance/${feature}/${file.name}`;
+  const safeName = file.name.replace(/\.(?:test|spec)\.mjs$/, ".acceptance.mjs");
+  const path = `acceptance/${feature}/${safeName}`;
   const command = testCommand(path);
-  const written = await applyFileTransaction(workspace.paths.root, "write-acceptance-tests", [
-    {
-      kind: "write",
-      path: join(workspace.paths.root, path),
-      content: file.content,
-      expectedBefore: { existed: false },
-    },
-  ]);
-  if (!written.ok) return { status: "rejected", reason: written.error.message, file: path };
-  const baseline = await runBaseline(workspace.paths.root, command);
-  const kept = { file: path, command, baseline };
-  // On an existing codebase the current code is the oracle for documented behavior: tests
-  // of it, with the same helpers, must pass now. Wrong assumed formats fail here.
-  const existing = existingBehavior
-    ? await runBaseline(workspace.paths.root, command, { VISP_TEST_SCOPE: "existing" })
-    : undefined;
-  const rejection =
-    existing && (existing.exitCode !== 0 || existing.timedOut)
-      ? `Tests of existing behavior fail on the current repository, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`
-      : baseline.timedOut
-        ? "The tests did not finish on the unimplemented project"
-        : baseline.exitCode === 0
-          ? "The tests pass before any implementation, so they check nothing new"
-          : undefined;
-  if (rejection) {
-    await removeFile(workspace, path, file.content);
-    return { status: "rejected", reason: rejection, content: file.content, ...kept };
-  }
+  // Keep redaction anchored to the real project, including values from its env files.
+  const redact = await outputRedactor(workspace.paths.root);
+  const execute = (extra: Record<string, string> = {}) =>
+    inTesterSnapshot(snapshot, async (root) => {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), file.content, { flag: "wx" });
+      return runBaseline(root, command, extra, { redact });
+    });
+  const { fullOutput, ...stored } = await execute();
+  const existing = existingBehavior ? await execute({ VISP_TEST_SCOPE: "existing" }) : undefined;
+  const kept = { file: path, command, baseline: stored };
+  const rejection = await baselineRejection(
+    { ...stored, fullOutput },
+    existing,
+    declared,
+    redact,
+    workspace.paths.root,
+  );
+  if (rejection) return { ...rejection, content: file.content, ...kept };
+  // A file with no declared tests skips the name gate, but a failure still needs a FAIL line.
+  if (!declared.length && !/^\s*FAIL:/im.test(fullOutput))
+    return {
+      status: "declined",
+      reason:
+        "The suite declares no tests and reported no failing test before implementation, so a later failure cannot be attributed to a test or disputed",
+      ...kept,
+    };
+  const written = await retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "write-acceptance-tests", [
+      {
+        kind: "write",
+        path: join(workspace.paths.root, path),
+        content: file.content,
+        expectedBefore: { existed: false },
+      },
+    ]),
+  );
+  if (!written.ok) return { status: "failed", reason: written.error.message };
   const pinned = await pinTests(workspace, feature, path, command, file.content);
   if (pinned.ok) return { status: "pinned", ...kept };
-  await removeFile(workspace, path, file.content);
+  if (pinned.error.code !== "STATE_BUSY") await removeFile(workspace, path, file.content);
   return { status: "failed", reason: pinned.error.message, ...kept };
+}
+
+const NO_NAMED_FAILURE =
+  "The suite failed before implementation but reported no declared test as failing";
+const MAX_LISTED_LINES = 5;
+const MAX_LISTED_CHARS = 300;
+const UNDECLARED_FAILURE = "The suite printed FAIL lines that name no declared test";
+/** A suite that reports an environment error while a browser starts here is repaired. */
+const BROWSER_AVAILABLE =
+  "VISP's own check starts a browser here: the browser is available, so do not print ENVIRONMENT ERROR; print a FAIL line per failing test.";
+
+async function baselineRejection(
+  baseline: Awaited<ReturnType<typeof runBaseline>>,
+  existing: Awaited<ReturnType<typeof runBaseline>> | undefined,
+  declared: readonly string[],
+  redact: (text: string) => string,
+  root: string,
+): Promise<Pick<TestFields, "status" | "reason"> | undefined> {
+  const failure = runFailure(baseline, existing);
+  if (failure) return { status: "rejected", reason: failure };
+  // A suite that says only "environment error" tells nothing about the product, but a suite
+  // can print that line to dodge attribution, so VISP checks the browser itself.
+  const environment = environmentOnly(baseline.fullOutput, declared)
+    ? environmentErrorLine(baseline.fullOutput)
+    : undefined;
+  if (environment !== undefined && (await browserUnavailable(root)))
+    return {
+      status: "failed",
+      reason: `The suite could not run in this environment (${redact(environment).slice(0, MAX_LISTED_CHARS)}) and VISP's own check finds no browser that starts here, so no product behavior was tested and no tests were pinned. Run the tester again where a browser is available.`,
+    };
+  const reason = attributionRejection(baseline.fullOutput, baseline.output, declared, redact);
+  return reason
+    ? {
+        status: "rejected",
+        reason: environment === undefined ? reason : `${reason} ${BROWSER_AVAILABLE}`,
+      }
+    : undefined;
+}
+
+function runFailure(
+  baseline: Awaited<ReturnType<typeof runBaseline>>,
+  existing: Awaited<ReturnType<typeof runBaseline>> | undefined,
+): string | undefined {
+  if (existing && (existing.exitCode !== 0 || existing.timedOut || existing.spawnFailed))
+    return `Tests of existing behavior fail on the launch-time repository copy, so the suite assumes something the code does not do: ${existing.output.slice(-600)}`;
+  if (baseline.spawnFailed || [127, 9009].includes(baseline.exitCode))
+    return "The test interpreter could not start; no product behavior was tested";
+  if (baseline.timedOut) return "The tests did not finish on the unimplemented project";
+  if (baseline.exitCode === 0)
+    return "The tests pass before any implementation, so they check nothing new";
+  return undefined;
+}
+
+/**
+ * A later failure must be attributable to a test the reviewer can rule on: a crash before
+ * any test ran, or FAIL lines with other names, would pin a suite nobody can dispute.
+ */
+function attributionRejection(
+  full: string,
+  tail: string,
+  declared: readonly string[],
+  redact: (text: string) => string,
+): string | undefined {
+  if (!declared.length) return undefined;
+  const stats = failLineStats(full, declared);
+  if (!stats.named.length)
+    return `${NO_NAMED_FAILURE}, so a later failure cannot be attributed to a test or disputed (a crash, an import or syntax error, or FAIL lines with other names). Declared names: ${declared
+      .slice(0, 12)
+      .map((name) => JSON.stringify(name))
+      .join(", ")}. Output tail: ${tail.slice(-600)}`;
+  if (stats.undeclared.length)
+    return `${UNDECLARED_FAILURE} (${stats.undeclared
+      .slice(0, MAX_LISTED_LINES)
+      .map((line) => JSON.stringify(redact(line).slice(0, MAX_LISTED_CHARS)))
+      .join(", ")}). Every FAIL line must be \`FAIL: <exact name from tests[].name>: <reason>\`.`;
+  return undefined;
+}
+
+/**
+ * The tester's own words say why it wrote no file (an interface it could not reach, a size limit
+ * it could not meet); the generic text hid that in the R12 benchmark round.
+ */
+function declineReason(notes: string): string {
+  const said = notes.replace(/\s+/g, " ").trim().slice(0, 300);
+  return said ? `The tester wrote no file: ${said}` : "No testable interface in the request";
+}
+
+function onlyStructuralChecks(response: TesterResponse): boolean {
+  const described = `${response.notes} ${response.tests.map((test) => test.name).join(" ")}`;
+  return (
+    /(?:cannot|can't|unable to|no way to) test (?:the )?behavio(?:u)?r/i.test(described) ||
+    (response.tests.length > 0 &&
+      response.tests.every((test) =>
+        /\b(?:file exists|exists and parses|parses|syntax|file structure|source file)\b/i.test(
+          test.name,
+        ),
+      ))
+  );
 }
 
 /**
@@ -539,7 +1156,7 @@ async function recordTesterActivity(
   network: boolean,
   activity: SessionActivity,
 ): Promise<void> {
-  const line = `${JSON.stringify({ at: new Date().toISOString(), model, network, ...activity })}\n`;
+  const line = `${JSON.stringify(redactStrings({ at: new Date().toISOString(), model, network, ...activity }, workspace.paths.root))}\n`;
   await appendFile(workspace.paths.featureFile(feature, TESTER_ACTIVITY_FILE), line).catch(
     () => undefined,
   );
@@ -566,22 +1183,6 @@ export async function testerNetworkCommands(
   });
 }
 
-/** Never copied for a session with network, whatever the project's settings say. */
-const SECRET_FILES = [
-  ".env",
-  ".env.*",
-  "*.pem",
-  "*.key",
-  "*.p12",
-  "*.pfx",
-  "id_rsa*",
-  "id_ecdsa*",
-  "id_ed25519*",
-  ".npmrc",
-  ".pypirc",
-  ".netrc",
-];
-
 /** Like .gitignore: a pattern without a slash matches a name at any depth. */
 function leftOut(path: string, patterns: readonly string[]): boolean {
   const parts = path.split("/");
@@ -605,8 +1206,27 @@ async function repositoryCopy(
   root: string,
   directory: string,
   blockedPaths: readonly string[],
+  sourceRoot?: string,
 ): Promise<string> {
   const copy = join(directory, "repository");
+  if (sourceRoot) {
+    await cp(sourceRoot, copy, {
+      recursive: true,
+      verbatimSymlinks: true,
+      filter: async (path) => {
+        const local = relative(sourceRoot, path).replaceAll("\\", "/");
+        const link = await readlink(path).catch(() => undefined);
+        const target =
+          link === undefined
+            ? local
+            : relative(sourceRoot, resolve(dirname(path), link)).replaceAll("\\", "/");
+        return ![local, target].some((entry) =>
+          leftOut(entry, [".git", ".visp", "acceptance", ...SECRET_FILES, ...blockedPaths]),
+        );
+      },
+    });
+    return copy;
+  }
   const listed = await run("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
     cwd: root,
     timeoutMs: 20_000,
@@ -628,21 +1248,38 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "Write ONE self-contained executable test file that checks the observable behavior the request specifies.",
     "Rules:",
     "- Test only behavior the request states. Quote the sentence each test relies on in `tests[].quote`. Do not invent requirements, messages or formats the request leaves open.",
-    "- A wrong test is worse than a missing one: the implementer must satisfy it. Leave out any case where a careful reader could expect a different result (for example extra fields or an empty body when the request does not say).",
+    "- A wrong test is worse than a missing one: the implementer must satisfy it. Leave out any case where a careful reader could expect a different expected result (for example extra fields or an empty body when the request does not say). This is about what an assertion claims, not about outcomes whose setup the request leaves open: those follow the coverage and search rules below.",
+    "- Surface those cases in `ambiguities`: quote the exact rule in `quote`, list its reasonable `readings`, and give the reading most implementations/users expect in `conventionalReading`, as one plain statement without caveats. Consider common natural variants, such as whitespace-only lines for 'blank lines'. Do not write tests for ambiguous cases. Return ambiguities even when file is null; use [] when none exist. These notes ask the worker to decide explicitly, not to satisfy an invented requirement.",
+    "- Coverage priority: where the request describes them, the suite must cover the request's central outcomes, not only setup, formats and interface shapes. Central outcomes are the effects the product exists to produce (for example what an action scores or charges, a quota or retry limit taking effect, a status transition, a goal being reached or lost), each numeric rule for the trigger and amount the request gives, and every stated state transition together with what follows it, as far as the request states it. If a trigger, rounding or boundary is unclear, list it in `ambiguities` instead of asserting it. A suite that checks only setup, data shapes and interface plumbing is incomplete. When trimming to the size limit, drop shape and format checks before central outcomes.",
+    "- For each invariant the request states (something never happens: never passes through, never exceeds, never negative), include one bounded check that tries to break it (a small sweep of inputs or a simulated run) and fails if it ever happens; sample during the run, not only terminal snapshots, and include every named moving actor. When the request requires physical objects to remain at rest, check only those objects over bounded idle simulation through the stated interfaces; respect allowed settling and animation, assert only stated motion or damage constraints, and omit unobservable or ambiguous checks.",
+    "- Reaching outcomes without assuming open details: when producing an outcome depends on details the request leaves to the implementer (positions, layouts, data, timing), do not assume those details and do not skip the outcome. Reach it through the stated interfaces by a bounded search over allowed inputs (a grid over the input parameters, or sequences of actions), then assert the stated consequences once the effect is observed (for example the exact stated amount changed, the stated state appeared). Assert only what the request states about the consequence, not how the effect was reached. A goal the request defines (completing, winning, finishing a flow) must be reachable through allowed inputs: when the search covers the whole stated input domain (every stated range, at a resolution fine enough that a reasonable implementation cannot fall between samples, and sequences as long as the request allows), finding no way to reach it is a failure. Angles and directions are bounded (one full turn, or the range the request names) and a fraction from 0 to 1 is bounded, even when a test hook accepts any number. Search every such goal (each level or stage); when your search cannot cover the domain finely enough to prove the goal unreachable, print `NOT OBSERVED: <exact name>: <attempts> attempts` instead of FAIL. Only a truly open domain goes to `ambiguities`.",
+    "- Equivalent input paths: when the request states that two input paths (for example real user input and a programmatic or test interface) produce the same behavior, test each path against the same expected result derived from the request, never from what an implementation does. For directions, coordinates or other geometry, use non-degenerate inputs with a non-zero component on every axis (not only axis-aligned cases), so a flipped sign or swapped axis fails. Assert the direction (sign or quadrant) the request's stated convention implies, not exact magnitudes unless the request gives the formula; if the request states no convention, do not assert one and list it in `ambiguities`.",
+    "- Range coverage: for each stated input range, sample one allowed value near each end and one in the middle (or all allowed values if there are fewer than three), checking only the behavior the request requires at each value under its stated conditions. Use values strictly inside the range unless the request makes endpoint inclusion and behavior clear; do not invent exact results the request leaves open, and put unclear expectations in `ambiguities` instead of asserting them. Combine the samples in the same test within the suite's size limit, varying one ranged input at a time rather than testing every combination.",
+    "- When the request names deterministic controls (a clock, a step function, a seed, a reset), drive time and setup through them instead of real-time waits. When the request says a consequence happens as soon as (or immediately when) a trigger holds, or that a state shows a control or display (after a win, when lost), stop at the FIRST state where the trigger or state holds (bounded stepping with the named hooks) and check it there. Where the request states a delay, check within that delay; never assert an immediacy the request does not state.",
+    "- For each named context (direct reference, operator, function argument, range), include one case for each value kind whose behavior the request defines there (for example empty, text, number); combine cases to stay within the size limit and keep central outcomes. Apply the stated rules together: where they allow different expected results (for example an empty cell used as a direct reference), put the case and its conventional reading in `ambiguities`, not a test.",
     "- Reach the program only through interfaces the request names (commands, scripts, HTTP routes, files, exported names). If it names none a test could use, return file: null and explain in notes.",
-    "- Use only the standard library: Python 3 (name ending .py, run as `python3 <file>`) or Node.js ES modules (name ending .mjs, run as `node <file>`). Prefer the language the request or repository uses.",
+    "- Use only the standard library: Python 3 (name ending .py) or Node.js ES modules (name ending .mjs). Prefer the language the request or repository uses. Name Node files `*.acceptance.mjs`, not `*.test.mjs`, so a project's `node --test` does not discover them.",
+    "- The worker runs checks inside a workspace sandbox. Prefer in-process imports to spawning subprocesses. If a subprocess fails with EPERM, report an environment error rather than treating it as product behavior.",
     "- Start and stop anything the tests need, the way the request says, with timeouts on every wait. Use a free port where one is needed.",
-    "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why.",
+    "- Express every check as an assertion (Python `assert` or unittest assertions; Node `node:assert`). Exit non-zero when any test fails, and print which test failed and why, one line per failing test: `FAIL: <exact name from tests[].name>: <reason>`. For passes print `PASS: <exact name from tests[].name>`. For conditional interactions, print the qualifying event count; zero prints `NOT OBSERVED: <exact name from tests[].name>` (informational coverage gap, not a failure or pass).",
+    "- Print the FAIL lines yourself. Do not rely on unittest's default runner output or any other framework output: it names methods (`FAIL: test_x (Mod.Cls.test_x)`), not your declared tests, and does not count.",
+    "- This holds when nothing is implemented yet: catch a missing module, script or refused connection per test and print that test's FAIL line; never import or start the product at file top level outside a test. Exception: when the browser itself cannot start, print `ENVIRONMENT ERROR: <message>` once, close everything, exit non-zero and print no FAIL line.",
+    "- Only the checks' own assertions may fail the run. Errors while cleaning up after the tests (closing a browser or server, killing a child process, removing temporary directories or browser profiles) must be caught and ignored, and must never change the exit status: wrap every teardown step in try/catch (or `ignore_errors=True` / `force: true` with retries) and exit from the assertion results alone.",
+    "- Assertions must not depend on incidental ordering the request does not state: object key order, Set or dict iteration order, the order of unordered results, or timing. Compare parsed values, sort before comparing, or check membership.",
+    `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
     "- The project is not implemented yet, so the file must fail now and pass once the request is met.",
     "- Before answering, check every case against the request and trace it through your own helpers (for example, how a missing body, None or null is actually sent). Remove any case you cannot justify from the quoted text.",
-    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines.",
+    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines of your own code (the browser kit VISP inserts does not count). Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
     ...(existing
       ? [
           "- This request changes an existing codebase, and you are in a disposable copy of it where you may run the existing program and its tests. Before asserting anything about existing behavior (routes, status codes, body shapes, error formats, the requests your setup makes), run the program and observe it; base every such assertion on what you observed, not on assumptions.",
           "- Create every item, record or file your tests need through the documented interfaces; never depend on data, fixtures or documentation examples already in the repository.",
-          "- Include tests of existing behavior that use the same helpers as the new tests: at least one for every existing route, command or interface your new tests call or assert on (for example, if a new test expects a status from an existing endpoint, also test that endpoint's documented existing case), and every assertion helper the new tests use (such as an error-body check) must also be used by at least one existing-behavior test. Set existingBehavior: true. When the environment variable VISP_TEST_SCOPE is `existing`, run only those tests; they must pass on the repository as it is now. Your file is judged by running it against the real repository.",
+          "- Include tests of existing behavior that use the same helpers as the new tests: at least one for every existing route, command or interface your new tests call or assert on (for example, if a new test expects a status from an existing endpoint, also test that endpoint's documented existing case), and every assertion helper the new tests use (such as an error-body check) must also be used by at least one existing-behavior test. Set existingBehavior: true. When the environment variable VISP_TEST_SCOPE is `existing`, run only those tests; they must pass on the launch-time repository copy. Your file is judged against that same copy, even if the worker edits the live project.",
         ]
-      : ["- Set existingBehavior: false."]),
+      : [
+          "- Set existingBehavior: false. You are in an empty temporary directory. Do not inspect the implementation, run `visp`, or load project or personal skills.",
+        ]),
+    ...testerBrowserKitLines(request),
     `The file will be saved as acceptance/${feature}/<name> and run from the repository root. Do not modify the repository.`,
     "",
     "Request:",
@@ -662,54 +1299,54 @@ function invalidFile(file: { name: string; content: string }): string | undefine
 }
 
 function testCommand(path: string): string[] {
-  return path.endsWith(".py") ? ["python3", path] : ["node", path];
+  return path.endsWith(".py")
+    ? [process.platform === "win32" ? "python" : "python3", path]
+    : ["node", path];
 }
 
 /**
  * One run of the pinned or candidate tests, in its own process group that is ended
  * afterwards: suites start servers, and one left two running after it finished.
  */
-async function runBaseline(root: string, command: string[], extra: Record<string, string> = {}) {
+async function runBaseline(
+  root: string,
+  command: string[],
+  extra: Record<string, string> = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; redact?: (text: string) => string } = {},
+) {
   const [file, ...args] = command as [string, ...string[]];
+  const redact = options.redact ?? (await outputRedactor(root));
   const env = await resolvedProductExecutionEnvironment();
-  return new Promise<{ exitCode: number; timedOut: boolean; output: string }>((resolve) => {
-    let output = "";
-    let timedOut = false;
-    const child = spawn(file, args, {
+  // Its own HOME and temporary directory, as a pinned check gets: two baselines that run
+  // together share no browser profile lock.
+  const home = await mkdtemp(join(tmpdir(), "visp-baseline-"));
+  let result: Awaited<ReturnType<typeof run>>;
+  try {
+    await mkdir(privateTemporaryDirectory(home), { recursive: true, mode: 0o700 });
+    result = await run(file, args, {
       cwd: root,
-      env: { ...env, VISP_ACCEPTANCE_BASELINE: "1", ...extra },
-      // Its own process group on POSIX; on Windows detached would open a new console.
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...acceptanceEnvironment(env, home), VISP_ACCEPTANCE_BASELINE: "1", ...extra },
+      replaceEnv: true,
+      timeoutMs: options.timeoutMs ?? BASELINE_TIMEOUT_MS,
+      signal: options.signal,
     });
-    const collect = (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-8000);
-    };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
-    const endGroup = () => {
-      try {
-        // Windows has no process groups to signal; there the child itself is ended.
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // The group already exited.
-      }
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      endGroup();
-    }, BASELINE_TIMEOUT_MS);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ exitCode: -1, timedOut: false, output: error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      endGroup();
-      resolve({ exitCode: code ?? -1, timedOut, output: output.trim().slice(-2000) });
-    });
-  });
+  } finally {
+    await removeTreeBestEffort(home);
+  }
+  if (!result.ok) {
+    const output = redact(result.error.message);
+    return { exitCode: -1, timedOut: false, spawnFailed: true, output, fullOutput: output };
+  }
+  const full = `${result.value.stdout}\n${result.value.stderr}`.trim();
+  return {
+    exitCode: result.value.exitCode,
+    timedOut: result.value.timedOut,
+    spawnFailed: false,
+    output: redact(full).slice(-2000),
+    // Unredacted so declared test names match what the suite printed; only used to attribute
+    // FAIL lines in memory, never stored or shown (`output` above is what a record keeps).
+    fullOutput: full.slice(-200_000),
+  };
 }
 
 async function pinTests(
@@ -729,7 +1366,8 @@ async function pinTests(
         vispError("STAGE_BLOCKED", "The feature was accepted before the tests were ready"),
       );
     const pinned = await pinOnto(workspace, current.value.brief, path, command, content);
-    if (pinned.ok || pinned.error.code !== "STATE_BUSY" || attempt >= 4) return pinned;
+    if (pinned.ok || pinned.error.code !== "STATE_BUSY" || attempt >= 8) return pinned;
+    await sleep(500);
   }
 }
 
@@ -758,13 +1396,15 @@ function pinOnto(
 }
 
 async function removeFile(workspace: WorkspaceState, path: string, content: string) {
-  await applyFileTransaction(workspace.paths.root, "discard-acceptance-tests", [
-    {
-      kind: "remove",
-      path: join(workspace.paths.root, path),
-      expectedBefore: filePrecondition(content),
-    },
-  ]);
+  await retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "discard-acceptance-tests", [
+      {
+        kind: "remove",
+        path: join(workspace.paths.root, path),
+        expectedBefore: filePrecondition(content),
+      },
+    ]),
+  );
 }
 
 export async function readTestsRecord(
@@ -781,20 +1421,43 @@ export async function readTestsRecord(
   }
 }
 
-async function saveTestsRecord(
+export async function saveTestsRecord(
   workspace: WorkspaceState,
   feature: string,
   record: IndependentTestsRecord,
   before: IndependentTestsRecord | undefined,
 ) {
-  return applyFileTransaction(workspace.paths.root, "record-acceptance-tests", [
-    {
-      kind: "write",
-      path: workspace.paths.featureFile(feature, RECORD),
-      content: `${JSON.stringify(record, null, 2)}\n`,
-      ...(before === undefined ? { expectedBefore: { existed: false } } : {}),
-    },
-  ]);
+  const path = workspace.paths.featureFile(feature, RECORD);
+  const current = await workspace.files.readTextIfExists(path);
+  if (!current.ok) return current;
+  if (!before && current.value !== undefined)
+    return err(vispError("STATE_BUSY", "Another tester already started for this feature"));
+  let parsed: unknown;
+  try {
+    parsed = current.value === undefined ? null : JSON.parse(current.value);
+  } catch {
+    return err(vispError("ARTIFACT_INVALID", `Unreadable ${RECORD}`));
+  }
+  if (before && hashValue(parsed) !== hashValue(before))
+    return err(vispError("STATE_BUSY", "The tester record changed while this tester was running"));
+  return retryBusy(() =>
+    applyFileTransaction(workspace.paths.root, "record-acceptance-tests", [
+      {
+        kind: "write",
+        path,
+        content: `${JSON.stringify(record, null, 2)}\n`,
+        expectedBefore: filePrecondition(current.value),
+      },
+    ]),
+  );
+}
+
+async function retryBusy<T>(operation: () => Promise<Result<T>>): Promise<Result<T>> {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await operation();
+    if (result.ok || result.error.code !== "STATE_BUSY" || attempt >= 8) return result;
+    await sleep(500);
+  }
 }
 
 async function waitForRecord(
@@ -822,6 +1485,16 @@ export interface AcceptanceProgress {
   readonly note: string;
 }
 
+function progressNote(passing: boolean, timedOut: boolean): string {
+  if (passing) return "Pinned acceptance tests pass.";
+  return timedOut ? TIMED_OUT_NOTE : STILL_FAIL_NOTE;
+}
+
+const STILL_FAIL_NOTE =
+  "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one.";
+const TIMED_OUT_NOTE =
+  "Pinned acceptance tests did not finish in the time left for this command; they were cut off, not shown failing. Run visp done again for a full result. The last slice cannot close until they pass.";
+
 /**
  * Weak workers stopped before the last slice, where pinned tests become checks, so they
  * never saw them fail. Earlier `done` calls run them for information: a failure there
@@ -831,23 +1504,36 @@ export async function acceptanceProgress(
   workspace: WorkspaceState,
   feature: string,
   executedChecks: readonly string[],
+  options: import("./store.js").ProductSelection = {},
 ): Promise<AcceptanceProgress[]> {
   if (executedChecks.some((check) => check.startsWith("PINNED_"))) return [];
   const loaded = await readProductRecord(workspace, { feature });
   if (!loaded.ok) return [];
   const results: AcceptanceProgress[] = [];
   for (const pinned of loaded.value.brief.acceptanceBaseline) {
+    if (options.signal?.aborted || Date.now() >= (options.deadline ?? Infinity)) break;
+    await options.onProgress?.({ check: "acceptance baseline", status: "running" });
     const command =
       typeof pinned.command === "string" ? pinned.command.split(" ") : [...pinned.command];
-    const outcome = await runBaseline(workspace.paths.root, command);
+    const outcome = await runBaseline(
+      workspace.paths.root,
+      command,
+      await waivedTestsEnv(workspace, feature),
+      {
+        signal: options.signal,
+        timeoutMs: Math.max(
+          1,
+          Math.min(BASELINE_TIMEOUT_MS, (options.deadline ?? Infinity) - Date.now()),
+        ),
+      },
+    );
     const passing = outcome.exitCode === 0 && !outcome.timedOut;
     results.push({
       passing,
       command: command.join(" "),
-      ...(passing ? {} : { failure: outcome.output.slice(-1200) }),
-      note: passing
-        ? "Pinned acceptance tests pass."
-        : "Pinned acceptance tests still fail. This does not block this slice, but the last slice cannot close until they pass. Fix the product, not the tests; but never change documented existing behavior to satisfy one. If a test contradicts the request or that documentation, keep the product and record the disagreement with an intent change.",
+      // A run that was cut off shows nothing failing, so it carries no failure tail.
+      ...(passing || outcome.timedOut ? {} : { failure: outcome.output.slice(-1200) }),
+      note: progressNote(passing, outcome.timedOut),
     });
   }
   return results;
@@ -857,9 +1543,21 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isStale(record: IndependentTestsRecord): boolean {
-  if (record.pid !== undefined && !processAlive(record.pid)) return true;
-  return Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS;
+/**
+ * A running record is stale once its writer is gone or it outlived every deadline. Codex
+ * runs each sandboxed command in its own pid namespace, where another command's tester is
+ * invisible (or its pid names an unrelated process): across namespaces liveness cannot be
+ * told, so only the age decides.
+ */
+async function isStale(record: IndependentTestsRecord): Promise<boolean> {
+  if (Date.now() - Date.parse(record.startedAt) > STALE_RUNNING_MS) return true;
+  if (record.pid === undefined) return false;
+  if (
+    record.pidNamespace &&
+    (await processIdentity(process.pid)).pidNamespace !== record.pidNamespace
+  )
+    return false;
+  return !processAlive(record.pid);
 }
 
 function processAlive(pid: number): boolean {

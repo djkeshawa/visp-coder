@@ -384,3 +384,33 @@ it("persists execution-derived links using only the prepared image selection", a
     evidence: [record.value.state.executions[0]?.id, ...captures.map((capture) => capture.id)],
   });
 });
+
+it("accepts prepared CHECK result citations as their canonical behavior execution", async () => {
+  const w = await ready();
+  const prepared = await runProductReviewRequest(await w.state(), { prepare: true, task: "T001" });
+  if (!prepared.ok) throw new Error(prepared.error.message);
+  const session = prepared.value as { session: string; packetPath: string };
+  const packet = JSON.parse(await readFile(session.packetPath, "utf8"));
+  const source = packet.sources.find((entry: { kind: string }) => entry.kind === "executed-check");
+  expect(source).toBeDefined();
+  expect(JSON.stringify(packet.responseSchema)).toContain(source.id);
+  const submitted = await runProductReviewRequest(await w.state(), {
+    session: session.session,
+    task: "T001",
+    detail: true,
+    reviewer: { context: "fresh" },
+    assessments: [
+      {
+        outcome: "O001",
+        status: "satisfied",
+        summary: "Executed behavior passes",
+        evidence: [source.id],
+        expectations: [],
+      },
+    ],
+  });
+  expect(submitted).toMatchObject({
+    ok: true,
+    value: { assessments: [{ status: "satisfied", evidence: [source.id.slice(6)] }] },
+  });
+});

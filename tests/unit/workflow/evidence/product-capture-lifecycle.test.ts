@@ -6,8 +6,14 @@ import { hashValue, sha256 } from "../../../../src/core/hash.js";
 import { err, ok } from "../../../../src/core/result.js";
 import { BrowserSecurityError } from "../../../../src/testing/browser-files.js";
 import { runProductCapture } from "../../../../src/workflow/evidence/product-capture.js";
+import { runProductCaptureAction } from "../../../../src/workflow/evidence/product-capture-actions.js";
 import { prepareProductCapture } from "../../../../src/workflow/evidence/product-capture-execution.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
+import {
+  currentFailedJourneys,
+  pendingJourneyReplays,
+} from "../../../../src/workflow/product/evidence-references.js";
+import { experimentReviewContext } from "../../../../src/workflow/product/experiments.js";
 import * as store from "../../../../src/workflow/product/store.js";
 import * as subject from "../../../../src/workflow/product/subject.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
@@ -109,8 +115,8 @@ describe("capture publication lifecycle", () => {
       const state = await workspace.state();
       const before = await readFile(store.productStatePath(state, feature), "utf8");
       const snapshot = vi.spyOn(subject, "productSourceDigest");
-      if (stage === "after")
-        snapshot.mockResolvedValueOnce(ok("a".repeat(64))).mockResolvedValueOnce(ok("environment"));
+      vi.spyOn(subject, "productComparisonEnvironmentDigest").mockResolvedValue(ok("environment"));
+      if (stage === "after") snapshot.mockResolvedValueOnce(ok("a".repeat(64)));
       snapshot.mockResolvedValueOnce(err(vispError("IO_ERROR", "Cannot inspect product source")));
       const publish = vi.spyOn(store, "saveProductState");
       expect(
@@ -216,6 +222,7 @@ describe("capture publication lifecycle", () => {
       feature,
       task: "T001",
       journey: { url: "http://127.0.0.1:3000/" },
+      outcomes: ["O001"],
     });
     expect(result).toMatchObject({
       ok: true,
@@ -491,12 +498,8 @@ it("surfaces optional matching replays through work after edits and removes them
     journeyFeedback: {
       replay: {
         advisory: true,
-        runs: [
-          {
-            runId: first.value.runId,
-            command: expect.stringContaining(`--replay=${first.value.runId}`),
-          },
-        ],
+        command: expect.stringContaining(`--replay-batch=${first.value.runId}`),
+        runs: [{ runId: first.value.runId }],
       },
     },
   });
@@ -509,4 +512,298 @@ it("surfaces optional matching replays through work after edits and removes them
   const refreshed = await runProductWork(state, { feature, task: "T001" });
   if (!refreshed.ok) throw new Error(refreshed.error.message);
   expect(refreshed.value.journeyFeedback?.replay).toBeUndefined();
+});
+
+it("reports exploratory failure once, retires it with a reason and preserves the reviewer-visible failed receipt", async () => {
+  lifecycle.run.mockResolvedValue({
+    captures: [],
+    operations: [],
+    status: "timed-out",
+    failure: { kind: "behavior", message: "Speculative aim did not win" },
+  });
+  const state = await workspace.state();
+  const captured = await runProductCapture(state, {
+    feature,
+    task: "T001",
+    journey: { url: "http://127.0.0.1:3000/", actions: [{ kind: "click", selector: "#aim" }] },
+  });
+  if (!captured.ok) throw new Error(captured.error.message);
+  expect(captured.value).toMatchObject({
+    status: "timed-out",
+    information: expect.stringContaining("not required replay"),
+    expectation: { basis: "agent-proposed", outcomes: [] },
+  });
+  const before = await store.readProductRecord(state, { feature });
+  if (!before.ok) throw new Error(before.error.message);
+  const receipt = JSON.stringify(before.value.state.captureRuns[0]);
+  expect(currentFailedJourneys(before.value, "changed", "T001")).toEqual([]);
+  expect(pendingJourneyReplays(before.value, "changed", "T001")).toEqual([]);
+  for (const reason of [undefined, "", "two\nlines", "x".repeat(501)]) {
+    expect(
+      await runProductCaptureAction(state, { feature, retire: captured.value.runId, reason }),
+    ).toMatchObject({ ok: false });
+  }
+  const retirement = await runProductCaptureAction(state, {
+    feature,
+    retire: captured.value.runId,
+    reason: "Ordinary missed aim; winning was only a hypothesis",
+  });
+  expect(retirement).toMatchObject({
+    ok: true,
+    value: {
+      originalStatus: "timed-out",
+      retirement: {
+        provenance: "worker-reported",
+        reason: "Ordinary missed aim; winning was only a hypothesis",
+      },
+    },
+  });
+  const after = await store.readProductRecord(state, { feature });
+  if (!after.ok) throw new Error(after.error.message);
+  expect(JSON.stringify(after.value.state.captureRuns[0])).toBe(receipt);
+  expect(
+    experimentReviewContext(after.value, "changed", after.value.brief.slices[0]),
+  ).toMatchObject({
+    exploratory: [
+      {
+        status: "timed-out",
+        retirement: { reason: "Ordinary missed aim; winning was only a hypothesis" },
+      },
+    ],
+  });
+  expect(
+    await runProductCaptureAction(state, {
+      feature,
+      retire: captured.value.runId,
+      reason: "overwrite",
+    }),
+  ).toMatchObject({ ok: false });
+  expect(lifecycle.run).toHaveBeenCalledOnce();
+});
+
+it("refuses retirement of declared outcomes and lets the reviewer require a retired hypothesis", async () => {
+  lifecycle.run.mockResolvedValue({
+    captures: [],
+    operations: [{ id: "failed-op", kind: "observe", completedAt: "now" }],
+    status: "timed-out",
+    failure: { kind: "behavior", message: "Failed expectation" },
+  });
+  const state = await workspace.state();
+  const journey = { url: "http://127.0.0.1:3000/" };
+  const declared = await runProductCapture(state, {
+    feature,
+    task: "T001",
+    journey,
+    outcomes: ["O001"],
+  });
+  if (!declared.ok) throw new Error(declared.error.message);
+  expect(
+    await runProductCaptureAction(state, {
+      feature,
+      retire: declared.value.runId,
+      reason: "Ignore",
+    }),
+  ).toMatchObject({ ok: false, error: { code: "EVIDENCE_FAILED" } });
+  expect(
+    await runProductCapture(state, { feature, task: "T001", journey, outcomes: ["unknown"] }),
+  ).toMatchObject({ ok: false });
+  const exploratory = await runProductCapture(state, {
+    feature,
+    task: "T001",
+    journey: { ...journey, actions: [{ kind: "click", selector: "#other" }] },
+  });
+  if (!exploratory.ok) throw new Error(exploratory.error.message);
+  expect(
+    await runProductCaptureAction(state, {
+      feature,
+      retire: exploratory.value.runId,
+      reason: "Unsupported hypothesis",
+    }),
+  ).toMatchObject({ ok: true });
+  const loaded = await store.readProductRecord(state, { feature });
+  if (!loaded.ok) throw new Error(loaded.error.message);
+  const run = loaded.value.state.captureRuns[1] as {
+    subjectDigest: string;
+    contractDigest: string;
+  };
+  await store.saveProductState(state, loaded.value, {
+    ...loaded.value.state,
+    reviews: [
+      {
+        subjectDigest: run.subjectDigest,
+        contractDigest: run.contractDigest,
+        createdAt: "now",
+        task: "T001",
+        assessments: [],
+        captures: [],
+        feedback: {
+          phase: "product",
+          dimensions: [],
+          resolutions: [],
+          findings: [
+            {
+              dimension: "functional",
+              problem: "Real contract defect",
+              nextCheck: "Replay",
+              outcomes: ["O001"],
+              required: true,
+              evidence: ["failed-op"],
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const required = await store.readProductRecord(state, { feature });
+  if (!required.ok) throw new Error(required.error.message);
+  expect(
+    currentFailedJourneys(required.value, run.subjectDigest, "T001").map((entry) => entry.id),
+  ).toContain(exploratory.value.runId);
+  expect(
+    pendingJourneyReplays(required.value, "edited", "T001").map((entry) => entry.id),
+  ).toContain(exploratory.value.runId);
+  expect(
+    await runProductCaptureAction(state, {
+      feature,
+      retire: exploratory.value.runId,
+      reason: "Ignore finding",
+    }),
+  ).toMatchObject({ ok: false, error: { code: "EVIDENCE_FAILED" } });
+});
+
+it("replays canonical failed input and related transitions unchanged in one result, retaining each failure", async () => {
+  lifecycle.run.mockResolvedValue({ captures: [], operations: [], status: "completed" });
+  const state = await workspace.state();
+  const journeys = [
+    {
+      url: "http://127.0.0.1:3000/",
+      actions: [
+        { kind: "click", selector: "#aim" },
+        { kind: "click", selector: "#reset" },
+      ],
+    },
+    { url: "http://127.0.0.1:3000/", actions: [{ kind: "click", selector: "#export" }] },
+    { url: "http://127.0.0.1:3000/other", actions: [{ kind: "click", selector: "#aim" }] },
+    { url: "http://127.0.0.1:3000/", actions: [{ kind: "click", selector: "#aim" }] },
+  ];
+  const ids = [];
+  for (const [index, journey] of journeys.entries()) {
+    if (index === 3)
+      lifecycle.run.mockResolvedValue({
+        captures: [],
+        operations: [],
+        status: "timed-out",
+        failure: { kind: "behavior", message: "Aim failed" },
+      });
+    const result = await runProductCapture(state, {
+      feature,
+      task: "T001",
+      journey,
+      outcomes: index === 3 ? ["O001"] : undefined,
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    ids.push(result.value.runId);
+  }
+  const savedInputs = lifecycle.run.mock.calls.map((call) => call[0].journey);
+  await workspace.write("src/value.mjs", "export const value = 2;\n");
+  lifecycle.run.mockClear();
+  lifecycle.run
+    .mockResolvedValueOnce({
+      captures: [],
+      operations: [],
+      status: "timed-out",
+      failure: { kind: "behavior", message: "Still failed" },
+    })
+    .mockResolvedValue({ captures: [], operations: [], status: "completed" });
+  const replayed = await runProductCaptureAction(state, {
+    feature,
+    task: "T001",
+    replayBatch: ids[3],
+  });
+  expect(replayed).toMatchObject({
+    ok: true,
+    value: {
+      canonicalRunId: ids[3],
+      status: "failed",
+      runs: [
+        { sourceRunId: ids[3], result: { status: "timed-out" } },
+        { sourceRunId: ids[0], result: { status: "completed" } },
+      ],
+    },
+  });
+  expect(lifecycle.run.mock.calls.map((call) => call[0].journey)).toEqual([
+    savedInputs[3],
+    savedInputs[0],
+  ]);
+  const loaded = await store.readProductRecord(state, { feature });
+  if (!loaded.ok) throw new Error(loaded.error.message);
+  const subjectDigest = await subject.productSourceDigest(state, loaded.value.brief);
+  if (!subjectDigest.ok) throw new Error(subjectDigest.error.message);
+  expect(currentFailedJourneys(loaded.value, subjectDigest.value, "T001")).toHaveLength(1);
+});
+
+it("refuses retirement of uncaught product exceptions and cancels a replay batch before browser startup", async () => {
+  lifecycle.run.mockResolvedValue({
+    captures: [],
+    operations: [
+      {
+        id: "uncaught",
+        kind: "observe",
+        description: "Uncaught application exception",
+        completedAt: "now",
+      },
+    ],
+    status: "failed",
+    failure: { kind: "behavior", message: "Uncaught ReferenceError" },
+  });
+  const state = await workspace.state();
+  const captured = await runProductCapture(state, {
+    feature,
+    task: "T001",
+    journey: { url: "http://127.0.0.1:3000/" },
+  });
+  if (!captured.ok) throw new Error(captured.error.message);
+  expect(captured.value.information).toBeUndefined();
+  expect(
+    await runProductCaptureAction(state, {
+      feature,
+      retire: captured.value.runId,
+      reason: "Ignore exception",
+    }),
+  ).toMatchObject({ ok: false, error: { code: "EVIDENCE_FAILED" } });
+  const controller = new AbortController();
+  controller.abort();
+  const replayed = await runProductCaptureAction(state, {
+    feature,
+    replayBatch: captured.value.runId,
+    signal: controller.signal,
+  });
+  expect(replayed).toMatchObject({ ok: true, value: { status: "cancelled", runs: [] } });
+  expect(lifecycle.run).toHaveBeenCalledOnce();
+});
+
+it("shows retirement of a completed exploratory journey to the reviewer", async () => {
+  lifecycle.run.mockResolvedValue({ captures: [], operations: [], status: "completed" });
+  const state = await workspace.state();
+  const captured = await runProductCapture(state, {
+    feature,
+    task: "T001",
+    journey: { url: "http://127.0.0.1:3000/" },
+  });
+  if (!captured.ok) throw new Error(captured.error.message);
+  const retired = await runProductCaptureAction(state, {
+    feature,
+    retire: captured.value.runId,
+    reason: "This path does not test the requested control",
+  });
+  expect(retired).toMatchObject({ ok: true });
+  const loaded = await store.readProductRecord(state, { feature });
+  if (!loaded.ok) throw new Error(loaded.error.message);
+  expect(
+    experimentReviewContext(loaded.value, "edited", loaded.value.brief.slices[0]),
+  ).toMatchObject({
+    retirements: [
+      { runId: captured.value.runId, reason: "This path does not test the requested control" },
+    ],
+  });
 });

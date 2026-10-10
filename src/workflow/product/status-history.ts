@@ -10,12 +10,15 @@ import { legacyFeatureContractDigest, productContractDigest } from "./subject.js
 export interface ProductIdentity {
   subject: string;
   implementation: string;
+  sourceSnapshot?: Record<string, string>;
 }
 
 export function historicalAcceptanceNext(
   record: ProductRecord,
   identity: ProductIdentity,
   base: { feature: string; task?: string },
+  /** VISP launches the reviewer: the next step is `visp accept`, not a review the worker runs. */
+  launched = false,
 ): ProductNext | undefined {
   if (
     record.state.status !== "accepted" ||
@@ -49,7 +52,9 @@ export function historicalAcceptanceNext(
         action: "refine",
         objective:
           "Resolve the retained review mismatch against the current product before relying on historical acceptance",
-        command: `visp review --handoff --feature ${record.brief.feature}`,
+        command: launched
+          ? `visp accept --feature ${record.brief.feature}`
+          : `visp review --handoff --feature ${record.brief.feature}`,
         evidence: historicalGaps,
         mayEdit: false,
       };
@@ -68,7 +73,9 @@ export function historicalAcceptanceNext(
       action: "understand",
       objective:
         "Historical acceptance is preserved; current implementation freshness is unknown under the upgraded runtime",
-      command: `visp review --handoff --feature ${record.brief.feature}`,
+      command: launched
+        ? `visp accept --feature ${record.brief.feature}`
+        : `visp review --handoff --feature ${record.brief.feature}`,
       evidence: [
         "The old acceptance has no implementation-only identity. Explicit new acceptance requires current evidence.",
       ],

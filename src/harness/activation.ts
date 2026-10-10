@@ -2,11 +2,12 @@ import type { Harness } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { sha256 } from "../core/hash.js";
 import { err, ok, type Result } from "../core/result.js";
+import { lineEndingsNormalized } from "./asset-inspection.js";
 import { commandMap } from "./command-guide.js";
 import { TOOL_ACCESS_GUIDANCE } from "./instructions.js";
 
-export const AGENT_ACTIVATION_FILE = "AGENTS.md";
-export const ACTIVATION_START = "<!-- visp:instructions:start -->";
+const AGENT_ACTIVATION_FILE = "AGENTS.md";
+const ACTIVATION_START = "<!-- visp:instructions:start -->";
 export const ACTIVATION_END = "<!-- visp:instructions:end -->";
 
 const LEGACY_ACTIVATION_BODY = `${ACTIVATION_START}
@@ -69,21 +70,25 @@ export function planAgentActivation(
     start >= endMarker
   ) {
     return err(
-      vispError("ARTIFACT_INVALID", `${AGENT_ACTIVATION_FILE} has malformed VISP markers`, {
-        recovery: `Repair or remove the ${ACTIVATION_START} / ${ACTIVATION_END} block, then rerun visp install`,
+      vispError("ARTIFACT_INVALID", `${agentActivationFile(harness)} has malformed VISP markers`, {
+        recovery: `Repair or remove the ${ACTIVATION_START} / ${ACTIVATION_END} block in ${agentActivationFile(harness)}, then rerun visp install`,
       }),
     );
   }
 
   const end = endMarker + ACTIVATION_END.length;
-  const installed = source.slice(start, end);
+  const installed = lineEndingsNormalized(source.slice(start, end));
   if (installed === ACTIVATION_BODY) return ok({ status: "current" });
 
   if (!force && !ownedActivationBlock(installed)) {
     return err(
-      vispError("ARTIFACT_INVALID", "The VISP block in AGENTS.md was edited and was left alone", {
-        recovery: "Rerun visp install --force to replace only the managed VISP block",
-      }),
+      vispError(
+        "ARTIFACT_INVALID",
+        `The VISP block in ${agentActivationFile(harness)} was edited and was left alone`,
+        {
+          recovery: `Rerun visp install --force to replace only the managed VISP block in ${agentActivationFile(harness)}`,
+        },
+      ),
     );
   }
 
@@ -114,7 +119,7 @@ export function planAgentDeactivation(current: string | undefined): {
   if (
     start < 0 ||
     end < ACTIVATION_END.length ||
-    !ownedActivationBlock(current.slice(start, end))
+    !ownedActivationBlock(lineEndingsNormalized(current.slice(start, end)))
   ) {
     return { status: "edited" };
   }

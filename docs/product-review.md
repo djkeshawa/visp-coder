@@ -26,9 +26,9 @@ checks:
     environment: browser
 ```
 
-Use the application's real selectors, states and files. An HTTP(S) application must already be running. Journeys run in an installed Chrome/Chromium (`CHROME_BIN`, or `google-chrome` by default) with an isolated profile and the browser sandbox enabled; VISP never downloads a browser or uses your open session.
+Use the application's real selectors, states and files. An HTTP(S) application must already be running. For a static page or game (HTML, JS and CSS, no backend) use the journey url `project:/index.html`: VISP serves the project itself for the journey on a loopback port it chooses and stops the server afterwards, so no server needs to be started. That server answers GET and HEAD only, serves the current project bytes, never serves `.env*`, `.git`, `.visp`, `dist/`, `build/`, `node_modules/`, configured blocked paths, anything behind a symlink or any file with more than one hard link, and refuses requests beyond 20000 per journey or 128 MiB in total. An app that needs a build output or a backend runs its own server on a free port. Journeys run in an installed Chrome/Chromium (`CHROME_BIN`, or `google-chrome` by default) with an isolated profile and the browser sandbox enabled; VISP never downloads a browser or uses your open session.
 
-A `file:///…` URL works when every loaded file is a regular, non-symlinked file inside the project and outside blocked paths. Workers, popups and downloads are unsupported in this mode; use a local HTTP server for those applications.
+A `file:///…` URL works when every loaded file is a regular, non-symlinked, single-link file inside the project and outside blocked paths. Workers, popups and downloads are unsupported in this mode; use a local HTTP server for those applications.
 
 Each journey records an initial capture, runs its actions and records the final state. Limits: 60 seconds and six captures per journey, 10 seconds per wait.
 
@@ -38,7 +38,7 @@ Each journey records an initial capture, runs its actions and records the final 
 | --- | --- |
 | `click`, `tap` | Activate a control; optional `position: {x, y}` (0–1, relative to the element's border box) |
 | `move` | Move the pointer to an element or relative `position` |
-| `drag` | `selector`, viewport-pixel `to` and optional `from`, `input: pointer\|touch`, `steps`, `durationMs`, `captureDuring`, `cancel` (touch only) |
+| `drag` | `selector`; end at viewport-pixel `to` or at `by: {x, y}` (−1 to 1, fractions of the element's width and height from the start); start at pixel `from` or `position: {x, y}` (0–1 of the border box), default the element centre; `input: pointer\|touch`, `steps`, `durationMs`, `cancel` (touch only); `captureDuring` captures the held state at full pull before release; `captureAfterMs: [300, 900]` (1–3 increasing offsets, 50–2000) captures again that many ms after release |
 | `scroll` | Bring an offscreen control into view; optional `block: start\|center\|end\|nearest` |
 | `key` | Press a special key or a single letter/digit |
 | `resize` | Change the viewport within the same session, keeping application state |
@@ -48,26 +48,29 @@ Each journey records an initial capture, runs its actions and records the final 
 
 Mark an action with `capture: true` when its rendered state matters. Pointer clicks travel natively from the previous position, so aim changes along the way are exercised.
 
-A drag with an intermediate capture:
+A drag with captures at full pull and after release:
 
 ```yaml
-url: http://localhost:3000/
+url: project:/index.html
 viewport: {width: 1280, height: 720}
 actions:
   - kind: drag
     selector: canvas
-    from: {x: 180, y: 360}
-    to: {x: 100, y: 400}
+    position: {x: 0.2, y: 0.5}
+    by: {x: -0.15, y: 0.1}
     input: pointer
     steps: 12
     durationMs: 300
     captureDuring: true
-    capture: true
+    captureAfterMs: [300, 900]
   - kind: wait-for
     selector: '[role="status"]'
     text: Launched
     timeoutMs: 5000
+    capture: true
 ```
+
+`position` and `by` are fractions of the element's border box, so the drag follows the element if the layout changes; `from` and `to` are viewport pixels. Use one form per end (`from` or `position`, `to` or `by`). `position` and `by` refuse an element that is rotated, skewed, flipped or moved along an `offset-path`, because fractions of such a box are not the box you see; use pixels there. `captureDuring` records the held state at full pull, before release. Each `captureAfterMs` offset records another capture that many milliseconds after release, for motion that plays out after the input ends. Every one of these counts toward the six captures per journey.
 
 A consistency check between two displays:
 
@@ -105,13 +108,19 @@ actions:
 YAML
 ```
 
+New ad hoc captures record an agent-proposed exploratory expectation unless they match a declared browser check or you link declared outcomes with `--outcome O001` (MCP `outcomes: ["O001"]`). A failed unlinked expectation is reported once as information and stays in history; it is not required replay work. Declared checks, outcome-linked journeys and independent reviewer-required defects retain their obligations. Legacy receipts without ownership metadata retain their existing semantics.
+
+Retire your own unlinked exploratory hypothesis with `visp capture --retire <run-id> --reason "Ordinary missed aim; winning was only a hypothesis"` (MCP `retire`, `reason`). The one-line reason is recorded separately and shown to the independent reviewer alongside the original failure. Retirement never changes a failed receipt to a pass. A reviewer can still require repair by citing its operation or image evidence in a required finding.
+
 After a repair, `visp capture --replay <run-id>` reruns a recorded journey against the current code and compares observations; a shallower new capture cannot erase a known failure. MCP `visp_capture` accepts the same journey object, or `replay`.
+
+`visp capture --replay-batch <run-id>` (MCP `replayBatch`) replays the canonical saved input plus distinct saved neighbouring transitions on the same route and control targets in one result. It excludes unsupported failed exploratory hypotheses and retired exploratory journeys. Each journey starts fresh, preserves its actions and assertions, and returns its own receipt and status, including failures. No new neighbour is invented; add one explicitly when relevant coverage is missing.
 
 `visp observations --outcome <id>` lists an outcome's captured output, freshness and image paths. MCP `visp_observations` delivers the actual images.
 
 ## Failed journeys
 
-A failed journey keeps its completed operations and the last observation: expected state, actual state, elapsed time and diagnostics, plus any partial images. Partial images never count as a successful journey. Uncaught application exceptions are recorded as behavioral failures. A failure stays open until the same journey passes on the repaired product; an unrelated successful capture does not clear it.
+A failed journey keeps its completed operations and the last observation: expected state, actual state, elapsed time and diagnostics, plus any partial images. Partial images never count as a successful journey. Uncaught application exceptions are recorded as behavioral failures. A retained failure stays open until the same journey passes on the repaired product; an unrelated successful capture does not clear it.
 
 Browser startup and permission problems are environment failures, not product failures. For slices with browser checks, `visp work` first confirms that an isolated browser can start and capture. If it cannot, implementation may continue inside scope, but browser checks and experience review stay unresolved until the host environment is fixed (install a browser, set `CHROME_BIN`, or grant the host's permission) and `--retry-environment` succeeds.
 

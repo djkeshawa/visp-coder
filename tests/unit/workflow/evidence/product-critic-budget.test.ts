@@ -153,6 +153,39 @@ it("refuses malformed feature accounting instead of resetting it", async () => {
   ).toMatchObject({ ok: false, error: { code: "ARTIFACT_INVALID" } });
 });
 
+it.each([
+  {
+    problem: "belongs to another feature",
+    message: "Feature critic budget belongs to another feature",
+    edit: (ledger: { feature: string }) => ({ ...ledger, feature: "F999" }),
+  },
+  {
+    problem: "lists one reservation twice",
+    message: "Duplicate feature critic budget entries",
+    edit: (ledger: { entries: unknown[] }) => ({
+      ...ledger,
+      entries: [...ledger.entries, ...ledger.entries],
+    }),
+  },
+])("refuses feature accounting that $problem instead of trusting it", async ({ message, edit }) => {
+  const p = await setup();
+  const state = await p.workspace.state();
+  const prepared = await runProductCritic(state, {
+    operation: "prepare",
+    task: "T001",
+    sourceOnly: true,
+    capabilities,
+  });
+  expect(prepared.ok).toBe(true);
+  const ledger = join(state.paths.featureDir(p.brief.feature), "critic-budget.json");
+  const recorded = JSON.parse(await readFile(ledger, "utf8"));
+  expect(recorded.entries).toHaveLength(1);
+  await writeFile(ledger, JSON.stringify(edit(recorded)));
+  expect(
+    await runProductCritic(await p.workspace.state(), { operation: "status", task: "T002" }),
+  ).toMatchObject({ ok: false, error: { code: "ARTIFACT_INVALID", message } });
+});
+
 it("defaults new feature policies to three calls with a three-minute call deadline", () => {
   expect(balancedCritic("codex")).toMatchObject({ maxCalls: 3, timeoutMs: 180_000 });
 });

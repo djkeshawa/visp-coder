@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { browserExecutableIdentity } from "../../core/browser-executable.js";
+import type { z } from "zod";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
+import { redactText } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { BrowserSecurityError } from "../../testing/browser-files.js";
 import { browserInputIdentity } from "../../testing/browser-input-identity.js";
@@ -17,19 +18,31 @@ import {
 } from "../../testing/browser-journey.js";
 import { BrowserUnavailableError } from "../../testing/chrome-transport.js";
 import { captureBehaviorChange } from "../product/behavior-changes.js";
+import { browserFailureRecovery } from "../product/browser-recovery.js";
 import {
   browserExecutionEnvironmentIdentity,
   supportedHostCaptureRecovery,
 } from "../product/environment-model.js";
 import type { inspectProductImages } from "../product/images.js";
+import {
+  isDeclaredJourney,
+  isExploratoryJourney,
+  type journeyExpectationSchema,
+} from "../product/journey-ownership.js";
 import type { productObservationPlan } from "../product/observation-plan.js";
 import type { ProductRecord } from "../product/store.js";
-import { productContractDigest, productSourceDigest } from "../product/subject.js";
+import {
+  productComparisonEnvironmentDigest,
+  productContractDigest,
+  productSourceDigest,
+} from "../product/subject.js";
 import type { WorkspaceState } from "../state.js";
 import { productJourneyKey } from "./product-journey.js";
 import type { ProductReviewCapture } from "./product-review.js";
 
 export interface ProductCaptureResult {
+  readonly expectation?: z.infer<typeof journeyExpectationSchema>;
+  readonly information?: string;
   readonly behaviorChange?: ReturnType<typeof captureBehaviorChange>;
   readonly captures: ProductReviewCapture[];
   readonly operations: number;
@@ -51,8 +64,10 @@ export interface PreparedProductCapture {
 
 interface CaptureExecutionOptions {
   readonly journey: unknown;
+  readonly outcomes?: readonly string[];
   readonly task?: string;
   readonly binary?: string;
+  readonly signal?: AbortSignal;
 }
 
 export const prepareProductCapture = (
@@ -78,13 +93,10 @@ export async function withProductCapture<T>(
     );
   const before = await productSourceDigest(workspace, record.brief);
   if (!before.ok) return before;
-  const environment = await productSourceDigest(workspace, record.brief, {});
-  const comparisonEnvironment = environment.ok
-    ? hashValue({
-        environment: environment.value,
-        browser: await browserExecutableIdentity(options.binary),
-      })
-    : undefined;
+  const environment = await productComparisonEnvironmentDigest(workspace, record.brief, {
+    binary: options.binary,
+  });
+  const comparisonEnvironment = environment.ok ? environment.value : undefined;
   const directory = await mkdtemp(join(tmpdir(), "visp-capture-"));
   try {
     const result = await runBrowserJourney({
@@ -92,6 +104,7 @@ export async function withProductCapture<T>(
       directory,
       subjectDigest: before.value,
       binary: options.binary,
+      signal: options.signal,
       projectRoot: workspace.paths.root,
       blockedPaths: workspace.config.workflow.blockedPaths,
     });
@@ -114,6 +127,7 @@ export async function withProductCapture<T>(
       options.task,
       comparisonEnvironment,
       options.binary,
+      options.outcomes,
     );
     return await publish(prepared);
   } catch (cause) {
@@ -132,6 +146,7 @@ async function prepareCaptures(
   task?: string,
   comparisonEnvironment?: string,
   binary?: string,
+  outcomes: readonly string[] = [],
 ): Promise<PreparedProductCapture> {
   const captures: ProductReviewCapture[] = [],
     mutations: FileMutation[] = [];
@@ -159,7 +174,16 @@ async function prepareCaptures(
     "captures",
     `run-${id}.json`,
   );
+  const expectation = {
+    basis:
+      outcomes.length ||
+      isDeclaredJourney(record, { task, journeyKey: productJourneyKey(journey, task) })
+        ? ("declared" as const)
+        : ("agent-proposed" as const),
+    outcomes: [...outcomes],
+  };
   const run = {
+    expectation,
     id,
     version: 2,
     provenance: "runner-executed",
@@ -168,6 +192,7 @@ async function prepareCaptures(
     failure: result.failure
       ? {
           ...result.failure,
+          message: redactText(result.failure.message, { root: workspace.paths.root }),
           input: browserInputIdentity(journey.actions[result.failure.actionIndex ?? -1]),
         }
       : undefined,
@@ -218,6 +243,13 @@ async function prepareCaptures(
     },
     mutations,
     result: {
+      expectation,
+      ...(isExploratoryJourney(record, run) && result.failure?.kind === "behavior"
+        ? {
+            information:
+              "Exploratory expectation failed. This is information, not required replay. Preserve this receipt; retire the hypothesis with capture --retire and a one-line --reason if unsupported. The independent reviewer can retain a real defect.",
+          }
+        : {}),
       captures,
       operations: result.operations.length,
       status: result.status,
@@ -241,18 +273,29 @@ function captureFailure(cause: unknown, record: ProductRecord, options: CaptureE
       feature: record.brief.feature,
       task: options.task,
       journey: options.journey,
+      outcomes: options.outcomes,
       binary: options.binary,
     });
     return err(
       vispError("UNSUPPORTED", cause.message, {
-        recovery: recovery.message,
+        recovery:
+          cause.kind === "startup"
+            ? "Inspect the browser startup diagnostic and restore its installation or required shared libraries before retrying."
+            : recovery.message,
         details: {
           gap: "browser-unavailable",
+          browserFailureKind: cause.kind,
           reviewStatus: "unavailable",
           supportedHostOption: recovery.option,
         },
       }),
     );
   }
-  return err(fromUnknown(cause, "EVIDENCE_FAILED"));
+  const error = fromUnknown(cause, "EVIDENCE_FAILED");
+  const journey = browserJourneySchema.safeParse(options.journey);
+  const recovery = browserFailureRecovery(
+    error.message,
+    journey.success ? journey.data.url : "the configured URL",
+  );
+  return err({ ...error, ...(recovery ? { recovery } : {}) });
 }

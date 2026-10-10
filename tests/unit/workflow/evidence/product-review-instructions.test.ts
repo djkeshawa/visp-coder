@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import { runProductCritic } from "../../../../src/workflow/product/critic.js";
@@ -7,6 +7,10 @@ import { criticSelection, readCriticState } from "../../../../src/workflow/produ
 import { independentReviewTemplate } from "../../../../src/workflow/product/independent-review.js";
 import { runProductVerify, runProductWork } from "../../../../src/workflow/product/index.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS } from "../../../../src/workflow/product/observation-preview.js";
+import {
+  CRITIC_INSTRUCTIONS,
+  productReviewInstructions,
+} from "../../../../src/workflow/product/review-instructions.js";
 import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
 import { runProductReviewerHandoff } from "../../../../src/workflow/product/reviewer-handoff.js";
 import { recordedProductJourney } from "../../support/product-journey.js";
@@ -41,6 +45,22 @@ it.each(["current", "observation-preview"] as const)(
   "delivers the same product rubric through native, prepared and host review in %s mode",
   async (reviewMode) => {
     const workspace = await ready(true);
+    const ambiguities = [
+      {
+        quote: "Blank lines are ignored.",
+        readings: ["Only empty lines", "Empty and whitespace-only lines"],
+        conventionalReading: "Empty and whitespace-only lines",
+      },
+    ];
+    await writeFile(
+      workspace.paths.featureFile(workspace.status?.activeFeature ?? "", "acceptance-tests.json"),
+      JSON.stringify({
+        version: 1,
+        status: "declined",
+        startedAt: new Date().toISOString(),
+        ambiguities,
+      }),
+    );
     workspace.config.workflow.reviewMode = reviewMode;
     const handoff = await runProductReviewerHandoff(workspace, { task: "T001" });
     const selected = await criticSelection(workspace, { task: "T001" });
@@ -68,8 +88,16 @@ it.each(["current", "observation-preview"] as const)(
     );
     expect(packet.instructions).toBe(native.value.instructions);
     expect(delivered).toMatchObject({ instructions: native.value.instructions });
+    for (const input of [packet, delivered, native.value.current])
+      expect(input).toMatchObject({ ambiguities });
+    expect(packet.instructions).toContain("deliberate, conventional choice");
     expect(packet.instructions).toContain("visual quality");
     expect(packet.instructions).toContain("composition");
+    expect(packet.instructions).toContain(
+      "consecutive images of the same action can show a contradiction",
+    );
+    expect(packet.instructions).toContain("preview's origin and direction");
+    expect(packet.instructions).toContain("Finish findings are always required: false");
     expect(packet.instructions.includes(OBSERVATION_REVIEW_INSTRUCTIONS)).toBe(
       reviewMode === "observation-preview",
     );
@@ -101,6 +129,8 @@ it("does not give source-only or design consultations rendered-product instructi
     );
     if (!packet.ok) throw new Error(packet.error.message);
     expect(packet.value.instructions).not.toContain("visual quality");
+    expect(packet.value.instructions).not.toContain("preview's origin");
+    expect(packet.value.instructions).not.toContain("judge finish once");
     expect(packet.value.instructions).toContain("assessments:[]");
     expect(packet.value.instructions).toContain("resolutions:[]");
     expect(packet.value.current).not.toHaveProperty("instructions");
@@ -117,4 +147,45 @@ it("keeps UI-specific advice out of a nonvisual module review", async () => {
   );
   expect(packet.instructions).toEqual(expect.any(String));
   expect(packet.instructions).not.toContain("visual quality");
+  expect(packet.instructions).not.toContain("preview's origin");
+  expect(packet.instructions).not.toContain("judge finish once");
+});
+
+it("asks for a preview to be compared across consecutive images and required only on a promise", () => {
+  const visual = productReviewInstructions({ visual: true });
+  expect(visual).toContain("One still image cannot prove motion or interaction");
+  expect(visual).toContain("Name the two images and the visible offset");
+  expect(visual).toContain(
+    "Mark such a finding required only when the request promises the preview",
+  );
+  expect(visual).toContain("list the missing observation instead of inferring a mismatch");
+  expect(productReviewInstructions()).not.toContain("preview's origin");
+});
+
+it("asks for one optional finish finding that can never fail an outcome", () => {
+  const visual = productReviewInstructions({ visual: true });
+  expect(visual).toContain(
+    "also judge finish once, as at most one finding after any required ones",
+  );
+  expect(visual).toContain("When requestPromises mention a game, play or a rich look");
+  expect(visual).toContain("omit it when three findings are already required");
+  expect(visual).toContain("compare the units");
+  expect(visual).toContain("Name the image and two concrete visible improvements");
+  expect(visual).toContain(
+    "Finish findings are always required: false; never mark one required and never let one fail an outcome.",
+  );
+  expect(productReviewInstructions()).not.toContain("judge finish once");
+});
+
+it("lets a specific request statement govern a case a general rule also covers", () => {
+  expect(CRITIC_INSTRUCTIONS).toContain(
+    "an implementation that makes it impossible for that option to match or apply under those conditions is a required finding",
+  );
+});
+
+it("requires findings for weakened existing tests unless the request changes their behavior", () => {
+  expect(CRITIC_INSTRUCTIONS).toContain(
+    "Edits that weaken, skip, delete or deselect existing tests, whether in test files or check commands, are required findings unless the request changes that behavior",
+  );
+  expect(CRITIC_INSTRUCTIONS).toContain("when it does, quote the request sentence");
 });

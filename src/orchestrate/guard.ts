@@ -1,5 +1,5 @@
 import { STATE_DIR } from "../core/constants.js";
-import { firstMatch, matchesAny } from "../core/patterns.js";
+import { firstMatch, matchesAny, normalizePath } from "../core/patterns.js";
 import type { ImplementMarker } from "../workflow/artifacts/evidence.js";
 
 /**
@@ -15,6 +15,7 @@ export type ScopeDecision =
       readonly reason:
         | "invalid-path"
         | "blocked-path"
+        | "protected-path"
         | "forbidden-file"
         | "outside-allowed-files"
         | "no-authorization";
@@ -35,6 +36,29 @@ export interface ScopeInput {
   readonly markers: readonly ImplementMarker[];
   /** Paths blocked project-wide, from visp.yml. */
   readonly blockedPaths: readonly string[];
+  /** Explicit proposed writes, as opposed to commit and CI diffs. */
+  readonly writeTime?: boolean;
+}
+
+const PROTECTED_CONTROL_PATHS = [
+  "visp.yml",
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".claude/settings.json",
+  ".codex/hooks.json",
+  ".github/workflows/visp.yml",
+  "VISP.commands.md",
+];
+
+function blockedMatch(path: string, patterns: readonly string[]): string | undefined {
+  const folded = path.toLowerCase();
+  return patterns.find((pattern) => {
+    const rule = pattern.toLowerCase();
+    return matchesAny(folded, [
+      rule,
+      ...(!rule.includes("/") ? [`**/${rule}`, `**/${rule}/**`] : []),
+    ]);
+  });
 }
 
 export function decideScope(input: ScopeInput): ScopeDecision {
@@ -50,11 +74,32 @@ export function decideScope(input: ScopeInput): ScopeDecision {
   const path = normalized.path;
 
   // Workflow state is the tool's own bookkeeping, not the change under review.
-  if (path === STATE_DIR || path.startsWith(`${STATE_DIR}/`)) {
+  const folded = path.toLowerCase();
+  if (folded === STATE_DIR || folded.startsWith(`${STATE_DIR}/`)) {
+    if (input.writeTime && !folded.startsWith(`${STATE_DIR}/drafts/`)) {
+      return {
+        allowed: false,
+        reason: "protected-path",
+        message: `${path} is VISP state; change it only through visp commands`,
+      };
+    }
     return { allowed: true, reason: "state-directory" };
   }
 
-  const blocked = firstMatch(path, input.blockedPaths);
+  if (
+    matchesAny(
+      folded,
+      PROTECTED_CONTROL_PATHS.map((p) => p.toLowerCase()),
+    )
+  ) {
+    return {
+      allowed: false,
+      reason: "protected-path",
+      message: `${path} is a VISP control file; change it outside an authorized task`,
+    };
+  }
+
+  const blocked = blockedMatch(path, input.blockedPaths);
   if (blocked !== undefined) {
     return {
       allowed: false,
@@ -74,7 +119,10 @@ export function decideScope(input: ScopeInput): ScopeDecision {
 
   // Forbidden wins over allowed, across every active marker.
   for (const marker of input.markers) {
-    const forbidden = firstMatch(path, marker.forbiddenFiles);
+    const forbidden = firstMatch(
+      folded,
+      marker.forbiddenFiles.map((pattern) => pattern.toLowerCase()),
+    );
     if (forbidden !== undefined) {
       return {
         allowed: false,
@@ -124,7 +172,7 @@ export function missingExpectedFiles(
   changed: readonly string[],
   marker: ImplementMarker,
 ): string[] {
-  const normalized = changed.map(normalizeForMatching);
+  const normalized = changed.map(normalizePath);
   return marker.expectedFiles.filter(
     (pattern) => !normalized.some((path) => matchesAny(path, [pattern])),
   );
@@ -152,8 +200,4 @@ function normalizeScopePath(input: string): NormalizedScopePath {
   const path = segments.join("/");
   if (path.length === 0 || /^[A-Za-z]:/.test(path)) return { ok: false };
   return { ok: true, path };
-}
-
-function normalizeForMatching(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
 }

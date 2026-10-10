@@ -254,6 +254,7 @@ function matchingJourneyPair(
     productJourneyKey(run.journey, run.task) === run.journeyKey;
   const cited = (run: (typeof runs)[number], ids: readonly string[]) =>
     ids.includes(run.id ?? "") ||
+    (run.status !== "completed" && ids.includes(`HIST-${run.id}`)) ||
     run.captures.some((entry) => ids.includes(entry.id)) ||
     run.operations.some((entry) => ids.includes(entry.id)) ||
     record.state.executions.some(
@@ -274,7 +275,8 @@ function matchingJourneyPair(
       !before.id ||
       !intact(before) ||
       (finding.task !== undefined && before.task !== finding.task) ||
-      before.subjectDigest !== finding.subjectDigest ||
+      (before.subjectDigest !== finding.subjectDigest &&
+        !finding.evidence.includes(`HIST-${before.id}`)) ||
       before.status === "completed" ||
       before.failure?.kind !== "behavior" ||
       !cited(before, finding.evidence)

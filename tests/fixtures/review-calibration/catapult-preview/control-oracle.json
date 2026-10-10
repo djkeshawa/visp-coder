@@ -1,0 +1,9 @@
+{
+  "variant": "control",
+  "expectedDefects": [],
+  "counterevidence": {
+    "held": "The dotted preview starts at the sling, where the projectile spawns, and follows the direction of the pull.",
+    "released": "The released stone flies along the previewed path."
+  },
+  "evaluationScope": "A narrow repair of the preview origin only, not a corrected or polished game. A required finding here is a false rejection; optional observations about finish are not scored as defects."
+}

@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { browserExecutableIdentity } from "../../core/browser-executable.js";
-import { productIdentityEnvironment } from "../../core/execution-environment.js";
 import { hashValue } from "../../core/hash.js";
 
 /** Derived capability observation, never acceptance evidence or authored intent. */
@@ -22,6 +21,7 @@ export interface SupportedHostCaptureInput {
   readonly task?: string;
   readonly journey?: unknown;
   readonly replay?: string;
+  readonly outcomes?: readonly string[];
   readonly binary?: string;
 }
 
@@ -29,6 +29,7 @@ export interface SupportedHostCaptureInput {
  * Keep a successful capture tied to the executable and host security context
  * that actually ran it. The no-binary form intentionally matches the default
  * identity used by the environment probe; a custom binary gets its own key.
+ * Toolchain variables are not part of it: they belong to the comparison identity.
  */
 export async function browserExecutionEnvironmentIdentity(root: string, binary?: string) {
   const executable = await browserExecutableIdentity(binary);
@@ -37,17 +38,37 @@ export async function browserExecutionEnvironmentIdentity(root: string, binary?:
     () => [],
   );
   return hashValue({
-    version: 2,
+    version: 3,
     root,
     executable,
     node: process.execPath,
     uid: process.getuid?.(),
     security,
-    environment: productIdentityEnvironment(),
+    permissionProfile: process.env.CODEX_PERMISSION_PROFILE,
   });
 }
 
-export function supportedHostCaptureOption(input: SupportedHostCaptureInput) {
+/** The Stop hook only reads state: it runs `visp next` with this marker in its environment. */
+export function isStopHookObserver(): boolean {
+  return process.env.VISP_OBSERVER === "stop-hook";
+}
+
+/**
+ * Whether a recorded browser capability still describes this host. An observer (the Stop
+ * hook) runs outside the worker's sandbox and cannot reproduce its security context, so it
+ * trusts the recorded capability; every other reader compares the environment identity.
+ */
+export async function browserCapabilityApplies(
+  root: string,
+  capability: BrowserCapability,
+): Promise<boolean> {
+  return (
+    isStopHookObserver() ||
+    capability.environment === (await browserExecutionEnvironmentIdentity(root))
+  );
+}
+
+function supportedHostCaptureOption(input: SupportedHostCaptureInput) {
   const args = {
     ...(input.feature ? { feature: input.feature } : {}),
     ...(input.task ? { task: input.task } : {}),
@@ -56,6 +77,7 @@ export function supportedHostCaptureOption(input: SupportedHostCaptureInput) {
       : input.journey !== undefined
         ? { journey: input.journey }
         : {}),
+    ...(input.outcomes ? { outcomes: input.outcomes } : {}),
     ...(input.binary ? { binary: input.binary } : {}),
   };
   return {

@@ -16,6 +16,36 @@ afterEach(async () => {
 });
 
 describe("runInit trust boundary", () => {
+  it("skips unavailable npm tools instead of persisting a failing validation command", async () => {
+    const root = await fixture();
+    await write(
+      root,
+      "package.json",
+      JSON.stringify({ scripts: { test: "visp-missing-test-tool" } }),
+    );
+
+    const result = await runInit({ root, harness: "generic" });
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(join(root, "visp.yml"), "utf8")).toContain("validationCommands: []");
+    expect(result.ok && result.value.skippedValidationCommands).toEqual([
+      { command: "npm run test", reason: "test: executable visp-missing-test-tool was not found" },
+    ]);
+  });
+
+  it("writes the Python preset for a tracked Python majority with JavaScript tooling", async () => {
+    const root = await fixture();
+    await write(root, "app.py", "");
+    await write(root, "models.py", "");
+    await write(root, "lint.js", "");
+    execFileSync("git", ["add", "."], { cwd: root });
+
+    const result = await runInit({ root, harness: "generic" });
+
+    expect(result.ok && result.value.preset).toBe("python");
+    expect(await readFile(join(root, "visp.yml"), "utf8")).toContain("preset: python");
+  });
+
   it("initializes a root containing only empty coordination ancestry", async () => {
     const root = await fixture();
     expect(await withStateLock(root, async () => ok(undefined))).toEqual(ok(undefined));

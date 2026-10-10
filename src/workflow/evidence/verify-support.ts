@@ -1,12 +1,4 @@
-import type { CommandSpec } from "../../core/exec.js";
-import type { ValidationLayer } from "../artifacts/common.js";
 import type { CodeEvidence, CommandResult, Finding } from "../artifacts/evidence.js";
-
-export interface ValidationCheck {
-  readonly command: CommandSpec;
-  readonly layer?: ValidationLayer;
-  readonly evidenceRole?: "acceptance";
-}
 
 /** Turns command results into findings, including the cases where none ran. */
 export function describeExecution(execution: {

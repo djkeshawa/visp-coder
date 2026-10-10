@@ -5,14 +5,26 @@ import type { ProductRecord } from "./store.js";
 
 export interface ProductSource {
   readonly id: string;
-  readonly kind: "preserved-request" | "pinned-file" | "implementation-file" | "authored-brief";
+  readonly kind:
+    | "preserved-request"
+    | "pinned-file"
+    | "implementation-file"
+    | "implementation-diff"
+    | "authored-brief"
+    | "executed-check";
   readonly reference: string;
   readonly sha256: string;
   readonly available: boolean;
   readonly excerpt: string;
+  readonly truncated?: boolean;
   readonly omittedRegions?: readonly string[];
   readonly nextRead?: string;
+  /** Conservative scope/dependency mapping, not proof that an outcome is satisfied. */
+  readonly coreOutcomes?: readonly string[];
 }
+
+/** Disclosure that a broad scope's review is anchored on the change (see core-review-sources). */
+export const BROAD_SCOPE_SOURCE_ID = "CODE-SCOPE";
 
 /** Source identity is observed by VISP. Authorship and human approval are not authenticated. */
 export async function productSources(workspace: WorkspaceState, record: ProductRecord) {

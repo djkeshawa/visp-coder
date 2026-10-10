@@ -1,6 +1,7 @@
 import { ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { criticStatus } from "./critic-status.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
 import type { ProductNext } from "./status.js";
 
 /** Criticism supplements baseline navigation; availability never becomes a product gate. */
@@ -18,7 +19,7 @@ export async function criticNext(
         guidance: `Critic status unavailable: ${status.error.message}. Continue the baseline build–observe–fix loop; report this review limitation.`,
       },
     });
-  return ok(withCriticAdvice(next, status.value));
+  return ok(withCriticAdvice(next, status.value, reviewerRules(workspace)));
 }
 
 /** The command a caller should execute when the current product is reviewable. */
@@ -27,29 +28,21 @@ export function criticRouteCommand(next: ProductNext): string | undefined {
 }
 
 type Status = Extract<Awaited<ReturnType<typeof criticStatus>>, { ok: true }>["value"];
-function withCriticAdvice(next: ProductNext, critic: Status): ProductNext {
+function withCriticAdvice(next: ProductNext, critic: Status, launched: boolean): ProductNext {
   if (!critic.enabled || !("next" in critic)) return next;
   if (critic.next === "normal-acceptance") return next;
-  const environmentGap = next.completion === "unresolved-environment";
-  const command = `visp critic --feature ${next.feature}${next.task ? ` --task ${next.task}` : ""}`;
   if (critic.stopped || critic.next === "worker")
-    return { ...next, criticAdvice: retainedAdvice(critic) };
+    return { ...next, criticAdvice: retainedAdvice(critic, launched) };
+  const environmentGap = next.completion === "unresolved-environment";
   if (critic.renderedEvidence.relevant && (environmentGap || !critic.renderedEvidence.recorded))
-    return {
-      ...next,
-      criticAdvice: {
-        status: "suggested",
-        command: next.command,
-        guidance:
-          "Keep critic capacity for the rendered product. Recover the browser through the supported host path and observe a usable interaction before product critique. Continue scoped implementation meanwhile. Source-only advice is an explicit option for a concrete code question, not an automatic substitute for visual feedback; it spends the same call budget.",
-      },
-    };
-  if (
-    !environmentGap &&
-    !["refine", "accept", "complete"].includes(next.action) &&
-    !(["implement", "fix"].includes(next.action) && critic.hasObservedProduct)
-  )
-    return next;
+    return { ...next, criticAdvice: renderedEvidenceAdvice(next, launched) };
+  const reviewable =
+    environmentGap ||
+    ["refine", "accept", "complete"].includes(next.action) ||
+    (["implement", "fix"].includes(next.action) && critic.hasObservedProduct);
+  // VISP starts the reviewer inside `visp done`; the worker has no review command to run.
+  if (!reviewable || launched) return next;
+  const command = `visp critic --feature ${next.feature}${next.task ? ` --task ${next.task}` : ""}`;
   return {
     ...next,
     criticAdvice: {
@@ -61,15 +54,49 @@ function withCriticAdvice(next: ProductNext, critic: Status): ProductNext {
   };
 }
 
+function renderedEvidenceAdvice(next: ProductNext, launched: boolean) {
+  return {
+    status: "suggested" as const,
+    command: next.command,
+    guidance: launched
+      ? "Observe the rendered product before review: recover the browser through the supported host path and capture a usable interaction. VISP's reviewer needs it; continue scoped implementation meanwhile."
+      : "Keep critic capacity for the rendered product. Recover the browser through the supported host path and observe a usable interaction before product critique. Continue scoped implementation meanwhile. Source-only advice is an explicit option for a concrete code question, not an automatic substitute for visual feedback; it spends the same call budget.",
+  };
+}
+
 type ActiveStatus = Extract<Status, { next: string }>;
-function retainedAdvice(critic: ActiveStatus): NonNullable<ProductNext["criticAdvice"]> {
+function retainedAdvice(
+  critic: ActiveStatus,
+  launched: boolean,
+): NonNullable<ProductNext["criticAdvice"]> {
   return {
     status: critic.stopped ? "unavailable" : "feedback",
-    guidance: `${critic.stopped ?? "Use the recorded findings to choose the next correction."} Continue the baseline build–observe–fix loop. Actual failures and missing product evidence remain unresolved; missing critic service alone does not block delivery.`,
-    command: critic.recovery?.command,
+    guidance: launched
+      ? launchedGuidance(critic.stopped, "findings" in critic && critic.findings.length > 0)
+      : baselineGuidance(critic.stopped),
+    command: launched ? undefined : critic.recovery?.command,
     findings: "findings" in critic ? critic.findings : [],
     evidenceRequest: critic.evidenceRequest,
     limitations: "advice" in critic ? critic.advice?.limitations : undefined,
     comparisons: "comparisons" in critic ? critic.comparisons : [],
   };
+}
+
+function baselineGuidance(stopped: string | undefined) {
+  return `${stopped ?? "Use the recorded findings to choose the next correction."} Continue the baseline build–observe–fix loop. Actual failures and missing product evidence remain unresolved; missing critic service alone does not block delivery.`;
+}
+
+/** VISP runs its own reviewer: the worker delegates nothing and reviews nothing itself. */
+function launchedGuidance(stopped: string | undefined, hasFindings: boolean) {
+  if (!stopped)
+    return "Use the recorded findings to choose the next correction. VISP re-runs its reviewer inside visp done; delegate nothing and run no review command. Actual failures and missing product evidence remain unresolved.";
+  if (stopped.startsWith("review-in-progress"))
+    return "VISP's reviewer is still running. Wait: run visp next.";
+  const head = stopped.split(". No new invocation")[0];
+  const route =
+    "Follow `visp next`: it says when to run visp done again and when to hand off with visp pr.";
+  // Findings exist: the reviewer did review an earlier version, so it is only unable to run now.
+  if (hasFindings)
+    return `Use the recorded findings to choose the next correction; delegate nothing and run no review command. VISP's reviewer cannot review a new version now: ${head}. ${route}`;
+  return `VISP's reviewer has not reviewed this version: ${head}. Do not review your own work instead; if it stays unavailable, say so in your final message. ${route}`;
 }

@@ -79,7 +79,7 @@ describe("product work authorization boundaries", () => {
     expect(await bytes()).toEqual(authorized);
   });
 
-  it("rejects unknown explicit and active slices without touching authorization", async () => {
+  it("rejects unknown explicit selections without touching authorization", async () => {
     const before = await bytes();
     const state = await workspace.state();
     for (const operation of [runProductContext, runProductWork]) {
@@ -87,18 +87,31 @@ describe("product work authorization boundaries", () => {
         ok: false,
         error: { code: "TASK_NOT_FOUND" },
       });
-      expect(
-        await operation({
-          ...state,
-          status: state.status ? { ...state.status, activeTask: "T999" } : undefined,
-        }),
-      ).toMatchObject({ ok: false, error: { code: "TASK_NOT_FOUND" } });
       expect(await operation(state, { feature: "999-missing" })).toMatchObject({
         ok: false,
         error: { code: "ARTIFACT_MISSING" },
       });
     }
     expect(await bytes()).toEqual(before);
+  });
+
+  it("recovers a stale saved slice without granting edits until work is requested", async () => {
+    const before = await bytes();
+    const state = await workspace.state();
+    const stale = {
+      ...state,
+      status: state.status ? { ...state.status, activeTask: "T999" } : undefined,
+    };
+    expect(value(await runProductContext(stale))).toMatchObject({
+      task: "T001",
+      mayEdit: false,
+    });
+    expect(await bytes()).toEqual(before);
+    const work = value(await runProductWork(stale));
+    expect(work).toMatchObject({ task: "T001", mayEdit: true });
+    expect(work.notes.join()).toContain("T999");
+    const after = await bytes();
+    expect(after.auth && JSON.parse(after.auth)).toMatchObject({ task: "T001" });
   });
 
   it("leaves a feature without a next slice incomplete instead of granting broad scope", async () => {
@@ -213,9 +226,13 @@ describe("product work authorization boundaries", () => {
       ],
     };
     const submitted = await runProductReview(await workspace.state(), input);
-    expect(submitted.ok).toBe(true);
-    if (!submitted.ok) return;
-    expect(submitted.value.assessments[0]?.status).not.toBe("satisfied");
+    expect(submitted).toMatchObject({
+      ok: false,
+      error: {
+        code: "EVIDENCE_FAILED",
+        message: expect.stringContaining("Unknown evidence reference"),
+      },
+    });
     const { task: _task, ...draft } = input;
     await workspace.write(".visp/drafts/wrong-slice.json", JSON.stringify(draft));
     const cli = await runJson<{ assessments: { status: string }[] }>(
@@ -226,8 +243,9 @@ describe("product work authorization boundaries", () => {
       "--from",
       ".visp/drafts/wrong-slice.json",
     );
-    expect(cli.exitCode, JSON.stringify(cli.envelope)).toBe(0);
-    expect(cli.envelope.data?.assessments[0]?.status).toBe(submitted.value.assessments[0]?.status);
+    expect(cli.exitCode, JSON.stringify(cli.envelope)).toBe(1);
+    expect(cli.envelope.ok).toBe(false);
+    expect(JSON.stringify(cli.envelope)).toContain("Unknown evidence reference");
     type Handler = (args: Record<string, unknown>) => Promise<CallToolResult>;
     let handler: Handler | undefined;
     registerEvidenceTools(
@@ -240,9 +258,8 @@ describe("product work authorization boundaries", () => {
     );
     if (!handler) throw new Error("Missing review tool");
     const response = await handler(input);
-    expect(response.isError).not.toBe(true);
-    const mcp = response.structuredContent as { data: { assessments: { status: string }[] } };
-    expect(mcp.data.assessments[0]?.status).toBe(submitted.value.assessments[0]?.status);
+    expect(response.isError).toBe(true);
+    expect(JSON.stringify(response.structuredContent)).toContain("Unknown evidence reference");
   });
 
   it("does not carry another slice's assessment into the selected slice", async () => {

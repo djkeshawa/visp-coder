@@ -29,7 +29,7 @@ it("delivers identical requested settings through CLI and MCP without requiring 
     const result = await client.callTool({ name: "visp_doctor", arguments: { settings: true } });
     expect(result.structuredContent).toMatchObject({ data: { settings: expected } });
     expect(JSON.stringify(result.content)).toContain("workflow.flipCheck");
-    expect(JSON.stringify(result.content)).toContain("historical telemetry");
+    expect(JSON.stringify(result.content)).toContain("display-only regression comparison");
     expect(JSON.stringify(result.content)).toContain("context.maxSnippets");
   } finally {
     await client.close();

@@ -1,13 +1,13 @@
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { fromUnknown, vispError } from "../core/errors.js";
+import { fromUnknown, isNodeError, vispError } from "../core/errors.js";
 import {
   applyFileTransaction,
   filePrecondition,
   withStateMutation,
 } from "../core/file-transaction.js";
-import { ProjectFileSystem } from "../core/fs.js";
 import { err, ok, type Result } from "../core/result.js";
 import {
   balancedCritic,
@@ -34,13 +34,18 @@ type UserCriticDefaults = z.infer<typeof userSchema>;
 const relativePath = ".config/visp/critic-defaults.json";
 
 export async function readCriticDefaults(home = homedir()) {
-  const read = await new ProjectFileSystem(home).readTextIfExists(relativePath);
-  if (!read.ok) return read;
+  const path = join(home, relativePath);
+  let text: string | undefined;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (cause) {
+    if (!isNodeError(cause) || cause.code !== "ENOENT") return err(fromUnknown(cause, "IO_ERROR"));
+  }
   try {
     const value = userSchema.parse(
-      read.value === undefined ? { version: 1, hosts: {} } : JSON.parse(read.value),
+      text === undefined ? { version: 1, hosts: {} } : JSON.parse(text),
     );
-    return ok({ path: join(home, relativePath), text: read.value, value });
+    return ok({ path, text, value });
   } catch (cause) {
     return err(
       vispError(
@@ -143,9 +148,13 @@ export async function resolveCriticPolicyDetails(
 ) {
   const settings = criticDefaultsSchema.safeParse(project ?? {});
   if (!settings.success) return err(fromUnknown(settings.error, "CONFIG_INVALID"));
-  const user = await readCriticDefaults(home);
-  if (!user.ok) return user;
   const preset = balancedCritic(settings.data.harness ?? harness);
+  const read = await readCriticDefaults(home);
+  const user =
+    !read.ok && !preset?.harness
+      ? ok({ value: { version: 1 as const, hosts: {} } as UserCriticDefaults })
+      : read;
+  if (!user.ok) return user;
   const host = preset?.harness ? user.value.value.hosts[preset.harness] : undefined;
   const sources = {
     mode: resolveModeSource(settings.data, host, user.value.value),

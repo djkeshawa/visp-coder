@@ -1,0 +1,20 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+body { display: grid; place-items: center; background: #142f47; font-family: Trebuchet MS, Arial, sans-serif; }
+#game { position: relative; width: min(100vw, 177.77778vh, 960px); aspect-ratio: 16 / 9; overflow: hidden; background: #86cae2; box-shadow: 0 18px 60px #071a2b88; touch-action: none; user-select: none; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.topbar { position: absolute; z-index: 2; left: 2.7%; right: 2.7%; top: 3%; display: flex; align-items: center; gap: 2.5%; color: #1d3f52; pointer-events: none; }
+.brand { display: flex; flex-direction: column; line-height: .9; letter-spacing: .11em; font-size: clamp(9px, 1.7vw, 18px); text-shadow: 0 1px #fff8; }
+.brand span { font-size: .67em; letter-spacing: .29em; margin-top: .3em; }
+.stats { display: flex; justify-content: center; gap: clamp(7px, 2vw, 28px); flex: 1; font-size: clamp(9px, 1.4vw, 15px); font-weight: bold; letter-spacing: .07em; }
+.stats span { background: #fffbe9c9; border: 2px solid #fff9; border-radius: 100px; padding: .45em .85em; white-space: nowrap; }
+.stats b { color: #c55b37; margin-left: .25em; }
+button { font: bold clamp(9px, 1.35vw, 15px) Trebuchet MS, Arial, sans-serif; color: #fff; background: #d5623e; border: 2px solid #fff9; border-radius: 100px; padding: .5em 1.1em; cursor: pointer; box-shadow: 0 3px 0 #9b402b; pointer-events: auto; }
+button:hover { background: #e4744c; }
+button:active { transform: translateY(2px); box-shadow: 0 1px 0 #9b402b; }
+#hint { position: absolute; left: 3%; bottom: 3%; color: #fff; text-shadow: 0 2px 3px #244b32; font-size: clamp(9px, 1.6vw, 17px); font-weight: bold; pointer-events: none; }
+.endcard { position: absolute; z-index: 3; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 38%; min-width: 150px; padding: 2.5% 3%; border-radius: 20px; display: flex; flex-direction: column; align-items: center; gap: .5em; background: #fff9e9ee; border: 4px solid #fff; box-shadow: 0 12px 40px #274f6088; color: #254453; text-align: center; font-size: clamp(10px, 1.7vw, 18px); }
+.endcard[hidden] { display: none; }
+.endcard strong { font-size: 1.8em; color: #d5623e; }
+.endcard button { margin-top: .6em; font-size: 1em; }
+@media (max-width: 500px) { .topbar { gap: 1%; } .stats { gap: 3px; } .stats span { padding: .28em .35em; border-width: 1px; } .brand { font-size: 9px; } button { border-width: 1px; padding: .35em .55em; } }

@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import time
 
-from common import RUNS
+from common import RUNS, isolate
 
 parser = argparse.ArgumentParser()
 parser.add_argument("run")
@@ -38,26 +38,39 @@ path = os.environ["PATH"]
 if arm.get("shim"):
     path = f"{arm['shim']}:{path}"
 env = {"HOME": str(home), "CODEX_HOME": str(codex_home), "PATH": path, "LANG": "C.UTF-8"}
+# BMAD renders its skills with `uv run`, which otherwise downloads CPython into every clean
+# home; the worker read that as breaking the no-download rule and stopped. Use the host's.
+uv_python = pathlib.Path.home() / ".local" / "share" / "uv" / "python"
+if uv_python.is_dir():
+    env.update({"UV_PYTHON_INSTALL_DIR": str(uv_python), "UV_PYTHON_DOWNLOADS": "never"})
 argv = [
+    *isolate(),
     # Equivalent to the user trusting the project's hooks once with /hooks.
     "codex", "exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-hook-trust",
     "--cd", str(project),
     "--model", args.model, "--config", f'model_reasoning_effort="{args.effort}"',
     "--sandbox", "workspace-write", "--config", "sandbox_workspace_write.network_access=true",
+    # The clean home is the worker's own, as it is for a Claude worker: BMAD's setup step
+    # installs a Python there with uv and stopped on a read-only home.
+    "--config", f"sandbox_workspace_write.writable_roots={json.dumps([str(home)])}",
     "--config", 'approval_policy="never"', "-",
 ]
-started = time.time()
+started, report = time.time(), ""
 try:
     # Own session, so a worker's process-group signal cannot reach sibling runs.
     completed = subprocess.run(argv, input=(run / "prompt.txt").read_text(), env=env,
                                capture_output=True, text=True, timeout=args.timeout,
                                start_new_session=True)
     output, timed_out = completed.stdout, False
+    # codex (or the namespace wrapper) failed without emitting a single event.
+    failed = completed.returncode != 0 and not output.strip()
+    if failed:
+        report = f"exit {completed.returncode}: {completed.stderr[-1500:]}"
 except subprocess.TimeoutExpired as expired:
     output = expired.stdout.decode() if isinstance(expired.stdout, bytes) else (expired.stdout or "")
-    timed_out = True
+    timed_out, failed = True, False
 elapsed = round(time.time() - started)
-usage, report, commands = {}, "", 0
+usage, commands = {}, 0
 for line in output.splitlines():
     try:
         event = json.loads(line)
@@ -75,7 +88,7 @@ for line in output.splitlines():
 shutil.rmtree(home, ignore_errors=True)
 result = {
     "run": args.run, "arm": arm["arm"], "model": f"{args.model}:{args.effort}", "seconds": elapsed,
-    "timedOut": timed_out, "turns": commands, "isError": False, "usage": usage, "report": report[-1500:],
+    "timedOut": timed_out, "turns": commands, "isError": failed, "usage": usage, "report": report[-1500:],
 }
 (run / "result.json").write_text(json.dumps(result, indent=2))
 print(json.dumps({k: result[k] for k in ("run", "arm", "seconds", "timedOut", "turns")}))

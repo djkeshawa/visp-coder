@@ -1,5 +1,5 @@
 import { vispError } from "../../core/errors.js";
-import { type FileMutation, filePrecondition } from "../../core/file-transaction.js";
+import type { FileMutation } from "../../core/file-transaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { CHECK_OUTPUT_GUIDANCE } from "../product-output-guidance.js";
 import type { WorkspaceState } from "../state.js";
@@ -12,15 +12,22 @@ import {
   productEvidenceGaps,
 } from "./assessment.js";
 import { checkBehaviorChanges } from "./behavior-changes.js";
-import { executeProductCheck } from "./check-execution.js";
+import {
+  cancelledExecution,
+  executeChecks,
+  executionOwnerKey,
+  requireExecutionContract,
+} from "./check-lifecycle.js";
 import { ensureProductCheckpoint } from "./checkpoint.js";
 import { productNeighborhood } from "./context.js";
 import { correctionChecks } from "./corrections.js";
+import { reviewerPointer } from "./critic-capacity.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
 import { environmentNext } from "./environment.js";
 import { currentJourneyFeedback } from "./evidence-references.js";
 import { productFailureSignature } from "./failures.js";
 import { findingAppliesToSlice, outstandingFeedback, productFeedbackPlan } from "./feedback.js";
+import { productInputWarnings } from "./input-warnings.js";
 import {
   checksFor,
   closedSlice,
@@ -30,11 +37,12 @@ import {
   type ProductSlice,
   type ProductState,
 } from "./model.js";
+import { reviewerRules } from "./pinned-dispute-model.js";
+import { reviewBaselineMutations } from "./review-baseline.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
 import { type ProductNext, runProductNext } from "./status.js";
 import {
-  authorizationPath,
   type ProductRecord,
   type ProductSelection,
   readProductRecord,
@@ -47,6 +55,8 @@ export type { ProductOutcomeStatus } from "./assessment.js";
 export { type ProductReviewBundle, type ProductReviewOptions, runProductReview } from "./review.js";
 
 export interface ProductVerification {
+  readonly warnings?: readonly string[];
+  readonly committedChanges?: readonly string[];
   readonly checkpoint?: { candidate: string; provenance: string } | { gap: string };
   readonly delivery?: { status: string; summary: string };
   readonly nextCommand?: string;
@@ -58,6 +68,7 @@ export interface ProductVerification {
   readonly passed: boolean;
   readonly closed?: boolean;
   readonly executions: readonly ProductExecution[];
+  readonly flipDurationMs?: number;
   readonly behaviorChanges?: ReturnType<typeof checkBehaviorChanges>;
   readonly outcomes: readonly ProductOutcomeStatus[];
   readonly gaps: readonly string[];
@@ -70,18 +81,15 @@ export interface ProductVerification {
 export const runProductVerify = (
   workspace: WorkspaceState,
   options: ProductSelection = {},
-): Promise<Result<ProductVerification>> =>
-  withProductMutation(workspace, () => execute(workspace, options, false, false));
+): Promise<Result<ProductVerification>> => execute(workspace, options, false, false);
 export const runProductDone = (
   workspace: WorkspaceState,
   options: ProductSelection = {},
-): Promise<Result<ProductVerification>> =>
-  withProductMutation(workspace, () => execute(workspace, options, true, false));
+): Promise<Result<ProductVerification>> => execute(workspace, options, true, false);
 export const runProductAccept = (
   workspace: WorkspaceState,
   options: ProductSelection = {},
-): Promise<Result<ProductVerification>> =>
-  withProductMutation(workspace, () => execute(workspace, options, false, true));
+): Promise<Result<ProductVerification>> => execute(workspace, options, false, true);
 
 async function execute(
   workspace: WorkspaceState,
@@ -89,7 +97,10 @@ async function execute(
   close: boolean,
   accept: boolean,
 ): Promise<Result<ProductVerification>> {
-  const prepared = await prepareExecution(workspace, options, close, accept);
+  if (options.signal?.aborted) return cancelledExecution();
+  const prepared = await withProductMutation(workspace, () =>
+    prepareExecution(workspace, options, close, accept),
+  );
   if (!prepared.ok) return prepared;
   const { record, slice, source, snapshot, commands } = prepared.value;
   const checked = await executeChecks(
@@ -99,19 +110,71 @@ async function execute(
     source,
     commands,
     close,
-    options.retryEnvironment,
+    accept,
+    options,
     snapshot,
   );
-  const { executions } = checked;
+  if (!checked.ok) return checked;
+  return withProductMutation(workspace, async () => {
+    if (options.signal?.aborted) return cancelledExecution();
+    const loaded = await readProductRecord(workspace, { feature: record.brief.feature });
+    if (!loaded.ok) return loaded;
+    const contract = requireExecutionContract(record, loaded.value);
+    if (!contract.ok) return contract;
+    const available = await closeoutAvailability(workspace, record.brief.feature, close, accept);
+    if (!available.ok) return available;
+    const finished = await finishExecution(
+      workspace,
+      loaded.value,
+      slice,
+      source,
+      snapshot,
+      commands,
+      checked.value,
+      close,
+      accept,
+      prepared.value.committedChanges,
+      options.signal,
+    );
+    return finished.ok
+      ? ok({ ...finished.value, ...flipBatchTiming(record, loaded.value) })
+      : finished;
+  });
+}
+
+function flipBatchTiming(before: ProductRecord, after: ProductRecord): { flipDurationMs?: number } {
+  const prior = new Map(before.state.executions.map((entry) => [entry.id, entry.flipCacheKey]));
+  const flipped = after.state.executions.filter(
+    (entry) => entry.flip && (!prior.has(entry.id) || prior.get(entry.id) !== entry.flipCacheKey),
+  );
+  return flipped.length
+    ? { flipDurationMs: flipped.reduce((total, entry) => total + (entry.flipDurationMs ?? 0), 0) }
+    : {};
+}
+
+async function finishExecution(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice | undefined,
+  source: string,
+  snapshot: Record<string, string>,
+  commands: ProductCheck[],
+  executions: ProductExecution[],
+  close: boolean,
+  accept: boolean,
+  committedChanges: string[],
+  signal?: AbortSignal,
+): Promise<Result<ProductVerification>> {
   const afterSnapshot = await productSourceSnapshot(workspace, record.brief);
   if (!afterSnapshot.ok) return afterSnapshot;
   const after = await productSourceDigest(workspace, record.brief, afterSnapshot.value);
   if (!after.ok) return after;
   const timestamp = new Date().toISOString();
   const next = {
-    ...checked.state,
+    ...record.state,
+    pendingVerification: undefined,
     updatedAt: timestamp,
-    executions: [...record.state.executions, ...executions],
+    executions: record.state.executions,
   };
   const current: ProductRecord = { ...record, state: next };
   const gaps = await executionGaps(workspace, current, slice, after.value, commands, executions);
@@ -122,7 +185,10 @@ async function execute(
         .filter((entry) => entry.required && findingAppliesToSlice(entry, slice))
         .map((entry) => `${entry.id}: ${entry.problem}. ${entry.nextCheck}`),
     );
-  if (accept) gaps.push(...finalProductAssessmentGaps(current, after.value));
+  if (accept)
+    gaps.push(
+      ...finalProductAssessmentGaps(current, after.value, undefined, reviewerRules(workspace)),
+    );
   const passed = gaps.length === 0;
   const completion = await completionState(workspace, record, next, {
     slice,
@@ -132,8 +198,8 @@ async function execute(
     subject: after.value,
   });
   if (!completion.ok) return completion;
+  if (signal?.aborted) return cancelledExecution();
   const saved = await saveProductState(workspace, record, completion.value.state, [
-    ...checked.mutations,
     ...completion.value.mutations,
   ]);
   if (!saved.ok) return saved;
@@ -148,6 +214,7 @@ async function execute(
   const repeated = failed.some((execution) =>
     record.state.executions.some(
       (before) =>
+        before.id !== execution.id &&
         before.check === execution.check &&
         before.status === "failed" &&
         productFailureSignature(before) === productFailureSignature(execution),
@@ -161,9 +228,13 @@ async function execute(
       passed,
       close,
       accept,
-      executions.some((entry) => entry.status === "environment-failed"),
+      executions
+        .filter((entry) => entry.status === "environment-failed" || entry.status === "timed-out")
+        .map((entry) => entry.output),
     ),
     checkpoint: checkpointDelivery(checkpoint),
+    warnings: await productInputWarnings(workspace, record.brief),
+    committedChanges,
     ...progress,
     ...(trace?.ok ? { trace: trace.value } : {}),
     feature: record.brief.feature,
@@ -174,12 +245,23 @@ async function execute(
     executions,
     outcomes: outcomeStatuses(current, after.value, slice),
     gaps: [...new Set(gaps)],
-    journeyFeedback: currentJourneyFeedback(current, after.value, slice?.id),
-    behaviorChanges: checkBehaviorChanges(record.state.executions, executions),
+    journeyFeedback: currentJourneyFeedback(
+      current,
+      after.value,
+      slice?.id,
+      reviewerRules(workspace),
+    ),
+    behaviorChanges: checkBehaviorChanges(
+      record.state.executions.filter(
+        (before) => !executions.some((entry) => entry.id === before.id),
+      ),
+      executions,
+    ),
     ...(repeated
       ? {
-          recommendation:
-            "The same product failure recurred. Test a different hypothesis or request a focused review; metadata edits do not constitute progress.",
+          recommendation: reviewerRules(workspace)
+            ? "The same product failure recurred. Test a different hypothesis; metadata edits do not constitute progress."
+            : "The same product failure recurred. Test a different hypothesis or request a focused review; metadata edits do not constitute progress.",
         }
       : {}),
   });
@@ -198,6 +280,7 @@ async function verificationProgress(
     subject,
     slice,
     workspace.config.workflow.reviewMode,
+    { reviewer: await reviewerPointer(workspace, record.brief.feature, subject, slice?.id) },
   );
   return {
     feedbackPlan,
@@ -211,9 +294,10 @@ function deliveryResult(
   passed: boolean,
   close: boolean,
   accept: boolean,
-  environmentFailed: boolean,
+  environmentFailures: string[],
 ) {
-  const recovery = environmentNext(feature, task, [], "verify");
+  const environmentFailed = environmentFailures.length > 0;
+  const recovery = environmentNext(feature, task, environmentFailures, "verify");
   const delivery = environmentFailed
     ? {
         status: "unresolved-environment",
@@ -248,6 +332,7 @@ function deliveryResult(
 }
 
 interface PreparedExecution {
+  committedChanges: string[];
   record: ProductRecord;
   slice?: ProductSlice;
   source: string;
@@ -270,13 +355,18 @@ async function prepareExecution(
   if (!selection.ok) return selection;
   const slice = accept ? undefined : selection.value;
   if (close && !slice) return err(vispError("NO_ACTIVE_TASK", "No slice selected for closure"));
-  if (
-    accept &&
-    record.brief.slices.some((entry) => !closedSlice(record.state.slices[entry.id]?.status))
-  )
+  const open = record.brief.slices.filter(
+    (entry) => !closedSlice(record.state.slices[entry.id]?.status),
+  );
+  if (accept && open.length)
     return err(
-      vispError("STAGE_BLOCKED", "Close the active slices before final product acceptance"),
+      vispError(
+        "STAGE_BLOCKED",
+        `Close the active slices before final product acceptance: ${open.map((entry) => entry.id).join(", ")}`,
+        { recovery: `visp next --feature ${record.brief.feature}` },
+      ),
     );
+  let committedChanges: string[] = [];
   if (slice && !closedSlice(record.state.slices[slice.id]?.status)) {
     const scope = await checkProductScope(workspace, record, slice);
     if (!scope.ok)
@@ -289,13 +379,21 @@ async function prepareExecution(
           browserRetryAttempted: false,
         },
       });
+    committedChanges = scope.value.committedChanges;
   }
   const snapshot = await productSourceSnapshot(workspace, record.brief);
   if (!snapshot.ok) return snapshot;
   const source = await productSourceDigest(workspace, record.brief, snapshot.value);
   if (!source.ok) return source;
-  const commands = executionCommands(workspace, record, slice, accept, source.value);
-  return ok({ record, slice, source: source.value, snapshot: snapshot.value, commands });
+  const commands = executionCommands(workspace, record, slice, close, accept, source.value);
+  return ok({
+    record,
+    slice,
+    source: source.value,
+    snapshot: snapshot.value,
+    commands,
+    committedChanges,
+  });
 }
 
 function closeoutAvailability(
@@ -308,7 +406,7 @@ function closeoutAvailability(
     ? requireNoPendingCriticReview(
         workspace,
         feature,
-        "Submit the pending reviewer result or wait for its deadline before closing or accepting",
+        "Run visp next to wait for the pending review and receive its findings before closing or accepting",
       )
     : Promise.resolve(ok(undefined));
 }
@@ -323,20 +421,27 @@ function executionCommands(
   workspace: WorkspaceState,
   record: ProductRecord,
   slice: ProductSlice | undefined,
+  close: boolean,
   accept: boolean,
   subject: string,
 ): ProductCheck[] {
   const { brief } = record;
+  // The completing VISP review needs current receipts for earlier outcomes too. Checks
+  // outside this slice retain feature ownership and the full feature contract.
+  const completing = close && slice && reviewerRules(workspace) && lastOpenSlice(record, slice);
   const commands = [
     ...new Map(
-      [...checksFor(brief, slice), ...(slice ? correctionChecks(record, slice, subject) : [])].map(
-        (check) => [check.id, check],
-      ),
+      [
+        ...checksFor(brief, completing ? undefined : slice),
+        ...(slice ? correctionChecks(record, slice, subject) : []),
+      ].map((check) => [check.id, check]),
     ).values(),
   ];
-  // The last open slice completes the product, so the pinned tests should pass there too.
+  // The last open slice completes the product, so the pinned tests should pass there too. A
+  // failed pinned run also selects the suite as a correction check of that slice: run it once.
   if (accept || !slice || lastOpenSlice(record, slice))
-    commands.push(...pinnedAcceptanceChecks(brief));
+    for (const pinned of pinnedAcceptanceChecks(brief))
+      if (!commands.some((command) => command.id === pinned.id)) commands.push(pinned);
   for (const [index, command] of workspace.config.workflow.validationCommands.entries())
     commands.push({
       id: `CONFIG_${index + 1}`,
@@ -346,48 +451,6 @@ function executionCommands(
       environment: "other",
     });
   return commands;
-}
-
-async function executeChecks(
-  workspace: WorkspaceState,
-  record: ProductRecord,
-  slice: ProductSlice | undefined,
-  source: string,
-  commands: ProductCheck[],
-  close: boolean,
-  retryEnvironment = false,
-  verifierSnapshot: Record<string, string> = {},
-): Promise<{ executions: ProductExecution[]; state: ProductState; mutations: FileMutation[] }> {
-  const executions: ProductExecution[] = [];
-  const mutations: FileMutation[] = [];
-  let state = record.state;
-  const existing = new Map(
-    applicableExecutions(record, source).map((execution) => [
-      executionOwnerKey(execution.check, execution.task),
-      execution,
-    ]),
-  );
-  for (const check of commands) {
-    // A check added by an assembled failure keeps its feature-wide contract identity.
-    // Binding it to a slice that does not declare it would hide later check revisions.
-    const owner = slice?.checks.includes(check.id) ? slice : undefined;
-    // `done` reuses only this owner's result. Explicit verify and acceptance rerun checks.
-    if (close && existing.get(executionOwnerKey(check.id, owner?.id))?.status === "passed")
-      continue;
-    const checked = await executeProductCheck(
-      workspace,
-      { ...record, state },
-      owner,
-      check,
-      source,
-      retryEnvironment,
-      verifierSnapshot,
-    );
-    executions.push(checked.execution);
-    state = checked.state;
-    mutations.push(...checked.mutations);
-  }
-  return { executions, state, mutations };
 }
 
 async function executionGaps(
@@ -416,10 +479,6 @@ async function executionGaps(
     )
       gaps.push(`${check.id}: no current passing execution`);
   return gaps;
-}
-
-function executionOwnerKey(check: string, task?: string) {
-  return JSON.stringify([check, task]);
 }
 
 function changedProductGap(before: Record<string, string>, after: Record<string, string>): string {
@@ -468,16 +527,9 @@ async function completionState(
         contractDigest: productContractDigest(record.brief, slice),
       },
     };
-    const auth = await workspace.files.readTextIfExists(
-      authorizationPath(workspace, record.brief.feature),
-    );
-    if (!auth.ok) return auth;
-    if (auth.value && JSON.parse(auth.value).task === slice.id)
-      extra.push({
-        kind: "remove" as const,
-        path: authorizationPath(workspace, record.brief.feature),
-        expectedBefore: filePrecondition(auth.value),
-      });
+    const baseline = await reviewBaselineMutations(workspace, record, slice);
+    if (!baseline.ok) return baseline;
+    extra.push(...baseline.value);
     const status = await statusMutation(workspace, record.brief.feature, undefined, "done");
     if (!status.ok) return status;
     extra.push(status.value);

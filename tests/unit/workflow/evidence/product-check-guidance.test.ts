@@ -27,6 +27,10 @@ it("prints parser-compatible browser and backend check examples without modifyin
     expect(result.value.example.outcomes).toEqual([]);
     expect(result.value.outcomes).toContainEqual(expect.objectContaining({ id: "O001" }));
   }
+  const browser = await productCheckTemplate(w, "browser");
+  expect(JSON.stringify(browser)).toContain("project:/index.html");
+  expect(JSON.stringify(browser)).toContain("free port you choose");
+  expect(JSON.stringify(browser)).not.toContain("3000");
   expect(await productCheckTemplate(w, "made-up")).toMatchObject({ ok: false });
   expect(await readProductRecord(w)).toEqual(before);
 });

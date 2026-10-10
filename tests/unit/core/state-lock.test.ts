@@ -1,8 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PRODUCT_CHECK_CONTEXT,
@@ -13,13 +24,43 @@ import { ProjectFileSystem } from "../../../src/core/fs.js";
 import { ok } from "../../../src/core/result.js";
 import {
   inspectStateLock,
+  recoverStateLock,
   STATE_LOCK_DIRECTORY,
   withStateLock,
 } from "../../../src/core/state-lock.js";
 
+// Lets a test observe the lock right after owner.json is published, before the writer returns.
+const published = vi.hoisted(() => ({
+  after: undefined as undefined | (() => Promise<void>),
+  unlinked: undefined as undefined | ((path: string) => Promise<void>),
+  listing: undefined as undefined | ((path: string) => Promise<void>),
+  linkFailure: undefined as undefined | string,
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    link: async (...args: Parameters<typeof actual.link>) => {
+      if (published.linkFailure)
+        throw Object.assign(new Error(published.linkFailure), { code: published.linkFailure });
+      await actual.link(...args);
+      if (/mutation\.lock[\\/]owner\.json$/.test(String(args[1]))) await published.after?.();
+    },
+    readdir: async (...args: Parameters<typeof actual.readdir>) => {
+      await published.listing?.(String(args[0]));
+      return actual.readdir(...args);
+    },
+    unlink: async (...args: Parameters<typeof actual.unlink>) => {
+      await actual.unlink(...args);
+      await published.unlinked?.(String(args[0]));
+    },
+  };
+});
+
 const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
+  published.after = published.unlinked = published.listing = published.linkFailure = undefined;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 async function root(): Promise<string> {
@@ -37,6 +78,95 @@ function signal(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("worktree state ownership", () => {
+  it("recognizes its owner while the owner record is still returning from publication", async () => {
+    const project = await root();
+    let observed: unknown;
+    published.after = async () => {
+      observed = await inspectStateLock(project);
+    };
+    try {
+      expect(await withStateLock(project, async () => ok(true))).toEqual(ok(true));
+      expect(observed).toMatchObject({ ok: true, value: { state: "active" } });
+    } finally {
+      published.after = undefined;
+    }
+  });
+
+  it.each(["EPERM", "ENOTSUP", "EXDEV", "ENOSYS"])(
+    "still acquires and releases on a filesystem whose link() fails with %s",
+    async (code) => {
+      const project = await root();
+      published.linkFailure = code;
+      let owner: unknown;
+      expect(
+        await withStateLock(project, async () => {
+          owner = JSON.parse(
+            await readFile(join(project, STATE_LOCK_DIRECTORY, "owner.json"), "utf8"),
+          );
+          return ok("held");
+        }),
+      ).toEqual(ok("held"));
+      expect(owner).toMatchObject({ version: 1, pid: process.pid });
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "unlocked" }));
+    },
+  );
+
+  it("requires the observed token to recover ambiguous ownership and refuses live owners", async () => {
+    const project = await root();
+    await withStateLock(project, async () => {
+      const lock = await inspectStateLock(project);
+      if (!lock.ok || !lock.value.owner) throw new Error("missing owner");
+      expect((await recoverStateLock(project, lock.value.owner.token)).ok).toBe(false);
+      return ok(undefined);
+    });
+    const token = randomUUID();
+    await mkdir(join(project, STATE_LOCK_DIRECTORY));
+    await writeFile(
+      join(project, STATE_LOCK_DIRECTORY, "owner.json"),
+      JSON.stringify({
+        version: 1,
+        token,
+        pid: process.pid,
+        host: "other-host",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    expect((await recoverStateLock(project, randomUUID())).ok).toBe(false);
+    expect(await recoverStateLock(project, token)).toEqual(ok(true));
+    expect(await inspectStateLock(project)).toEqual(ok({ state: "unlocked" }));
+  });
+
+  // Only Linux exposes a process start time (/proc/<pid>/stat); elsewhere a reused PID cannot be
+  // told apart from its owner, so the lock stays ambiguous until recovered with its token.
+  it.runIf(process.platform === "linux")(
+    "reclaims a reused PID with a different recorded process start",
+    async () => {
+      const project = await root();
+      let saved: Record<string, unknown> = {};
+      await withStateLock(project, async () => {
+        saved = JSON.parse(
+          await readFile(join(project, STATE_LOCK_DIRECTORY, "owner.json"), "utf8"),
+        );
+        return ok(undefined);
+      });
+      await mkdir(join(project, STATE_LOCK_DIRECTORY));
+      await writeFile(
+        join(project, STATE_LOCK_DIRECTORY, "owner.json"),
+        JSON.stringify({
+          ...saved,
+          processStart: "old-process",
+        }),
+      );
+      expect(await inspectStateLock(project)).toMatchObject({
+        ok: true,
+        value: { state: "abandoned" },
+      });
+      expect(await withStateLock(project, async () => ok("recovered"), { timeoutMs: 0 })).toEqual(
+        ok("recovered"),
+      );
+    },
+  );
+
   it.each(["missing", "changed", "symlink"])(
     "refuses a %s command-check receipt instead of crediting an exit-zero wrapper",
     async (kind) => {
@@ -171,7 +301,7 @@ describe("worktree state ownership", () => {
     });
     await entered.promise;
     pauseNext = true;
-    const contender = withStateLock(project, async () => ok("second"));
+    const contender = withStateLock(project, async () => ok("second"), { timeoutMs: 5000 });
     let stableParent = false;
     try {
       await preparing.promise;
@@ -277,7 +407,10 @@ describe("worktree state ownership", () => {
       return ok(undefined);
     });
     expect(!changed.ok && changed.error.code).toBe("STATE_BUSY");
-    expect(await inspectStateLock(project)).toMatchObject({ ok: true, value: { state: "active" } });
+    expect(await inspectStateLock(project)).toMatchObject({
+      ok: true,
+      value: { state: "ambiguous" },
+    });
   });
 
   it("serializes sibling mutations inside an already owned operation", async () => {
@@ -348,5 +481,161 @@ describe("worktree state ownership", () => {
     expect(!result.ok && result.error.code).toBe("STATE_BUSY");
     const inspection = await inspectStateLock(project);
     expect(inspection.ok && inspection.value.state).toBe("ambiguous");
+  });
+
+  describe("ownerless and stale-recovery locks", () => {
+    const longAgo = new Date(Date.now() - 120_000);
+    const lockPath = (project: string) => join(project, STATE_LOCK_DIRECTORY);
+    const age = (path: string) => utimes(path, longAgo, longAgo);
+    const exists = (path: string) =>
+      stat(path).then(
+        () => true,
+        () => false,
+      );
+
+    it("keeps a fresh ownerless lock ambiguous: a live writer is between mkdir and owner.json", async () => {
+      const project = await root();
+      await mkdir(lockPath(project), { recursive: true });
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "ambiguous" }));
+      const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 0 });
+      expect(!result.ok && result.error.code).toBe("STATE_BUSY");
+      expect(await exists(lockPath(project))).toBe(true);
+    });
+
+    it("recovers an ownerless lock directory that has aged past any live writer", async () => {
+      const project = await root();
+      await mkdir(lockPath(project), { recursive: true });
+      await age(lockPath(project));
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "abandoned" }));
+      expect(await withStateLock(project, async () => ok("in"), { timeoutMs: 0 })).toEqual(
+        ok("in"),
+      );
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "unlocked" }));
+    });
+
+    it("recovers an aged lock holding only an interrupted owner.json write", async () => {
+      const project = await root();
+      await mkdir(lockPath(project), { recursive: true });
+      await writeFile(join(lockPath(project), ".1a2b3c.tmp"), "{");
+      await age(lockPath(project));
+      expect(await withStateLock(project, async () => ok("in"), { timeoutMs: 0 })).toEqual(
+        ok("in"),
+      );
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "unlocked" }));
+    });
+
+    it("does not judge an aged lock that holds anything else", async () => {
+      const project = await root();
+      await mkdir(lockPath(project), { recursive: true });
+      await writeFile(join(lockPath(project), "notes.txt"), "someone's file");
+      await age(lockPath(project));
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "ambiguous" }));
+      const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 0 });
+      expect(!result.ok && result.error.code).toBe("STATE_BUSY");
+      expect(await exists(join(lockPath(project), "notes.txt"))).toBe(true);
+    });
+
+    it("keeps a malformed owner.json ambiguous however old it is", async () => {
+      const project = await root();
+      await mkdir(lockPath(project), { recursive: true });
+      await writeFile(join(lockPath(project), "owner.json"), "not-json");
+      await age(lockPath(project));
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "ambiguous" }));
+    });
+
+    it("clears a recovery mutex left by a reclaimer that died, then recovers", async () => {
+      const project = await root();
+      const recovery = `${lockPath(project)}.recovery`;
+      await mkdir(lockPath(project), { recursive: true });
+      await age(lockPath(project));
+      await mkdir(recovery);
+      await age(recovery);
+      expect(await withStateLock(project, async () => ok("in"), { timeoutMs: 1000 })).toEqual(
+        ok("in"),
+      );
+      expect(await exists(recovery)).toBe(false);
+    });
+
+    it("leaves a fresh recovery mutex to its holder", async () => {
+      const project = await root();
+      const recovery = `${lockPath(project)}.recovery`;
+      await mkdir(lockPath(project), { recursive: true });
+      await age(lockPath(project));
+      await mkdir(recovery);
+      const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 50 });
+      expect(!result.ok && result.error.code).toBe("STATE_BUSY");
+      expect(await exists(recovery)).toBe(true);
+    });
+
+    it("leaves an owner.json published while the reaper was clearing the directory", async () => {
+      const project = await root();
+      await mkdir(lockPath(project), { recursive: true });
+      await writeFile(join(lockPath(project), ".1a2b3c.tmp"), "{");
+      await age(lockPath(project));
+      const owner = JSON.stringify({
+        version: 1,
+        token: randomUUID(),
+        pid: process.pid,
+        host: hostname(),
+        createdAt: new Date().toISOString(),
+      });
+      // A writer whose directory this is publishes right after the leftovers are unlinked.
+      published.unlinked = async (path) => {
+        if (!path.endsWith(".1a2b3c.tmp")) return;
+        published.unlinked = undefined;
+        await writeFile(join(lockPath(project), "owner.json"), owner);
+      };
+      const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 0 });
+      expect(!result.ok && result.error.code).toBe("STATE_BUSY");
+      expect(await readFile(join(lockPath(project), "owner.json"), "utf8")).toBe(owner);
+    });
+
+    it("does not empty a fresh lock directory created while the aged one was being listed", async () => {
+      const project = await root();
+      await mkdir(lockPath(project), { recursive: true });
+      await age(lockPath(project));
+      // Under the recovery mutex, another reaper removes the aged directory and a writer creates
+      // a new one; the listing that follows sees the new, empty directory.
+      let listings = 0;
+      published.listing = async (path) => {
+        if (!path.endsWith("mutation.lock")) return;
+        listings += 1;
+        if (listings < 2) return;
+        published.listing = undefined;
+        await rm(lockPath(project), { recursive: true });
+        await mkdir(lockPath(project), { mode: 0o700 });
+      };
+      const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 0 });
+      expect(!result.ok && result.error.code).toBe("STATE_BUSY");
+      expect(await exists(lockPath(project))).toBe(true);
+    });
+
+    it("admits one holder at a time when contenders race to reap an aged ownerless lock", async () => {
+      const project = await root();
+      for (let round = 0; round < 30; round += 1) {
+        await mkdir(lockPath(project), { recursive: true });
+        await age(lockPath(project));
+        let inside = 0;
+        let overlaps = 0;
+        const results = await Promise.all(
+          Array.from({ length: 8 }, () =>
+            withStateLock(
+              project,
+              async () => {
+                inside += 1;
+                if (inside > 1) overlaps += 1;
+                await delay(1);
+                inside -= 1;
+                return ok(true);
+              },
+              { timeoutMs: 5000 },
+            ),
+          ),
+        );
+        expect(overlaps, `round ${round}`).toBe(0);
+        expect(results.filter((result) => !result.ok)).toEqual([]);
+      }
+      expect(await inspectStateLock(project)).toEqual(ok({ state: "unlocked" }));
+    }, 60_000);
   });
 });

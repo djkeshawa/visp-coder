@@ -24,6 +24,7 @@ import type { ProductSelection } from "../../workflow/product/store.js";
 import type { WorkspaceState } from "../../workflow/state.js";
 import { TOOL } from "../constants.js";
 import { mutatingWorkspaceFor, workspaceFor } from "../context.js";
+import { mcpOperationOptions } from "../operation-progress.js";
 import { mcpProductFeedbackHost } from "../product-feedback-host.js";
 import { failure } from "../reply.js";
 import { productReply, productSelectionInput } from "./workflow.js";
@@ -67,25 +68,38 @@ function checkedReviewInput<T extends Record<string, unknown>>(input: T) {
       );
 }
 
+const disputeFields = {
+  dispute: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Failing pinned acceptance tests that contradict the request; VISP's own independent reviewer rules; you delegate nothing",
+    ),
+  reason: z
+    .string()
+    .optional()
+    .describe("With dispute: quote the request sentence the test contradicts, and why"),
+};
+
 export function registerEvidenceTools(server: McpServer, root: string): void {
   for (const [name, run] of [
     [TOOL.verify, runProductVerify],
     [
       TOOL.done,
-      (state: WorkspaceState, args: ProductSelection) =>
+      (state: WorkspaceState, args: ProductSelection & { reason?: string }) =>
         runProductDoneReviewed(
           state,
-          args,
+          { ...args, disputeReason: args.reason },
           configuredReviewStarter(state, "mcp"),
           reviewWaitMs(state, "mcp"),
         ),
     ],
     [
       TOOL.accept,
-      (state: WorkspaceState, args: ProductSelection) =>
+      (state: WorkspaceState, args: ProductSelection & { reason?: string }) =>
         runProductAcceptReviewed(
           state,
-          args,
+          { ...args, disputeReason: args.reason },
           configuredReviewStarter(state, "mcp"),
           reviewWaitMs(state, "mcp"),
         ),
@@ -102,13 +116,21 @@ export function registerEvidenceTools(server: McpServer, root: string): void {
             ...productSelectionInput,
             detail: z.boolean().optional(),
             retryEnvironment: z.boolean().optional(),
+            ...(name === TOOL.verify ? {} : disputeFields),
           })
           .strict(),
       },
-      async (args) => {
+      async (args, extra) => {
+        const operation = mcpOperationOptions(extra);
         const state = await mutatingWorkspaceFor(root);
         return state.ok
-          ? productReply(name, await run(state.value, args), args.detail)
+          ? productReply(
+              name,
+              await run(state.value, { ...args, ...operation } as ProductSelection & {
+                reason?: string;
+              }),
+              args.detail,
+            )
           : failure(name, state.error);
       },
     );
@@ -118,7 +140,7 @@ export function registerEvidenceTools(server: McpServer, root: string): void {
     {
       title: "Review actual product evidence",
       description:
-        "prepare creates a confined tool-owned review session; submit session plus judgments without hashes or envelope fields. Without assessments or prepare, return relevant brief context and actual evidence. template returns editable unresolved assessments. Read structuredContent.data; detail:true also repeats the full result in text. Retain every outcome status; VISP selects at most three consequential corrections at a time.",
+        "prepare creates a confined tool-owned review session; submit session plus judgments without hashes or envelope fields. Without assessments or prepare, return relevant brief context and actual evidence. template returns editable unresolved assessments. Read the full result in structuredContent.data. Retain every outcome status; VISP selects at most three consequential corrections at a time.",
       inputSchema: z
         .object({
           ...productSelectionInput,

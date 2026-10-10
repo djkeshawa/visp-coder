@@ -5,12 +5,24 @@ import {
   LANGUAGE_BY_EXTENSION,
   PACKAGE_JSON,
   TEST_PATH_PATTERNS,
+  UNPARSED_SOURCE_EXTENSIONS,
 } from "./constants.js";
 import type { FileLanguage } from "./types.js";
 
 /** POSIX path arithmetic over repository-relative paths. The graph never uses OS separators. */
 
-const GENERATED_AGENT_PREFIXES = [".visp/", ".agents/", ".claude/", ".codex/", ".cursor/"];
+export const GENERATED_AGENT_PREFIXES = [".visp/", ".agents/", ".claude/", ".codex/", ".cursor/"];
+
+export function isGraphInputPath(path: string): boolean {
+  const extension = extensionOf(path);
+  return (
+    grammarForPath(path) !== undefined ||
+    isHtmlPath(path) ||
+    isPackageManifest(path) ||
+    ["pyproject.toml", "setup.cfg"].includes(basename(path)) ||
+    UNPARSED_SOURCE_EXTENSIONS.has(extension)
+  );
+}
 
 export function isHtmlPath(path: string): boolean {
   const extension = extensionOf(path);
@@ -32,12 +44,6 @@ export function basename(path: string): string {
 export function dirname(path: string): string {
   const slash = path.lastIndexOf("/");
   return slash === -1 ? "" : path.slice(0, slash);
-}
-
-export function stem(path: string): string {
-  const base = basename(path);
-  const extension = extensionOf(base);
-  return extension ? base.slice(0, base.length - extension.length) : base;
 }
 
 /** Joins and normalizes `.`/`..` segments without touching the filesystem. */

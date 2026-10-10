@@ -1,18 +1,31 @@
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { browserJourneySchema } from "../../testing/browser-journey.js";
+import {
+  cancelledExecution,
+  mergeCaptureState,
+  requireExecutionContract,
+} from "../product/check-lifecycle.js";
 import { criticRouteCommand } from "../product/critic-guidance.js";
 import { supportedHostCaptureRecovery } from "../product/environment-model.js";
+import { productCaptureRunSchema } from "../product/evidence-references.js";
 import { inspectProductImages } from "../product/images.js";
 import { productObservationPlan } from "../product/observation-plan.js";
 import { withProductMutation } from "../product/runtime.js";
 import { selectProductSlice } from "../product/scopes.js";
 import { type ProductNext, runProductNext } from "../product/status.js";
-import { type ProductSelection, readProductRecord, saveProductState } from "../product/store.js";
+import {
+  type ProductRecord,
+  type ProductSelection,
+  readProductRecord,
+  saveProductState,
+} from "../product/store.js";
+import { productSourceDigest } from "../product/subject.js";
 import type { WorkspaceState } from "../state.js";
 import { replayCommand, replayJourney } from "./capture-replay.js";
 import {
   type ProductCaptureResult as ExecutedProductCaptureResult,
+  type PreparedProductCapture,
   withProductCapture,
 } from "./product-capture-execution.js";
 
@@ -28,6 +41,7 @@ export async function runProductCapture(
   workspace: WorkspaceState,
   options: ProductSelection & {
     readonly journey?: unknown;
+    readonly outcomes?: readonly string[];
     readonly replay?: string;
     readonly binary?: string;
   },
@@ -36,14 +50,14 @@ export async function runProductCapture(
     return err(vispError("CONFIG_INVALID", "Supply exactly one journey or replay run ID"));
   let capturedFeature: string | undefined;
   let capturedTask: string | undefined;
-  const published = await withProductMutation(workspace, async () => {
-    const record = await readProductRecord(workspace, options);
+  const published = await (async () => {
+    if (options.signal?.aborted) return cancelledExecution();
+    const record = await withProductMutation(workspace, () =>
+      readProductRecord(workspace, options),
+    );
     if (!record.ok) return record;
     capturedFeature = record.value.brief.feature;
-    const selected =
-      options.replay === undefined
-        ? ok({ journey: options.journey, task: options.task })
-        : replayJourney(record.value.state.captureRuns, options.replay, options.task);
+    const selected = selectCaptureJourney(record.value, options);
     if (!selected.ok) return selected;
     const slice = selectProductSlice(workspace, record.value, {
       ...options,
@@ -53,21 +67,27 @@ export async function runProductCapture(
     // Feature-wide replays remain feature-wide, even when another task is active.
     const task = options.replay === undefined ? slice.value?.id : selected.value.task;
     capturedTask = task;
+    if (!validCaptureOutcomes(record.value, task, options.outcomes))
+      return err(vispError("CONFIG_INVALID", "Capture outcomes must belong to the selected scope"));
     const journey = browserJourneySchema.safeParse(selected.value.journey);
     if (!journey.success)
       return err(vispError("CONFIG_INVALID", `Invalid browser journey: ${journey.error.message}`));
     return withProductCapture(
       workspace,
       record.value,
-      { journey: journey.data, task, binary: options.binary },
+      {
+        journey: journey.data,
+        task,
+        outcomes: replayCaptureOutcomes(record.value, options.replay, options.outcomes),
+        binary: options.binary,
+        signal: options.signal,
+      },
       async (prepared) => {
-        const saved = await saveProductState(
-          workspace,
-          record.value,
-          prepared.state,
-          prepared.mutations,
-        );
-        if (!saved.ok) return saved;
+        const saved = await publishCapture(workspace, record.value, prepared, options.signal);
+        if (!saved.ok)
+          return saved.error.code === "INTERNAL"
+            ? err({ ...saved.error, code: "EVIDENCE_FAILED" })
+            : saved;
         const inspected = await inspectProductImages(
           workspace,
           prepared.subjectDigest,
@@ -92,7 +112,7 @@ export async function runProductCapture(
         });
       },
     );
-  });
+  })();
   const recovered = replayCaptureRecovery(published, options, capturedFeature, capturedTask);
   if (!recovered.ok) return recovered;
 
@@ -115,9 +135,46 @@ export async function runProductCapture(
   });
 }
 
+function publishCapture(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  prepared: PreparedProductCapture,
+  signal?: AbortSignal,
+) {
+  return withProductMutation(workspace, async () => {
+    if (signal?.aborted) return cancelledExecution();
+    const current = await readProductRecord(workspace, {
+      feature: record.brief.feature,
+    });
+    if (!current.ok) return current;
+    const contract = requireExecutionContract(record, current.value);
+    if (!contract.ok) return contract;
+    const subject = await productSourceDigest(workspace, current.value.brief);
+    if (!subject.ok) return subject;
+    if (subject.value !== prepared.subjectDigest)
+      return err(
+        vispError(
+          "EVIDENCE_FAILED",
+          "Product changed before capture publication; capture the current version again",
+        ),
+      );
+    if (signal?.aborted) return cancelledExecution();
+    return saveProductState(
+      workspace,
+      current.value,
+      mergeCaptureState(current.value.state, record.state, prepared.state),
+      prepared.mutations,
+    );
+  });
+}
+
 function replayCaptureRecovery(
   published: Result<ProductCaptureResult>,
-  options: ProductSelection & { readonly replay?: string; readonly binary?: string },
+  options: ProductSelection & {
+    readonly replay?: string;
+    readonly binary?: string;
+    readonly outcomes?: readonly string[];
+  },
   capturedFeature?: string,
   capturedTask?: string,
 ): Result<ProductCaptureResult> {
@@ -127,6 +184,7 @@ function replayCaptureRecovery(
     feature: options.feature ?? capturedFeature,
     task: options.task ?? capturedTask,
     replay: options.replay,
+    outcomes: options.outcomes,
     binary: options.binary,
   });
   return err({
@@ -134,4 +192,35 @@ function replayCaptureRecovery(
     recovery: recovery.message,
     details: { ...published.error.details, supportedHostOption: recovery.option },
   });
+}
+
+function validCaptureOutcomes(record: ProductRecord, task?: string, outcomes?: readonly string[]) {
+  const slice = record.brief.slices.find((entry) => entry.id === task);
+  return !outcomes?.some(
+    (id) =>
+      !record.brief.outcomes.some(
+        (outcome) => outcome.id === id && (!slice || slice.outcomes.includes(id)),
+      ),
+  );
+}
+
+function replayCaptureOutcomes(
+  record: ProductRecord,
+  replay?: string,
+  outcomes?: readonly string[],
+) {
+  const previous = record.state.captureRuns.flatMap((candidate) => {
+    const run = productCaptureRunSchema.safeParse(candidate);
+    return run.success && run.data.id === replay ? (run.data.expectation?.outcomes ?? []) : [];
+  });
+  return [...new Set([...previous, ...(outcomes ?? [])])];
+}
+
+function selectCaptureJourney(
+  record: ProductRecord,
+  options: { journey?: unknown; replay?: string; task?: string },
+) {
+  return options.replay === undefined
+    ? ok({ journey: options.journey, task: options.task })
+    : replayJourney(record.state.captureRuns, options.replay, options.task);
 }

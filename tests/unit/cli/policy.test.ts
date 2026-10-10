@@ -83,7 +83,7 @@ describe("policy show", () => {
     const rule = ruleIn(data, STRICT_ONLY_RULE);
 
     expect(rule.active).toBe(false);
-    expect(rule.why).toBe("off in standard mode");
+    expect(rule.why).toContain("not evaluated");
     expect(ruleIn(data, PROTECTED_RULE).why).toBe("on");
   });
 
@@ -222,6 +222,7 @@ describe("policy set", () => {
 
     const after = await show();
     expect(ruleIn(after, WAIVABLE_RULE).active).toBe(false);
+    expect(ruleIn(after, WAIVABLE_RULE).why).toBe("off explicitly");
     expect((await workspace.state()).policy.rules[WAIVABLE_RULE]).toBe(false);
   });
 

@@ -7,6 +7,10 @@ arm with it differs from one without only by that skill.
 
 The prompt is host-neutral; run_claude.py or run_codex.py gives it to a headless worker that
 works only inside the project. Every arm receives the same task and constraints.
+
+A two-session task (session1.md, session2.md, conventions.md) also gets prompt2.txt and
+prompt2-oracle.txt, the second request without and with the first session's conventions;
+run_carryover.py runs both sessions.
 """
 import argparse
 import json
@@ -29,7 +33,13 @@ if args.skill and not arm.startswith("visp"):
     raise SystemExit("--skill applies only to VISP arms")
 root = RUNS / "runs" / name / "project"
 root.mkdir(parents=True, exist_ok=False)
-task = (BENCH / "tasks" / task_name / "task.md").read_text()
+task_dir = BENCH / "tasks" / task_name
+sessions = (task_dir / "session1.md").is_file()
+if sessions:
+    conventions = (task_dir / "conventions.md").read_text().strip()
+    task = (task_dir / "session1.md").read_text().replace("{conventions}", conventions)
+else:
+    task = (task_dir / "task.md").read_text()
 env = dict(os.environ)
 shim_dir = None
 
@@ -45,7 +55,7 @@ sh(["git", "config", "user.name", "Bench"])
 sh(["git", "config", "user.email", "bench@localhost"])
 (root / ".gitignore").write_text("__pycache__/\nnode_modules/\n")
 # A brownfield task starts from its existing codebase.
-start = BENCH / "tasks" / task_name / "start"
+start = task_dir / "start"
 if start.is_dir():
     shutil.copytree(start, root, dirs_exist_ok=True)
 
@@ -105,6 +115,11 @@ sh(["git", "add", "-A"])
 sh(["git", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Benchmark scaffold"])
 prompt = f"{workflow}\n\n{COMMON}\n\nTask:\n\n{task}"
 (root.parent / "prompt.txt").write_text(prompt)
+if sessions:
+    second = (task_dir / "session2.md").read_text()
+    (root.parent / "prompt2.txt").write_text(f"{workflow}\n\n{COMMON}\n\nTask:\n\n{second}")
+    (root.parent / "prompt2-oracle.txt").write_text(
+        f"{workflow}\n\n{COMMON}\n\nTask:\n\n{second}\n{conventions}\n")
 # The headless runner puts the arm's VISP build on PATH so installed hooks find it.
 (root.parent / "arm.json").write_text(json.dumps({"task": task_name, "arm": arm, "shim": shim_dir, "skills": args.skill}))
 print(json.dumps({"root": str(root), "prompt": str(root.parent / "prompt.txt")}))

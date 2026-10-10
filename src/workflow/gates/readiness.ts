@@ -21,15 +21,24 @@ export async function requireImplementationFoundation(
   return blocked ? err(blocked) : ok(undefined);
 }
 
-/** A feature starts only from a committed, clean project baseline. */
+/**
+ * A feature starts from a committed project baseline. When Git cannot be written, so the
+ * earlier work can never be committed, the uncommitted files it starts from are returned
+ * for the caller to record as the feature's inherited starting state.
+ */
 export async function requireFeatureFoundation(
   state: WorkspaceState,
   recovery: string,
-): Promise<Result<void>> {
-  const context = await buildFoundationContext(state);
+): Promise<Result<{ readonly inherited: readonly string[] }>> {
+  const context = await buildFoundationContext(state, { probeGit: true });
   if (!context.ok) return context;
   const blocked = featureFoundationError(context.value, recovery);
-  return blocked ? err(blocked) : ok(undefined);
+  return blocked ? err(blocked) : ok({ inherited: inheritedChangedFiles(context.value) });
+}
+
+/** Uncommitted files a feature must inherit because Git cannot be written to commit them. */
+export function inheritedChangedFiles(context: FoundationState): readonly string[] {
+  return context.gitWritable === false ? (context.changedFiles ?? []) : [];
 }
 
 export function featureFoundationError(
@@ -91,14 +100,20 @@ export function foundationBlockers(
       ),
     });
   }
-  if (cleanBaseline && (context.changedFiles?.length ?? 0) > 0) {
+  // Only committable changes need committing: where Git is read-only, as in Codex's
+  // sandbox, the commit is impossible and the changes are inherited instead.
+  if (
+    cleanBaseline &&
+    (context.changedFiles?.length ?? 0) > 0 &&
+    inheritedChangedFiles(context).length === 0
+  ) {
     blockers.push({
       requirement: "clean-baseline",
       error: vispError(
         "STAGE_BLOCKED",
-        "A feature must start from a committed baseline, but the working tree already has changes",
+        "A feature must start from a committed baseline, but the working tree has uncommitted changes and Git accepts writes here. They may be earlier work, so commit them; do not discard them with git checkout, restore or reset. If the commit fails, fix what is fixable (an unset author identity with git config user.name and user.email, or a failing hook) and commit again; stop and tell the user only when Git reports a read-only or permission error. Never discard the changes to get past it",
         {
-          recovery: `git commit the project baseline, then ${recovery}`,
+          recovery: `git add -A && git commit -m "<what these changes are>", then ${recovery}`,
           details: { changedFiles: context.changedFiles },
         },
       ),

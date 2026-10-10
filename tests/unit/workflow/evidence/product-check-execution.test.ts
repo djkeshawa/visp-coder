@@ -7,8 +7,15 @@ import { hashValue } from "../../../../src/core/hash.js";
 import { inspectStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { validateProductCheckCommand } from "../../../../src/workflow/product/check-command.js";
+import {
+  executeProductCheck,
+  waivedResult,
+} from "../../../../src/workflow/product/check-execution.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { executionSchema, productCheckSchema } from "../../../../src/workflow/product/model.js";
+import { failingTests } from "../../../../src/workflow/product/pinned-dispute-model.js";
+import { disputedFailure } from "../../../../src/workflow/product/pinned-disputes.js";
+import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
@@ -69,11 +76,225 @@ describe("product command check execution boundary", () => {
         executions: [
           {
             status: "environment-failed",
-            output: expect.stringContaining("No product behavior was tested"),
+            output: expect.stringContaining("nothing about the product was tested"),
           },
         ],
-        next: { mayEdit: true, objective: expect.stringContaining("correcting its command") },
+        // The open slice shows the short missing-command recovery, not the general environment text.
+        next: {
+          mayEdit: true,
+          objective: expect.stringContaining(
+            'missing-command: "visp-missing-executable" is not installed',
+          ),
+        },
       },
+    });
+  });
+  it("keeps every FAIL line of a long run, including those the tail cut drops", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const names = Array.from({ length: 70 }, (_, index) => `case ${index}`);
+    const script = [
+      `for (const n of ${JSON.stringify(names)}) console.log("FAIL: " + n + ": expected 1");`,
+      'console.log("x".repeat(7000)); console.log("y".repeat(7000));',
+      'console.error("final line"); process.exit(1)',
+    ].join("\n");
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [process.execPath, "-e", script],
+        })),
+      },
+      reason: "Exercise a long failing run",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output.length).toBeLessThanOrEqual(8000);
+    expect(output).toContain("VISP: FAIL lines from earlier in the output:");
+    expect(output).toContain("final line");
+    // Every name is attributed as in the full run (at most 60 lines are repeated, so the
+    // first 60 declared names are what a dispute may name).
+    const kept = failingTests(output, names.slice(0, 60));
+    expect(kept.names).toHaveLength(60);
+    expect(kept.unattributed).toBe(0);
+  });
+  it("keeps a real FAIL below the evidence limit when many coverage gaps precede the tail", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const text = [
+      "FAIL: real assertion: wrong value",
+      ...Array.from(
+        { length: 40 },
+        (_, index) => `NOT OBSERVED: conditional interaction ${index}: 0 qualifying events`,
+      ),
+      "x".repeat(5300),
+    ].join("\n");
+    expect(text.length).toBeLessThan(7998);
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [
+            process.execPath,
+            "-e",
+            `console.log(${JSON.stringify(text)}); process.exit(1)`,
+          ],
+        })),
+      },
+      reason: "Exercise a failure among many coverage gaps",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output.length).toBeLessThanOrEqual(8000);
+    expect(output).toContain("FAIL: real assertion: wrong value");
+  });
+  it("retains undisputed failures across the final assertion-result tail boundary", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const lines = [
+      "FAIL: disputed A",
+      ...Array.from({ length: 100 }, (_, index) => `PASS: assertion ${index}`),
+      "NOT OBSERVED: conditional contact: 0 qualifying events",
+      "x".repeat(10000),
+      "FAIL: undisputed B",
+      "x".repeat(3500),
+    ];
+    await workspace.write(
+      "test/boundary.mjs",
+      `console.log(${JSON.stringify(lines.join("\n"))}); process.exitCode = 1;`,
+    );
+    const state = await workspace.state();
+    const record = await readProductRecord(state, {});
+    if (!record.ok) throw new Error(record.error.message);
+    const check = productCheckSchema.parse({
+      ...brief.checks[0],
+      id: "PINNED_boundary",
+      command: [process.execPath, "test/boundary.mjs"],
+    });
+    const { execution } = await executeProductCheck(
+      state,
+      record.value,
+      brief.slices[0],
+      check,
+      "current",
+    );
+    expect(execution.output).toContain("FAIL: disputed A");
+    expect(execution.output).toContain("FAIL: undisputed B");
+    expect(execution.output).toContain("PASS: assertion 0");
+    expect(execution.output).toContain("NOT OBSERVED: conditional contact: 0 qualifying events");
+    expect(execution.status).toBe("failed");
+    expect(execution.output.length).toBeLessThanOrEqual(8000);
+    expect(
+      disputedFailure(execution, {
+        declared: ["disputed A", "undisputed B"],
+        pending: [{ test: "disputed A" }] as Parameters<typeof disputedFailure>[1]["pending"],
+      }),
+    ).toBe(false);
+  });
+
+  it("never lets the shortened record decide that a failing run was entirely waived", () => {
+    const waived = Array.from({ length: 12 }, (_, index) => `waived test ${index}`);
+    const waivers = { names: waived, declared: [...waived, "real bug"], suiteSkips: false };
+    const failed = (stdout: string) =>
+      ({
+        ok: true as const,
+        value: {
+          command: "suite",
+          exitCode: 1,
+          stdout,
+          stderr: "",
+          timedOut: false,
+          durationMs: 1,
+        },
+      }) as const;
+    const lines = waived.map((name) => `FAIL: ${name}: ${"r".repeat(280)}`);
+    const noise = "n".repeat(14_000);
+    // 12 long waived lines, then an undisputed real failure, then noise that cuts them from
+    // the recorded tail: the waiver must still see the real failure.
+    const withBug = [...lines, "FAIL: real bug: it is broken", noise].join("\n");
+    expect(waivedResult(failed(withBug), withBug, "/tmp", waivers).status).toBe("failed");
+    // Control: only waived failures count as passed.
+    const onlyWaived = [...lines, noise].join("\n");
+    expect(waivedResult(failed(onlyWaived), onlyWaived, "/tmp", waivers).status).toBe("passed");
+    // An early traceback that the recorded tail would cut still blocks the waiver.
+    const crashed = [...lines, "Traceback (most recent call last):", noise].join("\n");
+    expect(waivedResult(failed(crashed), crashed, "/tmp", waivers).status).toBe("failed");
+  });
+  it("says so when the recorded run leaves early FAIL lines out", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const script = [
+      'for (let i = 0; i < 70; i++) console.log("FAIL: case " + i + ": " + "r".repeat(250));',
+      'console.log("x".repeat(9000)); process.exit(1)',
+    ].join("\n");
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [process.execPath, "-e", script],
+        })),
+      },
+      reason: "Exercise a run with more early FAIL lines than fit",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output.length).toBeLessThanOrEqual(8000);
+    expect(output).toMatch(/VISP: \d+ more FAIL lines are left out here; waiver and dispute/);
+  });
+  it("does not add an earlier-lines block when the tail already holds every FAIL line", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const script =
+      'console.log("z".repeat(9000)); console.log("FAIL: last: nope"); process.exit(1)';
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [process.execPath, "-e", script],
+        })),
+      },
+      reason: "Exercise a long run with a late FAIL line",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    const output = (result.ok && result.value.executions[0]?.output) || "";
+    expect(output).not.toContain("earlier in the output");
+    expect(output).toContain("FAIL: last: nope");
+  });
+  it("classifies a sandbox-denied subprocess as an environment failure", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const changed = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({
+          ...check,
+          command: [
+            process.execPath,
+            "-e",
+            "console.error('Error: spawnSync /usr/bin/node EPERM'); process.exit(1)",
+          ],
+        })),
+      },
+      reason: "Exercise a sandbox-denied helper",
+    });
+    expect(changed.ok).toBe(true);
+    expect((await runProductWork(await workspace.state())).ok).toBe(true);
+    const result = await runProductVerify(await workspace.state());
+    expect(result.ok && result.value.executions[0]).toMatchObject({
+      status: "environment-failed",
+      output: expect.stringContaining("supported sandbox escalation"),
     });
   });
   it.each([
@@ -471,4 +692,98 @@ ${masked ? "process.exitCode = 0;" : "process.stdout.write(child.stdout); proces
       });
     },
   );
+});
+
+it("uses complete pinned failure metadata when the displayed failures were cut", () => {
+  const execution = {
+    check: "PINNED_boundary",
+    status: "failed",
+    output: "FAIL: disputed A",
+    pinnedFailures: { names: ["disputed A", "undisputed B"], unattributed: 0 },
+  };
+  const state = {
+    declared: ["disputed A", "undisputed B"],
+    pending: [{ test: "disputed A" }] as Parameters<typeof disputedFailure>[1]["pending"],
+  };
+  expect(disputedFailure(execution, state)).toBe(false);
+  execution.pinnedFailures.names = ["disputed A"];
+  expect(disputedFailure(execution, state)).toBe(true);
+  execution.pinnedFailures.unattributed = 1;
+  expect(disputedFailure(execution, state)).toBe(false);
+  expect(
+    disputedFailure(
+      {
+        check: execution.check,
+        status: execution.status,
+        output:
+          "FAIL: disputed A\nVISP: output shortened for review; full output remains in the local log.",
+      },
+      state,
+    ),
+  ).toBe(false);
+});
+
+it.each([true, false])(
+  "persists full-output completion before shortening (complete=%s)",
+  async (complete) => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const current = await workspace.state();
+    await workspace.write(
+      `.visp/features/${brief.feature}/acceptance-tests.json`,
+      JSON.stringify({ tests: [{ name: "a" }, { name: "b" }, { name: "c" }] }),
+    );
+    const text = [
+      "PASS: a",
+      "FAIL: b: wrong test",
+      ...(complete ? ["PASS: c"] : []),
+      "diagnostic noise\n".repeat(1000),
+    ].join("\n");
+    const record = await readProductRecord(current, {});
+    expect(record.ok).toBe(true);
+    if (!record.ok) return;
+    const result = await executeProductCheck(
+      current,
+      record.value,
+      undefined,
+      {
+        id: "PINNED_completion",
+        environment: "node",
+        outcomes: ["O001"],
+        command: [process.execPath, "-e", `console.log(${JSON.stringify(text)}); process.exit(1)`],
+        files: [],
+      },
+      "subject",
+    );
+    expect(result.execution.pinnedFailures).toEqual({
+      names: ["b"],
+      unattributed: 0,
+      unreported: complete ? [] : ["c"],
+    });
+    const saved = executionSchema.parse(result.execution);
+    const pending = {
+      declared: ["a", "b", "c"],
+      pending: [{ test: "b" }] as Parameters<typeof disputedFailure>[1]["pending"],
+    };
+    // Replacing the display cannot change the decision made from the full execution output.
+    expect(disputedFailure({ ...saved, output: "FAIL: b" }, pending)).toBe(complete);
+  },
+);
+
+it("keeps old pinned summaries readable but refuses incomplete or shortened waiver evidence", () => {
+  const pending = {
+    declared: ["a", "b", "c"],
+    pending: [{ test: "b" }] as Parameters<typeof disputedFailure>[1]["pending"],
+  };
+  const old = {
+    check: "PINNED_old",
+    status: "failed",
+    output: "PASS: a\nFAIL: b",
+    pinnedFailures: { names: ["b"], unattributed: 0 },
+  };
+  expect(disputedFailure(old, pending)).toBe(false);
+  expect(disputedFailure({ ...old, output: `${old.output}\nPASS: c` }, pending)).toBe(true);
+  expect(
+    disputedFailure({ ...old, output: "FAIL: b\nVISP: earlier output omitted" }, pending),
+  ).toBe(false);
 });

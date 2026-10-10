@@ -46,6 +46,9 @@ export async function dispatchPointerTravel(send: PageSend, travel: PointerTrave
   return { from, to, path, durationMs };
 }
 
+/** Frame-driven UIs draw the pull a frame or two after the last move; wait before the held capture. */
+const HELD_SETTLE_MS = 60;
+
 export interface DragGesture {
   readonly from: { x: number; y: number };
   readonly to: { x: number; y: number };
@@ -55,7 +58,11 @@ export interface DragGesture {
   readonly durationMs: number;
 }
 
-/** Native browser input, with release on failure; no fabricated DOM events or success booleans. */
+/**
+ * Native browser input, with release on failure; no fabricated DOM events or success booleans.
+ * `intermediate` (captureDuring) runs once at full pull: after the last move and a short settle,
+ * still before release.
+ */
 export async function dispatchDrag(
   send: PageSend,
   record: (kind: BrowserOperation["kind"], description: string) => void,
@@ -101,7 +108,10 @@ export async function dispatchDrag(
           button: "left",
           buttons: 1,
         });
-      if (step === Math.floor(steps / 2)) await intermediate?.();
+    }
+    if (intermediate) {
+      await new Promise((resolve) => setTimeout(resolve, HELD_SETTLE_MS));
+      await intermediate();
     }
   } finally {
     if (touch)

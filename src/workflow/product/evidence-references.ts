@@ -3,12 +3,13 @@ import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { browserInputIdentitySchema } from "../../testing/browser-input-identity.js";
 import { browserJourneySchema } from "../../testing/browser-journey.js";
-import { replaySuggestions } from "../evidence/capture-replay.js";
+import { replayBatchCommand, replaySuggestions } from "../evidence/capture-replay.js";
 import {
   currentExactReplay,
   exactReplayIdentity,
   historicalFailureIdentity,
   journeyHistoryGroup,
+  journeyIdentityKey,
   legacyFailure,
 } from "../evidence/journey-history.js";
 import { imageDimensions } from "../evidence/observations/media.js";
@@ -16,8 +17,14 @@ import type { ProductReviewImage } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
 import { productCheckSupportsBehavior } from "./check-command.js";
 import { reviewCodeSources } from "./code-context.js";
+import { exploratoryFailureHistory, historicalFailureReferences } from "./exploratory-history.js";
 import { captureSchema, type ProductImageAvailability } from "./images.js";
-import { hasExecutedDeclaredRevision, isDeclaredJourney } from "./journey-ownership.js";
+import {
+  hasExecutedDeclaredRevision,
+  isDeclaredJourney,
+  journeyExpectationSchema,
+  journeyOwnershipIndex,
+} from "./journey-ownership.js";
 import {
   latestExecutionsByOwner,
   type ProductAssessment,
@@ -35,6 +42,8 @@ export interface ProductEvidenceReference {
   readonly summary: string;
   /** Runner-owned binding; never inferred from the reviewer's text. */
   readonly captureRunId?: string;
+  /** Verified historical failure, usable only to require repair/replay, never positive credit. */
+  readonly historicalFailure?: boolean;
   readonly outcomes: readonly string[];
   readonly viewport?: { width: number; height: number };
   readonly measurement?: { json: string; truncated: boolean };
@@ -101,6 +110,7 @@ export const productCaptureRunSchema = z.object({
   comparisonEnvironment: z.string().optional(),
   journey: browserJourneySchema.optional(),
   journeyKey: z.string().optional(),
+  expectation: journeyExpectationSchema.optional(),
   status: z.enum(["completed", "failed", "timed-out", "cancelled"]).optional(),
   completedInputs: z.array(browserInputIdentitySchema).optional(),
   failure: z
@@ -140,9 +150,22 @@ export async function productEvidenceCatalogue(
   imageReferences(record, subject, images, entries, aliases, availability);
   operationReferences(record, subject, entries, selectedSlice);
   controlReferences(record, subject, entries, selectedSlice);
+  historicalFailureEntries(record, entries, selectedSlice);
   const { sources, claims } = await productSources(workspace, record);
-  sources.push(...(codeSources ?? (await reviewCodeSources(workspace, record))));
-  for (const source of sources)
+  sources.push(
+    ...(codeSources ??
+      (await reviewCodeSources(workspace, record, undefined, subject, selectedSlice))),
+  );
+  for (const source of sources) {
+    const execution =
+      source.kind === "executed-check"
+        ? entries.find((entry) => entry.kind === "execution" && source.id === `CHECK-${entry.id}`)
+        : undefined;
+    if (execution) {
+      aliases.set(source.id, execution.id);
+      entries.push({ ...execution, id: source.id });
+      continue;
+    }
     entries.push({
       id: source.id,
       kind: "source",
@@ -150,6 +173,9 @@ export async function productEvidenceCatalogue(
       status: source.available ? "available" : "unavailable",
       summary: `${source.reference}: ${source.sha256}`,
     });
+  }
+  if (codeSources === undefined)
+    entries.push(...recordedDiffReferences(record, subject, entries, selectedSlice));
   const ambiguous = ambiguousEvidenceIds(entries);
   for (const [index, entry] of entries.entries())
     if (ambiguous.has(entry.id))
@@ -158,8 +184,35 @@ export async function productEvidenceCatalogue(
         status: "unavailable",
         summary: `${entry.summary}; ambiguous evidence ID`,
         supportsBehavior: false,
+        historicalFailure: false,
       };
   return { entries, aliases, sources, sourceClaims: claims };
+}
+
+/** Recorded delivery identities stay bound to their review, never to the latest authorization. */
+function recordedDiffReferences(
+  record: ProductRecord,
+  subject: string,
+  entries: readonly ProductEvidenceReference[],
+  slice?: ProductSlice,
+) {
+  const known = new Set(entries.map((entry) => entry.id));
+  const retained = new Map<string, ProductEvidenceReference>();
+  for (const review of record.state.reviews) {
+    const applicable =
+      evidenceApplies(record, subject, review) && evidenceInSlice(review.task, slice);
+    const references = (review.deliveredDiffReferences ?? []).filter(
+      (reference) => reference.sourceKind !== undefined && !known.has(reference.id),
+    );
+    for (const reference of references) {
+      if (applicable || !retained.has(reference.id))
+        retained.set(reference.id, {
+          ...reference,
+          status: applicable ? reference.status : "stale",
+        });
+    }
+  }
+  return [...retained.values()];
 }
 
 export function ambiguousEvidenceIds(entries: readonly ProductEvidenceReference[]) {
@@ -377,6 +430,7 @@ function operationReferences(
       const status = !current ? "stale" : observationStatus(observed);
       entries.push({
         id: observed.id,
+        captureRunId: run.id,
         kind: "operation",
         outcomes: run.task
           ? (record.brief.slices.find((slice) => slice.id === run.task)?.outcomes ?? [])
@@ -388,6 +442,44 @@ function operationReferences(
       });
     }
   }
+}
+
+function historicalFailureEntries(
+  record: ProductRecord,
+  entries: ProductEvidenceReference[],
+  slice?: ProductSlice,
+) {
+  const references = new Map<string, string>();
+  for (const run of exploratoryFailureHistory(record, slice).runs) {
+    for (const id of historicalFailureReferences(run)) references.set(id, run.id as string);
+    entries.push({
+      id: `HIST-${run.id}`,
+      kind: "operation",
+      status: "stale",
+      outcomes: [],
+      captureRunId: run.id,
+      historicalFailure: true,
+      supportsBehavior: false,
+      summary: `Historical runner failure ${run.id}: ${run.status}; ${run.failure?.message.slice(0, 600)}. Negative evidence only: require repair/replay; no current passing credit.`,
+    });
+  }
+  for (const [index, entry] of entries.entries())
+    if (entry.status === "stale" && references.has(entry.id))
+      entries[index] = {
+        ...entry,
+        captureRunId: references.get(entry.id),
+        historicalFailure: true,
+        supportsBehavior: false,
+        summary: entry.summary.slice(0, 600),
+        ...(entry.measurement
+          ? {
+              measurement: {
+                json: entry.measurement.json.slice(0, 2000),
+                truncated: entry.measurement.truncated || entry.measurement.json.length > 2000,
+              },
+            }
+          : {}),
+      };
 }
 
 function controlReferences(
@@ -510,16 +602,19 @@ export function currentJourneyFailures(
     ),
     ...pendingJourneyReplays(record, subject, task).map(
       (run) =>
-        `Replay required for ${run.id}: ${run.failure?.message}. Run visp capture --feature ${record.brief.feature}${run.task ? ` --task ${run.task}` : ""} --replay ${run.id}; keep the original interactions and assertions.`,
+        `Replay required for ${run.id}: ${run.failure?.message}. Run ${replayBatchCommand(record.brief.feature, run.id ?? "", run.task)}; keep the original interactions and assertions.`,
     ),
   ];
 }
 
 /** A source edit makes old evidence stale; it does not demonstrate that a known defect was repaired. */
 export function pendingJourneyReplays(record: ProductRecord, subject: string, task?: string) {
+  const ownership = journeyOwnershipIndex(record);
   const failed = new Map<string, z.infer<typeof productCaptureRunSchema>>();
   const current = latestCurrentJourneys(record, subject, task);
-  const unresolved = new Set(currentFailedJourneys(record, subject, task).map((run) => run.id));
+  const unresolved = new Set(
+    currentFailedJourneys(record, subject, task, ownership).map((run) => run.id),
+  );
   for (const candidate of record.state.captureRuns) {
     const parsed = productCaptureRunSchema.safeParse(candidate);
     if (!parsed.success) continue;
@@ -527,6 +622,7 @@ export function pendingJourneyReplays(record: ProductRecord, subject: string, ta
     if (
       !run.id ||
       !run.journey ||
+      ownership.isExploratory(run) ||
       run.failure?.kind !== "behavior" ||
       (task && run.task && run.task !== task) ||
       (run.task && !record.brief.slices.some((slice) => slice.id === run.task))
@@ -541,7 +637,7 @@ export function pendingJourneyReplays(record: ProductRecord, subject: string, ta
         (run) =>
           (legacyFailure(failure)
             ? currentExactReplay(run) && exactReplayIdentity(run) === exactReplayIdentity(failure)
-            : run.journeyKey === failure.journeyKey) &&
+            : journeyIdentityKey(run) === journeyIdentityKey(failure)) &&
           (run.status === "completed" || !unresolved.has(run.id)),
       ) &&
       (legacyFailure(failure) || !evidenceApplies(record, subject, failure)),
@@ -571,8 +667,25 @@ function focusedTerminalMeasurement(measurement: { json: string; truncated: bool
   return measurement;
 }
 
+function journeyRecovery(
+  record: ProductRecord,
+  run: ReturnType<typeof currentFailedJourneys>[number],
+  task: string | undefined,
+  launched: boolean,
+): string {
+  if (isDeclaredJourney(record, run))
+    return `Rerun or correct the declared journey in the brief; preserve its outcome.${launched ? "" : " After that same check passes, review --prepare can supply counterevidence to diagnose the obsolete assertion without changing intent."}`;
+  return `Keep the original input, route and viewport when checking a suspected test-route error. Scroll to an off-screen control if appropriate, execute that control and observe the actual result.${launched ? "" : ` Then visp review --feature ${record.brief.feature}${task ? ` --task ${task}` : ""} --prepare can offer current counterevidence for your diagnosis; it does not clear failures automatically.`}`;
+}
+
 /** Bounded repair context from the same applicable failures used by completion gates. */
-export function currentJourneyFeedback(record: ProductRecord, subject: string, task?: string) {
+export function currentJourneyFeedback(
+  record: ProductRecord,
+  subject: string,
+  task?: string,
+  /** VISP launches the reviewer, so the worker has no review to prepare. */
+  launched = false,
+) {
   const failures = currentFailedJourneys(record, subject, task);
   return {
     replay: replaySuggestions(record, subject, task),
@@ -588,9 +701,7 @@ export function currentJourneyFeedback(record: ProductRecord, subject: string, t
           runId: run.id,
           status: run.status,
           input: run.failure?.input,
-          recovery: isDeclaredJourney(record, run)
-            ? "Rerun or correct the declared journey in the brief; preserve its outcome. After that same check passes, review --prepare can supply counterevidence to diagnose the obsolete assertion without changing intent."
-            : `Keep the original input, route and viewport when checking a suspected test-route error. Scroll to an off-screen control if appropriate, execute that control and observe the actual result. Then visp review --feature ${record.brief.feature}${task ? ` --task ${task}` : ""} --prepare can offer current counterevidence for your diagnosis; it does not clear failures automatically.`,
+          recovery: journeyRecovery(record, run, task, launched),
           message: (run.failure?.message ?? "Journey did not complete").slice(0, 1000),
           failureOperationId: run.failure?.operationId ?? observed?.id,
           ...(measurement
@@ -649,7 +760,12 @@ export function latestCurrentJourneys(record: ProductRecord, subject: string, ta
   return [...latest.values()];
 }
 
-export function currentFailedJourneys(record: ProductRecord, subject: string, task?: string) {
+export function currentFailedJourneys(
+  record: ProductRecord,
+  subject: string,
+  task?: string,
+  ownership = journeyOwnershipIndex(record),
+) {
   const runs = latestCurrentJourneys(record, subject, task);
   const completed = new Map(
     record.state.captureRuns.flatMap((candidate) => {
@@ -668,6 +784,7 @@ export function currentFailedJourneys(record: ProductRecord, subject: string, ta
     (run) =>
       run.status &&
       run.status !== "completed" &&
+      !(run.failure?.kind === "behavior" && ownership.isExploratory(run)) &&
       !resolutions.some(
         (resolution) =>
           resolution.runId === run.id &&
