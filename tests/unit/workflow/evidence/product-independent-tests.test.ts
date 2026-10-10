@@ -215,6 +215,23 @@ it("rejects a test file without enough assertions", async () => {
   });
 });
 
+// Testers sometimes import Node's assert module under another name; those calls are assertions.
+it("counts calls through an aliased assert import as assertions", async () => {
+  const fixture = await testerWorkspace();
+  const content = `import check from "node:assert/strict";
+const strict = require("assert");
+check.equal(1, 2); check(false); strict.ok(false);
+`;
+  const work = await runProductWork(
+    await fixture.workspace.state(),
+    { task: "T001" },
+    inlineTests(tester({ name: "aliased.test.mjs", content })),
+  );
+  expect(work.ok && work.value.independentTests).not.toMatchObject({
+    reason: expect.stringContaining("assertions"),
+  });
+});
+
 it("does not pin a suite when its interpreter exits with command-not-found", async () => {
   const fixture = await testerWorkspace();
   const content = `import assert from "node:assert/strict";
