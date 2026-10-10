@@ -23,7 +23,10 @@ import {
   independentTestsBeforeWork,
   inlineTests,
   readTestsRecord,
+  saveTestsRecord,
   startIndependentTests,
+  type TesterRequest,
+  writeConfiguredTests,
   writeIndependentTests,
 } from "../../../../src/workflow/product/independent-tests.js";
 import { runProductReport } from "../../../../src/workflow/product/index.js";
@@ -1329,6 +1332,106 @@ it("runs the tester on an existing codebase in a writable copy only when opted i
   expect(work.ok, JSON.stringify(work)).toBe(true);
   expect(requests[0]?.explore).toBe(true);
   expect(requests[0]?.prompt).toContain("run the program and observe it");
+});
+
+// A retry used the project as it was then: files committed after a new-project launch gave
+// a Codex tester a writable, networked copy the project never opted in to.
+it("retries a new-project tester in new-project mode after the project gains source files", async () => {
+  const fixture = await testerWorkspace();
+  // Untracked at launch, so the project is still new; committing them changes no source bytes.
+  for (const name of ["a", "b", "c"])
+    await fixture.workspace.write(`lib/${name}.mjs`, "export const x = 1;\n");
+  const failed = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async () => {
+      throw new Error("model unavailable");
+    },
+  );
+  expect(failed.ok && failed.value.status).toBe("failed");
+  fixture.workspace.commit("three tracked source files");
+  const requests: TesterRequest[] = [];
+  const retry = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async (request) => {
+      requests.push(request);
+      return { file: null, existingBehavior: false, tests: [], notes: "" };
+    },
+    true,
+  );
+  expect(retry.ok && retry.value.status, JSON.stringify(retry)).toBe("declined");
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.explore).toBeFalsy();
+  expect(requests[0]?.blockedPaths).toBeUndefined();
+  expect(requests[0]?.prompt).toContain("You are in an empty temporary directory");
+});
+
+it("refuses to retry a tester in execution mode on an existing codebase that did not opt in", async () => {
+  const created = await TestWorkspace.create(
+    {
+      "src/value.mjs": "export const value = 1;\n",
+      "lib/a.mjs": "export const a = 1;\n",
+      "lib/b.mjs": "export const b = 1;\n",
+    },
+    { critic: true },
+  );
+  workspace = created;
+  const config = parse(await readFile(join(created.root, "visp.yml"), "utf8"));
+  config.critic = { ...config.critic, harness: "codex", launch: "codex-exec", mode: "auto" };
+  // Recalling earlier requests would run a real Codex model call.
+  config.memory = { ...config.memory, enabled: false };
+  await created.write("visp.yml", stringify(config));
+  await created.installFoundation();
+  created.commit("existing code, not opted in");
+  const request = "Return two from the public module.\nKeep the module name.";
+  const feature = await createProductFeatureWithTests(
+    await created.state(),
+    { goal: "Two", sourceBrief: request },
+    undefined,
+  );
+  if (!feature.ok) throw new Error(feature.error.message);
+  const id = feature.value.brief.feature;
+  // A failed record with no launch mode, as an earlier VISP version left it.
+  const failed = {
+    version: 1 as const,
+    status: "failed" as const,
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    model: "gpt-5",
+    reason: "model unavailable",
+  };
+  expect((await saveTestsRecord(await created.state(), id, failed, undefined)).ok).toBe(true);
+  const requests: TesterRequest[] = [];
+  const recording: IndependentTester = async (testerRequest) => {
+    requests.push(testerRequest);
+    return { file: null, existingBehavior: true, tests: [], notes: "" };
+  };
+  const refusal = {
+    ok: false,
+    error: {
+      code: "CONFIG_INVALID",
+      message: expect.stringContaining("critic.existingCodeTests: true"),
+    },
+  };
+  expect(await writeIndependentTests(await created.state(), id, recording, true)).toMatchObject(
+    refusal,
+  );
+  // `visp work --feature <id> --retry-tests`.
+  expect(await writeConfiguredTests(await created.state(), id, true)).toMatchObject(refusal);
+  // A repeated `visp feature` request says why instead of restarting the tester.
+  const repeated = await createProductFeatureWithTests(
+    await created.state(),
+    { goal: "Two", sourceBrief: request },
+    inlineTests(recording),
+  );
+  expect(repeated.ok && repeated.value).toMatchObject({
+    duplicateOf: id,
+    testsNote: expect.stringContaining("execution mode"),
+  });
+  expect(requests).toHaveLength(0);
+  const record = await readTestsRecord(await created.state(), id);
+  expect(record.ok && record.value).toEqual(failed);
 });
 
 // Evidence: suites that covered only setup and shapes let a rewrite silently break the

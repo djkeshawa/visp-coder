@@ -79,6 +79,10 @@ import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./
 
 const RECORD = TESTS_RECORD;
 const START_SOURCE = "tester-source-digest";
+/** Whether the project had existing code when the tester first started, beside its digest. */
+const START_MODE = "tester-launch-mode";
+const EXISTING_CODE_MODE = "existing-code";
+const NEW_PROJECT_MODE = "new-project";
 const TESTER_TIMEOUT_MS = 720_000;
 const BASELINE_TIMEOUT_MS = 120_000;
 const STALE_RUNNING_MS = 2 * TESTER_TIMEOUT_MS + BASELINE_TIMEOUT_MS;
@@ -531,6 +535,7 @@ async function startingSourceDigest(
   const source = await productSourceSnapshot(workspace, brief);
   if (!source.ok) return source;
   const digest = hashValue(source.value);
+  const mode = (await existingCode(workspace.paths.root)) ? EXISTING_CODE_MODE : NEW_PROJECT_MODE;
   const saved = await retryBusy(() =>
     applyFileTransaction(workspace.paths.root, "record-tester-source", [
       {
@@ -539,10 +544,49 @@ async function startingSourceDigest(
         content: `${digest}\n`,
         expectedBefore: { existed: false },
       },
+      {
+        kind: "write",
+        path: workspace.paths.featureFile(feature, START_MODE),
+        content: `${mode}\n`,
+        expectedBefore: { existed: false },
+      },
     ]),
   );
   if (!saved.ok) return saved;
   return ok(digest);
+}
+
+/**
+ * Whether the tester runs in execution mode, as decided when it first started: a retry after
+ * files were added or committed keeps its launch mode. Features started before VISP recorded
+ * the mode use the project as it is now; `executionRefusal` still guards that case.
+ */
+async function launchedOnExistingCode(
+  workspace: WorkspaceState,
+  feature: string,
+): Promise<Result<boolean>> {
+  const stored = await workspace.files.readTextIfExists(
+    workspace.paths.featureFile(feature, START_MODE),
+  );
+  if (!stored.ok) return stored;
+  if (stored.value === undefined) return ok(await existingCode(workspace.paths.root));
+  const mode = stored.value.trim();
+  return mode === EXISTING_CODE_MODE || mode === NEW_PROJECT_MODE
+    ? ok(mode === EXISTING_CODE_MODE)
+    : err(vispError("ARTIFACT_INVALID", `Unreadable ${START_MODE}`));
+}
+
+/**
+ * Execution mode gives the tester a writable, networked repository copy. A first launch gets
+ * it only with `critic.existingCodeTests: true` (testerApplies); retries and direct runs too.
+ */
+function executionRefusal(
+  workspace: WorkspaceState,
+  feature: string,
+  existingCodebase: boolean,
+): string | undefined {
+  if (!existingCodebase || workspace.config.critic?.existingCodeTests === true) return undefined;
+  return `The independent tester of ${feature} was not run: on an existing codebase it runs in execution mode (a writable repository copy with network access), which VISP allows only with critic.existingCodeTests: true in visp.yml`;
 }
 
 /** `visp feature` without the tester: the source-brief check, then the feature. */
@@ -573,20 +617,24 @@ export async function createProductFeatureWithTests(
   starter: TestsStarter | undefined,
 ): Promise<Result<ProductFeatureOutcome>> {
   const created = await createProductFeatureChecked(workspace, options, starter);
-  if (created.ok) await startFeatureTester(workspace, created.value, starter);
-  return created;
+  if (!created.ok) return created;
+  const refused = await startFeatureTester(workspace, created.value, starter);
+  return refused ? ok({ ...created.value, testsNote: refused }) : created;
 }
 
-/** The tester of a new feature; of the earlier one when the request was a repeat. */
-function startFeatureTester(
+/**
+ * The tester of a new feature; of the earlier one when the request was a repeat. Resolves to
+ * the reason when VISP refused to restart it.
+ */
+async function startFeatureTester(
   workspace: WorkspaceState,
   created: ProductFeatureOutcome,
   starter: TestsStarter | undefined,
-): Promise<void> {
+): Promise<string | undefined> {
   // A repeated request returns the earlier feature, which must still end with pinned tests.
-  return created.duplicateOf
-    ? restartTester(workspace, created.duplicateOf, starter)
-    : startIndependentTests(workspace, created.brief.feature, starter);
+  if (created.duplicateOf) return restartTester(workspace, created.duplicateOf, starter);
+  await startIndependentTests(workspace, created.brief.feature, starter);
+  return undefined;
 }
 
 /** How long `visp feature` waits for the tester's record before it prints. */
@@ -605,6 +653,7 @@ export async function beginFeatureTester(
 ): Promise<{ readonly testsNote?: string; readonly finished: Promise<void> }> {
   const feature = created.duplicateOf ?? created.brief.feature;
   let settled = false;
+  let refused: string | undefined;
   // The note is true only for a tester this process started and runs itself.
   let started = false;
   const watched: TestsStarter | undefined =
@@ -618,7 +667,8 @@ export async function beginFeatureTester(
     );
   const finished = startFeatureTester(workspace, created, watched)
     .catch(() => undefined)
-    .then(() => {
+    .then((reason) => {
+      refused = reason;
       settled = true;
     });
   const deadline = Date.now() + RECORD_WAIT_MS;
@@ -629,22 +679,35 @@ export async function beginFeatureTester(
         finished,
         testsNote: `Run visp work --feature ${feature} now; this command keeps running only to write VISP's acceptance tests — leave it running and do not run visp feature again.`,
       };
-    if (settled || Date.now() >= deadline) return { finished };
+    if (settled || Date.now() >= deadline)
+      return { finished, ...(refused ? { testsNote: refused } : {}) };
     await sleep(100);
   }
 }
 
-/** The tester of an existing feature that has none, failed, or stopped without a result. */
+/**
+ * The tester of an existing feature that has none, failed, or stopped without a result.
+ * Resolves to the reason when its launch mode needs an opt-in the project does not give.
+ */
 async function restartTester(
   workspace: WorkspaceState,
   feature: string,
   starter: TestsStarter | undefined,
-): Promise<void> {
-  if (!starter) return;
+): Promise<string | undefined> {
+  if (!starter) return undefined;
   const existing = await readTestsRecord(workspace, feature);
-  if (!existing.ok) return;
-  if (!existing.value) return startIndependentTests(workspace, feature, starter);
-  if (await mayRestartTester(existing.value, true)) await starter(workspace, feature, 0, true);
+  if (!existing.ok) return undefined;
+  if (!existing.value) {
+    await startIndependentTests(workspace, feature, starter);
+    return undefined;
+  }
+  if (!(await mayRestartTester(existing.value, true))) return undefined;
+  const existingCodebase = await launchedOnExistingCode(workspace, feature);
+  if (!existingCodebase.ok) return existingCodebase.error.message;
+  const refused = executionRefusal(workspace, feature, existingCodebase.value);
+  if (refused) return refused;
+  await starter(workspace, feature, 0, true);
+  return undefined;
 }
 
 const SOURCE_FILE =
@@ -793,14 +856,14 @@ async function testsFromSnapshot(
   feature: string,
   tester: IndependentTester,
   brief: ProductRecord["brief"],
-  setup: { model: string; reasoningEffort?: string; sourceDigest: string },
+  setup: TesterSetup,
 ): Promise<TestFields> {
   let snapshot: TesterSnapshot | undefined;
   try {
     const captured = await captureTesterSnapshot(workspace, brief, setup.sourceDigest);
     if (!captured.ok) return { status: "failed", reason: captured.error.message };
     snapshot = captured.value;
-    const existingCodebase = await existingCode(workspace.paths.root);
+    const { existingCodebase } = setup;
     const rules = await rulesForRequest(workspace, feature);
     const request: TesterRequest = {
       root: workspace.paths.root,
@@ -823,21 +886,36 @@ async function testsFromSnapshot(
   }
 }
 
+interface TesterSetup {
+  readonly model: string;
+  readonly reasoningEffort?: string;
+  readonly sourceDigest: string;
+  readonly sourceChanged: boolean;
+  /** The launch-time mode: a retry runs in the mode its first start had. */
+  readonly existingCodebase: boolean;
+}
+
+/** The launch-time source and mode a run uses, or why VISP refuses to run the tester. */
 async function testerSetup(
   workspace: WorkspaceState,
   feature: string,
   brief: ProductRecord["brief"],
   previous: IndependentTestsRecord | undefined,
-): Promise<
-  Result<{ model: string; reasoningEffort?: string; sourceDigest: string; sourceChanged: boolean }>
-> {
+): Promise<Result<TesterSetup>> {
   const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
   if (!policy.ok) return policy;
   const model = policy.value.config?.model;
   if (!model) return err(vispError("CONFIG_INVALID", "The tester needs a configured critic model"));
   const source = await productSourceSnapshot(workspace, brief);
   if (!source.ok) return source;
-  const startedSource = await readStartingSource(workspace, feature);
+  const existingCodebase = await launchedOnExistingCode(workspace, feature);
+  if (!existingCodebase.ok) return existingCodebase;
+  const refused = executionRefusal(workspace, feature, existingCodebase.value);
+  if (refused) return err(vispError("CONFIG_INVALID", refused));
+  // Starters record the launch source and mode first; a direct `work --write-tests` does here.
+  const startedSource = previous
+    ? await readStartingSource(workspace, feature)
+    : await startingSourceDigest(workspace, feature, brief);
   if (!startedSource.ok) return startedSource;
   const current = hashValue(source.value);
   const sourceDigest = previous?.sourceDigest ?? startedSource.value ?? current;
@@ -846,6 +924,7 @@ async function testerSetup(
     reasoningEffort: policy.value.config?.reasoningEffort,
     sourceDigest,
     sourceChanged: sourceDigest !== current,
+    existingCodebase: existingCodebase.value,
   });
 }
 
