@@ -51,11 +51,11 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check src tests",
+    "build": "tsup && tsup --config tsup.ui.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p ui",
+    "lint": "biome check src tests ui/src",
     "knip": "knip && knip --cycles",
-    "format": "biome check --write src tests",
+    "format": "biome check --write src tests ui/src",
     "test": "vitest run",
     "test:unit": "pnpm build && vitest run tests/unit",
     "test:integration": "pnpm build && vitest run tests/integration",
