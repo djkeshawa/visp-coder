@@ -314,6 +314,24 @@ The feature is built under VISP itself (dogfooding). Each milestone is a VISP fe
 6. First render is under 1 s for a feature with 20 slices and 200 executions on a mid-range laptop.
 7. All security tests in §16 pass.
 
+### Measured against items 2 and 6 (10 October 2026): not met
+
+`tests/integration/ui/large-demo.test.ts` seeds a feature with 20 slices through the workflow services (200 real `node --test` executions) and `bench/ui/bench-ui.mjs` times the page in headless Chromium: cold HTTP cache, signed in, 7 trials. Machine: 4 vCPU Xeon at 2.8 GHz, idle. Medians, with p90 in brackets:
+
+| Measure | 110 executions (what VISP keeps) | 200 executions | Target |
+| --- | --- | --- | --- |
+| First render, Now (all 20 slices and every run mark painted) | 980 ms (1,056) | 1,085 ms (1,106) | < 1 s |
+| First render, Runs (every run row) | 1,129 ms (1,219) | 1,191 ms (1,309) | < 1 s |
+| Same, Now, at 4× CPU throttling | 1,912 ms | 2,255 ms | — |
+| `visp brief --patch` to the decision on the open page | 1,184 ms (1,223) | — | 500 ms |
+| `visp verify` to its new run mark on the open page | 1,290 ms (2,800) | — | 500 ms |
+
+Live times run from the last write under `.visp/`; every change arrived through the event stream (the 10-second refresh never explained a trial). Notes:
+
+- **A feature rarely holds 200 executions.** The trail keeps the newest 100 plus those reviews cite and the latest of each check (`trail.ts`), so the seed above settles at 110. The 200 column holds compaction off while seeding.
+- **The watcher is fast; the re-read is slow.** The `change` event reaches the page 150 ms after the first write (600 ms for `verify`, whose first write is its check log). The page then re-fetches the feature, which takes most of the remaining time.
+- **The cost is parsing, not the number of runs.** Alone, `/api/v1/features/<id>` takes about 200 ms, `/api/v1/requests` 250 ms and `/api/v1/overview` 60 ms; page load issues them together on the server's one thread. In a CPU profile, reading the product record took 522 ms of the requests' time: 399 ms parsing `brief.yaml` (12 KB, about 11 ms per parse, roughly three parses per request) and about 170 ms schema validation. Hashing the product source took 97 ms and git subprocesses about 200 ms.
+
 ## 17. Reuse map
 
 | Source | What to reuse |

@@ -34,6 +34,10 @@ and a nonzero program exit fails even when its output matches. They use temporar
 and the standard library, without calling models. Oracle qualification is not a comparison
 of coding workflows.
 
+## Timing the dashboard
+
+`bench/ui/bench-ui.mjs` times `visp ui` against the first-render and live-update targets in [the dashboard specification](../docs/specs/visp-ui.md#16-testing-and-acceptance), on a feature that `tests/integration/ui/large-demo.test.ts` seeds with 20 slices and 200 real executions. Usage is at the top of the script; results are in the specification.
+
 ## Running
 
 Runs, builds and worker homes live outside the repository, in `$VISP_BENCH_RUNS` (default `~/visp-bench`).
