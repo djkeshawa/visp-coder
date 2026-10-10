@@ -1,148 +1,13 @@
-import type { UiCheck, UiFeature, UiOutcome, UiSlice } from "../../../src/ui/contract.js";
+import type { UiCheck, UiFeature, UiSlice } from "../../../src/ui/contract.js";
 import { h } from "../dom.js";
 import { executionTone, executionWord, relativeTime, type Tone } from "../format.js";
 import type { Actions, AppState } from "../state.js";
 import { chips, disclosure, empty, mark, status } from "./parts.js";
 
-export function progressPanel(feature: UiFeature, state: AppState, actions: Actions): HTMLElement {
-  return h(
-    "div",
-    { class: "progress" },
-    outcomesSection(feature, state, actions),
-    slicesSection(feature, state, actions),
-    notesSection(feature),
-  );
-}
-
-function outcomesSection(feature: UiFeature, state: AppState, actions: Actions): HTMLElement {
+export function slicesSection(feature: UiFeature, state: AppState, actions: Actions): HTMLElement {
   return h(
     "section",
-    { class: "block", "aria-labelledby": "outcomes-heading" },
-    h(
-      "div",
-      { class: "block-head" },
-      h("h2", { id: "outcomes-heading" }, "Outcomes"),
-      h(
-        "p",
-        null,
-        "What the work has to achieve. Met means executed checks passed and any required review agreed.",
-      ),
-    ),
-    feature.outcomes.length === 0
-      ? empty(
-          "No outcomes yet",
-          "The agent defines outcomes in the brief before it builds anything.",
-        )
-      : h(
-          "ul",
-          { class: "outcomes" },
-          feature.outcomes.map((outcome) =>
-            h("li", null, outcomeRow(feature.id, outcome, state, actions)),
-          ),
-        ),
-  );
-}
-
-function outcomeRow(
-  feature: string,
-  outcome: UiOutcome,
-  state: AppState,
-  actions: Actions,
-): HTMLElement {
-  const key = `outcome:${feature}:${outcome.id}`;
-  const summary = h(
-    "span",
-    { class: "outcome-summary" },
-    mark(
-      outcome.satisfied
-        ? "good"
-        : outcome.behavior === "failed" || outcome.review === "failed"
-          ? "bad"
-          : "neutral",
-      outcome.satisfied ? "Met" : "Not met yet",
-    ),
-    h("span", { class: "outcome-text" }, outcome.statement),
-    h(
-      "span",
-      { class: "outcome-evidence" },
-      evidenceWord("Checks", behaviorTone(outcome.behavior), behaviorLabel(outcome.behavior)),
-      outcome.requiredReview || outcome.review !== "unassessed"
-        ? evidenceWord("Review", reviewTone(outcome.review), reviewLabel(outcome.review))
-        : null,
-    ),
-  );
-  return disclosure(
-    key,
-    summary,
-    () =>
-      h(
-        "div",
-        { class: "outcome-detail" },
-        h(
-          "p",
-          { class: "meta-row" },
-          h("span", { class: "chip" }, outcome.id),
-          h("span", null, `${capitalize(outcome.kind)} outcome, ${outcome.priority}`),
-          h("span", null, capitalize(provenanceLabel(outcome.provenance))),
-        ),
-        outcome.expectations.length > 0
-          ? h(
-              "ul",
-              { class: "expectations" },
-              outcome.expectations.map((expectation) =>
-                h(
-                  "li",
-                  null,
-                  h("span", { class: "chip" }, expectation.id),
-                  " ",
-                  expectation.statement,
-                ),
-              ),
-            )
-          : h("p", { class: "fine" }, "No separate expectations recorded."),
-      ),
-    actions,
-    state.expanded.has(key),
-    "outcome",
-  );
-}
-
-function evidenceWord(label: string, tone: Tone, value: string): HTMLElement {
-  return h(
-    "span",
-    { class: `evidence-word tone-${tone}` },
-    h("span", { class: "evidence-label" }, label),
-    value,
-  );
-}
-
-const behaviorTone = (value: UiOutcome["behavior"]): Tone =>
-  value === "passed" ? "good" : value === "failed" ? "bad" : "neutral";
-const behaviorLabel = (value: UiOutcome["behavior"]) =>
-  value === "passed" ? "passed" : value === "failed" ? "failing" : "no current run";
-const reviewTone = (value: UiOutcome["review"]): Tone =>
-  value === "satisfied"
-    ? "good"
-    : value === "failed"
-      ? "bad"
-      : value === "unclear"
-        ? "warn"
-        : "neutral";
-const reviewLabel = (value: UiOutcome["review"]) =>
-  value === "unassessed" ? "not reviewed" : value;
-const provenanceLabel = (value: string) =>
-  value === "user-stated"
-    ? "stated by you"
-    : value === "independent"
-      ? "independent"
-      : value === "agent-proposed"
-        ? "proposed by the agent"
-        : value;
-
-function slicesSection(feature: UiFeature, state: AppState, actions: Actions): HTMLElement {
-  return h(
-    "section",
-    { class: "block", "aria-labelledby": "slices-heading" },
+    { class: "card block", "aria-labelledby": "slices-heading" },
     h(
       "div",
       { class: "block-head" },
@@ -255,7 +120,7 @@ function checkRow(feature: string, check: UiCheck, actions: Actions): HTMLElemen
   );
   if (run)
     row.addEventListener("click", () =>
-      actions.navigate({ view: "feature", feature, tab: "progress", run: run.id }),
+      actions.navigate({ view: "feature", feature, tab: "runs", run: run.id }),
     );
   return row;
 }
@@ -290,11 +155,11 @@ function scopeDetail(slice: UiSlice): HTMLElement {
   );
 }
 
-function notesSection(feature: UiFeature): HTMLElement | null {
+export function notesSection(feature: UiFeature): HTMLElement | null {
   if (feature.decisions.length === 0 && feature.uncertainties.length === 0) return null;
   return h(
     "section",
-    { class: "block notes", "aria-labelledby": "notes-heading" },
+    { class: "card block notes", "aria-labelledby": "notes-heading" },
     h(
       "div",
       { class: "block-head" },
@@ -323,5 +188,3 @@ function notesSection(feature: UiFeature): HTMLElement | null {
       : null,
   );
 }
-
-const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);

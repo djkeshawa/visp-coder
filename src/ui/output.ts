@@ -1,3 +1,5 @@
+import type { ExecutionStatus } from "./contract.js";
+
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences start with ESC.
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
 const FAILURE = /\b(?:not ok|fail(?:ed|ure|ing)?|error|assert(?:ion)?(?:error)?)\b|✖|×/i;
@@ -18,10 +20,7 @@ export function stripAnsi(text: string): string {
  * that reads like one; for a pass, the test runner's pass count when it prints
  * one; otherwise the last thing the command printed.
  */
-export function outputHeadline(
-  output: string,
-  status: "passed" | "failed" | "environment-failed",
-): string {
+export function outputHeadline(output: string, status: ExecutionStatus): string {
   const lines = stripAnsi(output)
     .split(/\r?\n/)
     .map((line) => line.trim())

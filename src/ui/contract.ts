@@ -77,10 +77,24 @@ export interface UiOutcome {
   readonly review: "satisfied" | "failed" | "unclear" | "unavailable" | "unassessed";
   readonly requiredReview: boolean;
   readonly satisfied: boolean;
+  /** The latest run of each agent check that names this outcome, counted by result. */
+  readonly checks: UiEvidenceCount;
   readonly expectations: readonly { readonly id: string; readonly statement: string }[];
 }
 
-export type ExecutionStatus = "passed" | "failed" | "environment-failed";
+/** Checks counted by their latest run. A stale run counts as stale, never as passed. */
+export interface UiEvidenceCount {
+  readonly total: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly stale: number;
+  readonly notRun: number;
+}
+
+export type ExecutionStatus = "passed" | "failed" | "timed-out" | "environment-failed";
+
+/** Who wrote a check: the agent in its brief, or VISP's independent tester (a pinned suite). */
+export type CheckSource = "agent" | "tester";
 
 export interface UiExecutionSummary {
   readonly id: string;
@@ -91,6 +105,7 @@ export interface UiExecutionSummary {
   readonly status: ExecutionStatus;
   readonly exitCode: number;
   readonly durationMs: number;
+  readonly source: CheckSource;
   readonly provenance: "supervisor-executed" | "supervisor-reused";
   readonly assertions: "agent-reported" | "runner-observed";
   /** False when the product, the slice contract or the verifier changed after this run. */
@@ -158,7 +173,7 @@ export interface UiReview {
   readonly findings: number;
   readonly resolutions: readonly {
     readonly id: string;
-    readonly disposition: "repaired" | "disproved";
+    readonly disposition: "repaired" | "disproved" | "still-open" | "not-reproducible";
     readonly explanation: string;
   }[];
 }
@@ -220,8 +235,33 @@ export interface UiFeature {
   readonly decisions: readonly { readonly id: string; readonly statement: string }[];
   readonly uncertainties: readonly string[];
   readonly report: string;
+  readonly tester: UiTester;
   /** When the server read this state. The product can change after it. */
   readonly readAt: string;
+}
+
+/**
+ * VISP's independent tester: it writes an acceptance suite from the original request
+ * alone, which is pinned so the agent cannot edit it. It covers the whole request,
+ * not one outcome.
+ */
+export interface UiTester {
+  readonly status:
+    | "none"
+    | "running"
+    | "pinned"
+    | "rejected"
+    | "failed"
+    | "declined"
+    | "unreadable";
+  readonly model?: string;
+  /** Tests the suite declares. */
+  readonly tests: number;
+  readonly ambiguities: number;
+  readonly at?: string;
+  readonly reason?: string;
+  /** The newest run of the pinned suite, current or not. */
+  readonly latest?: UiExecutionSummary;
 }
 
 export type RequestKind = "question" | "handoff" | "acceptance" | "environment" | "review";

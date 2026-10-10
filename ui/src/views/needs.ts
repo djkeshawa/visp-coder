@@ -1,7 +1,7 @@
 import type { RequestKind, UiRequest } from "../../../src/ui/contract.js";
 import { h, icon } from "../dom.js";
 import { fullTime, relativeTime, withQuotedAnswer } from "../format.js";
-import type { Actions, AppState } from "../state.js";
+import type { Actions, AppState, NeedsFilter } from "../state.js";
 import { command, empty, resource } from "./parts.js";
 
 const KIND_ICON: Record<RequestKind, string> = {
@@ -12,34 +12,95 @@ const KIND_ICON: Record<RequestKind, string> = {
   review: "review",
 };
 
+const KIND_NAMES: Record<RequestKind, string> = {
+  question: "Questions",
+  environment: "Environment",
+  acceptance: "Ready to accept",
+  handoff: "Handed off",
+  review: "Review",
+};
+
+const KIND_EYEBROW: Record<RequestKind, string> = {
+  question: "Question from the agent",
+  environment: "Environment blocked a check",
+  acceptance: "Ready for acceptance",
+  handoff: "Handed over to you",
+  review: "Review needs a person",
+};
+
 export function needsPage(state: AppState, actions: Actions): Node {
+  const requests = state.requests.data?.requests ?? [];
+  const filter = state.needsFilter;
   return h(
     "article",
     { class: "needs", "aria-labelledby": "needs-title" },
     h(
-      "header",
-      { class: "page-header" },
-      h("h1", { id: "needs-title" }, "Needs you"),
+      "nav",
+      { class: "needs-nav", "aria-label": "Request kinds" },
+      h("h1", { id: "needs-title", class: "page-headline" }, "Needs you"),
+      filterButton("all", "All open", requests.length, filter, actions),
+      (Object.keys(KIND_NAMES) as RequestKind[]).map((kind) =>
+        filterButton(
+          kind,
+          KIND_NAMES[kind],
+          requests.filter((request) => request.kind === kind).length,
+          filter,
+          actions,
+        ),
+      ),
       h(
         "p",
-        null,
-        "Questions your agent asked and decisions VISP leaves to a person. This page only shows them; answer in your agent's chat or paste the command.",
+        { class: "needs-note" },
+        "The dashboard never acts for you. It builds the command; you run it, or answer in your agent's chat.",
       ),
       notificationControl(state, actions),
     ),
-    resource(state.requests, "Loading requests", actions, (data) =>
-      data.requests.length === 0
-        ? empty(
-            "Nothing needs you right now",
-            "When your agent asks a question or work is ready for your decision, it shows up here.",
-          )
-        : h(
-            "ol",
-            { class: "requests" },
-            data.requests.map((request) => h("li", null, requestCard(request, state, actions))),
-          ),
+    h(
+      "div",
+      { class: "needs-list" },
+      resource(state.requests, "Loading requests", actions, (data) => {
+        const shown = data.requests.filter(
+          (request) => filter === "all" || request.kind === filter,
+        );
+        return shown.length === 0
+          ? h(
+              "div",
+              { class: "card card-body" },
+              empty(
+                "Nothing needs you right now",
+                "When your agent asks a question or work is ready for your decision, it shows up here.",
+              ),
+            )
+          : h(
+              "ol",
+              { class: "requests" },
+              shown.map((request) => h("li", null, requestCard(request, state, actions))),
+            );
+      }),
     ),
   );
+}
+
+function filterButton(
+  value: NeedsFilter,
+  label: string,
+  count: number,
+  current: NeedsFilter,
+  actions: Actions,
+): HTMLElement {
+  const button = h(
+    "button",
+    {
+      class: `needs-filter ${count === 0 ? "is-empty" : ""}`,
+      type: "button",
+      "aria-pressed": value === current ? "true" : "false",
+      "data-key": `needs-filter:${value}`,
+    },
+    h("span", null, label),
+    h("span", { class: "mono" }, String(count)),
+  );
+  button.addEventListener("click", () => actions.filterNeeds(value));
+  return button;
 }
 
 function notificationControl(state: AppState, actions: Actions): HTMLElement | null {
@@ -65,24 +126,41 @@ function notificationControl(state: AppState, actions: Actions): HTMLElement | n
 function requestCard(request: UiRequest, state: AppState, actions: Actions): HTMLElement {
   return h(
     "article",
-    { class: `request kind-${request.kind}` },
-    h("div", { class: "request-icon" }, icon(KIND_ICON[request.kind])),
+    { class: `card request kind-${request.kind}`, "aria-labelledby": `request-${request.id}` },
+    h(
+      "div",
+      { class: "request-head" },
+      h(
+        "span",
+        { class: "request-kind" },
+        icon(KIND_ICON[request.kind]),
+        KIND_EYEBROW[request.kind],
+      ),
+      h(
+        "span",
+        { class: "request-where" },
+        h(
+          "a",
+          { href: `#/f/${encodeURIComponent(request.feature)}/now` },
+          `${request.feature} · ${request.featureGoal}`,
+        ),
+        request.createdAt
+          ? h(
+              "span",
+              { title: fullTime(request.createdAt) },
+              ` · ${relativeTime(request.createdAt)}`,
+            )
+          : null,
+      ),
+    ),
     h(
       "div",
       { class: "request-body" },
       h(
-        "p",
-        { class: "request-feature" },
-        h(
-          "a",
-          { href: `#/f/${encodeURIComponent(request.feature)}/progress` },
-          request.featureGoal,
-        ),
-        request.createdAt
-          ? h("span", { title: fullTime(request.createdAt) }, relativeTime(request.createdAt))
-          : null,
+        "h2",
+        { id: `request-${request.id}`, class: "request-title" },
+        request.question?.question ?? request.title,
       ),
-      h("h2", null, request.title),
       request.question
         ? questionBody(request, state, actions)
         : h("p", { class: "request-detail" }, request.detail),
@@ -142,7 +220,6 @@ function questionBody(request: UiRequest, state: AppState, actions: Actions): HT
   return h(
     "div",
     { class: "question" },
-    h("blockquote", { class: "question-text" }, question.question),
     question.context ? h("p", { class: "fine" }, question.context) : null,
     h(
       "p",

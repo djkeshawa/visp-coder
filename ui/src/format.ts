@@ -82,12 +82,60 @@ export function describeNext(next: UiNext): { headline: string; tone: Tone } {
   return words[next.action];
 }
 
-export function executionWord(status: ExecutionStatus): string {
-  return status === "passed" ? "Passed" : status === "failed" ? "Failed" : "Could not run";
-}
+const EXECUTION_WORDS: Record<ExecutionStatus, string> = {
+  passed: "Passed",
+  failed: "Failed",
+  "timed-out": "Timed out",
+  "environment-failed": "Could not run",
+};
+
+export const executionWord = (status: ExecutionStatus) => EXECUTION_WORDS[status];
 
 export function executionTone(status: ExecutionStatus): Tone {
-  return status === "passed" ? "good" : status === "failed" ? "bad" : "warn";
+  return status === "passed" ? "good" : status === "environment-failed" ? "warn" : "bad";
+}
+
+/**
+ * The shape that stands for a run, so status never rests on colour alone: a dot
+ * passed, a square failed, an open square timed out, a ring could not start.
+ */
+export function runShape(status: ExecutionStatus): string {
+  const shapes: Record<ExecutionStatus, string> = {
+    passed: "pass",
+    failed: "fail",
+    "timed-out": "timeout",
+    "environment-failed": "env",
+  };
+  return shapes[status];
+}
+
+export const STAGES = [
+  "Request",
+  "Brief",
+  "Implement",
+  "Checks",
+  "Review",
+  "Accept",
+  "Handoff",
+] as const;
+
+/**
+ * Where the feature is on its way from request to handoff, and what the current
+ * stage is doing. Read from the service's next action; nothing is decided here.
+ */
+export function currentStage(next: UiNext, accepted: boolean): { index: number; detail: string } {
+  if (accepted || next.action === "complete") return { index: STAGES.length, detail: "" };
+  if (next.completion === "handoff") return { index: 6, detail: "to you" };
+  if (next.completion === "unresolved-environment") return { index: 3, detail: "blocked" };
+  const stages: Record<Exclude<NextAction, "complete">, { index: number; detail: string }> = {
+    understand: { index: 1, detail: "shaping" },
+    implement: { index: 2, detail: "building" },
+    fix: { index: 3, detail: "fixing" },
+    wait: { index: 4, detail: "running" },
+    refine: { index: 4, detail: "answering" },
+    accept: { index: 5, detail: "ready" },
+  };
+  return stages[next.action];
 }
 
 /**

@@ -2,8 +2,13 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import type { UiNext } from "../../../src/ui/contract.js";
 import {
+  currentStage,
   describeNext,
+  executionTone,
+  executionWord,
   isFailureLine,
+  runShape,
+  STAGES,
   shellQuote,
   withQuotedAnswer,
 } from "../../../ui/src/format.js";
@@ -64,4 +69,44 @@ it("highlights failure lines but not zero-failure summaries", () => {
   expect(isFailureLine("ℹ fail 0")).toBe(false);
   expect(isFailureLine("12 passed, 0 failed")).toBe(false);
   expect(isFailureLine("ℹ pass 3")).toBe(false);
+});
+
+describe("currentStage", () => {
+  const next = (fields: Partial<UiNext>): UiNext => ({
+    action: "implement",
+    objective: "",
+    mayEdit: true,
+    evidence: [],
+    ...fields,
+  });
+
+  it.each([
+    [{ action: "understand" }, "Brief", "shaping"],
+    [{ action: "implement" }, "Implement", "building"],
+    [{ action: "fix" }, "Checks", "fixing"],
+    [{ action: "wait" }, "Review", "running"],
+    [{ action: "refine" }, "Review", "answering"],
+    [{ action: "accept" }, "Accept", "ready"],
+    [{ action: "fix", completion: "unresolved-environment" }, "Checks", "blocked"],
+    [{ action: "refine", completion: "handoff" }, "Handoff", "to you"],
+  ] as const)("places %o at %s (%s)", (fields, stage, detail) => {
+    const placed = currentStage(next(fields), false);
+    expect(STAGES[placed.index]).toBe(stage);
+    expect(placed.detail).toBe(detail);
+  });
+
+  it("marks every stage done once the feature is accepted", () => {
+    expect(currentStage(next({ action: "fix" }), true).index).toBe(STAGES.length);
+    expect(currentStage(next({ action: "complete" }), false).index).toBe(STAGES.length);
+  });
+});
+
+describe("run status words and shapes", () => {
+  it("gives every status its own shape and word, and a timeout reads as a failure", () => {
+    const statuses = ["passed", "failed", "timed-out", "environment-failed"] as const;
+    expect(new Set(statuses.map(runShape)).size).toBe(statuses.length);
+    expect(new Set(statuses.map(executionWord)).size).toBe(statuses.length);
+    expect(executionTone("timed-out")).toBe("bad");
+    expect(executionTone("environment-failed")).toBe("warn");
+  });
 });

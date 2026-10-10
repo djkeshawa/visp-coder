@@ -155,3 +155,32 @@ export function longText(key: string, text: string, state: AppState, actions: Ac
     toggle,
   );
 }
+
+/** A run, review or judgment drawn as a shape; the label is always said in words nearby. */
+export function shape(kind: string, extra = ""): HTMLElement {
+  return h("span", { class: `mk mk-${kind} ${extra}`, "aria-hidden": "true" });
+}
+
+export function pill(tone: Tone, text: string): HTMLElement {
+  return h("span", { class: `pill tone-${tone}` }, text);
+}
+
+/** A card's heading row: title, one line of explanation, and an optional aside. */
+export function cardHead(
+  id: string,
+  title: string,
+  explanation?: string,
+  aside?: Node | null,
+): HTMLElement {
+  return h(
+    "div",
+    { class: "card-head" },
+    h(
+      "div",
+      { class: "card-title" },
+      h("h2", { id }, title),
+      explanation ? h("p", null, explanation) : null,
+    ),
+    aside ?? null,
+  );
+}

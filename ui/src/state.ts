@@ -1,4 +1,5 @@
 import type {
+  RequestKind,
   UiError,
   UiExecution,
   UiFeature,
@@ -19,8 +20,13 @@ export interface Resource<T> {
 
 export const idle = <T>(): Resource<T> => ({ loading: false });
 
-export type Tab = "progress" | "review" | "activity" | "handoff";
-export const TABS: readonly Tab[] = ["progress", "review", "activity", "handoff"];
+export type Tab = "now" | "review" | "runs" | "activity" | "handoff";
+export const TABS: readonly Tab[] = ["now", "review", "runs", "activity", "handoff"];
+
+/** Which requests the Needs you page lists. */
+export type NeedsFilter = "all" | RequestKind;
+/** Which runs the Runs tab lists. */
+export type RunsFilter = "all" | "problems" | "tester";
 
 export type Route =
   | { readonly view: "home" }
@@ -47,6 +53,10 @@ export interface AppState {
   wrapOutput: boolean;
   notifications: NotificationPermission | "unsupported";
   showHelp: boolean;
+  /** The finding open in each feature's Review tab. */
+  selectedFinding: Record<string, string>;
+  needsFilter: NeedsFilter;
+  runsFilter: RunsFilter;
 }
 
 export function initialState(): AppState {
@@ -66,6 +76,9 @@ export function initialState(): AppState {
     wrapOutput: true,
     notifications: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
     showHelp: false,
+    selectedFinding: {},
+    needsFilter: "all",
+    runsFilter: "all",
   };
 }
 
@@ -75,9 +88,7 @@ export function parseRoute(hash: string): Route {
   if (parts[0] === "needs") return { view: "needs" };
   if (parts[0] === "health") return { view: "health" };
   if (parts[0] === "f" && parts[1]) {
-    const tab = (TABS as readonly string[]).includes(parts[2] ?? "")
-      ? (parts[2] as Tab)
-      : "progress";
+    const tab = (TABS as readonly string[]).includes(parts[2] ?? "") ? (parts[2] as Tab) : "now";
     const run = new URLSearchParams(query).get("run") ?? undefined;
     return { view: "feature", feature: parts[1], tab, ...(run ? { run } : {}) };
   }
@@ -102,6 +113,9 @@ export interface Actions {
   cycleTheme(): void;
   toggleWrap(): void;
   toggleHelp(): void;
+  selectFinding(feature: string, id: string): void;
+  filterNeeds(filter: NeedsFilter): void;
+  filterRuns(filter: RunsFilter): void;
 }
 
 export const executionKey = (feature: string, id: string) => `${feature}/${id}`;

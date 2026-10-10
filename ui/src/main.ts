@@ -18,13 +18,13 @@ import {
   type Resource,
   type Route,
   routeHash,
+  TABS,
 } from "./state.js";
 import { applyTheme, currentTheme, saveTheme } from "./theme.js";
-import { runDrawer } from "./views/drawer.js";
 import { featurePage } from "./views/feature.js";
 import { needsPage } from "./views/needs.js";
 import { healthPage, homePage } from "./views/pages.js";
-import { sidebar } from "./views/sidebar.js";
+import { TAB_NAMES, topbar } from "./views/topbar.js";
 
 const REFRESH_MS = 10_000;
 const SEEN_KEY = "visp-ui-seen";
@@ -32,7 +32,6 @@ const SEEN_KEY = "visp-ui-seen";
 const state: AppState = initialState();
 let knownRequests: Set<string> | undefined;
 let lastHeadline: string | undefined;
-let returnFocusKey: string | undefined;
 let renderQueued = false;
 
 const root = document.getElementById("app") as HTMLElement;
@@ -227,26 +226,22 @@ function navigate(route: Route): void {
 function applyRoute(): void {
   const previous = state.route;
   const next = parseRoute(location.hash);
-  if (next.view === "feature" && next.run && !(previous.view === "feature" && previous.run))
-    returnFocusKey = (document.activeElement as HTMLElement | null)?.dataset.key;
   markActivitySeen(previous, next);
   state.route = next;
   if (next.view === "home") redirectHome();
   loadForRoute(state.route);
-  if (
-    !(
-      previous.view === next.view &&
-      JSON.stringify({ ...previous, run: 0 }) === JSON.stringify({ ...next, run: 0 })
-    )
-  )
-    document.getElementById("main")?.scrollTo({ top: 0 });
+  if (JSON.stringify(previous) !== JSON.stringify(next)) {
+    pendingScrollTop = true;
+    // Moving between pages puts focus on the new page, as a page load would.
+    pendingFocusMain = true;
+  }
   schedule();
 }
 
 function redirectHome(): void {
   const features = state.overview.data?.features;
   const target = state.meta.data?.activeFeature ?? features?.[0]?.id;
-  if (target) navigate({ view: "feature", feature: target, tab: "progress" });
+  if (target) navigate({ view: "feature", feature: target, tab: "now" });
 }
 
 const actions: Actions = {
@@ -295,6 +290,18 @@ const actions: Actions = {
     state.showHelp = !state.showHelp;
     schedule();
   },
+  selectFinding(feature, id) {
+    state.selectedFinding[feature] = id;
+    schedule();
+  },
+  filterNeeds(filter) {
+    state.needsFilter = filter;
+    schedule();
+  },
+  filterRuns(filter) {
+    state.runsFilter = filter;
+    schedule();
+  },
 };
 
 // ———— Rendering ————
@@ -308,66 +315,67 @@ function schedule(): void {
   });
 }
 
+let pendingScrollTop = false;
+let pendingFocusMain = false;
+
 function render(): void {
   const focusKey = (document.activeElement as HTMLElement | null)?.dataset.key;
   const selection = captureSelection();
-  const main = document.getElementById("main");
-  const scroll = main?.scrollTop ?? 0;
+  const scroll = pendingScrollTop ? 0 : window.scrollY;
   root.replaceChildren(...(state.signedOut ? [signedOutPage()] : appShell()));
-  const nextMain = document.getElementById("main");
-  if (nextMain) nextMain.scrollTop = scroll;
-  restoreFocus(focusKey, selection);
+  window.scrollTo({ top: scroll });
+  pendingScrollTop = false;
+  if (pendingFocusMain && !state.signedOut) {
+    pendingFocusMain = false;
+    document.getElementById("main")?.focus({ preventScroll: true });
+  } else restoreFocus(focusKey, selection);
   updateTitle();
 }
 
 function appShell(): Node[] {
-  const route = state.route;
-  const drawer =
-    route.view === "feature" && route.run ? cachedDrawer(route.feature, route.run) : null;
-  drawerJustOpened = drawer !== null && !drawerOpen;
-  drawerOpen = drawer !== null;
   return [
     h("a", { class: "skip-link", href: "#main" }, "Skip to content"),
-    h(
-      "div",
-      { class: `shell ${drawer ? "has-drawer" : ""}` },
-      sidebar(state, actions),
-      h(
-        "main",
-        { id: "main", class: "main", tabindex: -1, inert: drawer ? true : undefined },
-        h("div", { class: "main-inner" }, page()),
-      ),
-    ),
-    ...(drawer ? [drawer] : []),
+    topbar(state, actions),
+    h("main", { id: "main", class: "page", tabindex: -1, "data-key": "main" }, page()),
+    footer(),
     ...(state.showHelp ? [helpDialog()] : []),
     announcer,
   ];
 }
 
-let drawerCache: { key: string; node: HTMLElement } | undefined;
-let drawerOpen = false;
-let drawerJustOpened = false;
-
-/** A run's output never changes, so its drawer is rebuilt only when what it shows does. */
-function cachedDrawer(feature: string, run: string): HTMLElement {
-  const loaded = state.executions[executionKey(feature, run)];
-  const key = [
-    feature,
-    run,
-    state.wrapOutput,
-    loaded?.data ? "data" : (loaded?.error?.code ?? "loading"),
-  ].join("|");
-  if (drawerCache?.key !== key)
-    drawerCache = { key, node: runDrawer(state, actions, feature, run) };
-  return drawerCache.node;
-}
-
 function page(): Node {
   const route = state.route;
-  if (route.view === "feature") return featurePage(state, actions, route.feature, route.tab);
+  if (route.view === "feature")
+    return featurePage(state, actions, route.feature, route.tab, route.run);
   if (route.view === "needs") return needsPage(state, actions);
   if (route.view === "health") return healthPage(state, actions);
   return homePage(state, actions);
+}
+
+function footer(): HTMLElement {
+  const meta = state.meta.data;
+  const help = h(
+    "button",
+    { class: "link-button", type: "button", "data-key": "help" },
+    "Keyboard shortcuts",
+  );
+  help.addEventListener("click", () => actions.toggleHelp());
+  return h(
+    "footer",
+    { class: "footer" },
+    h(
+      "div",
+      { class: "footer-inner" },
+      meta ? h("span", { class: "mono" }, `VISP ${meta.version}`) : null,
+      h(
+        "a",
+        { href: "#/health", "aria-current": state.route.view === "health" ? "page" : undefined },
+        "Installation health",
+      ),
+      help,
+      h("span", null, "Read-only. Commands are shown to copy, never run."),
+    ),
+  );
 }
 
 function signedOutPage(): HTMLElement {
@@ -388,10 +396,10 @@ function signedOutPage(): HTMLElement {
 }
 
 const SHORTCUTS: readonly (readonly [string, string])[] = [
-  ["1 – 4", "Progress, Review, Activity, Handoff"],
+  ["1 – 5", TABS.map((tab) => TAB_NAMES[tab]).join(", ")],
   ["n", "Needs you"],
   ["r", "Refresh now"],
-  ["Esc", "Close output or this help"],
+  ["Esc", "Back from a run, or close this help"],
   ["?", "Show or hide shortcuts"],
 ];
 
@@ -428,18 +436,7 @@ function restoreFocus(
   key: string | undefined,
   selection: { start: number; end: number } | undefined,
 ): void {
-  const route = state.route;
-  if (drawerJustOpened) {
-    document.querySelector<HTMLElement>(".drawer-close")?.focus();
-    return;
-  }
-  if (drawerOpen && document.querySelector(".drawer")?.contains(document.activeElement)) return;
-  const target =
-    (key && document.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)) ||
-    (returnFocusKey && !(route.view === "feature" && route.run)
-      ? document.querySelector<HTMLElement>(`[data-key="${CSS.escape(returnFocusKey)}"]`)
-      : null);
-  if (returnFocusKey && !(route.view === "feature" && route.run)) returnFocusKey = undefined;
+  const target = key && document.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
   if (!target) return;
   target.focus({ preventScroll: true });
   if (selection && target instanceof HTMLTextAreaElement)
@@ -460,10 +457,9 @@ function onKey(event: KeyboardEvent): void {
     return;
   }
   if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
-  const tabs = ["progress", "review", "activity", "handoff"] as const;
   const index = Number(event.key) - 1;
-  if (state.route.view === "feature" && index >= 0 && index < tabs.length) {
-    navigate({ view: "feature", feature: state.route.feature, tab: tabs[index] ?? "progress" });
+  if (state.route.view === "feature" && index >= 0 && index < TABS.length) {
+    navigate({ view: "feature", feature: state.route.feature, tab: TABS[index] ?? "now" });
   } else if (event.key === "n") navigate({ view: "needs" });
   else if (event.key === "r") refreshVisible();
   else if (event.key === "?") actions.toggleHelp();

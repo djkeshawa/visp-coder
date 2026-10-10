@@ -5,6 +5,7 @@ import { BUILD_ID, VERSION } from "../core/version.js";
 import { runChecks } from "../doctor/checks.js";
 import { applicableExecutions } from "../workflow/product/assessment.js";
 import { outstandingFeedback } from "../workflow/product/findings.js";
+import { readTestsRecord } from "../workflow/product/independent-tests.js";
 import {
   latestExecutionsByOwner,
   type ProductBrief,
@@ -21,6 +22,7 @@ import {
   type FeatureSummary,
   UI_CONTRACT_VERSION,
   type UiCheck,
+  type UiEvidenceCount,
   type UiExecution,
   type UiExecutionSummary,
   type UiFeature,
@@ -33,6 +35,7 @@ import {
   type UiQuestion,
   type UiReview,
   type UiSlice,
+  type UiTester,
 } from "./contract.js";
 import { outputHeadline } from "./output.js";
 
@@ -115,6 +118,7 @@ export async function featureView(
   const executions = [...product.executions]
     .reverse()
     .map((execution) => executionSummary(execution, current.has(execution.id)));
+  const slices = slicesView(record.value, executions);
   return ok({
     id: brief.feature,
     goal: brief.goal,
@@ -124,8 +128,8 @@ export async function featureView(
     updatedAt: product.updatedAt,
     ...(subject ? { subjectDigest: subject } : {}),
     next: nextView(status.value.next),
-    outcomes: outcomesView(brief, status.value.outcomes),
-    slices: slicesView(record.value, executions),
+    outcomes: outcomesView(brief, status.value.outcomes, slices),
+    slices,
     findings: findingsView(record.value),
     reviews: reviewsView(record.value),
     questions: questionsView(record.value),
@@ -135,6 +139,7 @@ export async function featureView(
     decisions: brief.decisions.map((entry) => ({ id: entry.id, statement: entry.statement })),
     uncertainties: brief.uncertainties,
     report: status.value.report,
+    tester: await testerView(state, feature, executions),
     readAt: new Date().toISOString(),
   });
 }
@@ -161,6 +166,7 @@ function outcomesView(
     requiredReview: boolean;
     satisfied: boolean;
   }[],
+  slices: readonly UiSlice[],
 ): UiOutcome[] {
   const byId = new Map(statuses.map((entry) => [entry.id, entry]));
   return brief.outcomes.map((outcome) => {
@@ -175,6 +181,7 @@ function outcomesView(
       review: status?.review ?? "unassessed",
       requiredReview: status?.requiredReview ?? false,
       satisfied: status?.satisfied ?? false,
+      checks: evidenceCount(outcome.id, slices),
       expectations: outcome.expectations.map((entry) => ({
         id: entry.id,
         statement: entry.statement,
@@ -182,6 +189,57 @@ function outcomesView(
     };
   });
 }
+
+/** Each agent check that names the outcome once, by the latest run any slice records for it. */
+function evidenceCount(outcome: string, slices: readonly UiSlice[]): UiEvidenceCount {
+  const count = { total: 0, passed: 0, failed: 0, stale: 0, notRun: 0 };
+  for (const { latest } of checksNaming(outcome, slices)) {
+    count.total += 1;
+    if (!latest) count.notRun += 1;
+    else if (!latest.current) count.stale += 1;
+    else if (latest.status === "passed") count.passed += 1;
+    else count.failed += 1;
+  }
+  return count;
+}
+
+/** A check shared by several slices counts once, with its newest run. */
+function checksNaming(outcome: string, slices: readonly UiSlice[]): UiCheck[] {
+  const checks = new Map<string, UiCheck>();
+  for (const check of slices.flatMap((slice) => slice.checks)) {
+    if (!check.outcomes.includes(outcome)) continue;
+    const seen = checks.get(check.id);
+    if (!seen || (check.latest?.createdAt ?? "") > (seen.latest?.createdAt ?? ""))
+      checks.set(check.id, check);
+  }
+  return [...checks.values()];
+}
+
+async function testerView(
+  state: WorkspaceState,
+  feature: string,
+  executions: readonly UiExecutionSummary[],
+): Promise<UiTester> {
+  const latest = executions.find((entry) => entry.source === "tester");
+  const withLatest = latest ? { latest } : {};
+  const record = await readTestsRecord(state, feature);
+  if (!record.ok)
+    return { status: "unreadable", tests: 0, ambiguities: 0, reason: record.error.message };
+  if (!record.value) return { status: "none", tests: 0, ambiguities: 0, ...withLatest };
+  const tester = record.value;
+  return {
+    status: tester.status,
+    ...(tester.model ? { model: tester.model } : {}),
+    tests: tester.tests?.length ?? 0,
+    ambiguities: tester.ambiguities?.length ?? 0,
+    at: tester.finishedAt ?? tester.startedAt,
+    ...(tester.reason ? { reason: tester.reason } : {}),
+    ...withLatest,
+  };
+}
+
+/** Pinned acceptance suites run as `PINNED_<n>` checks. */
+const testerCheck = (check: string) => check.startsWith("PINNED_");
 
 export function executionSummary(
   execution: ProductExecution,
@@ -194,6 +252,7 @@ export function executionSummary(
     createdAt: execution.createdAt,
     command: execution.command,
     status: execution.status,
+    source: testerCheck(execution.check) ? "tester" : "agent",
     exitCode: execution.exitCode,
     durationMs: execution.durationMs,
     provenance: execution.provenance,

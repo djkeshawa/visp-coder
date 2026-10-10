@@ -166,6 +166,17 @@ describe("resources", () => {
     expect(feature.report).toContain("Export reports as CSV");
   });
 
+  it("counts each outcome's checks by their latest run and names who wrote each run", async () => {
+    const feature = await api<UiFeature>(`/api/v1/features/${active}`);
+    const escaped = feature.outcomes.find((outcome) => outcome.id === "O002");
+    expect(escaped?.checks).toEqual({ total: 1, passed: 0, failed: 1, stale: 0, notRun: 0 });
+    expect(feature.outcomes.find((outcome) => outcome.id === "O001")?.checks.total).toBe(1);
+    expect(new Set(feature.executions.map((run) => run.source))).toEqual(new Set(["agent"]));
+    // No tester ran in this scenario, and the page must say so rather than show nothing.
+    expect(feature.tester).toMatchObject({ status: "none", tests: 0 });
+    expect(feature.tester.latest).toBeUndefined();
+  });
+
   it("returns a run's full output, and says when a run doesn't exist", async () => {
     const feature = await api<UiFeature>(`/api/v1/features/${active}`);
     const failed = feature.executions.find((run) => run.status === "failed");

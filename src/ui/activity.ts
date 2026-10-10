@@ -1,5 +1,5 @@
 import type { ProductRecord } from "../workflow/product/store.js";
-import type { UiActivity } from "./contract.js";
+import type { ExecutionStatus, UiActivity } from "./contract.js";
 import { outputHeadline } from "./output.js";
 
 /** Most recent first. Older entries stay in the recorded state and in `visp pr`. */
@@ -37,21 +37,26 @@ function sliceEntries(state: State): UiActivity[] {
   }));
 }
 
+const EXECUTION_VERBS: Record<ExecutionStatus, string> = {
+  passed: "passed",
+  failed: "failed",
+  "timed-out": "timed out",
+  "environment-failed": "could not run",
+};
+
+const executionTone = (status: ExecutionStatus): UiActivity["tone"] =>
+  status === "passed" ? "good" : status === "environment-failed" ? "warn" : "bad";
+
 function executionEntries(state: State): UiActivity[] {
   return state.executions.map((execution) => {
     const where = execution.task ? `${execution.check} on ${execution.task}` : execution.check;
-    const verb =
-      execution.status === "passed"
-        ? "passed"
-        : execution.status === "failed"
-          ? "failed"
-          : "could not run";
+    const reused = execution.provenance === "supervisor-reused" ? " (reused)" : "";
     return {
       at: execution.createdAt,
       kind: "execution",
-      title: `${where} ${verb}${execution.provenance === "supervisor-reused" ? " (reused)" : ""}`,
+      title: `${where} ${EXECUTION_VERBS[execution.status]}${reused}`,
       detail: outputHeadline(execution.output, execution.status),
-      tone: execution.status === "passed" ? "good" : execution.status === "failed" ? "bad" : "warn",
+      tone: executionTone(execution.status),
       execution: execution.id,
     };
   });

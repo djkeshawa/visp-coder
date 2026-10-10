@@ -16,14 +16,20 @@ The command prints a link and opens it. Keep the link private: it signs you in. 
 
 ## What you see
 
-- **Now.** What the agent is doing in plain words ("Fixing what failed", "Independent review running", "Ready for acceptance"), the objective VISP gave it, and the command it runs next. Below it, the thread: every check run and review in order. Green is a passing run, red a failing one, a ring a run that could not start, a diamond a review. Faded marks are out of date. Select any mark to open it.
-- **Progress.** Each outcome with its check and review status, then each slice with its checks, the latest result of each and its authorized scope.
-- **Review.** Open findings (must-fix first) with the check that would show each is fixed and links to the runs they cite, the latest review's judgments, earlier reviews, and captured screens.
+A bar across the top names the repository, switches between features, and shows whether updates are live. Each feature has five tabs; `Needs you` is always one click away at the right.
+
+- **Now.** What the agent is doing in plain words ("Fixing what failed", "Independent review running", "Ready for acceptance"), the objective VISP gave it, the command it runs next, and where the feature stands from request to handoff. Below it:
+  - **What is proven**: each outcome with every independent source of evidence for it: the agent's checks (counted by their latest run, with out-of-date runs counted apart, never as passes), the independent reviewer's judgment, and a verdict. The independent tester's pinned suite covers the whole request, so it stands above the rows.
+  - **The thread**: every check run and review, one row per slice, oldest on the left. A dot passed, a square failed, an open square timed out, a ring could not start, a diamond is a review. Faded marks are out of date. Select any mark to open it.
+  - Each slice with its checks and its authorized scope, then the brief's decisions and open questions.
+  - At the side: what on this feature needs you, the review's open findings, and health.
+- **Review.** Open findings (must-fix first) beside the selected one in full: the check that would show it fixed, and the runs it cites. Then the latest review's judgments, earlier reviews, and captured screens.
+- **Runs.** Every run, newest first, filtered to problems or to the independent tests if you like. Selecting a run opens its output: command, exit code, duration, who ran it, whether its assertions were written by the agent, observed by VISP's runner or written by the independent tester, and the full output with failure lines highlighted. Beside it are this check's other runs and the findings and outcomes it is linked to.
 - **Activity.** Everything recorded, newest first, marking what is new since you last looked.
 - **Handoff.** The document `visp pr` prints.
-- **Needs you.** Questions your agent asked (`visp critic feedback --ask`), work ready for acceptance, review budgets spent with findings open, and checks the environment blocked. The browser tab title shows the count, and you can turn on browser notifications.
+- **Needs you.** Questions your agent asked (`visp critic feedback --ask`), work ready for acceptance, review budgets spent with findings open, and checks the environment blocked, filtered by kind. The browser tab title shows the count, and you can turn on browser notifications.
 
-Selecting a check opens its output: command, exit code, duration, who ran it, whether its assertions were written by the agent or observed by VISP's runner, and the full output with failure lines highlighted.
+The dashboard follows your system's light or dark setting; the button beside `Needs you` switches between system, light and dark.
 
 ## How it stays honest
 
@@ -31,7 +37,7 @@ Selecting a check opens its output: command, exit code, duration, who ran it, wh
 - **Out of date means out of date.** A run recorded against an earlier version of the product, slice or check is marked out of date and doesn't count, exactly as in `visp status`.
 - **It doesn't act.** The dashboard runs no commands and records no decisions. Commands are shown for you to copy. To answer a question, reply in your agent's chat, or type your answer and paste the command the page builds; the answer is single-quoted so nothing in it expands in your shell.
 
-Keyboard: `1`–`4` switch tabs, `n` opens Needs you, `r` refreshes, `Esc` closes the output panel, `?` lists shortcuts.
+Keyboard: `1`–`5` switch tabs, `n` opens Needs you, `r` refreshes, `Esc` goes back from a run to the list, `?` lists shortcuts.
 
 ## Live updates
 
