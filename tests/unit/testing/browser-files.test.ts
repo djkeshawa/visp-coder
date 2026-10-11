@@ -129,8 +129,8 @@ it("never returns bytes from a file swapped for a link between the check and the
     })();
     let leaks = 0;
     let reads = 0;
-    const until = Date.now() + 2500;
-    while (Date.now() < until) {
+    const started = Date.now();
+    while (raceGoesOn(started, 2500, reads)) {
       for (const target of [page, join(root, "sub-swap", "page.html")]) {
         try {
           const loaded = await readBrowserFile(root, url(target));
@@ -163,6 +163,7 @@ it("never reads through a parent directory swapped for a link to outside or to .
     let round = 0;
     const swapper = (async () => {
       while (!stop) {
+        let hold = 1;
         // Synchronous steps keep the window between them as small as an attacker's would be.
         try {
           if (round++ % 2 === 0) {
@@ -174,11 +175,15 @@ it("never reads through a parent directory swapped for a link to outside or to .
             rmSync(dir, { recursive: true, force: true });
             mkdirSync(dir);
             writeFileSync(join(dir, "page.html"), "PUBLIC");
+            // Keep the real directory for 1 to 8 turns of the event loop: the one-turn windows are an
+            // attacker's, the longer ones let a read finish on a slow runner too.
+            hold = 2 ** ((round >> 1) % 4);
           }
         } catch {
           // A racing step may fail; the reader is what is under test.
         }
-        await new Promise((resolve) => setImmediate(resolve));
+        for (let turn = 0; turn < hold; turn += 1)
+          await new Promise((resolve) => setImmediate(resolve));
       }
     })();
     let leaks = 0;
@@ -192,8 +197,10 @@ it("never reads through a parent directory swapped for a link to outside or to .
         // Refusing a swapped parent is the correct outcome.
       }
     };
-    const until = Date.now() + 3000;
-    while (Date.now() < until) await Promise.all(Array.from({ length: 4 }, readOnce));
+    // Race for 3 s, then on until a read has succeeded (refusals alone exercise only half the
+    // reader), within the test timeout.
+    const started = Date.now();
+    while (raceGoesOn(started, 3000, reads)) await Promise.all(Array.from({ length: 4 }, readOnce));
     stop = true;
     await swapper;
     expect(reads).toBeGreaterThan(0);
@@ -265,6 +272,11 @@ it("applies the blocked paths when the root is spelled through a symlink", async
     await rm(alias, { force: true });
   }
 });
+/** A race runs for its budget, and past it until one read got through, up to 20 s. */
+function raceGoesOn(started: number, budgetMs: number, reads: number) {
+  const elapsed = Date.now() - started;
+  return elapsed < budgetMs || (reads === 0 && elapsed < 20_000);
+}
 function transportFixture() {
   let emit: Parameters<ChromeTransport["onEvent"]>[0] = () => {};
   const dispose = vi.fn();
