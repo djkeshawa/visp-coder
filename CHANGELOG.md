@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0-beta.3 - 2026-10-11
 
 ### Added
 - **A VISP-launched Claude reviewer** (`critic.launch: claude-exec` with `critic.harness: claude-code`). VISP-launched review existed only through `codex exec`, so projects without Codex access, or whose Codex plan no longer offers the reviewer model, got no independent review unless the worker's host delegated one. VISP now runs one `claude -p` per reserved call: `--restricted --safe-mode` with only Read, Grep and Glob, no settings files, hooks, MCP servers or saved session, the configured model and effort, and the packet's response schema as structured output. `visp doctor` checks the CLI and its sign-in.
