@@ -70,7 +70,7 @@ describe("the pull request check", () => {
     );
 
     expect(workflow).toContain("--scope tasks");
-    expect(workflow).toContain(`npm install -g visp-coder@${version}`);
+    expect(workflow).toContain(`npm install -g @visporg/visp-coder@${version}`);
     expect(workflow).not.toContain("visp gate");
   });
 

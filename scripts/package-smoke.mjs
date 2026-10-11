@@ -62,9 +62,9 @@ try {
 import {
   taskRefSchema, taskRefKey, type TaskRef, loadWorkspace, runProductWork, runProductMigrate, productBriefSchema, productBriefInputSchema, assessmentSchema, productInputTemplate, productCheckSchema, coverageAssessmentSchema, runProductReviewerHandoff, productFeedbackSchema, runProductHostFeedback, runProductCritic, criticConfigSchema, type ProductCriticHost,
   skillSelectionSnapshot, skillPreregistrationSchema, type SkillPreregistration,
-} from "visp-coder";
-import { GraphStore, queryGraph } from "visp-coder/graph";
-import * as publicApi from "visp-coder";
+} from "@visporg/visp-coder";
+import { GraphStore, queryGraph } from "@visporg/visp-coder/graph";
+import * as publicApi from "@visporg/visp-coder";
 // @ts-expect-error Fixed legacy templates were removed in the breaking 0.5 API.
 void publicApi.proposeFailureSkills;
 // @ts-expect-error Legacy stage gates are removed from the breaking 0.5 API.
@@ -80,9 +80,9 @@ void publicApi.recordAttempt;
 void publicApi.runProductNext; void publicApi.runProductStatus;
 void publicApi.runProductReport; void publicApi.runProductContext;
 void publicApi.createProposalFromContent;
-import { runnerSpecSchema, adapterFor, type RunnerSpec, type NormalizedUsage, prepareCriticComparison } from "visp-coder/runner";
-import { activateControl, assertRecovery, assertUiState, assertTransitions, assertBehaviorSensitive, assertCheckpoint, measureCanvasRegion, type UiStateContract, type InteractionPage, type EvidenceReference, openBrowserSession, runSupervisedControl } from "visp-coder/testing";
-import { browserJourneySchema, type BrowserJourneyResult, type RelativePoint, type ObservationCondition, type BrowserComparison } from "visp-coder/testing";
+import { runnerSpecSchema, adapterFor, type RunnerSpec, type NormalizedUsage, prepareCriticComparison } from "@visporg/visp-coder/runner";
+import { activateControl, assertRecovery, assertUiState, assertTransitions, assertBehaviorSensitive, assertCheckpoint, measureCanvasRegion, type UiStateContract, type InteractionPage, type EvidenceReference, openBrowserSession, runSupervisedControl } from "@visporg/visp-coder/testing";
+import { browserJourneySchema, type BrowserJourneyResult, type RelativePoint, type ObservationCondition, type BrowserComparison } from "@visporg/visp-coder/testing";
 const point: RelativePoint = {x:0.46,y:0.28};
 const observation: ObservationCondition = {selector:'#launch',enabled:false};
 const comparison: BrowserComparison = {kind:"compare",left:{selector:"#hud"},right:{selector:"#result"},relation:"equal",mode:"number",capture:false};
@@ -90,7 +90,7 @@ const journey = browserJourneySchema.parse({url:'http://127.0.0.1:3000/', action
 const result: BrowserJourneyResult | undefined = undefined; void result; void journey; void productFeedbackSchema; void runProductHostFeedback; void productInputTemplate; void productBriefInputSchema; void assessmentSchema;
 void openBrowserSession; void runSupervisedControl; void coverageAssessmentSchema; void runProductReviewerHandoff;
 void runProductCritic; void criticConfigSchema; void prepareCriticComparison;
-import { runProductUserFeedback, type UserFeedbackHost } from "visp-coder";
+import { runProductUserFeedback, type UserFeedbackHost } from "@visporg/visp-coder";
 void runProductUserFeedback;
 const userHost: UserFeedbackHost = { ask: async () => ({action:"defer"}) }; void userHost;
 const criticHost: ProductCriticHost | undefined = undefined; void criticHost;
@@ -137,7 +137,7 @@ const preregistration: SkillPreregistration | undefined = undefined; void prereg
   if (!runtime || runtime.buildId === "dev" || !/^[a-f0-9]{16}$/.test(runtime.buildId)) {
     throw new Error("packaged doctor did not report a deterministic build id");
   }
-  if (!runtime.executable.includes(join("node_modules", "visp-coder", "dist", "cli.js"))) {
+  if (!runtime.executable.includes(join("node_modules", "@visporg", "visp-coder", "dist", "cli.js"))) {
     throw new Error(`doctor reported an unexpected executable: ${runtime.executable}`);
   }
 

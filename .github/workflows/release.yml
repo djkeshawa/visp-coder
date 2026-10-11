@@ -1,0 +1,95 @@
+name: release
+
+# Pushing a tag vX.Y.Z[-pre.N] on main publishes that version to npm and
+# creates the GitHub release from its CHANGELOG.md section. A prerelease
+# version goes to the dist-tag named by its identifier (0.5.0-beta.3 -> beta).
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install the pinned package manager
+        run: npm install --global pnpm@11.3.0
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag, version and branch
+        id: meta
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').name")
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} is not on main; merge the release to main before tagging"
+            exit 1
+          fi
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "::error::${name}@${version} is already published"
+            exit 1
+          fi
+          pre=$(node -p "(require('./package.json').version.split('-')[1] ?? '').split('.')[0]")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=${pre:-latest}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$([ -n "${pre}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${{ steps.meta.outputs.version }}" '
+            index($0, "## " v " ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "${RUNNER_TEMP}/notes.md"
+          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
+            echo "::error::CHANGELOG.md has no section for ${{ steps.meta.outputs.version }}"
+            exit 1
+          fi
+
+      # Includes a tarball consumer install, so publishing exercises the same
+      # packaged binary rather than trusting the repository's live dist.
+      - run: pnpm release:check
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+
+      # release:check just ran; prepublishOnly would run it again.
+      - name: Check the tarball keeps its executables
+        run: |
+          npm publish --dry-run --ignore-scripts --tag "${{ steps.meta.outputs.dist_tag }}" 2>&1 | tee "${RUNNER_TEMP}/dry-run.log"
+          if grep -q "invalid and removed" "${RUNNER_TEMP}/dry-run.log"; then
+            echo "::error::npm would drop entries from the package"
+            exit 1
+          fi
+
+      - name: Publish to npm
+        run: npm publish --ignore-scripts --provenance --access public --tag "${{ steps.meta.outputs.dist_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create the GitHub release
+        run: |
+          flags=()
+          [ "${{ steps.meta.outputs.prerelease }}" = true ] && flags+=(--prerelease)
+          gh release create "${GITHUB_REF_NAME}" --verify-tag \
+            --title "VISP ${{ steps.meta.outputs.version }}" \
+            --notes-file "${RUNNER_TEMP}/notes.md" "${flags[@]}"
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -162,6 +162,9 @@ function awaited(call: SyntaxNode): boolean {
   return parent?.type === "await_expression" || parent?.type === "return_statement";
 }
 
+// Suites written before the package moved to the @visporg scope import the unscoped name.
+const TESTING_SOURCES = new Set(["@visporg/visp-coder/testing", "visp-coder/testing"]);
+
 /** Only package imports get helper semantics; a local function with the same name proves nothing. */
 export function testingHelpers(node: SyntaxNode): ReadonlyMap<string, string> {
   let root = node;
@@ -170,7 +173,7 @@ export function testingHelpers(node: SyntaxNode): ReadonlyMap<string, string> {
   for (const statement of named(root)) {
     if (
       statement.type !== "import_statement" ||
-      stringValue(field(statement, "source")) !== "visp-coder/testing"
+      !TESTING_SOURCES.has(stringValue(field(statement, "source")) ?? "")
     )
       continue;
     walkNamed(statement, (entry) => {
