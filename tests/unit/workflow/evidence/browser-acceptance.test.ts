@@ -131,7 +131,7 @@ describe("mandatory browser acceptance evidence", () => {
   it("recognizes imported VISP helpers without trusting same-named local functions", async () => {
     workspace = await TestWorkspace.create({
       "tests/browser.mjs": `import { test } from 'node:test';
-      import { activateControl as activate, assertUiState } from 'visp-coder/testing';
+      import { activateControl as activate, assertUiState } from '@visplabs/visp-coder/testing';
       test('AC001 reset UI', async () => {
         await page.goto('/'); await activate(page, '#reset', 'keyboard', 5, 'Space');
         await assertUiState(page, { name:'ready', viewport:{width:390,height:844}, controls:[{selector:'#reset'}] });

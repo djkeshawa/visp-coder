@@ -2,6 +2,9 @@
 
 ## 0.5.0-beta.3 - 2026-10-11
 
+### Changed
+- **The package is now `@visplabs/visp-coder`** and the repository is [visplabs/visp-coder](https://github.com/visplabs/visp-coder). Install with `npm install -g @visplabs/visp-coder@beta`; the executables (`visp`, `visp-migrate`, `visp-runner`) are unchanged. The library exports moved with it (`@visplabs/visp-coder/testing`, `/graph`, `/runner`); browser suites that still import `visp-coder/testing` keep their helper semantics. The generated pull request workflow installs the scoped package, so rerun `visp install` to update it.
+
 ### Added
 - **A VISP-launched Claude reviewer** (`critic.launch: claude-exec` with `critic.harness: claude-code`). VISP-launched review existed only through `codex exec`, so projects without Codex access, or whose Codex plan no longer offers the reviewer model, got no independent review unless the worker's host delegated one. VISP now runs one `claude -p` per reserved call: `--restricted --safe-mode` with only Read, Grep and Glob, no settings files, hooks, MCP servers or saved session, the configured model and effort, and the packet's response schema as structured output. `visp doctor` checks the CLI and its sign-in.
 - **An independent tester with `claude-exec`.** The tester started only with `critic.launch: codex-exec` and a Codex critic, so `claude-exec` and host reviews got no acceptance tests and no notice. `claude-exec` now starts a restricted `claude -p` tester in an empty temporary directory after a bounded sign-in check (new projects; tests of an existing codebase stay with the Codex tester). `work` reports a skipped tester with its reason, `--retry-tests` refuses when no tester is configured, and a critic without its own harness uses the project's, so `codex-exec` in a Codex project also gets the tester.

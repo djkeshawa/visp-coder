@@ -1,6 +1,6 @@
 # Runner
 
-`visp-runner` is an optional executable for controlled experiments with coding agents. It runs one explicitly configured agent attempt in an isolated Git worktree, records its source and events, evaluates the result with a separately pinned oracle, and prepares matched comparisons. The ordinary `visp` CLI and MCP server never call models and do not import the runner. The library is available as `visp-coder/runner`.
+`visp-runner` is an optional executable for controlled experiments with coding agents. It runs one explicitly configured agent attempt in an isolated Git worktree, records its source and events, evaluates the result with a separately pinned oracle, and prepares matched comparisons. The ordinary `visp` CLI and MCP server never call models and do not import the runner. The library is available as `@visplabs/visp-coder/runner`.
 
 The runner never picks a model, a price or a budget for you, and preparing a study never launches a model.
 

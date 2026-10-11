@@ -11,7 +11,7 @@ What VISP records as evidence is what it executed itself: check commands, browse
 Requires Node.js 22.16 or later and a Git repository.
 
 ```sh
-npm install -g visp-coder@beta
+npm install -g @visplabs/visp-coder@beta
 ```
 
 The package installs three executables: `visp`, `visp-migrate` (backed-up upgrades of saved history) and `visp-runner` (optional experiment runner).

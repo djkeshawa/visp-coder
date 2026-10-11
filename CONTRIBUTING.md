@@ -42,12 +42,12 @@ Browser tests need an installed Chrome or Chromium; VISP never downloads one.
 | `src/mcp/` | MCP server, tool definitions (`tools/`), resources and reply shaping |
 | `src/workflow/product/` | The product loop: brief, work, checks, review, critic, acceptance, `pr` |
 | `src/workflow/evidence/` | Capture, control and observation readers |
-| `src/testing/` | Browser journey runner and helpers (exported as `visp-coder/testing`) |
+| `src/testing/` | Browser journey runner and helpers (exported as `@visplabs/visp-coder/testing`) |
 | `src/config/` | `visp.yml` schema, starter template and critic defaults |
 | `src/harness/` | Host installation: instructions, hooks, MCP registration, critic agents |
-| `src/graph/` | Tree-sitter repository index and queries (`visp-coder/graph`) |
+| `src/graph/` | Tree-sitter repository index and queries (`@visplabs/visp-coder/graph`) |
 | `src/memory/`, `src/skills/` | Project notes and the skill lifecycle |
-| `src/runner/` | `visp-runner` (`visp-coder/runner`) |
+| `src/runner/` | `visp-runner` (`@visplabs/visp-coder/runner`) |
 | `src/migration/` | `visp-migrate` |
 | `src/core/` | Shared primitives: file transactions, state lock, exec, paths, errors |
 | `tests/unit`, `tests/integration`, `tests/functional`, `tests/browser`, `tests/qualification` | Test suites |
