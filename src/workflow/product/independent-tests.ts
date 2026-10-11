@@ -1394,7 +1394,8 @@ function aliasedAssertions(content: string): number {
     .filter((alias) => alias && !/^assert/.test(alias));
   return aliases.reduce(
     (count, alias) =>
-      count + (content.match(new RegExp(String.raw`\b${alias}\s*[.(]`, "g"))?.length ?? 0),
+      // Not a property of something else (`page.check(...)`, `obj.check.x`).
+      count + (content.match(new RegExp(String.raw`(?<![\w$.])${alias}\s*[.(]`, "g"))?.length ?? 0),
     0,
   );
 }
