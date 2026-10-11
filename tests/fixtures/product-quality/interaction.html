@@ -24,6 +24,7 @@
   drag.onpointermove = () => { if (dragging) phase.textContent = 'aiming'; };
   drag.onpointerup = () => { if (dragging) { dragging = false; phase.textContent = 'ready'; } };
   drag.onpointercancel = () => {
+    drag.dataset.cancelled = 'true';
     if (repaired) { dragging = false; phase.textContent = 'ready'; }
     else launch();
   };

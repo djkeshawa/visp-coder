@@ -14,7 +14,8 @@ import unittest
 
 BENCH = Path(__file__).resolve().parent
 TASKS = (("spreadsheet-cli", "spreadsheet", 38),
-         ("spreadsheet-extend", "spreadsheet-extend", 63))
+         ("spreadsheet-extend", "spreadsheet-extend", 63),
+         ("sheet-carryover", "sheet-carryover", 44))
 
 
 class SpreadsheetOracleTests(unittest.TestCase):

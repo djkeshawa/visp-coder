@@ -29,7 +29,7 @@ Fixed-contract tasks for comparing coding workflows (bare coding, Spec Kit, BMAD
 python3 -m unittest bench/test_hidden_oracles.py
 ```
 
-These local checks verify that correct references pass, wrong division-error output fails,
+These local checks (spreadsheet-cli, spreadsheet-extend and sheet-carryover) verify that correct references pass, wrong division-error output fails,
 and a nonzero program exit fails even when its output matches. They use temporary copies
 and the standard library, without calling models. Oracle qualification is not a comparison
 of coding workflows.

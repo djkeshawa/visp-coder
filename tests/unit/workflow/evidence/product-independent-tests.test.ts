@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { sha256 } from "../../../../src/core/hash.js";
@@ -232,6 +232,24 @@ check.equal(1, 2); check(false); strict.ok(false);
   );
   expect(work.ok && work.value.independentTests).not.toMatchObject({
     reason: expect.stringContaining("assertions"),
+  });
+});
+
+// A method of the same name on another object (a page's `check`) is not an assertion.
+it("does not count another object's method named like the assert alias", async () => {
+  const fixture = await testerWorkspace();
+  const content = `import check from "node:assert/strict";
+await page.check("#agree"); await page.check("#terms"); form.check.call(form);
+check(true);
+`;
+  const work = await runProductWork(
+    await fixture.workspace.state(),
+    { task: "T001" },
+    inlineTests(tester({ name: "methods.test.mjs", content })),
+  );
+  expect(work.ok && work.value.independentTests).toMatchObject({
+    status: "rejected",
+    reason: expect.stringContaining("2 assertions"),
   });
 });
 
@@ -1365,6 +1383,84 @@ it("retries a new-project tester in new-project mode after the project gains sou
   expect(requests[0]?.explore).toBeFalsy();
   expect(requests[0]?.blockedPaths).toBeUndefined();
   expect(requests[0]?.prompt).toContain("You are in an empty temporary directory");
+});
+
+/** A new-project feature whose tester failed, with its recorded launch mode replaced. */
+async function failedTesterLaunchedAs(mode: string, existingCodeTests = false) {
+  const fixture = await testerWorkspace();
+  if (existingCodeTests) {
+    const config = parse(await readFile(join(fixture.workspace.root, "visp.yml"), "utf8"));
+    config.critic = { ...config.critic, existingCodeTests };
+    await fixture.workspace.write("visp.yml", stringify(config));
+    fixture.workspace.commit("opt in to existing-code tests");
+  }
+  const failed = await writeIndependentTests(
+    await fixture.workspace.state(),
+    fixture.brief.feature,
+    async () => {
+      throw new Error("model unavailable");
+    },
+  );
+  expect(failed.ok && failed.value.status).toBe("failed");
+  const state = await fixture.workspace.state();
+  const path = state.paths.featureFile(fixture.brief.feature, "tester-launch-mode");
+  expect(await readFile(path, "utf8")).toBe("new-project\n");
+  await fixture.workspace.write(relative(fixture.workspace.root, path), mode);
+  const requests: TesterRequest[] = [];
+  const recording: IndependentTester = async (request) => {
+    requests.push(request);
+    return { file: null, existingBehavior: false, tests: [], notes: "" };
+  };
+  return { fixture, requests, recording };
+}
+
+// The recorded mode decides, not the project as it looks at retry time.
+it("retries a tester recorded on existing code in execution mode only with the opt-in", async () => {
+  const refused = await failedTesterLaunchedAs("existing-code\n");
+  expect(
+    await writeIndependentTests(
+      await refused.fixture.workspace.state(),
+      refused.fixture.brief.feature,
+      refused.recording,
+      true,
+    ),
+  ).toMatchObject({
+    ok: false,
+    error: { code: "CONFIG_INVALID", message: expect.stringContaining("existingCodeTests") },
+  });
+  expect(refused.requests).toHaveLength(0);
+  await workspace?.destroy();
+  const opted = await failedTesterLaunchedAs("existing-code\n", true);
+  const retried = await writeIndependentTests(
+    await opted.fixture.workspace.state(),
+    opted.fixture.brief.feature,
+    opted.recording,
+    true,
+  );
+  expect(opted.requests, JSON.stringify(retried)).toHaveLength(1);
+  expect(opted.requests[0]?.explore).toBe(true);
+});
+
+it("refuses to retry a tester whose recorded launch mode is unreadable", async () => {
+  const { fixture, requests, recording } = await failedTesterLaunchedAs("sideways\n");
+  const feature = fixture.brief.feature;
+  const unreadable = {
+    ok: false,
+    error: { code: "ARTIFACT_INVALID", message: "Unreadable tester-launch-mode" },
+  };
+  expect(
+    await writeIndependentTests(await fixture.workspace.state(), feature, recording, true),
+  ).toMatchObject(unreadable);
+  const repeated = await createProductFeatureWithTests(
+    await fixture.workspace.state(),
+    { goal: fixture.brief.goal, sourceBrief: fixture.brief.originalRequest },
+    inlineTests(recording),
+  );
+  expect(repeated.ok && repeated.value).toMatchObject({
+    duplicateOf: feature,
+    testsNote: "Unreadable tester-launch-mode",
+  });
+  expect(requests).toHaveLength(0);
 });
 
 it("refuses to retry a tester in execution mode on an existing codebase that did not opt in", async () => {
