@@ -5,62 +5,91 @@
 //   VISP_UI_LARGE=/tmp/visp-ui-large pnpm vitest run tests/integration/ui/large-demo.test.ts
 //   npm install --prefix /tmp/pw playwright-core   # any recent version
 //   NODE_PATH=/tmp/pw/node_modules node bench/ui/bench-ui.mjs /tmp/visp-ui-large out.json --live
-// CHROME_BIN selects the browser; TRIALS (default 7) and RATES (CPU throttling, default
-// 1,2,4) tune the run. Runs on a copy of the fixture, which stays as seeded.
-import { execFileSync, spawn } from "node:child_process";
+// CHROME_BIN selects the browser. TRIALS (default 7) sets the trials per measure, RATES
+// (CPU throttling, default 1,2,4) the first-render rates and LIVE_RATES (default 1,4)
+// the live-update rates. Runs on a copy of the fixture, which stays as seeded.
+import { execFile, spawn } from "node:child_process";
 import { cpSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const { chromium } = createRequire(import.meta.url)("playwright-core");
 const CLI = fileURLToPath(new URL("../../dist/cli.js", import.meta.url));
-const [fixture, outFile] = process.argv.slice(2);
+const [fixtureArg, outFile] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+if (!fixtureArg || !outFile) {
+  console.error("usage: node bench/ui/bench-ui.mjs <fixture> <out.json> [--live]");
+  process.exit(2);
+}
+// resolve() drops a trailing separator, so the copy is a sibling, never inside the fixture.
+const fixture = resolve(fixtureArg);
 const live = process.argv.includes("--live");
 const TRIALS = Number(process.env.TRIALS ?? 7);
-const RATES = (process.env.RATES ?? "1,2,4").split(",").map(Number);
+const rates = (value) => value.split(",").map(Number);
+const RATES = rates(process.env.RATES ?? "1,2,4");
+const LIVE_RATES = rates(process.env.LIVE_RATES ?? "1,4");
+const MARK = '[data-key^="mark:"]';
 
-// Work on a copy so the fixture stays as seeded.
 const project = `${fixture}-run-${process.pid}`;
-rmSync(project, { recursive: true, force: true });
-cpSync(fixture, project, { recursive: true });
-const feature = readdirSync(join(project, ".visp/features"))[0];
-const executions = () =>
+const executions = (feature) =>
   JSON.parse(readFileSync(join(project, ".visp/features", feature, "product-state.json"), "utf8"))
     .executions.length;
-const visp = (args, input) =>
-  execFileSync(process.execPath, [CLI, "--project", project, ...args], {
-    input,
+// Asynchronous, so CDP events keep being handled (and timestamped) while the command runs.
+const visp = (args, input) => {
+  const run = promisify(execFile)(process.execPath, [CLI, "--project", project, ...args], {
     encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
   });
+  run.child.stdin.end(input ?? "");
+  return run;
+};
 
 function startServer() {
   const child = spawn(process.execPath, [CLI, "--project", project, "--json", "ui", "--no-open"], {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "inherit"],
   });
-  return new Promise((resolve, reject) => {
+  const announced = new Promise((resolveUrl, reject) => {
     let buffer = "";
-    child.stdout.on("data", (chunk) => {
+    const fail = (error) => {
+      clearTimeout(timer);
+      child.stdout.removeListener("data", onData);
+      reject(error);
+    };
+    const timer = setTimeout(() => fail(new Error("visp ui did not announce")), 20_000);
+    const onData = (chunk) => {
       buffer += chunk;
       const line = buffer.split("\n").find((l) => l.includes('"url"'));
-      if (line) resolve({ child, url: JSON.parse(line).data.url });
-    });
-    child.on("exit", (code) => reject(new Error(`visp ui exited ${code}`)));
-    setTimeout(() => reject(new Error("visp ui did not announce")), 20_000);
+      if (!line) return;
+      clearTimeout(timer);
+      child.stdout.removeListener("data", onData);
+      child.stdout.resume(); // keep draining later output without holding it
+      resolveUrl(JSON.parse(line).data.url);
+    };
+    child.stdout.on("data", onData);
+    child.on("exit", (code) => fail(new Error(`visp ui exited ${code}`)));
   });
+  return { child, announced };
 }
 
+// Linear interpolation between order statistics; with few trials p90 sits near the
+// maximum, so the maximum is reported alongside it.
 const stats = (xs) => {
   const s = [...xs].sort((a, b) => a - b);
-  const q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
+  const q = (p) => {
+    const at = (s.length - 1) * p;
+    const lo = Math.floor(at);
+    return s[lo] + (s[Math.min(lo + 1, s.length - 1)] - s[lo]) * (at - lo);
+  };
   return { n: s.length, min: s[0], median: q(0.5), p90: q(0.9), max: s[s.length - 1] };
 };
 const round = (o) => JSON.parse(JSON.stringify(o, (_k, v) => (typeof v === "number" ? Math.round(v) : v)));
 
+/** Waits until the selector count holds steady above zero; gives up after 30 s. */
 async function settle(page, selector) {
+  const deadline = Date.now() + 30_000;
   let last = -1;
   for (let stable = 0; stable < 10; ) {
+    if (Date.now() > deadline) throw new Error(`${selector} did not settle (last count ${last})`);
     await page.waitForTimeout(200);
     const n = await page.evaluate((sel) => document.querySelectorAll(sel).length, selector);
     stable = n === last && n > 0 ? stable + 1 : 0;
@@ -83,14 +112,55 @@ const watchScript = ({ selector, target }) => {
   observer.observe(document, { childList: true, subtree: true });
 };
 
+// Records the first time a live change shows: a run mark absent from the baseline, or
+// the marker text. Only the nodes each mutation touches are inspected, so the watcher
+// adds little work to the re-render it times, and it stops looking once it has seen it.
+const liveWatchScript = (selector) => {
+  window.__watch = null;
+  window.__seenAt = null;
+  const shows = (node, watch) => {
+    if (watch.marker) return node.textContent?.includes(watch.marker) ?? false;
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    const marks = node.matches(selector) ? [node] : [];
+    marks.push(...node.querySelectorAll(selector));
+    return marks.some((e) => !watch.baseline.has(e.dataset.key));
+  };
+  new MutationObserver((records) => {
+    const watch = window.__watch;
+    if (!watch || window.__seenAt !== null) return;
+    for (const r of records) {
+      const nodes = r.type === "childList" ? r.addedNodes : [r.target];
+      for (const node of nodes) {
+        if (shows(node, watch)) {
+          window.__seenAt = Date.now();
+          return;
+        }
+      }
+    }
+  }).observe(document, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["data-key"],
+  });
+};
+
 async function main() {
-  const { child, url } = await startServer();
-  const origin = new URL(url).origin;
-  const browser = await chromium.launch(
-    process.env.CHROME_BIN ? { executablePath: process.env.CHROME_BIN } : {},
-  );
-  const results = { fixture, feature, executionsInState: executions(), firstRender: {}, live: {} };
+  const results = { fixture, firstRender: {}, live: {} };
+  let child;
+  let browser;
   try {
+    rmSync(project, { recursive: true, force: true });
+    cpSync(fixture, project, { recursive: true });
+    const feature = readdirSync(join(project, ".visp/features"))[0];
+    Object.assign(results, { feature, executionsInState: executions(feature) });
+    const server = startServer();
+    child = server.child;
+    const url = await server.announced;
+    const origin = new URL(url).origin;
+    browser = await chromium.launch(process.env.CHROME_BIN ? { executablePath: process.env.CHROME_BIN } : {});
+
     // Sign in once; later contexts reuse the cookie with a cold HTTP cache.
     const signIn = await browser.newContext();
     const page0 = await signIn.newPage();
@@ -101,7 +171,7 @@ async function main() {
     // Untimed warm-up: how many marks and run rows the fully loaded page shows.
     const route = (tab) => `${origin}/#/f/${encodeURIComponent(feature)}/${tab}`;
     await page0.goto(route("now"));
-    const counts = { marks: await settle(page0, '[data-key^="mark:"]') };
+    const counts = { marks: await settle(page0, MARK) };
     counts.checks = await page0.evaluate(() => document.querySelectorAll('[data-key^="check:"]').length);
     await page0.goto(route("runs"));
     counts.runRows = await settle(page0, '[data-key^="run:"]');
@@ -109,7 +179,7 @@ async function main() {
     await signIn.close();
 
     const targets = [
-      ["now", '[data-key^="mark:"]', counts.marks],
+      ["now", MARK, counts.marks],
       ["runs", '[data-key^="run:"]', counts.runRows],
     ];
     for (const rate of RATES) {
@@ -149,16 +219,16 @@ async function main() {
       }
     }
 
-    if (live) results.live = await liveTrials(browser, cookies, route, counts);
+    if (live) results.live = await liveTrials(browser, cookies, route, counts, feature);
   } finally {
-    await browser.close();
-    child.kill("SIGINT");
+    await browser?.close();
+    child?.kill("SIGINT");
     writeFileSync(outFile, `${JSON.stringify(results, null, 1)}\n`);
     rmSync(project, { recursive: true, force: true });
   }
 }
 
-/** Newest and oldest mtime under .visp written since `since`. */
+/** Oldest and newest mtime under .visp written since `since`. */
 function writesSince(since) {
   let first = Number.POSITIVE_INFINITY;
   let last = 0;
@@ -179,9 +249,9 @@ function writesSince(since) {
   return { first, last };
 }
 
-async function liveTrials(browser, cookies, route, counts) {
+async function liveTrials(browser, cookies, route, counts, feature) {
   const out = {};
-  for (const rate of [1, 4]) {
+  for (const rate of LIVE_RATES) {
     const context = await browser.newContext();
     await context.addCookies(cookies);
     const page = await context.newPage();
@@ -189,52 +259,44 @@ async function liveTrials(browser, cookies, route, counts) {
     await cdp.send("Emulation.setCPUThrottlingRate", { rate });
     const sse = [];
     await cdp.send("Network.enable");
+    // Only changes naming the feature: the source edit before `verify` raises a
+    // project-wide ("*") change of its own.
     cdp.on("Network.eventSourceMessageReceived", (e) => {
-      if (e.eventName === "change") sse.push(Date.now());
+      if (e.eventName === "change" && JSON.parse(e.data).features?.includes(feature)) sse.push(Date.now());
     });
-    await page.addInitScript(() => {
-      window.__log = [];
-      window.__marker = null;
-      window.__baseline = null;
-      const note = () => {
-        const keys = [...document.querySelectorAll('[data-key^="mark:"]')].map((e) => e.dataset.key);
-        window.__log.push({
-          t: Date.now(),
-          marks: window.__baseline ? keys.filter((k) => !window.__baseline.has(k)).length : 0,
-          text: window.__marker && document.body?.textContent.includes(window.__marker) ? window.__marker : "",
-        });
-        if (window.__log.length > 400) window.__log.splice(0, 200);
-      };
-      new MutationObserver(note).observe(document, { childList: true, subtree: true, characterData: true });
-    });
+    await page.addInitScript(liveWatchScript, MARK);
     await page.goto(route("now"));
-    await page.waitForFunction((n) => document.querySelectorAll('[data-key^="mark:"]').length >= n, counts.marks);
+    await page.waitForFunction(({ sel, n }) => document.querySelectorAll(sel).length >= n, {
+      sel: MARK,
+      n: counts.marks,
+    });
     await page.waitForTimeout(2000);
 
     const kinds = {
       // visp verify records a new execution: a new mark in the thread.
       verify: async (k) => {
-        await page.evaluate(() => {
-          window.__baseline = new Set(
-            [...document.querySelectorAll('[data-key^="mark:"]')].map((e) => e.dataset.key),
-          );
-        });
-        const source = join(project, "src/m20.mjs");
-        writeFileSync(source, `export const value = () => 20; // live ${rate}-${k}\n`);
+        await page.evaluate((sel) => {
+          window.__seenAt = null;
+          window.__watch = { baseline: new Set([...document.querySelectorAll(sel)].map((e) => e.dataset.key)) };
+        }, MARK);
+        writeFileSync(join(project, "src/m20.mjs"), `export const value = () => 20; // live ${rate}-${k}\n`);
         const start = Date.now();
-        visp(["verify", "--task", "T020"]);
-        return { start, exit: Date.now(), seen: (e) => e.marks > 0 };
+        await visp(["verify", "--task", "T020"]);
+        return { start, exit: Date.now() };
       },
       // visp brief --patch adds a decision shown on the Now page.
       brief: async (k) => {
         const marker = `Live marker ${rate}-${k}`;
-        await page.evaluate((m) => (window.__marker = m), marker);
+        await page.evaluate((m) => {
+          window.__seenAt = null;
+          window.__watch = { marker: m };
+        }, marker);
         const start = Date.now();
-        visp(
+        await visp(
           ["brief", "--patch", "-", "--reason", marker],
           JSON.stringify({ decisions: [{ statement: marker, rationale: "live update trial" }] }),
         );
-        return { start, exit: Date.now(), seen: (e) => e.text.includes(marker) };
+        return { start, exit: Date.now() };
       },
     };
     for (const [kind, act] of Object.entries(kinds)) {
@@ -244,16 +306,13 @@ async function liveTrials(browser, cookies, route, counts) {
       const missed = [];
       for (let k = 0; k < TRIALS; k++) {
         sse.length = 0;
-        await page.evaluate(() => (window.__log = []));
-        const { start, exit, seen } = await act(k);
+        const { start, exit } = await act(k);
         const writes = writesSince(start);
-        const deadline = Date.now() + 15_000;
-        let at;
-        while (!at && Date.now() < deadline) {
-          const log = await page.evaluate(() => window.__log.map(({ t, marks, text }) => ({ t, marks, text })));
-          at = log.find(seen)?.t;
-          if (!at) await page.waitForTimeout(50);
-        }
+        const at = await page
+          .waitForFunction(() => window.__seenAt, null, { timeout: 15_000, polling: 100 })
+          .then((handle) => handle.jsonValue())
+          .catch(() => null);
+        await page.evaluate(() => (window.__watch = null));
         if (!at) {
           missed.push(k);
           continue;

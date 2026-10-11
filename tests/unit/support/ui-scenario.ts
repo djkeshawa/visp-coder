@@ -13,7 +13,7 @@ import { runProductUserFeedback } from "../../../src/workflow/product/user-feedb
 import { moduleFeedback } from "./product-feedback.js";
 import { TestWorkspace } from "./workspace.js";
 
-function value<T>(result: Result<T>): T {
+export function value<T>(result: Result<T>): T {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
   return result.value;
 }

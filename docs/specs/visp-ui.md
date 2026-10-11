@@ -314,23 +314,26 @@ The feature is built under VISP itself (dogfooding). Each milestone is a VISP fe
 6. First render is under 1 s for a feature with 20 slices and 200 executions on a mid-range laptop.
 7. All security tests in §16 pass.
 
-### Measured against items 2 and 6 (10 October 2026): not met
+### Measured against items 2 and 6 (11 October 2026): met on a laptop, not on a small VM
 
-`tests/integration/ui/large-demo.test.ts` seeds a feature with 20 slices through the workflow services (200 real `node --test` executions) and `bench/ui/bench-ui.mjs` times the page in headless Chromium: cold HTTP cache, signed in, 7 trials. Machine: 4 vCPU Xeon at 2.8 GHz, idle. Medians, with p90 in brackets:
+`tests/integration/ui/large-demo.test.ts` seeds a feature with 20 slices through the workflow services: 200 real `node --test` executions with trail compaction held off, or the 110 that VISP keeps with `VISP_UI_LARGE_COMPACT=1`. `bench/ui/bench-ui.mjs` times the page in headless Chrome: cold HTTP cache, signed in, 7 trials. Medians, with the slowest trial in brackets (with 7 trials a p90 is close to the slowest):
 
-| Measure | 110 executions (what VISP keeps) | 200 executions | Target |
-| --- | --- | --- | --- |
-| First render, Now (all 20 slices and every run mark painted) | 980 ms (1,056) | 1,085 ms (1,106) | < 1 s |
-| First render, Runs (every run row) | 1,129 ms (1,219) | 1,191 ms (1,309) | < 1 s |
-| Same, Now, at 4× CPU throttling | 1,912 ms | 2,255 ms | — |
-| `visp brief --patch` to the decision on the open page | 1,184 ms (1,223) | — | 500 ms |
-| `visp verify` to its new run mark on the open page | 1,290 ms (2,800) | — | 500 ms |
+| Measure | Laptop, 110 executions | Laptop, 200 executions | VM, 110 | VM, 200 | Target |
+| --- | --- | --- | --- | --- | --- |
+| First render, Now (all 20 slices and every run mark painted) | 575 ms (590) | 624 ms (646) | 980 ms (1,056) | 1,085 ms (1,106) | < 1 s |
+| First render, Runs (every run row) | 530 ms (568) | 614 ms (734) | 1,129 ms (1,219) | 1,191 ms (1,309) | < 1 s |
+| Same, Now, at 4× CPU throttling | 843 ms (847) | 954 ms (967) | 1,912 ms | 2,255 ms | — |
+| `visp brief --patch` to the decision on the open page | 387 ms (414) | — | not re-measured | — | 500 ms |
+| Same, at 4× CPU throttling | 487 ms (548) | — | — | — | — |
+| `visp verify` to its new run mark on the open page | 289 ms (370) | — | not re-measured | — | 500 ms |
+| Same, at 4× CPU throttling | 411 ms (893) | — | — | — | — |
 
-Live times run from the last write under `.visp/`; every change arrived through the event stream (the 10-second refresh never explained a trial). Notes:
+Laptop: AMD Ryzen 9 5900HS (8 cores), Chrome 155, playwright-core 1.63. VM: 4 vCPU Xeon at 2.8 GHz, idle, measured on 10 October with an earlier version of the script. Live times run from the last write under `.visp/`; in every trial the change showed well before the 10-second refresh. Notes:
 
-- **A feature rarely holds 200 executions.** The trail keeps the newest 100 plus those reviews cite and the latest of each check (`trail.ts`), so the seed above settles at 110. The 200 column holds compaction off while seeding.
-- **The watcher is fast; the re-read is slow.** The `change` event reaches the page 150 ms after the first write (600 ms for `verify`, whose first write is its check log). The page then re-fetches the feature, which takes most of the remaining time.
-- **The cost is parsing, not the number of runs.** Alone, `/api/v1/features/<id>` takes about 200 ms, `/api/v1/requests` 250 ms and `/api/v1/overview` 60 ms; page load issues them together on the server's one thread. In a CPU profile, reading the product record took 522 ms of the requests' time: 399 ms parsing `brief.yaml` (12 KB, about 11 ms per parse, roughly three parses per request) and about 170 ms schema validation. Hashing the product source took 97 ms and git subprocesses about 200 ms.
+- **The VM live times are withdrawn.** The earlier script ran each CLI command synchronously, which stalled its own event handling, and its page watcher scanned the whole document on every mutation while timing the re-render. Its VM figures (1,184 ms for `brief`, 1,290 ms for `verify`) are not comparable and were not re-measured. Its VM first-render figures used the same measurement as now, but the bracketed values were the slowest trial, not a p90.
+- **A feature rarely holds 200 executions.** The trail keeps the newest 100 plus those reviews cite and the latest of each check (`trail.ts`), so the seed settles at 110.
+- **The watcher is fast.** The `change` event that names the feature reaches the page about 150 ms after the first write under `.visp/`, for `verify` as well as `brief` (median 147 ms and 151 ms). The earlier note that `verify`'s event comes 600 ms after the first write was an artifact of the synchronous command. The page then re-fetches the feature, which takes most of the remaining time.
+- **The cost is parsing, not the number of runs.** Profiled on the VM: alone, `/api/v1/features/<id>` takes about 200 ms, `/api/v1/requests` 250 ms and `/api/v1/overview` 60 ms; page load issues them together on the server's one thread. Reading the product record took 522 ms of the requests' time: 399 ms parsing `brief.yaml` (12 KB, about 11 ms per parse, roughly three parses per request) and about 170 ms schema validation. Hashing the product source took 97 ms and git subprocesses about 200 ms. On the laptop the feature request alone takes about 425 ms at 110 executions and 480 ms at 200, so the same parsing cost is what keeps a slower machine from the target.
 
 ## 17. Reuse map
 

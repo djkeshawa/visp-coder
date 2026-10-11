@@ -1,6 +1,5 @@
 import { cp } from "node:fs/promises";
 import { it, vi } from "vitest";
-import type { Result } from "../../../src/core/result.js";
 import {
   createProductFeature,
   runProductDone,
@@ -8,23 +7,24 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../../src/workflow/product/index.js";
+import { value } from "../../unit/support/ui-scenario.js";
 import { TestWorkspace } from "../../unit/support/workspace.js";
 
 // The trail keeps the newest 100 executions plus those reviews cite (trail.ts), so a
 // feature reaches the spec's 200 only when reviews cite older runs. Seeding has no
-// reviews, so compaction is held off here; every execution is still a real run.
-vi.mock("../../../src/workflow/product/trail.js", async (original) => ({
-  ...(await original<typeof import("../../../src/workflow/product/trail.js")>()),
-  compactTrail: <T>(state: T) => state,
-}));
+// reviews, so compaction is held off by default; every execution is still a real run.
+// VISP_UI_LARGE_COMPACT=1 keeps compaction and seeds what VISP keeps (110 executions).
+// vi.mock is hoisted above this module's bindings, so the factory reads the env itself.
+vi.mock("../../../src/workflow/product/trail.js", async (original) => {
+  const actual = await original<typeof import("../../../src/workflow/product/trail.js")>();
+  return process.env.VISP_UI_LARGE_COMPACT
+    ? actual
+    : { ...actual, compactTrail: <T>(state: T) => state };
+});
+const COMPACT = Boolean(process.env.VISP_UI_LARGE_COMPACT);
 
 const SLICES = 20;
 const RUNS_PER_SLICE = 10;
-
-function value<T>(result: Result<T>): T {
-  if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
-  return result.value;
-}
 
 const id = (n: number) => String(n).padStart(2, "0");
 const source = (n: number, round: number) =>
@@ -36,10 +36,11 @@ const test = (n: number) =>
  * Seeds the spec §16 size target for `visp ui` (20 slices, 200 executions) through the
  * same services the CLI runs, and copies it to the directory named. Off by default:
  *   VISP_UI_LARGE=/tmp/visp-ui-large pnpm vitest run tests/integration/ui/large-demo.test.ts
+ *   VISP_UI_LARGE=/tmp/visp-ui-kept VISP_UI_LARGE_COMPACT=1 pnpm vitest run tests/integration/ui/large-demo.test.ts
  *   visp ui --project /tmp/visp-ui-large
  */
 it.skipIf(!process.env.VISP_UI_LARGE)(
-  "seeds a feature with 20 slices and 200 executions for visp ui",
+  `seeds a feature with 20 slices and ${COMPACT ? "the executions VISP keeps" : "200 executions"} for visp ui`,
   async () => {
     const files: Record<string, string> = {};
     for (let n = 1; n <= SLICES; n++) {

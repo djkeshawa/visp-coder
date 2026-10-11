@@ -36,7 +36,7 @@ of coding workflows.
 
 ## Timing the dashboard
 
-`bench/ui/bench-ui.mjs` times `visp ui` against the first-render and live-update targets in [the dashboard specification](../docs/specs/visp-ui.md#16-testing-and-acceptance), on a feature that `tests/integration/ui/large-demo.test.ts` seeds with 20 slices and 200 real executions. Usage is at the top of the script; results are in the specification.
+`bench/ui/bench-ui.mjs` times `visp ui` against the first-render and live-update targets in [the dashboard specification](../docs/specs/visp-ui.md#16-testing-and-acceptance), on a feature that `tests/integration/ui/large-demo.test.ts` seeds with 20 slices and 200 real executions (or the 110 VISP keeps, with `VISP_UI_LARGE_COMPACT=1`). Usage is at the top of the script; results are in the specification.
 
 ## Running
 
