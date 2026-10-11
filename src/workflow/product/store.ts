@@ -108,7 +108,7 @@ async function readRecordSnapshot(
   const content = await workspace.files.readTextIfExists(briefPath(workspace, feature));
   if (!content.ok) return content;
   if (content.value === undefined) return missingBrief(workspace, feature);
-  const brief = parseBriefText(content.value, feature);
+  const brief = rememberedBrief(content.value, feature);
   if (!brief.ok) return brief;
   const stored = await workspace.files.readText(productStatePath(workspace, feature));
   if (!stored.ok) return stored;
@@ -120,9 +120,14 @@ async function readRecordSnapshot(
         details: { externalBriefEdit: true },
       }),
     );
-  const state = parseStateText(stored.value, feature, migrateVersionTwo);
+  const state = remembered(parsedStates, `${feature}\0${migrateVersionTwo}\0${stored.value}`, () =>
+    parseStateText(stored.value, feature, migrateVersionTwo),
+  );
   if (!state.ok) return state;
-  if (!allowDraft && brief.value.originalRequest !== state.value.intentSnapshot.originalRequest)
+  if (
+    !allowDraft &&
+    brief.value.brief.originalRequest !== state.value.intentSnapshot.originalRequest
+  )
     return err(
       vispError(
         "ARTIFACT_INVALID",
@@ -130,16 +135,17 @@ async function readRecordSnapshot(
       ),
     );
   // Direct edits are drafts until the shared brief validator records the revision.
-  if (!allowDraft && state.value.briefDigest !== hashValue(brief.value))
+  if (!allowDraft && state.value.briefDigest !== brief.value.digest)
     return err(
       vispError("ARTIFACT_INVALID", "Brief changed outside the validated update operation", {
         recovery: `visp brief --feature ${feature} --from <draft.yaml> --reason <reason>`,
         details: { externalBriefEdit: true },
       }),
     );
+  // Callers get their own copies; the remembered values stay as parsed.
   return ok({
-    brief: brief.value,
-    state: state.value,
+    brief: structuredClone(brief.value.brief),
+    state: structuredClone(state.value),
     briefText: content.value,
     stateText: stored.value,
   });
@@ -162,6 +168,40 @@ async function missingBrief(workspace: WorkspaceState, feature: string): Promise
       },
     ),
   );
+}
+
+/**
+ * Parsed briefs and states by exact file content. `visp ui` reads the same record several times
+ * per request, and parsing a 12 KB brief took about 11 ms on a small VM; the result depends only
+ * on the bytes, so unchanged files are parsed once.
+ */
+const REMEMBERED = 8;
+const parsedBriefs = new Map<string, { brief: ProductBrief; digest: string }>();
+const parsedStates = new Map<string, ProductState>();
+
+function remembered<T>(cache: Map<string, T>, key: string, parse: () => Result<T>): Result<T> {
+  const hit = cache.get(key);
+  if (hit !== undefined) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return ok(hit);
+  }
+  const parsed = parse();
+  if (!parsed.ok) return parsed;
+  cache.set(key, parsed.value);
+  const oldest = cache.keys().next().value;
+  if (cache.size > REMEMBERED && oldest !== undefined) cache.delete(oldest);
+  return parsed;
+}
+
+function rememberedBrief(
+  content: string,
+  feature: string,
+): Result<{ brief: ProductBrief; digest: string }> {
+  return remembered(parsedBriefs, `${feature}\0${content}`, () => {
+    const brief = parseBriefText(content, feature);
+    return brief.ok ? ok({ brief: brief.value, digest: hashValue(brief.value) }) : brief;
+  });
 }
 
 function parseBriefText(content: string, feature: string): Result<ProductBrief> {

@@ -31,6 +31,7 @@ import { serveCommand } from "./commands/serve.js";
 import { initCommand } from "./commands/setup.js";
 import { skillCommand } from "./commands/skill.js";
 import { trailCommand } from "./commands/trail.js";
+import { uiCommand } from "./commands/ui.js";
 import { usageCommand } from "./commands/usage.js";
 
 export function buildProgram(
@@ -82,6 +83,7 @@ export function buildProgram(
   program.addCommand(overrideCommand());
   program.addCommand(skillCommand());
   program.addCommand(serveCommand());
+  program.addCommand(uiCommand());
 
   const enableUsageErrors = (command: Command): void => {
     command.exitOverride();

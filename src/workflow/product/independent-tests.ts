@@ -79,6 +79,10 @@ import { captureTesterSnapshot, inTesterSnapshot, type TesterSnapshot } from "./
 
 const RECORD = TESTS_RECORD;
 const START_SOURCE = "tester-source-digest";
+/** Whether the project had existing code when the tester first started, beside its digest. */
+const START_MODE = "tester-launch-mode";
+const EXISTING_CODE_MODE = "existing-code";
+const NEW_PROJECT_MODE = "new-project";
 const TESTER_TIMEOUT_MS = 720_000;
 const BASELINE_TIMEOUT_MS = 120_000;
 const STALE_RUNNING_MS = 2 * TESTER_TIMEOUT_MS + BASELINE_TIMEOUT_MS;
@@ -531,6 +535,7 @@ async function startingSourceDigest(
   const source = await productSourceSnapshot(workspace, brief);
   if (!source.ok) return source;
   const digest = hashValue(source.value);
+  const mode = (await existingCode(workspace.paths.root)) ? EXISTING_CODE_MODE : NEW_PROJECT_MODE;
   const saved = await retryBusy(() =>
     applyFileTransaction(workspace.paths.root, "record-tester-source", [
       {
@@ -539,10 +544,49 @@ async function startingSourceDigest(
         content: `${digest}\n`,
         expectedBefore: { existed: false },
       },
+      {
+        kind: "write",
+        path: workspace.paths.featureFile(feature, START_MODE),
+        content: `${mode}\n`,
+        expectedBefore: { existed: false },
+      },
     ]),
   );
   if (!saved.ok) return saved;
   return ok(digest);
+}
+
+/**
+ * Whether the tester runs in execution mode, as decided when it first started: a retry after
+ * files were added or committed keeps its launch mode. Features started before VISP recorded
+ * the mode use the project as it is now; `executionRefusal` still guards that case.
+ */
+async function launchedOnExistingCode(
+  workspace: WorkspaceState,
+  feature: string,
+): Promise<Result<boolean>> {
+  const stored = await workspace.files.readTextIfExists(
+    workspace.paths.featureFile(feature, START_MODE),
+  );
+  if (!stored.ok) return stored;
+  if (stored.value === undefined) return ok(await existingCode(workspace.paths.root));
+  const mode = stored.value.trim();
+  return mode === EXISTING_CODE_MODE || mode === NEW_PROJECT_MODE
+    ? ok(mode === EXISTING_CODE_MODE)
+    : err(vispError("ARTIFACT_INVALID", `Unreadable ${START_MODE}`));
+}
+
+/**
+ * Execution mode gives the tester a writable, networked repository copy. A first launch gets
+ * it only with `critic.existingCodeTests: true` (testerApplies); retries and direct runs too.
+ */
+function executionRefusal(
+  workspace: WorkspaceState,
+  feature: string,
+  existingCodebase: boolean,
+): string | undefined {
+  if (!existingCodebase || workspace.config.critic?.existingCodeTests === true) return undefined;
+  return `The independent tester of ${feature} was not run: on an existing codebase it runs in execution mode (a writable repository copy with network access), which VISP allows only with critic.existingCodeTests: true in visp.yml`;
 }
 
 /** `visp feature` without the tester: the source-brief check, then the feature. */
@@ -573,20 +617,24 @@ export async function createProductFeatureWithTests(
   starter: TestsStarter | undefined,
 ): Promise<Result<ProductFeatureOutcome>> {
   const created = await createProductFeatureChecked(workspace, options, starter);
-  if (created.ok) await startFeatureTester(workspace, created.value, starter);
-  return created;
+  if (!created.ok) return created;
+  const refused = await startFeatureTester(workspace, created.value, starter);
+  return refused ? ok({ ...created.value, testsNote: refused }) : created;
 }
 
-/** The tester of a new feature; of the earlier one when the request was a repeat. */
-function startFeatureTester(
+/**
+ * The tester of a new feature; of the earlier one when the request was a repeat. Resolves to
+ * the reason when VISP refused to restart it.
+ */
+async function startFeatureTester(
   workspace: WorkspaceState,
   created: ProductFeatureOutcome,
   starter: TestsStarter | undefined,
-): Promise<void> {
+): Promise<string | undefined> {
   // A repeated request returns the earlier feature, which must still end with pinned tests.
-  return created.duplicateOf
-    ? restartTester(workspace, created.duplicateOf, starter)
-    : startIndependentTests(workspace, created.brief.feature, starter);
+  if (created.duplicateOf) return restartTester(workspace, created.duplicateOf, starter);
+  await startIndependentTests(workspace, created.brief.feature, starter);
+  return undefined;
 }
 
 /** How long `visp feature` waits for the tester's record before it prints. */
@@ -605,6 +653,7 @@ export async function beginFeatureTester(
 ): Promise<{ readonly testsNote?: string; readonly finished: Promise<void> }> {
   const feature = created.duplicateOf ?? created.brief.feature;
   let settled = false;
+  let refused: string | undefined;
   // The note is true only for a tester this process started and runs itself.
   let started = false;
   const watched: TestsStarter | undefined =
@@ -618,7 +667,8 @@ export async function beginFeatureTester(
     );
   const finished = startFeatureTester(workspace, created, watched)
     .catch(() => undefined)
-    .then(() => {
+    .then((reason) => {
+      refused = reason;
       settled = true;
     });
   const deadline = Date.now() + RECORD_WAIT_MS;
@@ -629,22 +679,35 @@ export async function beginFeatureTester(
         finished,
         testsNote: `Run visp work --feature ${feature} now; this command keeps running only to write VISP's acceptance tests — leave it running and do not run visp feature again.`,
       };
-    if (settled || Date.now() >= deadline) return { finished };
+    if (settled || Date.now() >= deadline)
+      return { finished, ...(refused ? { testsNote: refused } : {}) };
     await sleep(100);
   }
 }
 
-/** The tester of an existing feature that has none, failed, or stopped without a result. */
+/**
+ * The tester of an existing feature that has none, failed, or stopped without a result.
+ * Resolves to the reason when its launch mode needs an opt-in the project does not give.
+ */
 async function restartTester(
   workspace: WorkspaceState,
   feature: string,
   starter: TestsStarter | undefined,
-): Promise<void> {
-  if (!starter) return;
+): Promise<string | undefined> {
+  if (!starter) return undefined;
   const existing = await readTestsRecord(workspace, feature);
-  if (!existing.ok) return;
-  if (!existing.value) return startIndependentTests(workspace, feature, starter);
-  if (await mayRestartTester(existing.value, true)) await starter(workspace, feature, 0, true);
+  if (!existing.ok) return undefined;
+  if (!existing.value) {
+    await startIndependentTests(workspace, feature, starter);
+    return undefined;
+  }
+  if (!(await mayRestartTester(existing.value, true))) return undefined;
+  const existingCodebase = await launchedOnExistingCode(workspace, feature);
+  if (!existingCodebase.ok) return existingCodebase.error.message;
+  const refused = executionRefusal(workspace, feature, existingCodebase.value);
+  if (refused) return refused;
+  await starter(workspace, feature, 0, true);
+  return undefined;
 }
 
 const SOURCE_FILE =
@@ -793,14 +856,14 @@ async function testsFromSnapshot(
   feature: string,
   tester: IndependentTester,
   brief: ProductRecord["brief"],
-  setup: { model: string; reasoningEffort?: string; sourceDigest: string },
+  setup: TesterSetup,
 ): Promise<TestFields> {
   let snapshot: TesterSnapshot | undefined;
   try {
     const captured = await captureTesterSnapshot(workspace, brief, setup.sourceDigest);
     if (!captured.ok) return { status: "failed", reason: captured.error.message };
     snapshot = captured.value;
-    const existingCodebase = await existingCode(workspace.paths.root);
+    const { existingCodebase } = setup;
     const rules = await rulesForRequest(workspace, feature);
     const request: TesterRequest = {
       root: workspace.paths.root,
@@ -823,21 +886,36 @@ async function testsFromSnapshot(
   }
 }
 
+interface TesterSetup {
+  readonly model: string;
+  readonly reasoningEffort?: string;
+  readonly sourceDigest: string;
+  readonly sourceChanged: boolean;
+  /** The launch-time mode: a retry runs in the mode its first start had. */
+  readonly existingCodebase: boolean;
+}
+
+/** The launch-time source and mode a run uses, or why VISP refuses to run the tester. */
 async function testerSetup(
   workspace: WorkspaceState,
   feature: string,
   brief: ProductRecord["brief"],
   previous: IndependentTestsRecord | undefined,
-): Promise<
-  Result<{ model: string; reasoningEffort?: string; sourceDigest: string; sourceChanged: boolean }>
-> {
+): Promise<Result<TesterSetup>> {
   const policy = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
   if (!policy.ok) return policy;
   const model = policy.value.config?.model;
   if (!model) return err(vispError("CONFIG_INVALID", "The tester needs a configured critic model"));
   const source = await productSourceSnapshot(workspace, brief);
   if (!source.ok) return source;
-  const startedSource = await readStartingSource(workspace, feature);
+  const existingCodebase = await launchedOnExistingCode(workspace, feature);
+  if (!existingCodebase.ok) return existingCodebase;
+  const refused = executionRefusal(workspace, feature, existingCodebase.value);
+  if (refused) return err(vispError("CONFIG_INVALID", refused));
+  // Starters record the launch source and mode first; a direct `work --write-tests` does here.
+  const startedSource = previous
+    ? await readStartingSource(workspace, feature)
+    : await startingSourceDigest(workspace, feature, brief);
   if (!startedSource.ok) return startedSource;
   const current = hashValue(source.value);
   const sourceDigest = previous?.sourceDigest ?? startedSource.value ?? current;
@@ -846,6 +924,7 @@ async function testerSetup(
     reasoningEffort: policy.value.config?.reasoningEffort,
     sourceDigest,
     sourceChanged: sourceDigest !== current,
+    existingCodebase: existingCodebase.value,
   });
 }
 
@@ -1252,7 +1331,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     "- Surface those cases in `ambiguities`: quote the exact rule in `quote`, list its reasonable `readings`, and give the reading most implementations/users expect in `conventionalReading`, as one plain statement without caveats. Consider common natural variants, such as whitespace-only lines for 'blank lines'. Do not write tests for ambiguous cases. Return ambiguities even when file is null; use [] when none exist. These notes ask the worker to decide explicitly, not to satisfy an invented requirement.",
     "- Coverage priority: where the request describes them, the suite must cover the request's central outcomes, not only setup, formats and interface shapes. Central outcomes are the effects the product exists to produce (for example what an action scores or charges, a quota or retry limit taking effect, a status transition, a goal being reached or lost), each numeric rule for the trigger and amount the request gives, and every stated state transition together with what follows it, as far as the request states it. If a trigger, rounding or boundary is unclear, list it in `ambiguities` instead of asserting it. A suite that checks only setup, data shapes and interface plumbing is incomplete. When trimming to the size limit, drop shape and format checks before central outcomes.",
     "- For each invariant the request states (something never happens: never passes through, never exceeds, never negative), include one bounded check that tries to break it (a small sweep of inputs or a simulated run) and fails if it ever happens; sample during the run, not only terminal snapshots, and include every named moving actor. When the request requires physical objects to remain at rest, check only those objects over bounded idle simulation through the stated interfaces; respect allowed settling and animation, assert only stated motion or damage constraints, and omit unobservable or ambiguous checks.",
-    "- Reaching outcomes without assuming open details: when producing an outcome depends on details the request leaves to the implementer (positions, layouts, data, timing), do not assume those details and do not skip the outcome. Reach it through the stated interfaces by a bounded search over allowed inputs (a grid over the input parameters, or sequences of actions), then assert the stated consequences once the effect is observed (for example the exact stated amount changed, the stated state appeared). Assert only what the request states about the consequence, not how the effect was reached. A goal the request defines (completing, winning, finishing a flow) must be reachable through allowed inputs: when the search covers the whole stated input domain (every stated range, at a resolution fine enough that a reasonable implementation cannot fall between samples, and sequences as long as the request allows), finding no way to reach it is a failure. Angles and directions are bounded (one full turn, or the range the request names) and a fraction from 0 to 1 is bounded, even when a test hook accepts any number. Search every such goal (each level or stage); when your search cannot cover the domain finely enough to prove the goal unreachable, print `NOT OBSERVED: <exact name>: <attempts> attempts` instead of FAIL. Only a truly open domain goes to `ambiguities`.",
+    "- Reaching outcomes without assuming open details: when producing an outcome depends on details the request leaves to the implementer (positions, layouts, data, timing), do not assume those details and do not skip the outcome. Reach it through the stated interfaces by a bounded search over allowed inputs (a grid over the input parameters, or sequences of actions), then assert the stated consequences once the effect is observed (for example the exact stated amount changed, the stated state appeared). Assert only what the request states about the consequence, not how the effect was reached. A goal the request defines (completing, winning, finishing a flow) must be reachable through allowed inputs: when the search covers the whole stated input domain (every stated range, at a resolution fine enough that a reasonable implementation cannot fall between samples, and sequences as long as the request allows), finding no way to reach it is a failure. Angles and directions are bounded (one full turn, or the range the request names) and a fraction from 0 to 1 is bounded, even when a test hook accepts any number. Write one test per goal unit the request defines (each level, stage or scenario), named with its unit (for example `level 2 can be won`); never test only the first unit. Direct each search before widening it: derive candidate inputs from what the product exposes and the stated rules (for example aim at each remaining target from the observed start point), then fall back to a grid. For a goal that takes several actions, after each action keep the candidate that made the most stated progress (fewest targets left, highest score) and continue from it, replaying the kept actions after a restart when state cannot be saved, until the allowed actions run out. Give each goal search up to about 150 attempts and stop at its first success. When your search cannot cover the domain finely enough to prove the goal unreachable, print `NOT OBSERVED: <exact name>: <attempts> attempts` instead of FAIL. Only a truly open domain goes to `ambiguities`.",
     "- Equivalent input paths: when the request states that two input paths (for example real user input and a programmatic or test interface) produce the same behavior, test each path against the same expected result derived from the request, never from what an implementation does. For directions, coordinates or other geometry, use non-degenerate inputs with a non-zero component on every axis (not only axis-aligned cases), so a flipped sign or swapped axis fails. Assert the direction (sign or quadrant) the request's stated convention implies, not exact magnitudes unless the request gives the formula; if the request states no convention, do not assert one and list it in `ambiguities`.",
     "- Range coverage: for each stated input range, sample one allowed value near each end and one in the middle (or all allowed values if there are fewer than three), checking only the behavior the request requires at each value under its stated conditions. Use values strictly inside the range unless the request makes endpoint inclusion and behavior clear; do not invent exact results the request leaves open, and put unclear expectations in `ambiguities` instead of asserting them. Combine the samples in the same test within the suite's size limit, varying one ranged input at a time rather than testing every combination.",
     "- When the request names deterministic controls (a clock, a step function, a seed, a reset), drive time and setup through them instead of real-time waits. When the request says a consequence happens as soon as (or immediately when) a trigger holds, or that a state shows a control or display (after a win, when lost), stop at the FIRST state where the trigger or state holds (bounded stepping with the named hooks) and check it there. Where the request states a delay, check within that delay; never assert an immediacy the request does not state.",
@@ -1269,7 +1348,7 @@ function testerPrompt(request: string, feature: string, existing = false): strin
     `- Tests can be waived after an independent review. The environment variable ${WAIVED_TESTS_ENV} may hold a JSON array of test names (unset or empty means none): skip every test whose \`tests[].name\` is listed, do not run or count it, and let all other tests decide the exit status. For example, in Node: \`const waived = new Set(JSON.parse(process.env.${WAIVED_TESTS_ENV} ?? "[]"))\`; in Python: \`json.loads(os.environ.get("${WAIVED_TESTS_ENV}") or "[]")\`.`,
     "- The project is not implemented yet, so the file must fail now and pass once the request is met.",
     "- Before answering, check every case against the request and trace it through your own helpers (for example, how a missing body, None or null is actually sent). Remove any case you cannot justify from the quoted text.",
-    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines of your own code (the browser kit VISP inserts does not count). Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file runs in under about 30 seconds, including when nothing is implemented yet.",
+    "- Keep it focused: one test per stated rule or error case, at most about 30 tests and 500 lines of your own code (the browser kit VISP inserts does not count). Share search and setup helpers between tests. Bound every search by an iteration count, not wall-clock time; stop a search at the first attempt that shows the interface is missing or throws, and never swallow errors inside it, so the whole file finishes in under about 30 seconds when nothing is implemented yet, and in under about 90 seconds against a working product, of which goal searches may use about 60.",
     ...(existing
       ? [
           "- This request changes an existing codebase, and you are in a disposable copy of it where you may run the existing program and its tests. Before asserting anything about existing behavior (routes, status codes, body shapes, error formats, the requests your setup makes), run the program and observe it; base every such assertion on what you observed, not on assumptions.",
@@ -1292,10 +1371,33 @@ function invalidFile(file: { name: string; content: string }): string | undefine
   if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(py|mjs)$/.test(file.name))
     return `Unsupported test file name ${JSON.stringify(file.name)}`;
   if (Buffer.byteLength(file.content) > MAX_FILE_BYTES) return "The test file is too large";
-  const assertions = file.content.match(/\bassert\w*|AssertionError/g)?.length ?? 0;
+  const assertions =
+    (file.content.match(/\bassert\w*|AssertionError/g)?.length ?? 0) +
+    aliasedAssertions(file.content);
   if (assertions < MIN_ASSERTIONS)
     return `The test file has ${assertions} assertions; at least ${MIN_ASSERTIONS} are required`;
   return undefined;
+}
+
+/** Calls through Node's assert module imported under another name (`import check from "node:assert"`). */
+function aliasedAssertions(content: string): number {
+  const module = String.raw`['"](?:node:)?assert(?:/strict)?['"]`;
+  const aliases = [
+    ...content.matchAll(
+      new RegExp(String.raw`import\s+(?:\*\s+as\s+)?(\w+)\s+from\s+${module}`, "g"),
+    ),
+    ...content.matchAll(
+      new RegExp(String.raw`(?:const|let|var)\s+(\w+)\s*=\s*require\(\s*${module}\s*\)`, "g"),
+    ),
+  ]
+    .map((match) => match[1] ?? "")
+    .filter((alias) => alias && !/^assert/.test(alias));
+  return aliases.reduce(
+    (count, alias) =>
+      // Not a property of something else (`page.check(...)`, `obj.check.x`).
+      count + (content.match(new RegExp(String.raw`(?<![\w$.])${alias}\s*[.(]`, "g"))?.length ?? 0),
+    0,
+  );
 }
 
 function testCommand(path: string): string[] {

@@ -28,6 +28,14 @@ pnpm build
 
 `pnpm release:check` is the release gate and runs before publishing (`prepublishOnly`).
 
+## Releasing
+
+1. On `develop`, set `version` in `package.json` and give `CHANGELOG.md` a `## <version> - <date>` section.
+2. Merge `develop` into `main`.
+3. Tag the merge on `main` and push the tag: `git tag v<version> && git push origin v<version>`.
+
+`.github/workflows/release.yml` then checks that the tag matches `package.json` and is on `main`, runs `pnpm release:check`, publishes to npm with provenance (a prerelease such as `0.5.0-beta.3` goes to the `beta` dist-tag, others to `latest`) and creates the GitHub release from the changelog section. It needs an npm automation token in the `NPM_TOKEN` repository secret.
+
 **When `pnpm knip` fails**, delete what nothing uses rather than ignoring it; an export that only its own file uses is fine. Code that only tests call is not reported, so check that a function you replace loses its tests too. The import cycles that predate the check are listed in `knip.json` under `cycles.allow`; a new cycle fails, so break it, or, if it cannot be avoided, add its exact path there with the reason in the commit.
 
 **Rebuild before running tests.** Several tests run the compiled CLI from `dist/`, and hook and installation tests compare the build ID of the running code with the build that generated the hooks. A stale `dist/` makes them fail. Run `pnpm build` after changing `src/`.
@@ -42,12 +50,12 @@ Browser tests need an installed Chrome or Chromium; VISP never downloads one.
 | `src/mcp/` | MCP server, tool definitions (`tools/`), resources and reply shaping |
 | `src/workflow/product/` | The product loop: brief, work, checks, review, critic, acceptance, `pr` |
 | `src/workflow/evidence/` | Capture, control and observation readers |
-| `src/testing/` | Browser journey runner and helpers (exported as `visp-coder/testing`) |
+| `src/testing/` | Browser journey runner and helpers (exported as `@visporg/visp-coder/testing`) |
 | `src/config/` | `visp.yml` schema, starter template and critic defaults |
 | `src/harness/` | Host installation: instructions, hooks, MCP registration, critic agents |
-| `src/graph/` | Tree-sitter repository index and queries (`visp-coder/graph`) |
+| `src/graph/` | Tree-sitter repository index and queries (`@visporg/visp-coder/graph`) |
 | `src/memory/`, `src/skills/` | Project notes and the skill lifecycle |
-| `src/runner/` | `visp-runner` (`visp-coder/runner`) |
+| `src/runner/` | `visp-runner` (`@visporg/visp-coder/runner`) |
 | `src/migration/` | `visp-migrate` |
 | `src/core/` | Shared primitives: file transactions, state lock, exec, paths, errors |
 | `tests/unit`, `tests/integration`, `tests/functional`, `tests/browser`, `tests/qualification` | Test suites |

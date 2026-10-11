@@ -4,7 +4,7 @@
  */
 
 export const PRODUCT_NAME = "visp";
-export const PACKAGE_NAME = "visp-coder";
+export const PACKAGE_NAME = "@visporg/visp-coder";
 
 /** Versioned shape returned by `visp guard` and required by generated hooks. */
 export const GUARD_PROTOCOL_VERSION = 2;

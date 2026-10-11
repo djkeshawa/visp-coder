@@ -23,6 +23,21 @@ Fixed-contract tasks for comparing coding workflows (bare coding, Spec Kit, BMAD
 - A two-session task has `session1.md`, `session2.md` and `conventions.md` instead of `task.md`. For `conventions-carryover`, its `code` checks apply conventions that the first session's code already shows; its `memory` checks apply conventions stated only in the first conversation (money in integer `*Cents` fields, soft deletion answering 410 `gone`), so they pass only if the knowledge survived between sessions. `archive-carryover` instead tests feature decisions already expressed in session 1 code: its `memory` checks apply the archived-item restriction to bundles and the quantity cap to restocking. Each memory check includes a forbidden operation, so omitting both carried decisions fails every one.
 - `reference/` holds correct implementations used only to validate the oracles; deliberately broken variants (a racy store, injected bugs) were checked to fail.
 
+## Qualifying the spreadsheet oracles
+
+```bash
+python3 -m unittest bench/test_hidden_oracles.py
+```
+
+These local checks (spreadsheet-cli, spreadsheet-extend and sheet-carryover) verify that correct references pass, wrong division-error output fails,
+and a nonzero program exit fails even when its output matches. They use temporary copies
+and the standard library, without calling models. Oracle qualification is not a comparison
+of coding workflows.
+
+## Timing the dashboard
+
+`bench/ui/bench-ui.mjs` times `visp ui` against the first-render and live-update targets in [the dashboard specification](../docs/specs/visp-ui.md#16-testing-and-acceptance), on a feature that `tests/integration/ui/large-demo.test.ts` seeds with 20 slices and 200 real executions (or the 110 VISP keeps, with `VISP_UI_LARGE_COMPACT=1`). Usage is at the top of the script; results are in the specification.
+
 ## Running
 
 Runs, builds and worker homes live outside the repository, in `$VISP_BENCH_RUNS` (default `~/visp-bench`).

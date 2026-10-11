@@ -1,19 +1,19 @@
 {
-  "name": "visp-coder",
-  "version": "0.5.0-beta.2",
+  "name": "@visporg/visp-coder",
+  "version": "0.5.0-beta.3",
   "publishConfig": {
-    "tag": "beta"
+    "access": "public"
   },
   "description": "Harness for AI coding agents: an actor-critic loop with executed checks, bounded file scope, an independent reviewer and independent acceptance tests. CLI and MCP server.",
   "license": "Apache-2.0",
   "author": "Dineth Keshawa Jayathilaka",
-  "homepage": "https://github.com/djkeshawa/visp-coder#readme",
+  "homepage": "https://github.com/visplabs/visp-coder#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/djkeshawa/visp-coder.git"
+    "url": "git+https://github.com/visplabs/visp-coder.git"
   },
   "bugs": {
-    "url": "https://github.com/djkeshawa/visp-coder/issues"
+    "url": "https://github.com/visplabs/visp-coder/issues"
   },
   "keywords": [
     "ai",
@@ -51,11 +51,11 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check src tests",
+    "build": "tsup && tsup --config tsup.ui.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p ui",
+    "lint": "biome check src tests ui/src",
     "knip": "knip && knip --cycles",
-    "format": "biome check --write src tests",
+    "format": "biome check --write src tests ui/src",
     "test": "vitest run",
     "test:unit": "pnpm build && vitest run tests/unit",
     "test:integration": "pnpm build && vitest run tests/integration",

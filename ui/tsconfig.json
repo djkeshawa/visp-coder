@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "declaration": false
+  },
+  "include": ["src/**/*.ts", "../src/ui/contract.ts"]
+}
