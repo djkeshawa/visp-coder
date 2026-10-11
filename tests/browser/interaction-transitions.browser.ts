@@ -50,6 +50,14 @@ it("detects a cancelled touch gesture consuming a resource", async () => {
               type: "touchCancel",
               touchPoints: [],
             });
+            // Chrome can return before the page has handled the cancel; sampling then saw
+            // the gesture still aiming, and the unrepaired page's launch not yet run.
+            await browser.page.evaluate(async () => {
+              const deadline = performance.now() + 2000;
+              const drag = document.querySelector<HTMLElement>("#drag");
+              while (drag?.dataset.cancelled !== "true" && performance.now() < deadline)
+                await new Promise(requestAnimationFrame);
+            }, undefined);
           },
           verify: (before, after) =>
             after.phase === "ready" && before.remaining === after.remaining,
