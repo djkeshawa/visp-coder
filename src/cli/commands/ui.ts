@@ -61,22 +61,26 @@ async function serve(
 ): Promise<void> {
   try {
     const server = await startUiServer({ root, ...(port ? { port } : {}) });
-    await writeLease({
+    const leased = writeLease({
       root,
       pid: process.pid,
       port: server.port,
       token: server.token,
       buildId: BUILD_ID,
     });
-    announce({ url: server.url, port: server.port, pid: process.pid, reused: false, root, json });
-    if (open) openBrowser(server.url);
+    // Handle the signals before announcing: a caller may stop the dashboard as soon as it
+    // reads the address, and without a handler that kills it with the lease left behind.
     const stop = async () => {
+      await leased.catch(() => undefined);
       await removeLease(root);
       await server.close();
       process.exit(EXIT.ok);
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
+    await leased;
+    announce({ url: server.url, port: server.port, pid: process.pid, reused: false, root, json });
+    if (open) openBrowser(server.url);
   } catch (cause) {
     const error =
       (cause as NodeJS.ErrnoException).code === "EADDRINUSE"
