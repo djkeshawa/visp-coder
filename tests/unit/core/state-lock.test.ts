@@ -35,6 +35,8 @@ const published = vi.hoisted(() => ({
   unlinked: undefined as undefined | ((path: string) => Promise<void>),
   listing: undefined as undefined | ((path: string) => Promise<void>),
   linkFailure: undefined as undefined | string,
+  // Error codes the next mkdir calls of the lock directory fail with, one per call.
+  mkdirFailures: [] as string[],
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -45,6 +47,16 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         throw Object.assign(new Error(published.linkFailure), { code: published.linkFailure });
       await actual.link(...args);
       if (/mutation\.lock[\\/]owner\.json$/.test(String(args[1]))) await published.after?.();
+    },
+    mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
+      const code = /mutation\.lock$/.test(String(args[0]))
+        ? published.mkdirFailures.shift()
+        : undefined;
+      if (code)
+        throw Object.assign(new Error(`${code}: operation not permitted, mkdir '${args[0]}'`), {
+          code,
+        });
+      return actual.mkdir(...args);
     },
     readdir: async (...args: Parameters<typeof actual.readdir>) => {
       await published.listing?.(String(args[0]));
@@ -61,6 +73,7 @@ const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
   published.after = published.unlinked = published.listing = published.linkFailure = undefined;
+  published.mkdirFailures = [];
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 async function root(): Promise<string> {
@@ -608,6 +621,42 @@ describe("worktree state ownership", () => {
       const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 0 });
       expect(!result.ok && result.error.code).toBe("STATE_BUSY");
       expect(await exists(lockPath(project))).toBe(true);
+    });
+
+    // Windows refuses to re-create a directory that another handle keeps pending deletion.
+    describe("a lock directory pending deletion on Windows", () => {
+      const platform = process.platform;
+      afterEach(() => Object.defineProperty(process, "platform", { value: platform }));
+
+      it("is retried until it can be created", async () => {
+        Object.defineProperty(process, "platform", { value: "win32" });
+        const project = await root();
+        published.mkdirFailures = ["EPERM", "EACCES", "EBUSY"];
+        expect(await withStateLock(project, async () => ok("held"), { timeoutMs: 2000 })).toEqual(
+          ok("held"),
+        );
+        expect(published.mkdirFailures).toEqual([]);
+      });
+
+      it("is reported when it outlasts the timeout", async () => {
+        Object.defineProperty(process, "platform", { value: "win32" });
+        const project = await root();
+        published.mkdirFailures = Array.from({ length: 1000 }, () => "EPERM");
+        const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 50 });
+        expect(!result.ok && result.error).toMatchObject({
+          code: "IO_ERROR",
+          message: expect.stringContaining("EPERM"),
+        });
+      });
+
+      it("is an error at once elsewhere", async () => {
+        Object.defineProperty(process, "platform", { value: "linux" });
+        const project = await root();
+        published.mkdirFailures = ["EPERM"];
+        const result = await withStateLock(project, async () => ok("no"), { timeoutMs: 2000 });
+        expect(!result.ok && result.error.code).toBe("IO_ERROR");
+        expect(published.mkdirFailures).toEqual([]);
+      });
     });
 
     it("admits one holder at a time when contenders race to reap an aged ownerless lock", async () => {

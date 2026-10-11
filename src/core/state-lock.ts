@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { checkMutationGuard } from "./check-context.js";
 import { STATE_DIR } from "./constants.js";
-import { fromUnknown, isNodeError, vispError } from "./errors.js";
+import { fromUnknown, isNodeError, type VispError, vispError } from "./errors.js";
 import { ProjectFileSystem } from "./fs.js";
 import { processIdentity } from "./process-identity.js";
 import { err, ok, type Result } from "./result.js";
@@ -185,20 +185,47 @@ async function acquire(files: ProjectFileSystem, timeoutMs: number): Promise<Res
     createdAt: new Date().toISOString(),
   };
   const deadline = performance.now() + timeoutMs;
+  let transient: VispError | undefined;
   for (;;) {
-    const created = await createOwner(files, owner);
-    if (!created.ok) return created;
-    if (created.value) return ok(owner);
-    const abandoned = await reclaimAbandoned(files);
-    if (!abandoned.ok) return abandoned;
-    if (abandoned.value) continue;
+    const attempt = await attemptOwnership(files, owner);
+    if (!attempt.ok) return attempt;
+    if (attempt.value === "held") return ok(owner);
+    if (attempt.value === "reclaimed") continue;
+    transient = attempt.value === "busy" ? undefined : attempt.value.transient;
     if (performance.now() >= deadline) break;
     await delay(Math.min(25, Math.max(1, deadline - performance.now())));
   }
+  if (transient) return err(transient);
   const current = await readOwner(files);
   return busy(
     "Another writer owns the worktree, or its ownership cannot be established",
     current.ok ? current.value : undefined,
+  );
+}
+
+/** One try: take the lock, or clear an abandoned one so the next try can. */
+async function attemptOwnership(
+  files: ProjectFileSystem,
+  owner: Owner,
+): Promise<Result<"held" | "reclaimed" | "busy" | { transient: VispError }>> {
+  const created = await createOwner(files, owner);
+  const abandoned = created.ok && !created.value ? await reclaimAbandoned(files) : created;
+  if (!abandoned.ok)
+    return transientOnWindows(abandoned.error) ? ok({ transient: abandoned.error }) : abandoned;
+  if (created.ok && created.value) return ok("held");
+  return ok(abandoned.value ? "reclaimed" : "busy");
+}
+
+/**
+ * Windows fails mkdir, lstat and file creation with these while a removed lock directory is still
+ * pending deletion because another contender has it open; they clear within milliseconds, so the
+ * acquire loop retries them and reports the last one only at its deadline.
+ */
+function transientOnWindows(error: VispError): boolean {
+  return (
+    process.platform === "win32" &&
+    error.code === "IO_ERROR" &&
+    /^(EPERM|EACCES|EBUSY):/.test(error.message)
   );
 }
 
