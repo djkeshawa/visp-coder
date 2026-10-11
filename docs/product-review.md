@@ -93,7 +93,7 @@ Every journey is one fresh browser session. To test repeated use, reset or recov
 
 ### Helpers for project tests
 
-The `@visplabs/visp-coder/testing` export offers the same building blocks to a project's own test suite: `runBrowserJourney` and `browserJourneySchema`; `activateControl` (real pointer, touch or keyboard input) and `assertControlReachable` (size, visibility, clipping and hit testing) for a page you supply; and `assertRecovery`, `assertFiniteState` and `assertTrajectoryClose` for simulation state. They check that input reaches a control, not that the application handled it; always assert the resulting state.
+The `@visporg/visp-coder/testing` export offers the same building blocks to a project's own test suite: `runBrowserJourney` and `browserJourneySchema`; `activateControl` (real pointer, touch or keyboard input) and `assertControlReachable` (size, visibility, clipping and hit testing) for a page you supply; and `assertRecovery`, `assertFiniteState` and `assertTrajectoryClose` for simulation state. They check that input reaches a control, not that the application handled it; always assert the resulting state.
 
 ## Ad hoc capture
 

@@ -3,7 +3,7 @@
 ## 0.5.0-beta.3 - 2026-10-11
 
 ### Changed
-- **The package is now `@visplabs/visp-coder`** and the repository is [visplabs/visp-coder](https://github.com/visplabs/visp-coder). Install with `npm install -g @visplabs/visp-coder@beta`; the executables (`visp`, `visp-migrate`, `visp-runner`) are unchanged. The library exports moved with it (`@visplabs/visp-coder/testing`, `/graph`, `/runner`); browser suites that still import `visp-coder/testing` keep their helper semantics. The generated pull request workflow installs the scoped package, so rerun `visp install` to update it.
+- **The package is now `@visporg/visp-coder`** and the repository is [visplabs/visp-coder](https://github.com/visplabs/visp-coder). Install with `npm install -g @visporg/visp-coder@beta`; the executables (`visp`, `visp-migrate`, `visp-runner`) are unchanged. The library exports moved with it (`@visporg/visp-coder/testing`, `/graph`, `/runner`); browser suites that still import `visp-coder/testing` keep their helper semantics. The generated pull request workflow installs the scoped package, so rerun `visp install` to update it.
 
 ### Added
 - **A VISP-launched Claude reviewer** (`critic.launch: claude-exec` with `critic.harness: claude-code`). VISP-launched review existed only through `codex exec`, so projects without Codex access, or whose Codex plan no longer offers the reviewer model, got no independent review unless the worker's host delegated one. VISP now runs one `claude -p` per reserved call: `--restricted --safe-mode` with only Read, Grep and Glob, no settings files, hooks, MCP servers or saved session, the configured model and effort, and the packet's response schema as structured output. `visp doctor` checks the CLI and its sign-in.
