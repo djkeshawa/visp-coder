@@ -34,7 +34,12 @@ pnpm build
 2. Merge `develop` into `main`.
 3. Tag the merge on `main` and push the tag: `git tag v<version> && git push origin v<version>`.
 
-`.github/workflows/release.yml` then checks that the tag matches `package.json` and is on `main`, runs `pnpm release:check`, publishes to npm with provenance (a prerelease such as `0.5.0-beta.3` goes to the `beta` dist-tag, others to `latest`) and creates the GitHub release from the changelog section. It needs an npm automation token in the `NPM_TOKEN` repository secret.
+`.github/workflows/release.yml` then checks that the tag matches `package.json` and is on `main`, runs `pnpm release:check`, stages the version on npm with provenance (a prerelease such as `0.5.0-beta.3` goes to the `beta` dist-tag, others to `latest`) and drafts the GitHub release from the changelog section. It needs a stage-only npm granular token ("Read and write (stage only)") in the `NPM_TOKEN` repository secret.
+
+4. Approve the staged version with 2FA, on the package's Staged Packages tab on npmjs.com or with `npm stage list @visporg/visp-coder` and `npm stage approve <stage-id>` (npm 11.15 or later). Approval publishes it.
+5. Publish the draft release: `gh release edit v<version> --draft=false`.
+
+The job summary of the release run repeats steps 4 and 5.
 
 **When `pnpm knip` fails**, delete what nothing uses rather than ignoring it; an export that only its own file uses is fine. Code that only tests call is not reported, so check that a function you replace loses its tests too. The import cycles that predate the check are listed in `knip.json` under `cycles.allow`; a new cycle fails, so break it, or, if it cannot be avoided, add its exact path there with the reason in the commit.
 
