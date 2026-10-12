@@ -20,6 +20,7 @@ import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
 import { byproductProtection, skippedByproduct } from "./byproducts.js";
 import { isBrowserCheckCommand } from "./check-command.js";
+import { declaredCheckImages } from "./check-images.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
 import { workingSourceIdentity } from "./source-git.js";
 import { sourceInputPatterns } from "./source-inputs.js";
@@ -60,16 +61,18 @@ export async function productSourceSnapshot(
   const algorithm =
     [...objects.value.entries.values()][0]?.object.length === 64 ? "sha256" : "sha1";
   const protection = byproductProtection(workspace, selected.value);
+  const images = declaredCheckImages(selected.value?.checks);
   const paths = listed.value.filter(
     (path) =>
       path !== ".visp" &&
       !path.startsWith(".visp/") &&
+      !images.has(path) &&
       !skippedByproduct(path, objects.value.entries.has(path), protection),
   );
   return workspace.files.withReadPass(() =>
     snapshotSourceFiles(
       workspace,
-      [...new Set([...paths, ...declared.value])].sort(),
+      [...new Set([...paths, ...declared.value.filter((path) => !images.has(path))])].sort(),
       patterns,
       objects.value,
       algorithm,

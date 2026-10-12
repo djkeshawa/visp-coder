@@ -95,6 +95,20 @@ Every journey is one fresh browser session. To test repeated use, reset or recov
 
 The `@visporg/visp-coder/testing` export offers the same building blocks to a project's own test suite: `runBrowserJourney` and `browserJourneySchema`; `activateControl` (real pointer, touch or keyboard input) and `assertControlReachable` (size, visibility, clipping and hit testing) for a page you supply; and `assertRecovery`, `assertFiniteState` and `assertTrajectoryClose` for simulation state. They check that input reaches a control, not that the application handled it; always assert the resulting state.
 
+## Images from command checks
+
+A result that is a picture rather than a page, such as a rendered scene, a chart or a generated image, is judged by looking at it. A command check that writes such a file declares it under `images` (up to four PNG, JPEG, WebP or GIF paths inside the project):
+
+```yaml
+checks:
+  - id: C002
+    command: { argv: [python3, render.py, --out, output/scene.png] }
+    outcomes: [O001]
+    images: [output/scene.png]
+```
+
+When the check passes, VISP copies each declared image into the feature's captures as an image of the current product version, and the review packet delivers it to the independent reviewer. A declared image that is missing, larger than 4 MiB or not one of those formats fails the check. Declared images are outputs: writing them does not change the product version, so rerunning the check does not make earlier evidence stale. An SVG or HTML result needs a check that rasterizes it to PNG first.
+
 ## Ad hoc capture
 
 For an exploratory observation, pass a journey on stdin:

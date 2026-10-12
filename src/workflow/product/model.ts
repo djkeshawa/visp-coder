@@ -23,6 +23,14 @@ import { generatedSourceReferencesSchema } from "./review-delivery-validation.js
 import { userFeedbackRecordSchema } from "./user-feedback-model.js";
 
 const id = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
+/** An image a check writes, relative to the project root, delivered to the reviewer when it passes. */
+export const checkImagePathSchema = z
+  .string()
+  .regex(/\.(?:png|jpe?g|webp|gif)$/i, "a check image must be a .png, .jpg, .webp or .gif file")
+  .refine(
+    (path) => !/^(?:[A-Za-z]:)?[\\/]/.test(path) && !path.split(/[\\/]/).includes(".."),
+    "a check image is a path inside the project",
+  );
 const provenance = z.enum(["user-stated", "independent", "agent-proposed", "legacy"]);
 const productOutcomeSchema = z
   .object({
@@ -71,6 +79,7 @@ export const productCheckSchema = z
     timeoutMs: z.number().int().positive().max(3_600_000).optional(),
     environment: z.enum(["node", "browser", "other"]).default("other"),
     environmentVariables: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
+    images: z.array(checkImagePathSchema).min(1).max(4).optional(),
   })
   .strict();
 
@@ -428,6 +437,8 @@ export const executionSchema = z
     provenance: z.enum(["supervisor-executed", "supervisor-reused"]),
     assertions: z.enum(["agent-reported", "runner-observed"]),
     captureRunId: z.string().optional(),
+    /** Capture IDs of the images a passing command check declared. */
+    checkImages: z.array(z.string()).optional(),
     environmentDigest: z.string().optional(),
     comparisonEnvironment: z.string().optional(),
     reusedEnvironmentFailure: z.boolean().optional(),
