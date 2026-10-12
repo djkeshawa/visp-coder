@@ -33,9 +33,9 @@
   },
   "packageManager": "pnpm@11.3.0",
   "bin": {
-    "visp": "./dist/cli.js",
-    "visp-migrate": "./dist/migrate.js",
-    "visp-runner": "./dist/runner.js"
+    "visp": "dist/cli.js",
+    "visp-migrate": "dist/migrate.js",
+    "visp-runner": "dist/runner.js"
   },
   "types": "./dist/index.d.ts",
   "exports": {

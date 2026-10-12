@@ -1,8 +1,10 @@
 name: release
 
-# Pushing a tag vX.Y.Z[-pre.N] on main publishes that version to npm and
-# creates the GitHub release from its CHANGELOG.md section. A prerelease
-# version goes to the dist-tag named by its identifier (0.5.0-beta.3 -> beta).
+# Pushing a tag vX.Y.Z[-pre.N] on main stages that version on npm and drafts
+# the GitHub release from its CHANGELOG.md section. A maintainer approves the
+# staged version with 2FA, which publishes it, and then publishes the draft
+# (the job summary lists both steps). A prerelease version goes to the
+# dist-tag named by its identifier (0.5.0-beta.3 -> beta).
 on:
   push:
     tags: ["v*"]
@@ -48,6 +50,7 @@ jobs:
             exit 1
           fi
           pre=$(node -p "(require('./package.json').version.split('-')[1] ?? '').split('.')[0]")
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "dist_tag=${pre:-latest}" >> "$GITHUB_OUTPUT"
           echo "prerelease=$([ -n "${pre}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
@@ -70,26 +73,51 @@ jobs:
         env:
           CHROME_BIN: /usr/bin/google-chrome
 
-      # release:check just ran; prepublishOnly would run it again.
+      # Staged publishing needs npm 11.15 or later; Node 22 bundles npm 10.
+      # Installed after release:check so its package smoke test keeps the bundled npm.
+      - name: Install npm with staged publishing
+        run: npm install --global npm@11.19.1
+
+      # release:check just ran; prepublishOnly would run it again. npm reports a
+      # normalized bin path as "invalid and removed" too, so package.json keeps
+      # them in normalized form and either message fails the release.
       - name: Check the tarball keeps its executables
         run: |
-          npm publish --dry-run --ignore-scripts --tag "${{ steps.meta.outputs.dist_tag }}" 2>&1 | tee "${RUNNER_TEMP}/dry-run.log"
-          if grep -q "invalid and removed" "${RUNNER_TEMP}/dry-run.log"; then
-            echo "::error::npm would drop entries from the package"
+          npm stage publish --dry-run --ignore-scripts --access public --tag "${{ steps.meta.outputs.dist_tag }}" 2>&1 | tee "${RUNNER_TEMP}/dry-run.log"
+          if grep -qE "invalid and removed|removed invalid|was removed" "${RUNNER_TEMP}/dry-run.log"; then
+            echo "::error::npm would change or drop entries of the package"
             exit 1
           fi
 
-      - name: Publish to npm
-        run: npm publish --ignore-scripts --provenance --access public --tag "${{ steps.meta.outputs.dist_tag }}"
+      # NPM_TOKEN is a stage-only token: it can stage a version but not publish one.
+      - name: Stage the version on npm
+        run: npm stage publish --ignore-scripts --provenance --access public --tag "${{ steps.meta.outputs.dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create the GitHub release
+      - name: Draft the GitHub release
         run: |
           flags=()
           [ "${{ steps.meta.outputs.prerelease }}" = true ] && flags+=(--prerelease)
-          gh release create "${GITHUB_REF_NAME}" --verify-tag \
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --draft \
             --title "VISP ${{ steps.meta.outputs.version }}" \
             --notes-file "${RUNNER_TEMP}/notes.md" "${flags[@]}"
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: List the steps that finish the release
+        run: |
+          spec="${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}"
+          {
+            echo "## ${spec} is staged, not published"
+            echo
+            echo "1. Review and approve it with 2FA: the Staged Packages tab of the package on npmjs.com, or"
+            echo '   `npm stage list '"${{ steps.meta.outputs.name }}"'` then `npm stage approve <stage-id>`.'
+            echo '2. Publish the draft release: `gh release edit '"${GITHUB_REF_NAME}"' --draft=false`.'
+            echo
+            echo '```'
+            npm stage list "${{ steps.meta.outputs.name }}" 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
