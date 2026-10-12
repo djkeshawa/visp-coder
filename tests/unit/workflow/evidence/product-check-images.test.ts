@@ -47,6 +47,16 @@ function crc32(bytes: Buffer): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+const SCENE = {
+  id: "O002",
+  kind: "experience" as const,
+  statement: "The rendered scene shows each object the request names, recognizably",
+  priority: "must" as const,
+  provenance: "user-stated" as const,
+  reviewRequired: true,
+  expectations: [],
+};
+
 /** The check writes whichever image the script names; a different image on every run. */
 async function imageCheck(script: string, images: string[]) {
   const { workspace, brief } = await productWorkspace();
@@ -54,9 +64,11 @@ async function imageCheck(script: string, images: string[]) {
   await workspace.write("src/value.mjs", "export const value = 2;\n");
   const next: ProductBrief = {
     ...brief,
+    outcomes: [...brief.outcomes, SCENE],
     checks: brief.checks.map((check) => ({
       ...check,
       command: [process.execPath, "-e", script],
+      outcomes: [...check.outcomes, SCENE.id],
       images,
     })),
   };
@@ -85,7 +97,7 @@ describe("images declared by a command check", () => {
     expect(execution?.checkImages).toHaveLength(1);
     const capture = record.value.state.captures.find(
       (entry) => (entry as { id: string }).id === execution?.checkImages?.[0],
-    ) as { path: string; sha256: string; subjectDigest: string; route: string };
+    ) as { id: string; path: string; sha256: string; subjectDigest: string; route: string };
     expect(capture).toMatchObject({
       subjectDigest: execution?.subjectDigest,
       route: "check C001: out/scene.png",
@@ -143,6 +155,39 @@ describe("images declared by a command check", () => {
         executions: [{ status: "failed", output: expect.stringContaining("is not a PNG") }],
       },
     });
+  });
+
+  it("must cover an experience outcome, so how the picture looks can fail", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const technicalOnly = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        checks: brief.checks.map((check) => ({ ...check, images: ["out/scene.png"] })),
+      },
+      reason: "Declare the render without saying how it must look",
+    });
+    expect(technicalOnly).toMatchObject({
+      ok: false,
+      error: {
+        message: expect.stringContaining(
+          "C001 declares images, so it must cover an experience outcome",
+        ),
+      },
+    });
+    const covered = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        outcomes: [...brief.outcomes, SCENE],
+        checks: brief.checks.map((check) => ({
+          ...check,
+          outcomes: [...check.outcomes, SCENE.id],
+          images: ["out/scene.png"],
+        })),
+      },
+      reason: "Declare the render and how it must look",
+    });
+    expect(covered.ok).toBe(true);
   });
 
   it("accept only image files inside the project", () => {

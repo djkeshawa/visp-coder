@@ -186,7 +186,9 @@ describe("the minimal profile", () => {
     // A goal-replay rule (ceiling 432) was reverted after it sent a game worker into building
     // per-level win replays for the whole hour; the per-kind count example (`Stone: 2`) fits
     // within 404 with the shorter preview rule.
-    expect(guide.length / 4).toBeLessThanOrEqual(404);
+    // 404 -> 423: the picture-result rule. With it, a Haiku worker rendering a voxel scene
+    // declared its PNG; an undeclared picture reaches the reviewer only as source.
+    expect(guide.length / 4).toBeLessThanOrEqual(423);
     expect(guide).toContain("At its id, run visp work");
     expect(guide).toContain("Leave feature running; background it on blocking hosts");
     expect(guide).toContain(

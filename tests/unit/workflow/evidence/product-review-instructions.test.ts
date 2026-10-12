@@ -177,6 +177,18 @@ it("asks for one optional finish finding that can never fail an outcome", () => 
   expect(productReviewInstructions()).not.toContain("judge finish once");
 });
 
+it("requires what the request names to be recognizable in the images, unlike finish", () => {
+  const visual = productReviewInstructions({ visual: true });
+  expect(visual).toContain("Recognizability is not finish.");
+  expect(visual).toContain(
+    "missing, hidden behind something else, cut off, or reads as something different is a departure from the request",
+  );
+  expect(visual).toContain("do not mark an outcome that covers it satisfied");
+  expect(visual).toContain("Polish beyond what the request names stays finish.");
+  // Without images there is nothing to recognize; code review keeps its own rules.
+  expect(productReviewInstructions()).not.toContain("Recognizability");
+});
+
 it("lets a specific request statement govern a case a general rule also covers", () => {
   expect(CRITIC_INSTRUCTIONS).toContain(
     "an implementation that makes it impossible for that option to match or apply under those conditions is a required finding",

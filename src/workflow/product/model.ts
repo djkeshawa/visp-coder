@@ -157,6 +157,7 @@ export const productBriefSchema = productBriefFieldsSchema.superRefine((brief, c
   validateBriefIds(brief, context);
   validateBriefReferences(brief, context);
   validateSliceCycles(brief, context);
+  validateImageChecks(brief, context);
 });
 
 /** Authored input exposes the same fields while leaving identifier allocation to VISP. */
@@ -227,6 +228,26 @@ function validateBriefReferences(brief: ProductBrief, context: z.RefinementCtx):
         });
   }
   validateSliceReferences(brief, context);
+}
+
+/**
+ * A check that declares images delivers a picture for review, so how the picture must look is
+ * part of the contract: it covers an experience outcome the reviewer judges from the image.
+ * Technical outcomes alone (the file is written, the grid has a size) cannot fail on a scene
+ * that does not show what the request names.
+ */
+function validateImageChecks(brief: ProductBrief, context: z.RefinementCtx): void {
+  if (brief.incomplete) return;
+  const experiences = new Set(
+    brief.outcomes.filter((entry) => entry.kind === "experience").map((entry) => entry.id),
+  );
+  for (const check of brief.checks)
+    if (check.images?.length && !check.outcomes.some((outcome) => experiences.has(outcome)))
+      context.addIssue({
+        code: "custom",
+        path: ["checks"],
+        message: `${check.id} declares images, so it must cover an experience outcome: add an outcome with kind: experience stating that each object, subject and look the request names is recognizable in the image, and list it in ${check.id}'s outcomes`,
+      });
 }
 
 function validateSliceReferences(brief: ProductBrief, context: z.RefinementCtx): void {
