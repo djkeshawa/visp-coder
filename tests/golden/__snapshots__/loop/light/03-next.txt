@@ -1,0 +1,10 @@
+$ visp next
+--- stdout
+next: {"feature":"001-return-two-from-the-public","task":"T001","action":"implement","objective":"Deliver the original request","command":"visp done --feature 001-return-two-from-the-public --task T001","mayEdit":true,"evidence":{"entries":["O001: behavior unassessed; review unassessed","C001: not executed for current product"],"remaining":0}}
+Full result: add --json.
+
+Next: visp done --feature 001-return-two-from-the-public --task T001
+
+--- stderr
+
+--- exit 0

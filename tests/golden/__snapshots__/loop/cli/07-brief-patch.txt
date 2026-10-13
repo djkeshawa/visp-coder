@@ -1,0 +1,9 @@
+$ visp brief --patch .visp/drafts/brief.json --reason 'Define the first usable behavior'
+--- stdout
+brief: {"feature":"001-return-two-from-the-public","incomplete":false,"outcomes":["O001 (functional)"],"examples":[],"checks":["C001"],"slices":[{"id":"T001","goal":"Return the promised value","scope":["src/value.mjs","checks/value.check.mjs"],"checks":["C001"]}]}
+Next: visp next --feature 001-return-two-from-the-public
+Read the full brief with visp brief --feature 001-return-two-from-the-public.
+
+--- stderr
+
+--- exit 0
