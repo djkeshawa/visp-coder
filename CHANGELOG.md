@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- The MCP `visp_guard` tool now runs the same pipeline as `visp guard --path`, so its answer matches the edit hook's field for field: it reports `protocolVersion` and, on a refusal, `committable`; while another VISP process is saving it waits briefly and then says to retry, instead of reporting an interrupted update; and a refusal during a pending independent review says so instead of pointing at `visp_next`.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed
