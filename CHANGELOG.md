@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A `[mcp_servers.visp]` table added to `.codex/config.toml` by hand is accepted when it starts this VISP build (`node` with this build's CLI and `serve --mcp`; other keys may differ). It was always reported as customized: `visp doctor` suggested `doctor --fix`, which answered "add it manually", which the user had already done. For a table that does not start this build, doctor and install now say exactly what to set, or to delete the table and rerun `visp install`.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed

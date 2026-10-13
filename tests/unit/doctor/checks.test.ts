@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { applyFileTransaction } from "../../../src/core/file-transaction.js";
 import { err, ok } from "../../../src/core/result.js";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import { type Check, type DoctorRuntime, runChecks } from "../../../src/doctor/checks.js";
 import { applyFixes } from "../../../src/doctor/fix.js";
 import { indexRepository } from "../../../src/graph/index.js";
@@ -159,6 +160,32 @@ describe("the enforcement check", () => {
     const repairs = await applyFixes(refreshed, [await check("mcp registration")]);
     expect(repairs.some((repair) => repair.done)).toBe(true);
     expect(await check("mcp registration")).toMatchObject({ status: "ok" });
+  });
+
+  // `doctor --fix` cannot rewrite a table VISP did not write, so advising it looped.
+  it("accepts a hand-added Codex MCP table and ends its advice for one it cannot use", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "codex");
+    const state = await workspace.state();
+    const installed = await installHarness(state.paths, { harness: "codex", hooks: [], mcp: true });
+    expect(installed.ok).toBe(true);
+    const config = join(workspace.root, CODEX_CONFIG_FILE);
+    const cli = JSON.stringify(runtimeIdentity().executable);
+    await writeFile(
+      config,
+      `[mcp_servers.visp]\ncommand = "node"\nargs = [${cli}, "serve", "--mcp"]\n`,
+    );
+    expect(await check("mcp registration")).toMatchObject({ status: "ok" });
+
+    await writeFile(config, '[mcp_servers.visp]\ncommand = "visp"\nargs = ["serve", "--mcp"]\n');
+    const result = await check("mcp registration");
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("[mcp_servers.visp]");
+    expect(result.recovery).not.toContain("--fix");
+    expect(result.recovery).toContain(`args = [${cli}, "serve", "--mcp"]`);
+    const repairs = await applyFixes(await workspace.state(), [result]);
+    const detail = repairs.map((repair) => repair.detail).join(" ");
+    expect(detail).not.toContain("add [mcp_servers.visp] manually");
+    expect(detail).toContain(`args = [${cli}, "serve", "--mcp"]`);
   });
 
   it("keeps a project or environment recovery instead of prescribing a global reinstall", async () => {

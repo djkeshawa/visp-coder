@@ -21,12 +21,17 @@ import {
   hookCommand,
   preToolUseRegistration,
 } from "../harness/claude-settings.js";
+import { codexRegistrationAdvice } from "../harness/codex-mcp-registration.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { verifyGuardHandshake } from "../harness/guard-handshake.js";
 import { HOOK_MARKER, renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
 import { type InstallState, readInstallState } from "../harness/install-state.js";
 import { verifyRequestedMcp } from "../harness/install-verification.js";
-import { mcpConfigFile } from "../harness/mcp-registration.js";
+import {
+  CODEX_CONFIG_FILE,
+  mcpConfigFile,
+  planMcpRegistration,
+} from "../harness/mcp-registration.js";
 import { type Asset, planFor } from "../harness/targets.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import type { Check, DoctorRuntime } from "./checks.js";
@@ -117,14 +122,30 @@ export async function checkMcpRegistration(state: WorkspaceState): Promise<Check
     harness: state.config.harness,
     mcp: true,
   });
-  return verified.ok
-    ? { name: "mcp registration", status: "ok", detail: `${path} registers VISP` }
-    : {
-        name: "mcp registration",
-        status: "warn",
-        detail: `${path} does not contain a usable VISP MCP registration`,
-        recovery: `${PRODUCT_NAME} doctor --fix`,
-      };
+  if (verified.ok)
+    return { name: "mcp registration", status: "ok", detail: `${path} registers VISP` };
+  // `doctor --fix` never rewrites a Codex table VISP did not write, so advising it would loop.
+  if (await isCustomizedCodexTable(state))
+    return {
+      name: "mcp registration",
+      status: "warn",
+      detail: `${path} has an [mcp_servers.visp] table VISP did not write, and it does not start this VISP build`,
+      recovery: `In ${path}, ${codexRegistrationAdvice()}`,
+    };
+  return {
+    name: "mcp registration",
+    status: "warn",
+    detail: `${path} does not contain a usable VISP MCP registration`,
+    recovery: `${PRODUCT_NAME} doctor --fix`,
+  };
+}
+
+async function isCustomizedCodexTable(state: WorkspaceState): Promise<boolean> {
+  if (state.config.harness !== "codex") return false;
+  const current = await state.files.readTextIfExists(CODEX_CONFIG_FILE);
+  if (!current.ok) return false;
+  const planned = planMcpRegistration(current.value, false, "codex");
+  return planned.ok && planned.value.status === "customized";
 }
 
 async function inspectHarnessAssetFiles(

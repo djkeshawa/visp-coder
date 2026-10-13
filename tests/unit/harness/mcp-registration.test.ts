@@ -275,6 +275,53 @@ describe("Codex MCP registration", () => {
     expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
   });
 
+  /**
+   * Doctor used to call a hand-written table that starts this build "customized" and send the
+   * user to `doctor --fix`, which answered "add it manually": a loop. Only the command and its
+   * arguments decide what Codex runs, so an equivalent table is installed as it stands.
+   */
+  it.each([
+    (cli: string) =>
+      `[mcp_servers.visp]\ncommand = "node"\nargs = [${JSON.stringify(cli)}, "serve", "--mcp"]\n`,
+    (cli: string) =>
+      `model = "gpt-6"\n\n[mcp_servers."visp"]  # added by hand\ncommand = '${process.execPath}'\nstartup_timeout_sec = 20\nargs = [\n  '${cli}', # the CLI\n  "serve",\n  "--mcp",\n]\n\n[mcp_servers.other]\ncommand = "other"\n`,
+  ])("accepts a hand-written Codex table that starts this build (%#)", async (render) => {
+    const current = render(runtimeIdentity().executable);
+    await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
+
+    const result = await registerMcpServer(root, false, "codex");
+
+    expect(result.ok && result.value).toBe("current");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
+  });
+
+  it.each([
+    [
+      "another CLI",
+      '[mcp_servers.visp]\ncommand = "node"\nargs = ["/elsewhere/cli.js", "serve", "--mcp"]\n',
+    ],
+    [
+      "another subcommand",
+      (cli: string) =>
+        `[mcp_servers.visp]\ncommand = "node"\nargs = [${JSON.stringify(cli)}, "serve"]\n`,
+    ],
+    [
+      "a second table",
+      (cli: string) =>
+        `[mcp_servers.visp]\ncommand = "node"\nargs = [${JSON.stringify(cli)}, "serve", "--mcp"]\n[mcp_servers.visp]\ncommand = "visp"\n`,
+    ],
+    [
+      "an unparseable value",
+      (cli: string) =>
+        `[mcp_servers.visp]\ncommand = node\nargs = [${JSON.stringify(cli)}, "serve", "--mcp"]\n`,
+    ],
+  ])("keeps a hand-written Codex table with %s customized", async (_name, render) => {
+    const current = typeof render === "string" ? render : render(runtimeIdentity().executable);
+    await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
+    const result = await registerMcpServer(root, false, "codex");
+    expect(result.ok && result.value).toBe("customized");
+  });
+
   it("leaves a customized Codex entry alone unless forced", async () => {
     const current = `[mcp_servers.visp]\ncommand = "/custom/visp"\nargs = ["serve", "--mcp"]\n`;
     await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
