@@ -1,0 +1,7 @@
+> visp_next {}
+--- text
+visp_next: {"feature":"001-return-two-from-the-public","action":"accept","objective":"Run final checks against the assembled product and preserved expectations","command":"visp_accept {\"feature\":\"001-return-two-from-the-public\"}","mayEdit":false}
+Full data is already in structuredContent.data.
+
+Next: visp_accept {"feature":"001-return-two-from-the-public"}
+--- isError false

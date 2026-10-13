@@ -13,6 +13,7 @@ import { readTestsRecord } from "../../../src/workflow/product/independent-tests
 import { type ProductRecord, readProductRecord } from "../../../src/workflow/product/store.js";
 import { type CliResult, runCli } from "../../unit/cli/support/cli.js";
 import { TestWorkspace } from "../../unit/support/workspace.js";
+import { type FakeModels, modelCallTranscript } from "./fake-models.js";
 import { type NormalizeContext, normalize } from "./normalize.js";
 
 /**
@@ -67,6 +68,24 @@ export const BRIEF = {
       checks: ["C001"],
     },
   ],
+};
+
+/** visp.yml as `visp init` writes it for Codex: VISP launches its own reviewer and tester. */
+export const CODEX: ProjectOptions = {
+  harness: "codex",
+  critic: {
+    enabled: true,
+    harness: "codex",
+    launch: "codex-exec",
+    reasoningEffort: "medium",
+    webSearch: true,
+  },
+};
+
+/** Claude Code with VISP launching a `claude -p` reviewer and tester. */
+export const CLAUDE: ProjectOptions = {
+  harness: "claude-code",
+  critic: { enabled: true, harness: "claude-code", launch: "claude-exec" },
 };
 
 export interface ProjectOptions {
@@ -321,6 +340,17 @@ export class Recorder {
       `${name}.decision.json`,
       JSON.stringify(await this.project.decision(extra), null, 2),
     );
+  }
+
+  /** Every model call VISP made since the last plan, one file per call, named by role. */
+  async models(name: string, models: FakeModels): Promise<void> {
+    const calls = await models.calls();
+    for (const call of calls) {
+      const same = calls.filter((entry) => entry.role === call.role);
+      const suffix = same.length > 1 ? `-${same.indexOf(call) + 1}` : "";
+      await this.save(`${name}.${call.role}${suffix}.prompt.txt`, modelCallTranscript(call));
+    }
+    await models.clear();
   }
 
   save(file: string, text: string): Promise<void> {

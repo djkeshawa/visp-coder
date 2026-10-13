@@ -150,13 +150,28 @@ export class FakeModels {
     return new FakeModels(directory);
   }
 
-  /** Sets the answers for the next calls and forgets earlier calls. */
+  /** Sets the answers for the next calls and forgets every earlier call. */
   async plan(plan: ModelPlan): Promise<void> {
     await rm(join(this.directory, "calls"), { recursive: true, force: true });
+    this.seen = 0;
     await writeFile(join(this.directory, "plan.json"), JSON.stringify(plan));
   }
 
+  /** Calls made since the last `plan` or `clear`, in order. */
   async calls(): Promise<ModelCall[]> {
+    return (await this.recorded()).slice(this.seen);
+  }
+
+  /**
+   * Starts a new step: later `calls` leave out what was made so far. The responder still
+   * counts every reviewer call since the plan, so its verdicts keep their order.
+   */
+  async clear(): Promise<void> {
+    this.seen = (await this.recorded()).length;
+  }
+
+  private seen = 0;
+  private async recorded(): Promise<ModelCall[]> {
     const directory = join(this.directory, "calls");
     const files = (await readdir(directory).catch(() => [] as string[])).sort();
     return Promise.all(
@@ -201,3 +216,39 @@ function jsonLine(line: string): unknown {
 function argument(value: string): string {
   return /^[\w./:=@,+-]+$/.test(value) ? value : `'${value}'`;
 }
+
+/** The tester's answer: a pinned suite with the named assertions on the fixture's value. */
+export function testerSuite(tests: readonly (readonly [string, string])[]) {
+  const checks = tests
+    .map(([name, assertion]) => `check(${JSON.stringify(name)}, () => assert.ok(${assertion}));`)
+    .join("\n");
+  return {
+    file: {
+      name: "value.test.mjs",
+      content: `import assert from "node:assert/strict";
+import { value } from "../../src/value.mjs";
+const waived = new Set(JSON.parse(process.env.VISP_WAIVED_TESTS ?? "[]"));
+let failed = false;
+function check(name, run) {
+  if (waived.has(name)) return;
+  try { run(); console.log(\`PASS: \${name}\`); } catch (error) { failed = true; console.log(\`FAIL: \${name}: \${error.message}\`); }
+}
+${checks}
+process.exitCode = failed ? 1 : 0;
+`,
+    },
+    existingBehavior: false,
+    tests: tests.map(([name]) => ({ name, quote: "return two" })),
+    ambiguities: [],
+    notes: "",
+  };
+}
+
+/** A tester that writes nothing: the request is too small to test apart from its checks. */
+export const DECLINED_TESTER = {
+  file: null,
+  existingBehavior: false,
+  tests: [],
+  ambiguities: [],
+  notes: "The request states one value; the worker's own check covers it.",
+};
