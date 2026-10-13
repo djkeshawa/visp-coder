@@ -13,7 +13,8 @@ pnpm build
 
 | Command | What it runs |
 | --- | --- |
-| `pnpm build` | Bundle `dist/` with tsup |
+| `pnpm build` | Bundle `dist/` with tsup, including type declarations and the dashboard |
+| `pnpm build:fast` | Bundle the CLI only, without `.d.ts` (about 1 s); wipes `dist/ui` |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | Biome over `src` and `tests`; `pnpm format` applies fixes |
 | `pnpm knip` | Knip: unused files, exports, types and dependencies, then runtime import cycles |
@@ -43,7 +44,7 @@ The job summary of the release run repeats steps 4 and 5.
 
 **When `pnpm knip` fails**, delete what nothing uses rather than ignoring it; an export that only its own file uses is fine. Code that only tests call is not reported, so check that a function you replace loses its tests too. The import cycles that predate the check are listed in `knip.json` under `cycles.allow`; a new cycle fails, so break it, or, if it cannot be avoided, add its exact path there with the reason in the commit.
 
-**Rebuild before running tests.** Several tests run the compiled CLI from `dist/`, and hook and installation tests compare the build ID of the running code with the build that generated the hooks. A stale `dist/` makes them fail. Run `pnpm build` after changing `src/`.
+**Rebuild before running tests.** Several tests run the compiled CLI from `dist/`, and hook and installation tests compare the build ID of the running code with the build that generated the hooks. A stale `dist/` makes them fail, so the test run checks the build ID before it starts and stops at once with one line (`dist is stale (build … != sources …): run pnpm build:fast`). Run `pnpm build:fast` after changing `src/`, `package.json`, `pnpm-lock.yaml`, `tsconfig.json` or `tsup.config.ts`. It wipes `dist/ui`; run `pnpm exec tsup --config tsup.ui.config.ts` when a test needs the dashboard. `pnpm build` is the full build. To run just the tests that cover a change: `pnpm exec vitest run $(node scripts/direct-tests.mjs src/core/exec.ts)`. `AGENTS.md` has the working rules for agents developing this repository.
 
 Browser tests need an installed Chrome or Chromium; VISP never downloads one.
 

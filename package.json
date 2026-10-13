@@ -52,6 +52,7 @@
   ],
   "scripts": {
     "build": "tsup && tsup --config tsup.ui.config.ts",
+    "build:fast": "tsup --no-dts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p ui",
     "lint": "biome check src tests ui/src",
     "knip": "knip && knip --cycles",
