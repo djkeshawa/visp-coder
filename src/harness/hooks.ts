@@ -18,7 +18,7 @@ import { hookCommand } from "./claude-settings.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 16;
+export const HOOK_TEMPLATE_VERSION = 17;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -224,6 +224,19 @@ if (input?.tool_name === "Bash") {
     );
     process.exit(0);
   }
+  const backgrounded = input?.tool_input?.run_in_background === true ? backgroundedWorkflowCommand(command) : undefined;
+  if (backgrounded) {
+    process.stdout.write(
+      JSON.stringify(
+        deny(
+          "Run \`" + backgrounded + "\` in the foreground: repeat this call without run_in_background and with timeout 600000. " +
+            "VISP bounds its own waits (\`${PRODUCT_NAME} next\` waits for a running review) and prints the result and the next step when it returns. " +
+            "If the host still moves it to the background, run \`${PRODUCT_NAME} next\` instead of polling with pgrep, tail -f or sleep loops.",
+        ),
+      ),
+    );
+    process.exit(0);
+  }
   const lost = discardedChanges(command);
   if (lost.length > 0) {
     process.stdout.write(
@@ -238,6 +251,24 @@ if (input?.tool_name === "Bash") {
     );
   }
   process.exit(0);
+}
+
+// Workers started visp done and accept as background tasks and then waited for them with
+// loops that never ended on their own (pgrep -f matching its own shell, tail -f piped to
+// grep -m1): commands that returned in 15 s left them idle for up to 9 minutes. VISP's
+// workflow commands bound their own waits, so they run in the foreground. \`${PRODUCT_NAME} feature\`
+// keeps writing acceptance tests after it prints the feature id and \`${PRODUCT_NAME} ui\` is a
+// server, so both may still run in the background.
+// A function declaration, not a top-level constant: the Bash branch above runs first.
+function backgroundedWorkflowCommand(command) {
+  const workflow = new Set(["work", "done", "verify", "accept", "next", "pr", "status", "brief", "critic", "review"]);
+  for (const words of shellCommands(command)) {
+    const index = words.findIndex((word) => word === "${PRODUCT_NAME}" || word.endsWith("/${PRODUCT_NAME}"));
+    if (index < 0) continue;
+    const verb = words.slice(index + 1, index + 4).find((word) => workflow.has(word));
+    if (verb) return "${PRODUCT_NAME} " + verb;
+  }
+  return undefined;
 }
 
 // A worker discarded a previous session's uncommitted work with git checkout to get the

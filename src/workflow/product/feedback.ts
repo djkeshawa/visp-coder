@@ -11,6 +11,7 @@ import {
   type ProductEvidenceCatalogue,
   productCaptureRunSchema,
   supportsBehaviorEvidence,
+  withoutUnavailableCitations,
 } from "./evidence-references.js";
 import {
   exploratoryFailureHistory,
@@ -263,7 +264,7 @@ export function validateProductFeedback(
   const parsed = productFeedbackSchema.safeParse(input);
   if (!parsed.success)
     return err(vispError("ARTIFACT_INVALID", `Invalid product feedback: ${parsed.error.message}`));
-  const feedback = parsed.data;
+  const feedback = withUsableCitations(parsed.data, catalogue);
   if (
     new Set(feedback.dimensions.map((entry) => entry.dimension)).size !== feedback.dimensions.length
   )
@@ -309,6 +310,46 @@ export function validateProductFeedback(
     findings,
     ...(feedback.probes ? { probes: probes.value } : {}),
   });
+}
+
+/** Unavailable citations beside usable ones are dropped and recorded as a limitation. */
+function withUsableCitations(
+  feedback: ProductFeedback,
+  catalogue: ProductEvidenceCatalogue,
+): ProductFeedback {
+  const dropped = new Set<string>();
+  const clean = <T extends { readonly evidence: readonly string[]; readonly status?: string }>(
+    entry: T,
+  ): T => {
+    // An unclear or unavailable judgment may rest on unavailable evidence; that is its reason.
+    if (unavailableFeedbackAssessment(entry)) return entry;
+    const citations = withoutUnavailableCitations(entry.evidence, catalogue);
+    if (!citations.dropped.length) return entry;
+    for (const id of citations.dropped) dropped.add(id);
+    return { ...entry, evidence: citations.kept };
+  };
+  const cleaned: ProductFeedback = {
+    ...feedback,
+    dimensions: feedback.dimensions.map(clean),
+    findings: feedback.findings.map(clean),
+    resolutions: feedback.resolutions.map((resolution) => {
+      const entry = clean(resolution);
+      return entry.regression?.kind === "checked"
+        ? { ...entry, regression: clean(entry.regression) }
+        : entry;
+    }),
+    ...(feedback.probes ? { probes: feedback.probes.map(clean) } : {}),
+  };
+  if (!dropped.size) return feedback;
+  return {
+    ...cleaned,
+    limitations: [...(feedback.limitations ?? []), droppedCitationNote([...dropped])],
+  };
+}
+
+/** How a review records citations VISP dropped. */
+export function droppedCitationNote(dropped: readonly string[]): string {
+  return `VISP dropped citations of evidence it could not deliver: ${dropped.slice(0, 5).join(", ")}${dropped.length > 5 ? ` (+${dropped.length - 5} more)` : ""}`;
 }
 
 function validateFeedbackReferences(

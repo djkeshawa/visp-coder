@@ -5,7 +5,7 @@ import { browserExecutableIdentity } from "../core/browser-executable.js";
 import { CONFIG_FILE, LEGACY_STATE_IGNORE, PRODUCT_NAME, STATE_DIR } from "../core/constants.js";
 import { describeCommand, resolveCommand, run } from "../core/exec.js";
 import { inspectFileTransactions } from "../core/file-transaction.js";
-import { isRepository } from "../core/git.js";
+import { isRepository, workingTreeChanges } from "../core/git.js";
 import { ok, type Result } from "../core/result.js";
 import { inspectStateLock, STATE_LOCK_DIRECTORY } from "../core/state-lock.js";
 import { checkCurrency, openProjectStore } from "../graph/index.js";
@@ -13,6 +13,7 @@ import { skillCatalog } from "../skills/catalog.js";
 import { SKILL_STATES } from "../skills/schema.js";
 import { readIndex } from "../skills/store.js";
 import { findTask, type TaskGraph } from "../workflow/artifacts/tasks.js";
+import { foreignHostFile } from "../workflow/product/byproducts.js";
 import { describeProductCheck } from "../workflow/product/check-command.js";
 import { readProductRecord } from "../workflow/product/store.js";
 import type { WorkspaceState } from "../workflow/state.js";
@@ -65,6 +66,7 @@ export async function runChecks(
     await checkInstalledRuntime(state),
     await checkPathRuntime(state),
     await checkGit(state),
+    await checkForeignHostFiles(state),
     await checkHarnessAssets(state),
     await checkMcpRegistration(state),
     await checkCodexTrust(state),
@@ -424,6 +426,29 @@ async function checkGit(state: WorkspaceState): Promise<Check> {
       ? "Feature work exists outside a Git repository, so it cannot be authorized or evidenced against a before-tree"
       : "Not a git repository, so scope checks cannot read a diff",
     recovery: "git init",
+  };
+}
+
+/** Another host's files that appeared in the project are ignored as product; say so once. */
+async function checkForeignHostFiles(state: WorkspaceState): Promise<Check> {
+  const name = "other host files";
+  if (!(await isRepository(state.paths.root)))
+    return { name, status: "unknown", detail: "Not a git repository" };
+  const changes = await workingTreeChanges(state.paths.root);
+  if (!changes.ok) return { name, status: "unknown", detail: changes.error.message };
+  const foreign = changes.value.files
+    .filter((file) => file.status === "untracked")
+    .map((file) => file.path)
+    .filter((path) => foreignHostFile(path, false, state.config.harness));
+  if (!foreign.length)
+    return { name, status: "ok", detail: "No untracked files of another coding host" };
+  const shown = foreign.slice(0, 5).join(", ");
+  return {
+    name,
+    status: "warn",
+    detail: `Untracked files of another coding host are not part of the product VISP checks: ${shown}${foreign.length > 5 ? ` (+${foreign.length - 5} more)` : ""}`,
+    recovery:
+      "Commit them if the product needs them; otherwise delete them or add them to .gitignore",
   };
 }
 

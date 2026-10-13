@@ -9,13 +9,17 @@ import {
   type ProductReviewChallenge,
   validateCoverage,
 } from "./coverage.js";
-import type { ProductEvidenceCatalogue } from "./evidence-references.js";
+import {
+  type ProductEvidenceCatalogue,
+  withoutUnavailableCitations,
+} from "./evidence-references.js";
 import type { ExperimentResolution } from "./experiment-model.js";
 import { experimentReviewContext, validateExperimentResolutions } from "./experiments.js";
-import { feedbackIntentDigest, validateProductFeedback } from "./feedback.js";
+import { droppedCitationNote, feedbackIntentDigest, validateProductFeedback } from "./feedback.js";
 import type { ProductFeedback } from "./feedback-model.js";
 import { independentSources } from "./independent-sources.js";
 import {
+  assessmentSchema,
   PRODUCT_REVIEW_POLICY,
   type ProductAssessment,
   type ProductCoverageAssessment,
@@ -102,7 +106,7 @@ export async function submitReview(context: ReviewSubmissionContext) {
     (outcome) => !slice || slice.outcomes.includes(outcome.id),
   );
   const validated = validateAssessments(
-    options,
+    { ...options, assessments: withUsableAssessmentCitations(options.assessments, catalogue) },
     subject,
     outcomes,
     images,
@@ -293,5 +297,39 @@ function validateDeliveredCatalogue(
       ...catalogue.entries.filter((entry) => ids.has(entry.id)),
       ...delivered.generatedReferences.filter((entry) => ids.has(entry.id) && !known.has(entry.id)),
     ],
+  });
+}
+
+/**
+ * A satisfied assessment citing evidence VISP marked unavailable beside current evidence was
+ * downgraded to unavailable, leaving the outcome unassessed; such a citation is dropped and
+ * named in the summary. Malformed input is left for schema validation to reject.
+ */
+function withUsableAssessmentCitations(
+  assessments: unknown,
+  catalogue: ProductEvidenceCatalogue,
+): unknown {
+  if (!Array.isArray(assessments)) return assessments;
+  return assessments.map((assessment) => {
+    const parsed = assessmentSchema.safeParse(assessment);
+    if (!parsed.success) return assessment;
+    const dropped = new Set<string>();
+    // An unclear or unavailable judgment may rest on unavailable evidence; that is its reason.
+    const clean = (references: readonly string[], status: string) => {
+      if (status === "unclear" || status === "unavailable") return [...references];
+      const citations = withoutUnavailableCitations(references, catalogue);
+      for (const id of citations.dropped) dropped.add(id);
+      return citations.kept;
+    };
+    const cleaned = {
+      ...parsed.data,
+      evidence: clean(parsed.data.evidence, parsed.data.status),
+      expectations: parsed.data.expectations.map((entry) =>
+        entry.evidence ? { ...entry, evidence: clean(entry.evidence, entry.status) } : entry,
+      ),
+    };
+    return dropped.size
+      ? { ...cleaned, summary: `${cleaned.summary}\n${droppedCitationNote([...dropped])}` }
+      : assessment;
   });
 }

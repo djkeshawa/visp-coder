@@ -38,6 +38,7 @@ import {
   type ProductState,
 } from "./model.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
+import { recordResultImages } from "./result-images.js";
 import { reviewBaselineMutations } from "./review-baseline.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
@@ -142,6 +143,21 @@ async function execute(
   });
 }
 
+/** Only a passing run on an unchanged product shows the version its pictures belong to. */
+function passedResultImages(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  executions: readonly ProductExecution[],
+  unchanged: Record<string, string> | undefined,
+  subject: string,
+) {
+  return unchanged &&
+    executions.length > 0 &&
+    executions.every((execution) => execution.status === "passed")
+    ? recordResultImages(workspace, record, unchanged, subject)
+    : Promise.resolve({ captures: [], mutations: [] });
+}
+
 function flipBatchTiming(before: ProductRecord, after: ProductRecord): { flipDurationMs?: number } {
   const prior = new Map(before.state.executions.map((entry) => [entry.id, entry.flipCacheKey]));
   const flipped = after.state.executions.filter(
@@ -170,11 +186,20 @@ async function finishExecution(
   const after = await productSourceDigest(workspace, record.brief, afterSnapshot.value);
   if (!after.ok) return after;
   const timestamp = new Date().toISOString();
+  // Pictures the product made reach the reviewer as images of the version the checks passed.
+  const pictures = await passedResultImages(
+    workspace,
+    record,
+    executions,
+    source === after.value ? afterSnapshot.value : undefined,
+    after.value,
+  );
   const next = {
     ...record.state,
     pendingVerification: undefined,
     updatedAt: timestamp,
     executions: record.state.executions,
+    captures: [...record.state.captures, ...pictures.captures],
   };
   const current: ProductRecord = { ...record, state: next };
   const gaps = await executionGaps(workspace, current, slice, after.value, commands, executions);
@@ -200,6 +225,7 @@ async function finishExecution(
   if (!completion.ok) return completion;
   if (signal?.aborted) return cancelledExecution();
   const saved = await saveProductState(workspace, record, completion.value.state, [
+    ...pictures.mutations,
     ...completion.value.mutations,
   ]);
   if (!saved.ok) return saved;

@@ -1,7 +1,7 @@
 import { workingTreeChanges } from "../../core/git.js";
 import { matchesAny } from "../../core/patterns.js";
 import type { WorkspaceState } from "../state.js";
-import { byproductProtection, skippedByproduct } from "./byproducts.js";
+import { byproductProtection, foreignHostFile, skippedByproduct } from "./byproducts.js";
 import { unchangedInheritedPaths } from "./inherited-changes.js";
 import type { ProductBrief } from "./model.js";
 import { declaredSourcePatterns } from "./source-inputs.js";
@@ -22,7 +22,8 @@ export async function productInputWarnings(
       !file.path.startsWith(".visp/") &&
       !matchesAny(file.path, patterns) &&
       // Untracked tool output (caches, logs) is not part of the evidence, so it is not a warning.
-      !skippedByproduct(file.path, false, protection),
+      !skippedByproduct(file.path, false, protection) &&
+      !foreignHostFile(file.path, false, workspace.config.harness),
   );
   const first = outside[0];
   return first

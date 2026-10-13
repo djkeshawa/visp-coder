@@ -77,3 +77,46 @@ export function skippedByproduct(
 ): boolean {
   return !tracked && isDerivedByproduct(path) && !matchesAny(path, protection);
 }
+
+/** Instruction and settings files each coding host reads, by the `harness` names visp.yml uses. */
+const HOST_FILES: Record<string, { files: readonly string[]; directories: readonly string[] }> = {
+  "claude-code": { files: ["CLAUDE.md", "CLAUDE.local.md"], directories: [".claude"] },
+  codex: { files: ["AGENTS.md", "AGENTS.override.md"], directories: [".codex", ".agents"] },
+  opencode: { files: ["AGENTS.md", "opencode.json"], directories: [".opencode"] },
+  cursor: { files: ["AGENTS.md", ".cursorrules"], directories: [".cursor"] },
+  copilot: {
+    files: ["AGENTS.md", ".github/copilot-instructions.md"],
+    directories: [".github/instructions"],
+  },
+  gemini: { files: ["GEMINI.md"], directories: [".gemini"] },
+  windsurf: { files: [".windsurfrules"], directories: [".windsurf"] },
+};
+
+function hostFile(
+  path: string,
+  host: { files: readonly string[]; directories: readonly string[] },
+) {
+  return (
+    host.files.includes(path) ||
+    host.directories.some((directory) => path === directory || path.startsWith(`${directory}/`))
+  );
+}
+
+/**
+ * Another coding host's instructions or settings, which the configured host never reads.
+ * A desktop app importing a Claude Code project wrote AGENTS.md, .codex/ and .agents/ into
+ * projects mid-run; as product files they made an acceptance stale and failed `visp done`
+ * with a scope violation the worker could not resolve. Only untracked files are skipped,
+ * and never the configured host's own files, which are VISP's enforcement surface.
+ */
+export function foreignHostFile(path: string, tracked: boolean, harness: string): boolean {
+  const own = HOST_FILES[harness];
+  if (tracked || !own) return false;
+  const normalized = normalizePath(path);
+  return (
+    !hostFile(normalized, own) &&
+    Object.entries(HOST_FILES).some(
+      ([name, host]) => name !== harness && hostFile(normalized, host),
+    )
+  );
+}

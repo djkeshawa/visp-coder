@@ -35,44 +35,53 @@ export async function recordCheckImages(
   for (const path of check.images ?? []) {
     const bytes = await readImageBytes(workspace, path);
     if (!bytes) return `Declared image ${path} is missing or larger than 4 MiB after the check ran`;
-    const buffer = Buffer.from(bytes);
-    const mimeType = imageMimeType(buffer);
-    const dimensions = imageDimensions(buffer);
-    if (!mimeType || !dimensions || buffer.length > MAX_IMAGE_BYTES)
+    const capture = imageCapture(workspace, feature, Buffer.from(bytes), subjectDigest, {
+      route: `check ${check.id}: ${path}`,
+      steps: [command],
+    });
+    if (!capture)
       return `Declared image ${path} is not a PNG, JPEG, WebP or GIF image VISP can deliver`;
-    const id = `CAP-${randomUUID()}`;
-    const copy = join(
-      workspace.paths.featureDir(feature),
-      "captures",
-      `${id}.${mimeType.split("/")[1]}`,
-    );
-    mutations.push({
+    captures.push(capture.capture);
+    mutations.push(capture.mutation);
+  }
+  return { captures, mutations };
+}
+
+/** A review capture of one image of this product version, or undefined if VISP cannot deliver it. */
+export function imageCapture(
+  workspace: WorkspaceState,
+  feature: string,
+  buffer: Buffer,
+  subjectDigest: string,
+  origin: { route: string; steps: string[] },
+): { capture: ProductReviewCapture; mutation: FileMutation } | undefined {
+  const mimeType = imageMimeType(buffer);
+  const dimensions = imageDimensions(buffer);
+  if (!mimeType || !dimensions || buffer.length > MAX_IMAGE_BYTES) return undefined;
+  const id = `CAP-${randomUUID()}`;
+  const copy = join(
+    workspace.paths.featureDir(feature),
+    "captures",
+    `${id}.${mimeType.split("/")[1]}`,
+  );
+  return {
+    mutation: {
       kind: "write",
       path: copy,
       content: buffer,
       expectedBefore: { existed: false },
       mode: 0o600,
-    });
-    captures.push({
+    },
+    capture: {
       id,
       path: relative(workspace.paths.root, copy).replace(/\\/g, "/"),
       sha256: sha256(buffer),
       subjectDigest,
-      route: `check ${check.id}: ${path}`,
-      steps: [command],
+      route: origin.route,
+      steps: origin.steps,
       viewport: dimensions,
       createdAt: new Date().toISOString(),
       provenance: "runner-captured",
-    });
-  }
-  return { captures, mutations };
-}
-
-/** Declared check images are outputs, not product source: rewriting one does not change the product. */
-export function declaredCheckImages(checks: readonly ProductCheck[] | undefined): Set<string> {
-  return new Set(
-    (checks ?? []).flatMap((check) =>
-      (check.images ?? []).map((path) => path.replace(/\\/g, "/").replace(/^\.\//, "")),
-    ),
-  );
+    },
+  };
 }

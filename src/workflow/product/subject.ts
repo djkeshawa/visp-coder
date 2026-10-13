@@ -18,9 +18,9 @@ import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
-import { byproductProtection, skippedByproduct } from "./byproducts.js";
+import { byproductProtection, foreignHostFile, skippedByproduct } from "./byproducts.js";
 import { isBrowserCheckCommand } from "./check-command.js";
-import { declaredCheckImages } from "./check-images.js";
+import { declaredCheckImages } from "./check-image-paths.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
 import { workingSourceIdentity } from "./source-git.js";
 import { sourceInputPatterns } from "./source-inputs.js";
@@ -61,18 +61,21 @@ export async function productSourceSnapshot(
   const algorithm =
     [...objects.value.entries.values()][0]?.object.length === 64 ? "sha256" : "sha1";
   const protection = byproductProtection(workspace, selected.value);
+  // A declared check image the check writes is output; a committed one stays product.
   const images = declaredCheckImages(selected.value?.checks);
+  const output = (path: string) => images.has(path) && !objects.value.entries.has(path);
   const paths = listed.value.filter(
     (path) =>
       path !== ".visp" &&
       !path.startsWith(".visp/") &&
-      !images.has(path) &&
+      !output(path) &&
+      !foreignHostFile(path, objects.value.entries.has(path), workspace.config.harness) &&
       !skippedByproduct(path, objects.value.entries.has(path), protection),
   );
   return workspace.files.withReadPass(() =>
     snapshotSourceFiles(
       workspace,
-      [...new Set([...paths, ...declared.value.filter((path) => !images.has(path))])].sort(),
+      [...new Set([...paths, ...declared.value.filter((path) => !output(path))])].sort(),
       patterns,
       objects.value,
       algorithm,

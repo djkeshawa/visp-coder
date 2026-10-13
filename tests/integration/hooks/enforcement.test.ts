@@ -213,6 +213,47 @@ describe("generated hooks", () => {
     expect(decision(callPreToolUse(".visp/drafts/assessment.json"))).toBe("");
   });
 
+  // Workers backgrounded visp done and accept (15 s commands), then waited up to 9 minutes
+  // in polling loops that never ended on their own.
+  it("sends backgrounded VISP workflow commands to the foreground and leaves servers alone", () => {
+    const run = (command: string, background: boolean) => {
+      const output = execFileSync(
+        process.execPath,
+        [join(project.root, ".visp/hooks/claude-pretooluse.mjs")],
+        {
+          cwd: project.root,
+          input: JSON.stringify({
+            tool_name: "Bash",
+            tool_input: { command, ...(background ? { run_in_background: true } : {}) },
+          }),
+          env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
+          encoding: "utf8",
+        },
+      );
+      return output ? JSON.parse(output) : {};
+    };
+    for (const command of [
+      "visp done --feature 001-x --task T001 2>&1",
+      "export PATH=/opt/shim:$PATH && visp accept --feature 001-x",
+      "cd /p && /opt/shim/visp next | head -50",
+    ]) {
+      const response = run(command, true);
+      expect(decision(response), command).toBe("deny");
+      expect(response.hookSpecificOutput.permissionDecisionReason).toContain(
+        "without run_in_background and with timeout 600000",
+      );
+      expect(decision(run(command, false)), command).toBe("");
+    }
+    expect(decision(run("visp ui --port 4000", true))).toBe("");
+    // feature keeps writing acceptance tests after it prints the id the worker continues with.
+    expect(
+      decision(
+        run("visp feature \"Build it\" --source-brief - <<'REQUEST'\nBuild it\nREQUEST", true),
+      ),
+    ).toBe("");
+    expect(decision(run("npm run dev", true))).toBe("");
+  });
+
   // A worker ran rm -rf .visp acceptance to get past a scope error it could not read.
   it("refuses shell commands that would delete VISP state and leaves others to the host", async () => {
     const shell = (command: string) =>
