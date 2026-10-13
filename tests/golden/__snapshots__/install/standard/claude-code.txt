@@ -329,7 +329,7 @@ description: Use for any code change in this project. Keeps edits inside a decla
 Follow AGENTS.visp.md and VISP.commands.md. Run visp next.
 === .git/hooks/pre-commit (executable)
 #!/bin/sh
-# managed by visp; hook-version: 16
+# managed by visp; hook-version: 17
 # Refuses a commit whose staged files fall outside the active task's scope.
 
 
@@ -506,7 +506,7 @@ esac
 
 === .visp/hooks/claude-pretooluse.mjs (executable)
 #!/usr/bin/env node
-// managed by visp; hook-version: 16
+// managed by visp; hook-version: 17
 // Refuses edits outside the active task's declared scope.
 // Decisions come from `visp guard`, so this file holds no rules of its own.
 
@@ -702,6 +702,19 @@ if (input?.tool_name === "Bash") {
     );
     process.exit(0);
   }
+  const backgrounded = input?.tool_input?.run_in_background === true ? backgroundedWorkflowCommand(command) : undefined;
+  if (backgrounded) {
+    process.stdout.write(
+      JSON.stringify(
+        deny(
+          "Run `" + backgrounded + "` in the foreground: repeat this call without run_in_background and with timeout 600000. " +
+            "VISP bounds its own waits (`visp next` waits for a running review) and prints the result and the next step when it returns. " +
+            "If the host still moves it to the background, run `visp next` instead of polling with pgrep, tail -f or sleep loops.",
+        ),
+      ),
+    );
+    process.exit(0);
+  }
   const lost = discardedChanges(command);
   if (lost.length > 0) {
     process.stdout.write(
@@ -716,6 +729,24 @@ if (input?.tool_name === "Bash") {
     );
   }
   process.exit(0);
+}
+
+// Workers started visp done and accept as background tasks and then waited for them with
+// loops that never ended on their own (pgrep -f matching its own shell, tail -f piped to
+// grep -m1): commands that returned in 15 s left them idle for up to 9 minutes. VISP's
+// workflow commands bound their own waits, so they run in the foreground. `visp feature`
+// keeps writing acceptance tests after it prints the feature id and `visp ui` is a
+// server, so both may still run in the background.
+// A function declaration, not a top-level constant: the Bash branch above runs first.
+function backgroundedWorkflowCommand(command) {
+  const workflow = new Set(["work", "done", "verify", "accept", "next", "pr", "status", "brief", "critic", "review"]);
+  for (const words of shellCommands(command)) {
+    const index = words.findIndex((word) => word === "visp" || word.endsWith("/visp"));
+    if (index < 0) continue;
+    const verb = words.slice(index + 1, index + 4).find((word) => workflow.has(word));
+    if (verb) return "visp " + verb;
+  }
+  return undefined;
 }
 
 // A worker discarded a previous session's uncommitted work with git checkout to get the
@@ -1035,6 +1066,7 @@ Start: `visp feature "<goal>" --source-brief -` with a quoted heredoc for the re
 - Before editing run visp work; build runnable behavior. Functional outcomes need tests or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
 - Stateful: act, settle, repeat; test failure/restart.
 - If the request has a UI, show status, counts, errors as word-labeled text (`Score: 1500`, `Stone: 2`), not only canvas/icons.
+- A picture result needs a check that writes a PNG listed in `images: [path]`.
 - UI previews (aim line, predicted path): use the real action's function and start point; check with real input. Do not delete or shrink requested content to pass a check.
 - If visp done runs VISP's reviewer, run or delegate no review; visp next waits. Fix findings, rerun done. Run visp critic/review only when visp next prints it.
 - Run feature/done/verify/accept/next with the host's maximum shell timeout. Leave feature running; background it on blocking hosts. At its id, run visp work. Poll; never duplicate; after kill/error recover by id.
