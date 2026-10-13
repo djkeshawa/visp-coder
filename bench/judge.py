@@ -6,7 +6,8 @@ the newest image the worker wrote; SVG is rasterized in headless Chrome) and cop
 anonymous name. For a game task, serves the project and takes a 1280 x 800 screenshot of
 index.html at the start of level 1. The judge model (Sonnet 5.5 at high effort, or the run's
 preset judge) checks a fixed per-task checklist and gives an overall 1-10 score. Writes judge.json
-beside the project. Runs marked invalid (invalid.json) are skipped.
+beside the project. A run with no image (or no index.html) scores 1 with no checklist item passed;
+a failed judge call is recorded as `error` and scores nothing. Runs marked invalid are skipped.
 """
 import functools
 import hashlib
@@ -210,7 +211,10 @@ def judge(name):
         image = raster(image, directory) if image else None
         what = "one image"
     if not image:
-        result = {"run": name, "task": task, "image": None, "error": "no image produced"}
+        # Nothing to judge is the lowest score, as a hidden check with no result passes nothing.
+        result = {"run": name, "task": task, "image": None, "missing": "no image produced",
+                  "judge": f"{settings['model']}:{settings['effort']}", "overall": 1,
+                  "elements": f"0/{len(checklist['elements'])}", "styles": f"0/{len(checklist['styles'])}"}
         (run / "judge.json").write_text(json.dumps(result, indent=2))
         return result
     request = (BENCH / "tasks" / task / "task.md").read_text().strip()
@@ -231,7 +235,9 @@ def judge(name):
         "judge": f"{settings['model']}:{settings['effort']}",
         "elements": f"{sum(bool(e.get('pass')) for e in elements)}/{len(checklist['elements'])}",
         "styles": f"{sum(bool(s.get('pass')) for s in styles)}/{len(checklist['styles'])}",
-        "overall": verdict.get("overall"), "error": verdict.get("error"), "verdict": verdict, "call": usage,
+        "overall": verdict.get("overall"),
+        "error": verdict.get("error") or (None if verdict.get("overall") else "the judge gave no score"),
+        "verdict": verdict, "call": usage,
     }
     (run / "judge.json").write_text(json.dumps(result, indent=2))
     return result

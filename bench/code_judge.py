@@ -3,13 +3,14 @@
 Usage: code_judge.py <run_name> [...]
        code_judge.py --project <dir> --task <task> [--out <file>]
 
-Only the product's own source is copied, under an anonymous temporary directory: version control,
+Only the product's own files are copied, under an anonymous temporary directory: version control,
 workflow state and instructions (.visp, .claude, .codex, .agents, .specify, _bmad*, specs/,
 CLAUDE.md, AGENTS*.md, VISP.commands.md, visp.yml), every hidden file, dependencies, caches,
-images and binaries are left out. A document or configuration file that names a workflow (VISP,
-Spec Kit, BMAD) is left out; a source file that does is kept with those names replaced by
-"workflow", so a test that writes to `.visp/` is still judged. A top-level acceptance/ directory
-whose files name a workflow is VISP's independent tester's work, not the worker's, and is left out.
+images, binaries and paths that name a workflow are left out, and so are the files VISP's
+independent tester wrote (the `file` of each acceptance-tests.json), which are not the worker's.
+In every other file, source or document, the names of the workflows (VISP, Spec Kit, BMAD) are
+replaced by "workflow", so a README or a test that writes to `.visp/` is still judged and, in a
+change, shows only the edits the worker made.
 
 A task with a starting codebase (start/) is judged on the change: the judge gets before/ (the
 starting tree, filtered the same way), after/ (the product) and change.diff, and is told to judge
@@ -108,11 +109,25 @@ def request_text(task):
     return (task_dir / "task.md").read_text().strip()
 
 
+def tester_files(project):
+    """Files VISP's independent tester wrote (acceptance-tests.json `file`): not the worker's work."""
+    files = set()
+    for record in project.glob(".visp/features/*/acceptance-tests.json"):
+        try:
+            data = json.loads(record.read_text())
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("file"):
+            files.add(pathlib.PurePath(data["file"]))
+    return files
+
+
 def blind_copy(source, target):
-    """Copy the product's own files; returns (files copied, files left out, names redacted)."""
-    acceptance = source / "acceptance"
-    drop_acceptance = acceptance.is_dir() and any(
-        WORKFLOW.search(path.read_text(errors="replace")) for path in acceptance.rglob("*") if path.is_file())
+    """Copy the product's own files; returns (files copied, files left out, names redacted).
+
+    The same rules apply to the starting tree, so before/ and after/ differ only by the work.
+    """
+    tester = tester_files(source)
     copied = left_out = redacted = 0
     for path in sorted(source.rglob("*")):
         relative = path.relative_to(source)
@@ -121,7 +136,7 @@ def blind_copy(source, target):
         parts = relative.parts
         if any(part.startswith(".") for part in parts) or SKIP_DIRS.intersection(parts) \
                 or path.name in SKIP_FILES or BINARY.search(path.name) or path.stat().st_size > MAX_FILE \
-                or (drop_acceptance and parts[0] == "acceptance"):
+                or pathlib.PurePath(relative) in tester or WORKFLOW.search(str(relative)):
             left_out += 1
             continue
         try:
@@ -129,12 +144,8 @@ def blind_copy(source, target):
         except UnicodeDecodeError:
             left_out += 1
             continue
-        if WORKFLOW.search(text) or WORKFLOW.search(str(relative)):
-            if not SOURCE.search(path.name) or WORKFLOW.search(str(relative)):
-                left_out += 1
-                continue
-            text, count = WORKFLOW.subn("workflow", text)
-            redacted += count
+        text, count = WORKFLOW.subn("workflow", text)
+        redacted += count
         (target / relative).parent.mkdir(parents=True, exist_ok=True)
         (target / relative).write_text(text)
         copied += 1
@@ -202,7 +213,8 @@ def judge_project(project, task, settings=CODE_JUDGE):
         "redacted": redacted, "diffBytes": len(diff) if diff is not None else None,
         "overall": (verdict.get("overall") or {}).get("score"), "criteria": scores,
         "mean": round(sum(numbers) / len(numbers), 2) if numbers else None,
-        "error": verdict.get("error"), "verdict": verdict, "call": usage,
+        "error": verdict.get("error") or (None if verdict.get("overall") else "the judge gave no score"),
+        "verdict": verdict, "call": usage,
     }
 
 
