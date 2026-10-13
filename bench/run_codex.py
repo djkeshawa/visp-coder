@@ -87,7 +87,7 @@ for line in output.splitlines():
         commands += 1
 shutil.rmtree(home, ignore_errors=True)
 result = {
-    "run": args.run, "arm": arm["arm"], "model": f"{args.model}:{args.effort}", "seconds": elapsed,
+    "run": args.run, "arm": arm["arm"], "preset": arm.get("preset"), "model": f"{args.model}:{args.effort}", "seconds": elapsed,
     "timedOut": timed_out, "turns": commands, "isError": failed, "usage": usage, "report": report[-1500:],
 }
 (run / "result.json").write_text(json.dumps(result, indent=2))

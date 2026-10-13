@@ -1,11 +1,12 @@
 """Run one prepared arm with a headless Claude Code actor in its project directory.
 
-Usage: run_claude.py <run_name> [--model claude-haiku-4-5-20251001] [--timeout 2700]
+Usage: run_claude.py <run_name> [--model claude-haiku-4-5-20251001] [--effort high] [--timeout 2700]
 
 Unlike a subagent, a headless session started in the project loads the project's own
 CLAUDE.md, skills and hooks, so each workflow is enforced the way a user would run it.
 User-level settings and MCP servers are excluded so every arm starts from the same host.
-Writes result.json (duration, turns, cost, tokens, session id) beside the project.
+Writes result.json (duration, turns, cost, tokens, session id, preset) beside the project.
+The model and effort default to the worker of the preset recorded in arm.json (presets.py).
 """
 import argparse
 import json
@@ -34,8 +35,15 @@ def worker_env(arm):
     return env
 
 
-def run_session(project, arm, prompt, model=MODEL, timeout=2700, resume=None):
+def worker(arm, model=None, effort=None):
+    """The worker model and effort: explicit values, else the arm's preset, else the default."""
+    settings = (arm.get("settings") or {}).get("worker") or {}
+    return model or settings.get("model") or MODEL, effort or settings.get("effort")
+
+
+def run_session(project, arm, prompt, model=None, timeout=2700, resume=None, effort=None):
     """Run one user session (the prompt plus the arm's scripted follow-ups) and summarize it."""
+    model, effort = worker(arm, model, effort)
     env = worker_env(arm)
     started = time.time()
 
@@ -43,6 +51,8 @@ def run_session(project, arm, prompt, model=MODEL, timeout=2700, resume=None):
         argv = [*isolate(), "claude", "-p", text, "--model", model, "--output-format", "json",
                 "--permission-mode", "bypassPermissions", "--setting-sources", "project,local",
                 "--strict-mcp-config"]
+        if effort:
+            argv += ["--effort", effort]
         if session:
             argv += ["--resume", session]
         remaining = max(60, timeout - int(time.time() - started))
@@ -84,7 +94,7 @@ def run_session(project, arm, prompt, model=MODEL, timeout=2700, resume=None):
         return sum(value for value in values if isinstance(value, int)) or None
 
     return {
-        "arm": arm["arm"], "model": model, "seconds": round(time.time() - started), "timedOut": timed_out,
+        "arm": arm["arm"], "preset": arm.get("preset"), "model": model, "effort": effort, "seconds": round(time.time() - started), "timedOut": timed_out,
         "turns": sum(entry.get("num_turns") or 0 for entry in turns), "userTurns": len(turns),
         "isError": any(entry.get("is_error") for entry in turns),
         "sessionId": next((entry["session_id"] for entry in reversed(turns) if entry.get("session_id")), None),
@@ -97,13 +107,14 @@ def run_session(project, arm, prompt, model=MODEL, timeout=2700, resume=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("run")
-    parser.add_argument("--model", default=MODEL)
+    parser.add_argument("--model")
+    parser.add_argument("--effort")
     parser.add_argument("--timeout", type=int, default=2700)
     args = parser.parse_args()
     run = RUNS / "runs" / args.run
     arm = json.loads((run / "arm.json").read_text())
     result = {"run": args.run, **run_session(run / "project", arm, (run / "prompt.txt").read_text(),
-                                             args.model, args.timeout)}
+                                             args.model, args.timeout, effort=args.effort)}
     (run / "result.json").write_text(json.dumps(result, indent=2))
     print(json.dumps({k: result[k] for k in ("run", "arm", "seconds", "timedOut", "turns", "isError")}))
 
