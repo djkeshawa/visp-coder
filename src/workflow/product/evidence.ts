@@ -148,13 +148,13 @@ function passedResultImages(
   workspace: WorkspaceState,
   record: ProductRecord,
   executions: readonly ProductExecution[],
-  unchanged: Record<string, string> | undefined,
-  subject: string,
+  source: string,
+  after: { digest: string; snapshot: Record<string, string> },
 ) {
-  return unchanged &&
+  return source === after.digest &&
     executions.length > 0 &&
     executions.every((execution) => execution.status === "passed")
-    ? recordResultImages(workspace, record, unchanged, subject)
+    ? recordResultImages(workspace, record, after.snapshot, after.digest)
     : Promise.resolve({ captures: [], mutations: [] });
 }
 
@@ -187,13 +187,10 @@ async function finishExecution(
   if (!after.ok) return after;
   const timestamp = new Date().toISOString();
   // Pictures the product made reach the reviewer as images of the version the checks passed.
-  const pictures = await passedResultImages(
-    workspace,
-    record,
-    executions,
-    source === after.value ? afterSnapshot.value : undefined,
-    after.value,
-  );
+  const pictures = await passedResultImages(workspace, record, executions, source, {
+    digest: after.value,
+    snapshot: afterSnapshot.value,
+  });
   const next = {
     ...record.state,
     pendingVerification: undefined,
