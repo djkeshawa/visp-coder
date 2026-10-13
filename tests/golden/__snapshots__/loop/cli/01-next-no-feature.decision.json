@@ -1,0 +1,12 @@
+{
+  "exitCode": 0,
+  "next": {
+    "action": "understand",
+    "command": "visp feature \"<goal>\"",
+    "mayEdit": false,
+    "evidence": 0
+  },
+  "product": {
+    "unavailable": "NO_ACTIVE_FEATURE"
+  }
+}

@@ -1,0 +1,6 @@
+> visp_brief {"patch":{"incomplete":false,"outcomes":[{"id":"O001","kind":"functional","statement":"The public value is two","priority":"must","provenance":"user-stated"}],"checks":[{"id":"C001","command":["node","checks/value.check.mjs"],"outcomes":["O001"],"files":["src/value.mjs","checks/value.check.mjs"],"environment":"node"}],"slices":[{"id":"T001","goal":"Return the promised value","outcomes":["O001"],"scope":{"allowed":["src/value.mjs","checks/value.check.mjs"],"expected":["src/value.mjs"],"forbidden":[]},"checks":["C001"]}]},"reason":"Define the first usable behavior"}
+--- text
+visp_brief: {"feature":"001-return-two-from-the-public","incomplete":false,"outcomes":["O001 (functional)"],"examples":[],"checks":["C001"],"slices":[{"id":"T001","goal":"Return the promised value","scope":["src/value.mjs","checks/value.check.mjs"],"checks":["C001"]}]}
+Next: visp_next {feature:"001-return-two-from-the-public"}
+Read the full brief with visp_brief {feature:"001-return-two-from-the-public"}.
+--- isError false

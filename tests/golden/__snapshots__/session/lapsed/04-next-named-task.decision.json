@@ -1,0 +1,21 @@
+{
+  "exitCode": 0,
+  "next": {
+    "action": "understand",
+    "command": "visp feature \"<the user's request>\"",
+    "mayEdit": false,
+    "evidence": 1
+  },
+  "product": {
+    "status": "active",
+    "slices": {
+      "T001": "in-progress"
+    },
+    "executions": [],
+    "reviews": 0,
+    "openFindings": {
+      "required": 0,
+      "advisory": 0
+    }
+  }
+}

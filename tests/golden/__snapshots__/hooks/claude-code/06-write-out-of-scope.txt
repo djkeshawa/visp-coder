@@ -1,0 +1,6 @@
+> .visp/hooks/claude-pretooluse.mjs {"session_id":"golden-session","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"<PROJECT>/README.md","content":"x"}}
+--- stdout
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"README.md is outside the allowed files of T001. Authorize the task that owns this file, or widen its allowedFiles — do not work around the refusal."}}
+--- stderr
+
+--- exit 0

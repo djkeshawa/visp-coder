@@ -1,0 +1,8 @@
+$ visp accept
+--- stdout
+
+--- stderr
+Error: Close the active slices before final product acceptance: T001
+Try: visp next --feature 001-return-two-from-the-public
+
+--- exit 1

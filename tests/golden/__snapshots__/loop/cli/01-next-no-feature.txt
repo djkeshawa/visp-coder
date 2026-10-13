@@ -1,0 +1,10 @@
+$ visp next
+--- stdout
+next: {"action":"understand","objective":"Record the original request and define the next useful outcome","command":"visp feature \"<goal>\"","mayEdit":false}
+Full result: add --json.
+
+Next: visp feature "<goal>"
+
+--- stderr
+
+--- exit 0

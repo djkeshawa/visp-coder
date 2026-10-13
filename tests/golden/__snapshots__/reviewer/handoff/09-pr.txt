@@ -1,0 +1,58 @@
+$ visp pr
+--- stdout
+# Return two from the public value module
+
+Status: active. Every required outcome is satisfied.
+
+## Request
+
+> Make the public value module return two instead of one.
+
+## Outcomes
+
+| Outcome | Priority | Statement | Checks | Behavior | Review |
+| --- | --- | --- | --- | --- | --- |
+| O001 | must | The public value is two | C001 | passed | unassessed |
+
+## Changes
+
+- **T001** Return the promised value (in-progress; may edit src/value.mjs, checks/value.check.mjs)
+
+Uncommitted changes:
+
+- modified: src/value.mjs
+
+## Checks
+
+| Check | Command | Latest result |
+| --- | --- | --- |
+| C001 | `node checks/value.check.mjs` | passed (exit 0, <TIME>) |
+
+## Acceptance tests
+
+The independent tester's tests were not pinned (declined): The tester wrote no file: The request states one value; the worker's own check covers it..
+
+Tester notes: The request states one value; the worker's own check covers it.
+
+## Independent review
+
+- <TIME>: gpt-5.6-sol (fresh context), 0/1 outcomes satisfied
+
+Open findings:
+
+- **required** functional: The module has no default export Consequence: Callers that import the module's default value receive undefined, not two Next check: Import the default export of src/value.mjs and compare it with two
+
+## Next
+
+The independent review budget is spent. Run visp pr; the remaining findings go to a human reviewer
+
+`visp pr --feature 001-return-two-from-the-public`
+
+Check results come from commands VISP executed. Review judgments are attributed to their reviewer; the actor's own claims are not evidence.
+
+
+Next: visp pr --feature 001-return-two-from-the-public
+
+--- stderr
+
+--- exit 0

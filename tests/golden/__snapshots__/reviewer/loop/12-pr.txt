@@ -1,0 +1,59 @@
+$ visp pr
+--- stdout
+# Return two from the public value module
+
+Status: accepted. Every required outcome is satisfied.
+
+## Request
+
+> Make the public value module return two instead of one.
+
+## Outcomes
+
+| Outcome | Priority | Statement | Checks | Behavior | Review |
+| --- | --- | --- | --- | --- | --- |
+| O001 | must | The public value is two | C001 | passed | satisfied |
+
+## Changes
+
+- **T001** Return the promised value (closed; may edit src/value.mjs, checks/value.check.mjs)
+
+Uncommitted changes:
+
+- untracked: acceptance/001-return-two-from-the-public/value.acceptance.mjs
+- modified: src/value.mjs
+
+## Checks
+
+| Check | Command | Latest result |
+| --- | --- | --- |
+| C001 | `node checks/value.check.mjs` | passed (exit 0, <TIME>) |
+| PINNED_1 | `node acceptance/001-return-two-from-the-public/value.acceptance.mjs` | passed (exit 0, <TIME>) |
+
+## Acceptance tests
+
+Written from the request by gpt-5.6-sol, failed before implementation (exit 1), and pinned as `acceptance/001-return-two-from-the-public/value.acceptance.mjs`.
+
+| Test | Request text it relies on |
+| --- | --- |
+| value is two | return two |
+
+## Intent changes
+
+- <TIME> (visp-tester, method): Pin acceptance tests an independent tester wrote from the original request
+
+## Independent review
+
+- <TIME>: gpt-5.6-sol (fresh context), 0/1 outcomes satisfied
+- <TIME>: gpt-5.6-sol (fresh context), 1/1 outcomes satisfied
+
+## Next
+
+Required product outcomes have current acceptance evidence
+
+Check results come from commands VISP executed. Review judgments are attributed to their reviewer; the actor's own claims are not evidence.
+
+
+--- stderr
+
+--- exit 0

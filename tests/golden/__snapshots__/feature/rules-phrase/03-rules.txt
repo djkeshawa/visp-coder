@@ -1,0 +1,8 @@
+$ visp rules
+--- stdout
+Project rules the user stated for all later work on this project (they apply here too; only where a specific statement in the current request conflicts with a project rule for the same case does that statement take precedence, and only for the conflicting requirement; all compatible rules and rules about cases the request does not address still apply):
+R-<HEX-1> From now on, never log request bodies.
+
+--- stderr
+
+--- exit 0
