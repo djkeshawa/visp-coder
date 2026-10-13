@@ -161,17 +161,32 @@ def game_screen(project, directory):
 
 
 def ask(model, effort, prompt, directory, schema, tools="Read", timeout=600):
-    """One blind `claude -p` call with structured output; returns (verdict, envelope)."""
+    """A blind `claude -p` call with structured output; returns (verdict, call facts).
+
+    About one call in ten ended with error_max_structured_output_retries in calibration; such a
+    call is made once more, and the first attempt's facts are kept under `earlier`.
+    """
+    verdict, usage = _ask_once(model, effort, prompt, directory, schema, tools, timeout)
+    if usage.get("subtype") == "error_max_structured_output_retries":
+        verdict, retried = _ask_once(model, effort, prompt, directory, schema, tools, timeout)
+        usage = {**retried, "earlier": [usage]}
+    return verdict, usage
+
+
+def _ask_once(model, effort, prompt, directory, schema, tools, timeout):
     argv = ["claude", "-p", "--model", model, "--effort", effort, "--output-format", "json",
             "--json-schema", json.dumps(schema), "--tools", tools, "--safe-mode", "--strict-mcp-config",
             "--no-session-persistence", "--permission-mode", "dontAsk", "--add-dir", str(directory)]
     done = subprocess.run(argv, input=prompt, capture_output=True, text=True, cwd=directory, timeout=timeout)
     try:
         envelope = json.loads(done.stdout)
-        verdict = envelope.get("structured_output") or json.loads(envelope.get("result", "{}"))
     except ValueError:
         return {"error": (done.stdout + done.stderr)[-800:]}, {}
-    usage = {key: envelope.get(key) for key in ("usage", "total_cost_usd", "duration_ms", "is_error")}
+    usage = {key: envelope.get(key) for key in ("usage", "total_cost_usd", "duration_ms", "is_error", "subtype")}
+    verdict = envelope.get("structured_output")
+    if envelope.get("is_error") or not isinstance(verdict, dict):
+        # No verdict: keep what the CLI said, so a failed call is visible and never read as a score.
+        return {"error": f"{envelope.get('subtype')}: {str(envelope.get('result'))[-800:]}"}, usage
     return verdict, usage
 
 
