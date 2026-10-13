@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A fresh clone no longer refuses every edit before `visp install`.** `.claude/settings.json` is committed but `.visp/hooks/` is not, so in a clone that had not run `visp install` the edit hook command failed and Claude Code refused every Edit and Write with a node stack trace, and printed a hook error on every prompt, stop and shell command. The commands now check for the script first. Without it, an edit is allowed when this checkout has no authorization state, and refused with a message naming `visp install` when a slice may be authorized (a marker exists, or the state is a link or unreadable), so deleting the script mid-slice does not switch enforcement off. The prompt, Stop and shell hooks do nothing without the script. `visp doctor` names the missing script instead of reporting the hook as not installed.
+- On Windows the Claude Code hook commands used cmd.exe syntax (`%CLAUDE_PROJECT_DIR%`, `exit /b 2`), but Claude Code runs hook commands with Git Bash there, so every edit was refused even after `visp install`. Every platform now gets the same POSIX command. `visp install` replaces entries written by earlier builds without `--force`, and uninstall removes them.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed

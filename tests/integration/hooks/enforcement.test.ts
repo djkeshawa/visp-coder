@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmod, mkdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -397,6 +397,165 @@ describe("generated hooks", () => {
       },
     );
     expect(output).toBe("");
+  });
+
+  /**
+   * `.claude/settings.json` is committed; `.visp/hooks/` and `.visp/state/` are not. A fresh
+   * clone runs the committed commands with no script, which must not block every edit, while
+   * deleting the script during an authorized slice must not switch enforcement off.
+   */
+  describe.skipIf(process.platform === "win32")("settings command without the hook script", () => {
+    const script = () => join(project.root, ".visp/hooks/claude-pretooluse.mjs");
+    const authorizations = () => join(project.root, ".visp/state/product-authorizations");
+
+    async function settingsCommand(event: "edit" | "Bash" | "UserPromptSubmit" | "Stop") {
+      const settings = JSON.parse(await project.read(".claude/settings.json")) as {
+        hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]>;
+      };
+      const entries =
+        event === "edit" || event === "Bash" ? settings.hooks.PreToolUse : settings.hooks[event];
+      const matcher =
+        event === "edit" ? "Edit|Write|NotebookEdit" : event === "Bash" ? "Bash" : undefined;
+      const entry = entries?.find((candidate) => candidate.matcher === matcher);
+      if (!entry?.hooks[0]) throw new Error(`no ${event} entry`);
+      return entry.hooks[0].command;
+    }
+
+    async function runSettings(
+      event: "edit" | "Bash" | "UserPromptSubmit" | "Stop",
+      { root = project.root, env = project.env() }: { root?: string; env?: NodeJS.ProcessEnv } = {},
+    ) {
+      const input =
+        event === "edit"
+          ? { hook_event_name: "PreToolUse", tool_input: { file_path: "src/billing/invoice.ts" } }
+          : event === "Bash"
+            ? { hook_event_name: "PreToolUse", tool_input: { command: "ls" } }
+            : { hook_event_name: event, prompt: "hello" };
+      const result = spawnSync("/bin/sh", ["-c", await settingsCommand(event)], {
+        cwd: root,
+        env: { ...env, CLAUDE_PROJECT_DIR: root },
+        input: JSON.stringify(input),
+        encoding: "utf8",
+      });
+      return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    }
+
+    async function withoutScript<T>(action: () => Promise<T>): Promise<T> {
+      await rename(script(), `${script()}.parked`);
+      try {
+        return await action();
+      } finally {
+        await rename(`${script()}.parked`, script());
+      }
+    }
+
+    async function withAuthorizations<T>(
+      replacement: ((path: string) => Promise<void>) | undefined,
+      action: () => Promise<T>,
+    ): Promise<T> {
+      await rename(authorizations(), `${authorizations()}.parked`);
+      try {
+        await replacement?.(authorizations());
+        return await action();
+      } finally {
+        await rm(authorizations(), { recursive: true, force: true });
+        await rename(`${authorizations()}.parked`, authorizations());
+      }
+    }
+
+    const noNode = () => ({ ...project.env(), PATH: "/nonexistent" });
+
+    it("stays silent with no authorization, with or without node", async () => {
+      await withoutScript(() =>
+        withAuthorizations(undefined, async () => {
+          expect(await runSettings("edit")).toEqual({ status: 0, stdout: "", stderr: "" });
+          expect(await runSettings("edit", { env: noNode() })).toEqual({
+            status: 0,
+            stdout: "",
+            stderr: "",
+          });
+        }),
+      );
+    });
+
+    it("refuses an edit while a slice is authorized, with or without node", async () => {
+      await withoutScript(async () => {
+        for (const env of [project.env(), noNode()]) {
+          const result = await runSettings("edit", { env });
+          expect(result.status).toBe(2);
+          expect(result.stdout).toBe("");
+          expect(result.stderr).toContain("visp install --harness claude-code");
+        }
+      });
+    });
+
+    it("runs the script as before when it is present", async () => {
+      const result = await runSettings("edit");
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual(callPreToolUse("src/billing/invoice.ts"));
+      expect(decision(JSON.parse(result.stdout))).toBe("deny");
+    });
+
+    it("leaves prompts, Stop and shell commands alone", async () => {
+      await withoutScript(async () => {
+        for (const event of ["Bash", "UserPromptSubmit", "Stop"] as const)
+          expect(await runSettings(event)).toEqual({ status: 0, stdout: "", stderr: "" });
+      });
+    });
+
+    it("allows edits in a fresh clone that has not run visp install", async () => {
+      const clone = `${project.root}-clone`;
+      execFileSync("git", ["clone", "--quiet", project.root, clone], { env: project.env() });
+      try {
+        await expect(stat(join(clone, ".claude/settings.json"))).resolves.toBeDefined();
+        await expect(stat(join(clone, ".visp/hooks"))).rejects.toThrow();
+        await expect(stat(join(clone, ".visp/state"))).rejects.toThrow();
+        expect(await runSettings("edit", { root: clone })).toEqual({
+          status: 0,
+          stdout: "",
+          stderr: "",
+        });
+      } finally {
+        await rm(clone, { recursive: true, force: true });
+      }
+    });
+
+    it("fails closed when the authorization directory is a link or unreadable", async () => {
+      const elsewhere = `${project.root}-linked-state`;
+      await mkdir(elsewhere, { recursive: true });
+      try {
+        await withoutScript(async () => {
+          await writeFile(join(elsewhere, "001-scoped-work.json"), "{}");
+          await withAuthorizations(
+            (path) => symlink(elsewhere, path, "dir"),
+            async () => expect((await runSettings("edit")).status).toBe(2),
+          );
+          await rm(join(elsewhere, "001-scoped-work.json"));
+          await withAuthorizations(
+            (path) => symlink(elsewhere, path, "dir"),
+            async () => expect((await runSettings("edit")).status).toBe(2),
+          );
+          // Root reads any directory, so the permission case only means something otherwise.
+          if (process.getuid?.() !== 0) {
+            await withAuthorizations(
+              async (path) => {
+                await mkdir(path);
+                await chmod(path, 0o000);
+              },
+              async () => {
+                try {
+                  expect((await runSettings("edit")).status).toBe(2);
+                } finally {
+                  await chmod(authorizations(), 0o755);
+                }
+              },
+            );
+          }
+        });
+      } finally {
+        await rm(elsewhere, { recursive: true, force: true });
+      }
+    });
   });
 
   it("refuses a commit whose staged files are out of scope", async () => {

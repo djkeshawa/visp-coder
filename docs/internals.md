@@ -8,9 +8,11 @@ Three surfaces call `visp guard`, so a refusal means the same thing everywhere:
 
 | Surface | Installed as | Scope source | When the guard cannot run |
 | --- | --- | --- | --- |
-| Edit hook (Claude Code) | `.visp/hooks/claude-pretooluse.mjs`, wired into `.claude/settings.json` | This checkout's authorization | Denies the write and says the check could not run |
+| Edit hook (Claude Code) | `.visp/hooks/claude-pretooluse.mjs`, wired into `.claude/settings.json` | This checkout's authorization | Denies the write and says the check could not run. If the script itself is missing (a fresh clone before `visp install`), the command in `.claude/settings.json` allows the write when `.visp/state` holds no authorization marker, and refuses it with an install message when a marker exists or the state cannot be read (a link, no permission) |
 | Git `pre-commit` | The repository's pre-commit hook | This checkout's authorization | Blocks the commit while a slice is authorized; otherwise allows it with a warning |
 | CI (`visp install --hooks claude git ci`, or `--hooks git ci` outside Claude Code) | `.github/workflows/visp.yml` | The feature's committed brief (`--scope tasks`) | The job fails |
+
+`.claude/settings.json` is committed, while `.visp/hooks/` and `.visp/state/` are local to each checkout, so the settings commands check for the script before running it. The prompt, Stop and shell hooks do nothing without it. The edit hook's fallback reads only whether marker files exist, as the pre-commit hook does without `node`, so a marker left by a closed slice also refuses edits until `visp install` (or `visp doctor --fix`) restores the script. Claude Code runs these commands with `sh`, or Git Bash on Windows; a Windows host without Git Bash runs hooks in PowerShell, which these commands do not support.
 
 The hooks read the JSON envelope from `visp guard --json` rather than the exit code, so a crash or an unrelated `visp` on `PATH` is never mistaken for a verdict. `--hooks` replaces the default hook set; retain `git` and, for Claude Code, `claude` when adding `ci`. `--if-authorized` lets ordinary commits through when no slice is authorized; `--include-done` keeps finished slices' changes committable. A denial that blames the installation should be fixed with `visp doctor`, not by widening scope. The local hook can be bypassed with `git commit --no-verify`; CI is the authoritative check.
 

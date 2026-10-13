@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { resolveCriticDefault } from "../config/critic-defaults.js";
 import { DIR, PRODUCT_NAME, STATE_DIR } from "../core/constants.js";
 import { isExecutableMode } from "../core/mode.js";
@@ -388,7 +389,7 @@ function addSurface(surfaces: EnforcementSurfaces, state: SurfaceState): void {
 async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceState> {
   const hookPath = `${STATE_DIR}/${DIR.hooks}/claude-pretooluse.mjs`;
   const script = await state.files.readTextIfExists(hookPath);
-  if (!script.ok || script.value === undefined) return { inactive: "edit hook" };
+  if (!script.ok || script.value === undefined) return missingEditHook(state, hookPath);
   if (script.value !== renderPreToolUseHook()) return { inactive: "edit hook (stale or edited)" };
   const metadata = await state.files.metadata(hookPath);
   if (!metadata.ok || !isExecutableMode(metadata.value?.mode)) {
@@ -401,10 +402,13 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
     const settings = await state.files.readTextIfExists(CLAUDE_SETTINGS_FILE);
     if (!settings.ok || !hasClaudeSessionHooks(settings.value, hookPath))
       return { inactive: "prompt, Stop or Bash hook (settings registration is missing)" };
-    const command = hookCommand(hookPath, true);
+    // Claude Code runs the command with Git Bash on Windows, which doctor cannot locate
+    // reliably (a `bash` on PATH may be WSL's), so there it checks that node runs the script.
     const check = spawnSync(
-      process.platform === "win32" ? "cmd.exe" : "/bin/sh",
-      process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command],
+      process.platform === "win32" ? "node" : "/bin/sh",
+      process.platform === "win32"
+        ? [join(state.paths.root, hookPath)]
+        : ["-c", hookCommand(hookPath, true)],
       {
         cwd: state.paths.root,
         env: { ...process.env, CLAUDE_PROJECT_DIR: state.paths.root },
@@ -424,6 +428,16 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
     return { inactive: "edit hook (settings registration is stale or edited)" };
   }
   return { inactive: "edit hook (script written, not wired into settings)" };
+}
+
+/** Settings are committed, the script is not: they still run, refusing while a slice may be authorized. */
+async function missingEditHook(state: WorkspaceState, hookPath: string): Promise<SurfaceState> {
+  const wired = await preToolUseRegistration(state.paths.root, hookPath);
+  return wired.ok && (wired.value === "present" || wired.value === "customized")
+    ? {
+        inactive: `edit hook (script missing; Claude Code refuses writes while a slice is authorized, until ${PRODUCT_NAME} install restores it)`,
+      }
+    : { inactive: "edit hook" };
 }
 
 async function inspectPreCommitHook(state: WorkspaceState): Promise<SurfaceState> {

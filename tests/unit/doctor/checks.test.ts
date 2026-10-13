@@ -148,6 +148,19 @@ describe("the enforcement check", () => {
     await applyFixes(state, [await check("enforcement")], { guardHandshake: healthyGuard });
     expect(await check("enforcement")).toMatchObject({ status: "ok" });
   });
+  // The committed settings still run; without the script they refuse writes only while a
+  // slice may be authorized, which "not installed" would misdescribe.
+  it("names a deleted edit hook script that settings still run, and restores it", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    await rm(join(workspace.root, CLAUDE_PRE_TOOL_USE_HOOK));
+    const result = await check("enforcement");
+    expect(result).toMatchObject({ status: "warn", recovery: "visp doctor --fix" });
+    expect(result.detail).toContain("script missing");
+    expect(result.detail).toContain("refuses writes while a slice is authorized");
+    await applyFixes(await workspace.state(), [result], { guardHandshake: healthyGuard });
+    expect(await check("enforcement")).toMatchObject({ status: "ok" });
+  });
   it("detects and repairs a deleted Codex MCP registration", async () => {
     await setConfigScalar((await workspace.state()).paths, "harness", "codex");
     const state = await workspace.state();
