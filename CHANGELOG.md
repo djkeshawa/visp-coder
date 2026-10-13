@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Hooks written by the same VISP build installed at another path (nvm, npx, a local `node_modules`) no longer count as missing. Every generated hook embeds the path of the CLI that wrote it and was compared byte for byte, so `visp feature` refused to start on hosts other than Claude Code and `visp doctor` reported the hooks as stale or edited. The check now re-renders the hook with the path it embeds: the build ID, version and template must match, and the CLI it calls must exist.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed

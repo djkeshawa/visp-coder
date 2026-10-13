@@ -23,10 +23,14 @@ import {
   planAgentActivation,
   requiresAgentActivation,
 } from "../harness/activation.js";
-import { sameAssetContent } from "../harness/asset-inspection.js";
+import { isCurrentAsset } from "../harness/asset-inspection.js";
 import { preToolUseRegistration } from "../harness/claude-settings.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
-import { renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
+import {
+  isCurrentGeneratedHook,
+  renderPreCommitHook,
+  renderPreToolUseHook,
+} from "../harness/hooks.js";
 import { planFor } from "../harness/targets.js";
 import { now } from "./artifacts/common.js";
 import type { ImplementMarker } from "./artifacts/evidence.js";
@@ -246,11 +250,7 @@ async function hasHarnessAssets(state: WorkspaceState): Promise<Result<boolean>>
   const current = await Promise.all(
     assets.map(async (asset) => {
       const installed = await state.files.readTextIfExists(asset.path);
-      if (
-        !installed.ok ||
-        installed.value === undefined ||
-        !sameAssetContent(installed.value, asset)
-      )
+      if (!installed.ok || installed.value === undefined || !isCurrentAsset(installed.value, asset))
         return false;
       if (asset.executable !== true) return true;
 
@@ -276,7 +276,10 @@ async function hasEnforcementSurface(state: WorkspaceState): Promise<boolean> {
     if (
       preCommit.ok &&
       local.ok &&
-      preCommit.value === renderPreCommitHook(local.value !== undefined) &&
+      preCommit.value !== undefined &&
+      isCurrentGeneratedHook(preCommit.value, (cli) =>
+        renderPreCommitHook(local.value !== undefined, cli),
+      ) &&
       metadata.ok &&
       isExecutableMode(metadata.value?.mode)
     ) {
@@ -287,7 +290,12 @@ async function hasEnforcementSurface(state: WorkspaceState): Promise<boolean> {
   if (state.config.harness !== "claude-code") return false;
   const editHookPath = `${STATE_DIR}/${DIR.hooks}/claude-pretooluse.mjs`;
   const editHook = await state.files.readTextIfExists(editHookPath);
-  if (!editHook.ok || editHook.value !== renderPreToolUseHook()) return false;
+  if (
+    !editHook.ok ||
+    editHook.value === undefined ||
+    !isCurrentGeneratedHook(editHook.value, renderPreToolUseHook)
+  )
+    return false;
   const metadata = await state.files.metadata(editHookPath);
   if (!metadata.ok || !isExecutableMode(metadata.value?.mode)) return false;
   const registration = await preToolUseRegistration(state.paths.root, editHookPath);

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { withStateMutation } from "../../../src/core/file-transaction.js";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import { installHarness } from "../../../src/harness/install.js";
 import { planFor } from "../../../src/harness/targets.js";
 import { now } from "../../../src/workflow/artifacts/common.js";
@@ -126,6 +127,106 @@ describe("feature and foundation context resolution", () => {
       expect(context.value.harnessInstalled).toBe(true);
       expect(context.value.enforcementInstalled).toBe(true);
     }
+  });
+
+  /**
+   * The same build installed at another path (nvm, npx, a local node_modules) renders the
+   * same hooks except for the CLI path they call. Only a different build, an older template,
+   * or a CLI that is no longer there makes a hook missing.
+   */
+  it("accepts hooks the same build wrote from another install path", async () => {
+    await workspace.installFoundation();
+    const hook = join(workspace.root, ".git/hooks/pre-commit");
+    const original = await readFile(hook, "utf8");
+    const elsewhere = join(workspace.root, "elsewhere/node_modules/visp/dist/cli.js");
+    await workspace.write("elsewhere/node_modules/visp/dist/cli.js", "// another install\n");
+    const rewrite = (content: string) =>
+      writeFile(hook, content.replaceAll(runtimeIdentity().executable, elsewhere), {
+        mode: 0o755,
+      });
+    const enforcement = async () => {
+      const context = await buildFoundationContext(await workspace.state());
+      return context.ok && context.value.enforcementInstalled;
+    };
+
+    await rewrite(original);
+    expect(await enforcement()).toBe(true);
+
+    await rewrite(original.replaceAll(runtimeIdentity().buildId, "0123456789abcdef"));
+    expect(await enforcement()).toBe(false);
+
+    await rewrite(original.replace(/hook-version: \d+/, "hook-version: 1"));
+    expect(await enforcement()).toBe(false);
+
+    await rm(elsewhere);
+    await rewrite(original);
+    expect(await enforcement()).toBe(false);
+  });
+
+  it("accepts a Claude edit hook the same build wrote from another install path", async () => {
+    const initial = await workspace.state();
+    const config = parse(await readFile(initial.paths.config, "utf8"));
+    config.harness = "claude-code";
+    await writeFile(initial.paths.config, stringify(config), "utf8");
+    const configured = await workspace.state();
+    const installed = await installHarness(configured.paths, {
+      harness: "claude-code",
+      profile: configured.config.profile,
+      hooks: ["claude"],
+      mcp: false,
+    });
+    if (!installed.ok) throw new Error(installed.error.message);
+    const script = join(workspace.root, ".visp/hooks/claude-pretooluse.mjs");
+    const original = await readFile(script, "utf8");
+    await workspace.write("elsewhere/cli.js", "// another install\n");
+    const elsewhere = JSON.stringify(join(workspace.root, "elsewhere/cli.js"));
+    const enforcement = async (content: string) => {
+      await writeFile(
+        script,
+        content.replace(JSON.stringify(runtimeIdentity().executable), elsewhere),
+        { mode: 0o755 },
+      );
+      const context = await buildFoundationContext(await workspace.state());
+      return context.ok && context.value.enforcementInstalled;
+    };
+
+    expect(await enforcement(original)).toBe(true);
+    expect(
+      await enforcement(original.replaceAll(runtimeIdentity().buildId, "0123456789abcdef")),
+    ).toBe(false);
+  });
+
+  it("accepts a Codex hook script the same build wrote from another install path", async () => {
+    const initial = await workspace.state();
+    const config = parse(await readFile(initial.paths.config, "utf8"));
+    config.harness = "codex";
+    await writeFile(initial.paths.config, stringify(config), "utf8");
+    const configured = await workspace.state();
+    const installed = await installHarness(configured.paths, {
+      harness: "codex",
+      profile: configured.config.profile,
+      hooks: [],
+      mcp: false,
+    });
+    if (!installed.ok) throw new Error(installed.error.message);
+    const script = join(workspace.root, ".visp/hooks/codex-hooks.mjs");
+    const original = await readFile(script, "utf8");
+    await workspace.write("elsewhere/cli.js", "// another install\n");
+    const elsewhere = JSON.stringify(join(workspace.root, "elsewhere/cli.js"));
+    const installedHarness = async (content: string) => {
+      await writeFile(
+        script,
+        content.replace(JSON.stringify(runtimeIdentity().executable), elsewhere),
+        { mode: 0o755 },
+      );
+      const context = await buildFoundationContext(await workspace.state());
+      return context.ok && context.value.harnessInstalled;
+    };
+
+    expect(await installedHarness(original)).toBe(true);
+    expect(
+      await installedHarness(original.replaceAll(runtimeIdentity().buildId, "0123456789abcdef")),
+    ).toBe(false);
   });
 
   it("recognizes exact custom Codex critic assets in foundation context", async () => {
