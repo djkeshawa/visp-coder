@@ -4,9 +4,9 @@
 // A test covers a module when it imports it directly (the import specifier resolves to the
 // module) or is named after it: tests/<kind>/<area>/X.test.ts for src/<area>/**/X.ts, and
 // tests/unit/workflow/evidence/product-X.test.ts for src/workflow/product/X.ts.
-// With no match it prints nothing and warns on stderr; an empty list given to vitest would run
-// the whole suite, so check before pasting.
-import { readdirSync, readFileSync } from "node:fs";
+// With no match it prints NO_MATCH, a path no test file contains, so vitest stops with "No test
+// files found" instead of running the whole suite on an empty list; the reason goes to stderr.
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,33 +46,42 @@ function nameMatches(source, test) {
   return segments[2] === area && names.includes(segments.at(-1));
 }
 
-const wanted = process.argv
-  .slice(2)
-  .map((path) => posix(relative(root, resolve(path))))
-  .filter((path) => path.endsWith(".ts"));
-if (wanted.length === 0) {
+const NO_MATCH = "tests/__no_direct_tests__";
+const requested = process.argv.slice(2);
+if (requested.length === 0) {
   console.error("usage: node scripts/direct-tests.mjs <src file>...");
+  console.log(NO_MATCH);
   process.exit(2);
 }
 
 const imports = new Map(tests.map((test) => [test, importedModules(test)]));
 const found = new Set();
-for (const source of wanted) {
+for (const argument of requested) {
+  if (!existsSync(argument)) {
+    console.error(`no such file: ${argument}`);
+    continue;
+  }
+  const source = posix(relative(root, resolve(argument)));
+  if (!source.endsWith(".ts")) {
+    console.error(`not a .ts file: ${argument}`);
+    continue;
+  }
   const module = source.replace(/\.ts$/, "");
   let any = false;
   for (const test of tests) {
-    if (source === test.relative) {
-      found.add(test.relative);
-      any = true;
-    } else if (imports.get(test).has(module) || nameMatches(source, test)) {
+    if (source === test.relative || imports.get(test).has(module) || nameMatches(source, test)) {
       found.add(test.relative);
       any = true;
     }
   }
   if (!any) {
-    console.error(
-      `no direct tests for ${source}; it is covered through other modules, try tests/unit/${source.split("/")[1]}`,
-    );
+    const area = source.split("/");
+    const hint =
+      area[0] === "src" && area.length > 2
+        ? `; it is covered through other modules, try tests/unit/${area[1]}`
+        : "";
+    console.error(`no direct tests for ${source}${hint}`);
   }
 }
+if (found.size === 0) console.log(NO_MATCH);
 for (const path of [...found].sort()) console.log(path);

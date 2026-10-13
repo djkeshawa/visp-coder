@@ -8,25 +8,25 @@ before changing behaviour. Work in a git worktree per topic, never on `develop` 
 
 - **Build ID.** Tests compare the build ID baked into `dist/` with a hash of `src/**`,
   `package.json`, `pnpm-lock.yaml`, `tsconfig.json` and `tsup.config.ts`. After ANY edit to those,
-  run `pnpm build:fast` (~1 s, no `.d.ts`). A stale or missing `dist/` stops a test run at once with
-  `dist is stale (build X != sources Y): run pnpm build:fast`. `build:fast` wipes `dist/ui`; run
-  `pnpm exec tsup --config tsup.ui.config.ts` when a test needs the dashboard. `pnpm build` is the
-  full build.
+  run `pnpm build:fast` (~1 s); a stale `dist/` stops the run at once. Details, including the
+  `dist/ui` wipe, are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Inner loop.** Run only the tests that cover what you changed:
   `pnpm exec vitest run $(node scripts/direct-tests.mjs src/x.ts) --bail=1`, adding `-t "<name>"`
   and `--maxWorkers=4`. The script lists tests that import the module plus the naming map
   (`src/core/X.ts` to `tests/unit/core/X.test.ts`, `src/workflow/product/X.ts` to
-  `tests/unit/workflow/evidence/product-X.test.ts`). It prints nothing and warns when there is no
-  direct test: an empty list would make vitest run everything, so check before running.
+  `tests/unit/workflow/evidence/product-X.test.ts`). With no direct test (or a mistyped path)
+  it explains on stderr and prints a path no test matches, so vitest stops with "No test files
+  found" instead of running everything.
 - **Never `vitest related` or `--changed`.** The product barrel makes them select 170 to 330 of 429
   files.
 - **Cheap gates, before every commit.** `pnpm lint` (~3 s), `pnpm knip` (~4 s), `pnpm typecheck`
-  (~18 s), and the golden suite `pnpm exec vitest run tests/golden`.
+  (~18 s), and the golden suite `pnpm exec vitest run tests/golden` (added by the golden-suite PR).
 - **Full suite (~10 min)** only in the background, in a separate verify worktree:
   `git worktree add ../visp-coder-verify --detach <sha>`, install, `pnpm build`, `pnpm test`. tsup
   `clean: true` wipes `dist/` under a running suite, so never build in the worktree being tested.
   One heavy run at a time.
-- **Browser suite**, only when `src/testing`, capture or journey code changes:
+- **Browser suite**, only when `src/testing`, capture or journey code changes. On a Linux desktop
+  where Chrome hangs on D-Bus, run it as
   `env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS CHROME_BIN=/usr/bin/google-chrome pnpm test:browser`
 - **Trust coverage** (`pnpm test:coverage:trust`) only for files listed in
   `vitest.trust-boundary.config.ts`; run the targeted form first (that config's tests for the
@@ -56,8 +56,7 @@ measured quality gain pays for it.
 - User-visible changes get an entry under `## Unreleased` in `CHANGELOG.md` (add the heading if
   missing). Update `README.md` or `docs/` when behaviour changes, and keep
   `tests/unit/harness/documented-workflow.test.ts` passing.
-- knip: delete unused code, do not ignore it. Add no import cycles (`knip --cycles`; the allowed
-  ones are in `knip.json`).
+- knip: delete unused code, do not ignore it, and add no import cycles (see CONTRIBUTING.md).
 - Exports are pinned in `tests/compat/current-product-api.ts`. No new dependency, changed default
   or removed public API without an owner decision.
 - Git flow: topic branch, then a PR into `develop`. `develop` goes to `main` only for releases (see
