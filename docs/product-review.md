@@ -111,6 +111,14 @@ A check that declares images must cover an `experience` outcome that says how th
 
 When the check passes, VISP copies each declared image into the feature's captures as an image of the current product version, and the review packet delivers it to the independent reviewer. A declared image that is missing, larger than 4 MiB or not one of those formats fails the check. Declared images are outputs: writing them does not change the product version, so rerunning the check does not make earlier evidence stale. An SVG or HTML result needs a check that rasterizes it to PNG first.
 
+### Pictures without a declaration
+
+The product's pictures reach the reviewer even when no check declares them. After the checks pass on an unchanged product, VISP captures up to four PNG, JPEG, WebP, GIF or SVG files in the product that were written since the feature started (newest first, each once per product version, and not the declared images above). An SVG is rendered in a fresh browser, since reviewers can view PNG files but not SVG ones; an SVG over 1 MiB is skipped. These captures never fail a check. Declaring the image on a check remains the reliable way, because it also makes the picture's look an outcome the reviewer can fail.
+
+### Files of another coding host
+
+Untracked instruction and settings files of a coding host other than the configured `harness` (for example `AGENTS.md`, `.codex/` and `.agents/` in a Claude Code project, or `CLAUDE.md` and `.claude/` in a Codex project) are not part of the product: they do not change its version, count against a slice's scope or raise input warnings. Tracked files and the configured host's own files are unaffected. `visp doctor` lists them as `other host files`.
+
 ## Ad hoc capture
 
 For an exploratory observation, pass a journey on stdin:
@@ -193,6 +201,8 @@ Specific findings stay open until addressed with current counterevidence. Submit
 - A functional repair also needs `regression`: either `{kind: checked, explanation, evidence}` citing a distinct passing behavior in the finding's scope on the repaired version, or `{kind: not-applicable, explanation}`.
 
 If a known finding lacks sufficient repair evidence, VISP records the rest of the review and leaves that finding open with the reason in `limitations`.
+
+Evidence that VISP lists as unavailable (a core file it could not deliver as text, a rendered image it did not capture) cannot support a judgment. When an assessment, finding, resolution or probe cites it beside evidence VISP delivered, VISP drops the unavailable citation instead of discarding the review, and records `VISP dropped citations of evidence it could not deliver: ...` in the summary (assessments) or `limitations`. A judgment marked `unclear` or `unavailable` keeps its citations, and citations of stale, unknown or ambiguous evidence are never dropped.
 
 For a finding with recorded execution evidence, `work`, critic packets and review sessions include a `recheck` that names the journey or check to rerun and its replay or verify command. A matching later execution is labeled `observed-unassessed` until a reviewer judges it.
 

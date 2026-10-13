@@ -12,6 +12,8 @@ Three surfaces call `visp guard`, so a refusal means the same thing everywhere:
 | Git `pre-commit` | The repository's pre-commit hook | This checkout's authorization | Blocks the commit while a slice is authorized; otherwise allows it with a warning |
 | CI (`visp install --hooks claude git ci`, or `--hooks git ci` outside Claude Code) | `.github/workflows/visp.yml` | The feature's committed brief (`--scope tasks`) | The job fails |
 
+The Claude Code shell hook also refuses a backgrounded `visp work`, `done`, `verify`, `accept`, `next`, `pr`, `status`, `brief`, `critic` or `review`: workers that ran `done` and `accept` as background tasks waited for them in polling loops for up to 9 minutes, though the commands returned in about 15 s. `visp feature` and `visp ui` are exempt.
+
 The hooks read the JSON envelope from `visp guard --json` rather than the exit code, so a crash or an unrelated `visp` on `PATH` is never mistaken for a verdict. `--hooks` replaces the default hook set; retain `git` and, for Claude Code, `claude` when adding `ci`. `--if-authorized` lets ordinary commits through when no slice is authorized; `--include-done` keeps finished slices' changes committable. A denial that blames the installation should be fixed with `visp doctor`, not by widening scope. The local hook can be bypassed with `git commit --no-verify`; CI is the authoritative check.
 
 The generated CI workflow pins the VISP version that generated it, so a new release cannot change the verdict on an unchanged repository. A `pull_request` checkout is detached, so the workflow passes `--branch` to find the feature.
