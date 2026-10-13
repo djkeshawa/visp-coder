@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,9 +21,17 @@ import { type NormalizeContext, normalize } from "./normalize.js";
  * A private HOME for the whole run: VISP reads user critic defaults and the Codex sign-in
  * from it, and the developer's own settings must not change what a scenario prints.
  */
+const FIXTURE_COMMIT_DATE = "2026-01-01T00:00:00Z";
+const LATER_DATE = "2099-01-01T00:00:00Z";
 const home = mkdtempSync(join(tmpdir(), "visp-golden-home-"));
 process.env.HOME = home;
 process.env.CODEX_HOME = join(home, ".codex");
+/**
+ * Fixture commits carry a fixed date long before any feature, so VISP's list of commits made
+ * after an earlier feature does not depend on whether setup and the feature fell in one second.
+ */
+process.env.GIT_AUTHOR_DATE = FIXTURE_COMMIT_DATE;
+process.env.GIT_COMMITTER_DATE = FIXTURE_COMMIT_DATE;
 
 /** The request every scenario starts from: one module whose public value must become two. */
 export const REQUEST = "Make the public value module return two instead of one.";
@@ -175,6 +184,13 @@ export class GoldenProject {
     );
     expect(updated.exitCode, updated.stdout + updated.stderr).toBe(0);
     return updated;
+  }
+
+  /** A commit dated after every feature, as a change made outside VISP after earlier work. */
+  laterCommit(message: string): void {
+    const env = { ...process.env, GIT_AUTHOR_DATE: LATER_DATE, GIT_COMMITTER_DATE: LATER_DATE };
+    execFileSync("git", ["add", "-A"], { cwd: this.root, env });
+    execFileSync("git", ["commit", "-q", "--no-verify", "-m", message], { cwd: this.root, env });
   }
 
   async activeFeature(): Promise<string> {

@@ -63,7 +63,7 @@ Respond only with JSON that matches the provided output schema.
         "reference": "Executed C001 at <SHA256-1>",
         "sha256": "<SHA256-4>",
         "available": true,
-        "excerpt": "Check C001; execution <UUID-1>; passed; exit 0\nCommand executed: node checks/value.check.mjs\nProvenance: supervisor-executed; assertions: agent-reported\nWithout the change (implementation reverted to the work-authorization baseline, tests kept): unchecked (expected 2, got 1)\nFlip check extra time: 135 ms\nRecorded assertion results/output (names are supplied only when the check emitted them):\nvalue is 2",
+        "excerpt": "Check C001; execution <UUID-1>; passed; exit 0\nCommand executed: node checks/value.check.mjs\nProvenance: supervisor-executed; assertions: agent-reported\nWithout the change (implementation reverted to the work-authorization baseline, tests kept): unchecked (expected 2, got 1)\nFlip check extra time: <N> ms\nRecorded assertion results/output (names are supplied only when the check emitted them):\nvalue is 2",
         "omittedRegions": []
       },
       {

@@ -33,12 +33,19 @@ export function normalize(text: string, context: NormalizeContext = {}): string 
     .replace(
       /("(?:durationMs|flipDurationMs|flipExtraMs|elapsedMs|ms|pid|startedAtMs)"\s*:\s*)\d+/g,
       "$1<N>",
-    );
+    )
+    .replace(/(Flip check extra time: )\d+( ms)/g, "$1<N>$2");
   result = numbered(result, /\bCAN-[a-f0-9]{32}\b/g, "CAN");
   result = numbered(
     result,
     /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g,
     "UUID",
+  );
+  // Abbreviated commit IDs where VISP lists commits as "<hash> <subject>".
+  result = numbered(
+    result,
+    /(?<=(?:^|\n|\\n)(?:- )?|")(?=[a-f]*[0-9])(?=[0-9]*[a-f])[0-9a-f]{7,12}(?= )/g,
+    "COMMIT",
   );
   result = numbered(result, /\b[0-9a-f]{64}\b/g, "SHA256");
   result = numbered(result, /\b[0-9a-f]{40}\b/g, "GIT");
