@@ -1,0 +1,6 @@
+$ git commit (staged src/value.mjs)
+--- stdout
+
+--- stderr
+
+--- exit 0

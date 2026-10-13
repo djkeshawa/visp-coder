@@ -1,0 +1,10 @@
+$ visp next
+--- stdout
+next: {"feature":"001-return-two-from-the-public","action":"understand","objective":"Complete the brief: declare outcomes and set incomplete:false before working","command":"visp brief --feature 001-return-two-from-the-public","mayEdit":false,"evidence":{"entries":["Should the value stay a number, or may it become the string two?"],"remaining":0}}
+Full result: add --json.
+
+Next: visp brief --feature 001-return-two-from-the-public
+
+--- stderr
+
+--- exit 0

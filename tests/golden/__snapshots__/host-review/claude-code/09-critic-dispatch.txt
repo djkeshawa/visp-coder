@@ -1,0 +1,8 @@
+$ visp critic --dispatch
+--- stdout
+
+--- stderr
+Error: No reviewer adapter is attached. Follow the native handoff; host capability is not yet established and no call was spent.
+Try: visp critic --preflight
+
+--- exit 2
