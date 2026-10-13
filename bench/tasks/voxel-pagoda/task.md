@@ -1,0 +1,1 @@
+Isometric 3D voxel art scene of a cozy Japanese pagoda in a small garden with cherry blossom trees, clean digital minimalism, flat shading, high-contrast saturation, primary color palette, 8-bit retro style, rendered in 32-bit cube resolution, sharp edges, no photorealistic lighting.
