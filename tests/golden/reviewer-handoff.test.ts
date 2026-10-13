@@ -1,6 +1,7 @@
 import { afterEach, it, vi } from "vitest";
 import { DECLINED_TESTER, FakeModels } from "./support/fake-models.js";
-import { BRIEF, CODEX, GOAL, GoldenProject, Recorder, REQUEST } from "./support/project.js";
+import { runHook, SESSION } from "./support/hooks.js";
+import { BRIEF, CODEX, GOAL, GoldenProject, REQUEST, Recorder } from "./support/project.js";
 
 /**
  * VISP's reviewer through MCP tools, with a budget of one review: the worker repairs the
@@ -43,4 +44,12 @@ it("hands open findings to visp pr once the review budget is spent", async () =>
   await run.cli("07-next-handoff", ["next"]);
   await run.cli("08-accept-handoff", ["accept"]);
   await run.cli("09-pr", ["pr"]);
+  await run.save(
+    "10-stop-hook.txt",
+    runHook(project.root, ".visp/hooks/codex-hooks.mjs", {
+      session_id: SESSION,
+      cwd: project.root,
+      hook_event_name: "Stop",
+    }),
+  );
 });

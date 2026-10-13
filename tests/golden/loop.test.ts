@@ -1,5 +1,5 @@
 import { afterEach, it } from "vitest";
-import { BRIEF, GOAL, GoldenProject, Recorder, REQUEST } from "./support/project.js";
+import { BRIEF, GOAL, GoldenProject, REQUEST, Recorder } from "./support/project.js";
 
 /**
  * The product loop with VISP's reviewer off, as a worker drives it: every state `visp next`
@@ -58,9 +58,11 @@ it("walks feature, brief, work and done through the CLI", async () => {
   await run.cli("15-done-passing", ["done"]);
   await run.cli("16-next-review-owed", ["next"]);
   await run.mcp("16-next-review-owed", "visp_next");
-  await run.cli("17-accept-unreviewed", ["accept"]);
-  await run.cli("18-status", ["status"]);
-  await run.cli("19-pr", ["pr"]);
+  await run.cli("17-review-handoff", ["review", "--handoff"]);
+  await run.cli("18-accept-unreviewed", ["accept"]);
+  await run.cli("19-status", ["status"]);
+  await run.cli("20-brief", ["brief"]);
+  await run.cli("21-pr", ["pr"]);
 });
 
 it("works the whole request as one slice with work --check", async () => {
@@ -72,20 +74,4 @@ it("works the whole request as one slice with work --check", async () => {
   await project.setValue(2);
   await run.cli("04-done", ["done"]);
   await run.cli("05-next", ["next"]);
-});
-
-it("walks the same loop through MCP tools", async () => {
-  project = await GoldenProject.create();
-  const run = new Recorder(project, "loop/mcp");
-  await run.mcp("01-feature", "visp_feature", { goal: GOAL, sourceBrief: REQUEST });
-  await run.mcp("02-brief-patch", "visp_brief", {
-    patch: BRIEF,
-    reason: "Define the first usable behavior",
-  });
-  await run.mcp("03-work-first", "visp_work");
-  await run.mcp("04-work-again", "visp_work", { task: "T001" });
-  await run.mcp("05-done-failing", "visp_done");
-  await project.setValue(2);
-  await run.mcp("06-done-passing", "visp_done");
-  await run.mcp("07-status", "visp_status");
 });

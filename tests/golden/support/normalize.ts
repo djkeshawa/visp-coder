@@ -34,22 +34,27 @@ export function normalize(text: string, context: NormalizeContext = {}): string 
       /("(?:durationMs|flipDurationMs|flipExtraMs|elapsedMs|ms|pid|startedAtMs)"\s*:\s*)\d+/g,
       "$1<N>",
     )
-    .replace(/(Flip check extra time: )\d+( ms)/g, "$1<N>$2");
+    .replace(/(Flip check extra time: )\d+( ms)/g, "$1<N>$2")
+    // Clock values in milliseconds, and sizes of payloads that embed clock values.
+    .replace(/("[A-Za-z]*At"\s*:\s*)\d{12,}/g, "$1<EPOCH-MS>")
+    .replace(/("packetBytes"\s*:\s*)\d+/g, "$1<N>");
   result = numbered(result, /\bCAN-[a-f0-9]{32}\b/g, "CAN");
   result = numbered(
     result,
     /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g,
     "UUID",
   );
-  // Abbreviated commit IDs where VISP lists commits as "<hash> <subject>".
-  result = numbered(
-    result,
-    /(?<=(?:^|\n|\\n)(?:- )?|")(?=[a-f]*[0-9])(?=[0-9]*[a-f])[0-9a-f]{7,12}(?= )/g,
-    "COMMIT",
-  );
+  // Abbreviated commit IDs where VISP lists commits as "<hash> <subject>"; an ID can be all digits.
+  result = numbered(result, /(?<=(?:^|\n|\\n)(?:- )?|")[0-9a-f]{7,12}(?= )/g, "COMMIT");
   result = numbered(result, /\b[0-9a-f]{64}\b/g, "SHA256");
   result = numbered(result, /\b[0-9a-f]{40}\b/g, "GIT");
-  result = numbered(result, /\b[0-9a-f]{12,39}\b/g, "HEX");
+  // Hash-derived IDs (`FB-…`, `CODE-DIFF-…`) whatever their digits; elsewhere a hex run must
+  // hold a letter, so long decimal numbers are left alone.
+  result = numbered(
+    result,
+    /(?<=\b[A-Z]+(?:-[A-Z]+)*-)[0-9a-f]{12,39}\b|\b(?=[0-9]*[a-f])[0-9a-f]{12,39}\b/g,
+    "HEX",
+  );
   return result;
 }
 

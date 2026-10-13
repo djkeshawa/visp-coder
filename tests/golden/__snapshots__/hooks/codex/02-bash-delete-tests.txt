@@ -1,0 +1,6 @@
+> .visp/hooks/codex-hooks.mjs {"session_id":"golden-session","cwd":"<PROJECT>","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf acceptance"}}
+--- stdout
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead."}}
+--- stderr
+
+--- exit 0

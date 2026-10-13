@@ -1,6 +1,6 @@
 import { afterEach, it, vi } from "vitest";
 import { FakeModels, testerSuite } from "./support/fake-models.js";
-import { CODEX, GOAL, GoldenProject, Recorder, REQUEST } from "./support/project.js";
+import { CODEX, GOAL, GoldenProject, REQUEST, Recorder } from "./support/project.js";
 
 /**
  * The loop as `visp init` sets it up for Codex: VISP launches its own tester when the feature

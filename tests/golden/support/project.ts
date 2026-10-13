@@ -1,37 +1,47 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { expect } from "vitest";
+import { afterAll, expect } from "vitest";
 import { parse, stringify } from "yaml";
 import { registerTools } from "../../../src/mcp/tools/index.js";
-import { runProductNext } from "../../../src/workflow/product/status.js";
 import { outstandingFeedback } from "../../../src/workflow/product/findings.js";
 import { readTestsRecord } from "../../../src/workflow/product/independent-tests.js";
+import { runProductNext } from "../../../src/workflow/product/status.js";
 import { type ProductRecord, readProductRecord } from "../../../src/workflow/product/store.js";
 import { type CliResult, runCli } from "../../unit/cli/support/cli.js";
 import { TestWorkspace } from "../../unit/support/workspace.js";
-import { type FakeModels, modelCallTranscript } from "./fake-models.js";
+import { type FakeModels, modelCallTranscript, testerSuite } from "./fake-models.js";
 import { type NormalizeContext, normalize } from "./normalize.js";
 
 /**
- * A private HOME for the whole run: VISP reads user critic defaults and the Codex sign-in
+ * A private HOME for this test file: VISP reads user critic defaults and the Codex sign-in
  * from it, and the developer's own settings must not change what a scenario prints.
+ *
+ * Fixture commits carry a fixed date long before any feature, so VISP's list of commits made
+ * after an earlier feature does not depend on whether setup and the feature fell in one second.
  */
 const FIXTURE_COMMIT_DATE = "2026-01-01T00:00:00Z";
 const LATER_DATE = "2099-01-01T00:00:00Z";
 const home = mkdtempSync(join(tmpdir(), "visp-golden-home-"));
-process.env.HOME = home;
-process.env.CODEX_HOME = join(home, ".codex");
-/**
- * Fixture commits carry a fixed date long before any feature, so VISP's list of commits made
- * after an earlier feature does not depend on whether setup and the feature fell in one second.
- */
-process.env.GIT_AUTHOR_DATE = FIXTURE_COMMIT_DATE;
-process.env.GIT_COMMITTER_DATE = FIXTURE_COMMIT_DATE;
+const isolated = {
+  HOME: home,
+  CODEX_HOME: join(home, ".codex"),
+  GIT_AUTHOR_DATE: FIXTURE_COMMIT_DATE,
+  GIT_COMMITTER_DATE: FIXTURE_COMMIT_DATE,
+};
+const outer = Object.fromEntries(Object.keys(isolated).map((name) => [name, process.env[name]]));
+Object.assign(process.env, isolated);
+afterAll(async () => {
+  for (const [name, value] of Object.entries(outer)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+  await rm(home, { recursive: true, force: true });
+});
 
 /** The request every scenario starts from: one module whose public value must become two. */
 export const REQUEST = "Make the public value module return two instead of one.";
@@ -41,7 +51,7 @@ const FILES = {
   "src/value.mjs": "export const value = 1;\n",
   // A trivial, deterministic check: it prints the value it saw and passes only for two.
   "checks/value.check.mjs":
-    'import { value } from "../src/value.mjs";\nif (value === 2) console.log("value is 2");\nelse {\n  console.log(`expected 2, got ${value}`);\n  process.exitCode = 1;\n}\n',
+    'import { value } from "../src/value.mjs";\nif (value === 2) console.log("value is 2");\nelse {\n  console.log("expected 2, got " + value);\n  process.exitCode = 1;\n}\n',
 };
 
 export const BRIEF = {
@@ -97,6 +107,18 @@ export const CLAUDE: ProjectOptions = {
   critic: { enabled: true, harness: "claude-code", launch: "claude-exec" },
 };
 
+/** A pinned suite with one test the request contradicts: two is not odd. */
+export const DISPUTED_SUITE = testerSuite([
+  ["value is two", "value === 2"],
+  ["value is odd", "value % 2 === 1"],
+]);
+export const DISPUTE = [
+  "--dispute",
+  "value is odd",
+  "--reason",
+  "The request says return two; two is even",
+];
+
 export interface ProjectOptions {
   /** Merged into `critic` in visp.yml; omitted keeps the critic off. */
   readonly critic?: Record<string, unknown>;
@@ -104,6 +126,8 @@ export interface ProjectOptions {
   readonly harness?: string;
   /** Extra files committed with the fixture. */
   readonly files?: Record<string, string>;
+  /** False leaves VISP initialized but not installed into any host. */
+  readonly install?: boolean;
 }
 
 /** One scenario's project: a real repository with VISP installed, driven through its adapters. */
@@ -112,19 +136,24 @@ export class GoldenProject {
 
   /** Built once per test file and copied for each scenario, as the unit fixtures do. */
   static async create(options: ProjectOptions = {}): Promise<GoldenProject> {
-    const { workspace } = await TestWorkspace.cached(`golden:${JSON.stringify(options)}`, async () => {
-      const built = await TestWorkspace.create(
-        { ...FILES, ...options.files },
-        { critic: !!options.critic },
-      );
-      const config = parse(await readFile(join(built.root, "visp.yml"), "utf8"));
-      if (options.harness) config.harness = options.harness;
-      if (options.critic) config.critic = { ...config.critic, ...options.critic };
-      await built.write("visp.yml", stringify(config));
-      await built.installFoundation();
-      built.commit("install foundation");
-      return { workspace: built, value: undefined };
-    });
+    const { workspace } = await TestWorkspace.cached(
+      `golden:${JSON.stringify(options)}`,
+      async () => {
+        const built = await TestWorkspace.create(
+          { ...FILES, ...options.files },
+          { critic: !!options.critic },
+        );
+        const config = parse(await readFile(join(built.root, "visp.yml"), "utf8"));
+        if (options.harness) config.harness = options.harness;
+        if (options.critic) config.critic = { ...config.critic, ...options.critic };
+        await built.write("visp.yml", stringify(config));
+        if (options.install !== false) {
+          await built.installFoundation();
+          built.commit("install foundation");
+        }
+        return { workspace: built, value: undefined };
+      },
+    );
     return new GoldenProject(workspace);
   }
 
@@ -141,10 +170,13 @@ export class GoldenProject {
   }
 
   /** The exact text an MCP host receives for one tool call, and the structured envelope. */
-  async mcp(tool: string, args: Record<string, unknown> = {}) {
+  async mcp(tool: string, args: Record<string, unknown> = {}, options: { aborted?: boolean } = {}) {
     const handler = (await this.tools()).get(tool);
     if (!handler) throw new Error(`No MCP tool ${tool}`);
-    const result = await handler(args, { signal: new AbortController().signal });
+    const controller = new AbortController();
+    // A cancelled request stops waiting at once: it reaches the reply a deadline would.
+    if (options.aborted) controller.abort();
+    const result = await handler(args, { signal: controller.signal });
     return { text: mcpText(result), result };
   }
 
@@ -232,7 +264,9 @@ export class GoldenProject {
         ? {
             independentTests: {
               status: tests.value.status,
-              disputes: (tests.value.disputes ?? []).map((entry) => `${entry.test}: ${entry.status}`),
+              disputes: (tests.value.disputes ?? []).map(
+                (entry) => `${entry.test}: ${entry.status}`,
+              ),
             },
           }
         : {}),
@@ -315,9 +349,9 @@ export async function golden(
   context: NormalizeContext = {},
 ): Promise<void> {
   // Soft, so one run reports every changed surface of a scenario, not only the first.
-  await expect.soft(`${normalize(text, context)}\n`).toMatchFileSnapshot(
-    new URL(name, SNAPSHOTS).pathname,
-  );
+  await expect
+    .soft(`${normalize(text, context)}\n`)
+    .toMatchFileSnapshot(new URL(name, SNAPSHOTS).pathname);
 }
 
 /**
@@ -337,8 +371,13 @@ export class Recorder {
     return result;
   }
 
-  async mcp(name: string, tool: string, args: Record<string, unknown> = {}) {
-    const reply = await this.project.mcp(tool, args);
+  async mcp(
+    name: string,
+    tool: string,
+    args: Record<string, unknown> = {},
+    options: { aborted?: boolean } = {},
+  ) {
+    const reply = await this.project.mcp(tool, args, options);
     await this.save(`${name}.mcp.txt`, mcpTranscript(tool, args, reply));
     const structured = reply.result.structuredContent as
       | { ok?: boolean; nextAction?: unknown }

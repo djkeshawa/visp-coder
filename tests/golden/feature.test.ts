@@ -1,6 +1,6 @@
 import { afterEach, it, vi } from "vitest";
 import { DECLINED_TESTER, FakeModels } from "./support/fake-models.js";
-import { CODEX, GOAL, GoldenProject, Recorder, REQUEST } from "./support/project.js";
+import { CODEX, GOAL, GoldenProject, REQUEST, Recorder } from "./support/project.js";
 
 /**
  * `visp feature` as the worker and VISP's models see it: with and without standing project
@@ -21,7 +21,9 @@ afterEach(async () => {
 async function recordPrompts(...prompts: string[]) {
   await project?.workspace.write(
     ".visp/session/user-prompts.jsonl",
-    prompts.map((prompt) => `${JSON.stringify({ at: "2026-01-01T00:00:00.000Z", prompt })}\n`).join(""),
+    prompts
+      .map((prompt) => `${JSON.stringify({ at: "2026-01-01T00:00:00.000Z", prompt })}\n`)
+      .join(""),
   );
 }
 

@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { afterAll } from "vitest";
 
 /**
  * Stand-ins for the `codex` and `claude` CLIs VISP launches for its reviewer, tester, rule
@@ -134,7 +135,7 @@ else process.stdout.write(JSON.stringify({ type: "result", is_error: false, stru
 export class FakeModels {
   private constructor(readonly directory: string) {}
 
-  /** Puts `codex` and `claude` stand-ins first on PATH for this test file's process. */
+  /** Puts `codex` and `claude` stand-ins first on PATH until this test file ends. */
   static install(): FakeModels {
     const directory = mkdtempSync(join(tmpdir(), "visp-golden-models-"));
     writeFileSync(join(directory, "responder.mjs"), RESPONDER);
@@ -146,7 +147,13 @@ export class FakeModels {
         `#!/bin/sh\nexec ${quoted(process.execPath)} ${quoted(join(directory, "responder.mjs"))} ${quoted(directory)} ${name} "$@"\n`,
         { mode: 0o755 },
       );
-    process.env.PATH = `${directory}${delimiter}${process.env.PATH ?? ""}`;
+    const path = process.env.PATH;
+    process.env.PATH = `${directory}${delimiter}${path ?? ""}`;
+    afterAll(async () => {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+      await rm(directory, { recursive: true, force: true });
+    });
     return new FakeModels(directory);
   }
 
