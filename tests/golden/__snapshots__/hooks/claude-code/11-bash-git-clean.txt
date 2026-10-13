@@ -1,0 +1,6 @@
+> .visp/hooks/claude-pretooluse.mjs {"session_id":"golden-session","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git clean -fd"}}
+--- stdout
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"git clean may delete untracked VISP state or acceptance tests; inspect and remove individual files instead."}}
+--- stderr
+
+--- exit 0

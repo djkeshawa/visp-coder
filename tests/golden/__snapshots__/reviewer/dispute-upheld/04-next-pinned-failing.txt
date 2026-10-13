@@ -1,0 +1,10 @@
+$ visp next
+--- stdout
+next: {"feature":"001-return-two-from-the-public","task":"T001","action":"fix","objective":"Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check","command":"visp work --feature 001-return-two-from-the-public --task T001","mayEdit":true,"evidence":{"entries":["A failing pinned test that contradicts the request: do not edit it or bend the product. Run visp done --dispute \"<test name>\" --reason \"<request sentence + why>\". VISP itself launches the reviewer during that command (about 1-2 minutes), so you delegate nothing. Then run visp next until it rules; upheld tests are waived.","PINNED_1: failed: PASS: value is two\nFAIL: value is odd: The expression evaluated to a falsy value:\n\n  assert.ok(value % 2 === 1)"],"remaining":0}}
+Full result: add --json.
+
+Next: visp work --feature 001-return-two-from-the-public --task T001
+
+--- stderr
+
+--- exit 0

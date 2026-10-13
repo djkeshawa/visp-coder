@@ -1,0 +1,935 @@
+$ visp install --harness claude-code --profile minimal
+--- stdout
+Installed visp assets for claude-code:
+  wrote    AGENTS.visp.md
+  wrote    .claude/commands/visp-next.md
+  wrote    VISP.commands.md
+  wrote    CLAUDE.md
+  wrote    .visp/hooks/claude-pretooluse.mjs
+  wrote    .git/hooks/pre-commit
+  wrote    .mcp.json  (registered as an MCP server)
+
+Before starting a feature, review and commit the project baseline including setup changes. VISP does not stage files or create the commit.
+
+Next: visp next
+
+--- stderr
+
+--- exit 0
+=== .claude/commands/visp-next.md
+---
+description: Resolve the next product action
+---
+
+Run `visp next` and address its objective and evidence.
+
+=== .claude/settings.json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\"",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
+
+=== .git/hooks/pre-commit (executable)
+#!/bin/sh
+# managed by visp; hook-version: 16
+# Refuses a commit whose staged files fall outside the active task's scope.
+
+
+authorization_dir=".visp/state/implement-allowed"
+product_authorization_dir=".visp/state/product-authorizations"
+has_authorization=0
+
+# If guard itself cannot answer, distinguish an open task from a marker left by
+# an interrupted older closure. A malformed marker or graph stays conservative:
+# without enough state to prove it stale, the hook treats it as active.
+node_runtime=$(command -v node 2>/dev/null)
+if [ -n "$node_runtime" ]; then
+  authorization_state=$("$node_runtime" - "$authorization_dir" <<'VISP_AUTHORIZATION_CHECK' 2>/dev/null
+
+const { readFileSync, readdirSync, lstatSync } = require("node:fs");
+const { join } = require("node:path");
+let unknown = false;
+function entries(directory) {
+  try {
+    if (lstatSync(directory).isSymbolicLink()) { unknown = true; return []; }
+    return readdirSync(directory, { withFileTypes: true }).filter(entry => {
+      if (entry.isSymbolicLink()) unknown = true;
+      return entry.isFile() && entry.name.endsWith(".json");
+    });
+  } catch(error) {
+    if (error?.code !== "ENOENT") unknown = true;
+    return [];
+  }
+}
+function read(path) {
+  if (lstatSync(path).isSymbolicLink()) throw new Error("Linked state");
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+function validIdentity(marker) {
+  return typeof marker?.feature === "string" && /^\d{3}-[a-z0-9][a-z0-9-]*$/.test(marker.feature)
+    && typeof marker.task === "string" && /^T\d{3,}$/.test(marker.task);
+}
+for (const [directory, version] of [[".visp/state/product-authorizations", 2], [".visp/state/implement-allowed", 1]]) {
+  for (const entry of entries(directory)) {
+    try {
+      const marker = read(join(directory, entry.name));
+      if (!validIdentity(marker)) throw new Error("Invalid authorization identity");
+      try { lstatSync(join(".visp", "features", marker.feature)); }
+      catch (error) { if (error?.code === "ENOENT") continue; throw error; }
+      if (version === 2) {
+        if (marker.version !== 2) throw new Error("Invalid product authorization");
+        const state = read(join(".visp", "features", marker.feature, "product-state.json"));
+        if (state?.version !== 3 || state.feature !== marker.feature || !state.slices?.[marker.task]) throw new Error("Missing product state");
+        const status = state.slices[marker.task].status;
+        if (status === "closed" || status === "legacy-closed") continue;
+        if (status !== "pending" && status !== "in-progress") throw new Error("Invalid slice status");
+      } else {
+        if (marker.kind !== "implement-marker") throw new Error("Invalid historical marker");
+        const graph = read(join(".visp", "features", marker.feature, "tasks.json"));
+        if (graph?.kind !== "tasks" || graph.feature !== marker.feature || !Array.isArray(graph.tasks)) throw new Error("Invalid historical graph");
+        const matching = graph.tasks.filter(task => task?.id === marker.task);
+        if (matching.length !== 1) throw new Error("Missing historical task");
+        if (matching[0].status === "done") continue;
+      }
+      console.log("active");
+      process.exit(0);
+    } catch { unknown = true; }
+  }
+}
+console.log(unknown ? "unknown" : "inactive");
+
+VISP_AUTHORIZATION_CHECK
+  )
+  case "$authorization_state" in
+    active|unknown)
+      has_authorization=1
+      ;;
+  esac
+else
+  # Node is unavailable too, so no safe semantic read is possible. Preserve
+  # fail-closed behavior for any marker that might still be active.
+  for marker in "$authorization_dir"/*.json "$product_authorization_dir"/*.json; do
+    if [ -f "$marker" ]; then
+      has_authorization=1
+      break
+    fi
+  done
+fi
+
+unchecked() {
+  echo "" >&2
+  echo "visp could not check this commit: $1." >&2
+  echo "Run 'visp doctor' to find out why." >&2
+  if [ "$has_authorization" -eq 1 ]; then
+    echo "An active VISP authorization exists, so the commit was refused rather than allowed unchecked." >&2
+    return 1
+  fi
+  echo "No VISP task is authorized, so this ordinary commit is allowed with a warning." >&2
+  return 0
+}
+
+if [ -z "$node_runtime" ]; then
+  unchecked "node is not on PATH"
+  exit $?
+fi
+
+# --if-authorized: with no task active you are not working under visp, so
+# ordinary commits are left alone.
+# --include-done: work from a task visp already closed is still in the tree and
+# must remain committable, or finishing a task would strand it.
+output=$("$node_runtime" '<REPO>/dist/cli.js' guard --staged --if-authorized --include-done --json 2>/dev/null)
+
+# The exit code alone cannot be trusted. A stale or corrupted CLI might also
+# exit 1, the refusal code. Only a parseable guard envelope proves this check ran,
+# so that is what the decision reads.
+verdict=$(printf '%s' "$output" | "$node_runtime" -e '
+let raw = "";
+process.stdin.on("data", (chunk) => { raw += chunk; });
+process.stdin.on("end", () => {
+  try {
+    const parsed = JSON.parse(raw);
+    const data = parsed?.data;
+    const valid =
+      parsed?.command === "guard" &&
+      typeof parsed.ok === "boolean" &&
+      data?.protocolVersion === 2 &&
+      data.runtime?.buildId === "<BUILD-ID>" &&
+      data.runtime?.version === "<VERSION>" &&
+      Number.isInteger(data.checked) &&
+      data.checked >= 0 &&
+      typeof data.allowed === "boolean" &&
+      Array.isArray(data.violations) &&
+      Array.isArray(data.authorizedTasks) &&
+      data.authorizedTasks.every((task) => typeof task === "string") &&
+      (parsed.ok
+        ? data.allowed === true && data.violations.length === 0
+        : data.allowed === false &&
+          data.violations.length > 0 &&
+          data.violations.every((finding) => typeof finding?.message === "string"));
+    if (!valid) { console.log("unchecked"); return; }
+    if (parsed.ok) { console.log("allow"); return; }
+    const first = parsed.data?.violations?.[0];
+    console.log("refuse " + (first?.message ?? "changes are outside the authorized scope"));
+  } catch {
+    console.log("unchecked");
+  }
+});
+' 2>/dev/null)
+
+case "$verdict" in
+  allow)
+    exit 0
+    ;;
+  refuse*)
+    echo ""
+    echo "Commit refused: ${verdict#refuse }"
+    echo "Adjust the task's allowedFiles, or unstage the extra files."
+    exit 1
+    ;;
+  *)
+    unchecked "the guard returned no valid result"
+    exit $?
+    ;;
+esac
+
+=== .mcp.json
+{
+  "mcpServers": {
+    "visp": {
+      "command": "node",
+      "args": [
+        "<REPO>/dist/cli.js",
+        "serve",
+        "--mcp"
+      ]
+    }
+  }
+}
+
+=== .visp/hooks/claude-pretooluse.mjs (executable)
+#!/usr/bin/env node
+// managed by visp; hook-version: 16
+// Refuses edits outside the active task's declared scope.
+// Decisions come from `visp guard`, so this file holds no rules of its own.
+
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+const cli = "<REPO>/dist/cli.js";
+
+function deny(reason) {
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
+function readInput() {
+  try {
+    return JSON.parse(readFileSync(0, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+const input = readInput();
+
+// Claude Code names the project in its environment; Codex passes the session cwd instead.
+function projectRoot() {
+  const start = resolve(process.env.CLAUDE_PROJECT_DIR ?? input?.cwd ?? process.cwd());
+  let directory = start;
+  while (true) {
+    if (existsSync(join(directory, ".visp", "project.json"))) return directory;
+    if (existsSync(join(directory, ".git"))) return start;
+    const parent = dirname(directory);
+    if (parent === directory) return start;
+    directory = parent;
+  }
+}
+
+// The user's own words are the contract the tester and reviewer judge against; workers
+// paraphrase them. Kept locally in the git-ignored session directory for `visp feature`.
+if (input?.hook_event_name === "UserPromptSubmit") {
+  try {
+    const directory = join(projectRoot(), ".visp", "session");
+    const file = join(directory, "user-prompts.jsonl");
+    mkdirSync(directory, { recursive: true });
+    let lines = [];
+    try {
+      lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+    } catch {}
+    lines.push(JSON.stringify({ at: new Date().toISOString(), prompt: String(input.prompt ?? "") }));
+    writeFileSync(file, `${lines.slice(-20).join("\n")}\n`);
+    recordSession();
+  } catch {}
+  process.exit(0);
+}
+
+// A weak worker stopped with slices open and no acceptance, so the pinned tests never ran
+// as final checks. Send it back to the next step, only for recent work. A block is a nudge
+// about one step: the same step is raised at most twice, and again only when the feature
+// changed since the last nudge; a handoff or an unusable environment is raised once.
+if (input?.hook_event_name === "Stop") {
+  const root = projectRoot();
+  try {
+    const status = JSON.parse(readFileSync(join(root, ".visp", "status.json"), "utf8"));
+    if (!status.activeFeature) process.exit(0);
+    // Recent work moves the feature's state file; status.json alone misses a long check.
+    let touched = Date.parse(status.updatedAt);
+    try {
+      touched = Math.max(
+        Number.isFinite(touched) ? touched : 0,
+        statSync(join(root, ".visp", "features", String(status.activeFeature), "product-state.json")).mtimeMs,
+      );
+    } catch {}
+    if (!(Date.now() - touched < 60 * 60 * 1000)) process.exit(0);
+    const envelope = JSON.parse(
+      // Unselected, so a later session's untaken request is sent to a feature of its own.
+      // The observer marker makes `visp next` trust the worker's recorded browser
+      // capability and report a `progress` token; it changes nothing else.
+      execFileSync(process.execPath, [cli, "next", "--json"], {
+        cwd: root,
+        env: { ...process.env, VISP_OBSERVER: "stop-hook" },
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 170000,
+      }).toString(),
+    );
+    const next = envelope?.data;
+    if (!next?.feature && typeof input.session_id === "string") {
+      const edits = join(root, ".visp", "session", "edits", encodeURIComponent(input.session_id) + ".json");
+      try { readFileSync(edits); } catch { process.exit(0); }
+    }
+    if (!envelope?.ok || !next?.action || next.action === "complete") process.exit(0);
+    const day = 24 * 60 * 60 * 1000;
+    const plain = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    const now = Date.now();
+    const kind =
+      next.completion === "handoff" ? "handoff" : next.completion === "unresolved-environment" ? "environment" : "work";
+    const limit = kind === "work" ? 2 : 1;
+    // Ids and values change from call to call; the command's verb and flags name the step.
+    const words = String(next.command ?? "").split(/\s+/).filter(Boolean);
+    const shape = words.filter((word, index) => index < 2 || word.startsWith("-"));
+    const fingerprint = createHash("sha256")
+      .update(JSON.stringify([status.activeFeature, next.action, next.completion ?? "", next.task ?? "", shape]))
+      .digest("hex");
+    const progress = typeof next.progress === "string" ? next.progress : "";
+    const counts = join(root, ".visp", "session", "stop-blocks.json");
+    let entries = {};
+    try {
+      const stored = JSON.parse(readFileSync(counts, "utf8"));
+      if (stored?.version === 2 && plain(stored.entries)) entries = stored.entries;
+    } catch {}
+    for (const [name, entry] of Object.entries(entries)) {
+      if (!plain(entry) || !(now - Date.parse(entry.at) < day)) delete entries[name];
+      else if (plain(entry.fps))
+        for (const [id, seen] of Object.entries(entry.fps))
+          if (!plain(seen) || !(now - Date.parse(seen.at) < day)) delete entry.fps[id];
+    }
+    const key = [input.session_id ?? "unknown", status.activeFeature].join(":");
+    const entry = plain(entries[key]) && plain(entries[key].fps) ? entries[key] : { total: 0, fps: {} };
+    const seen = plain(entry.fps[fingerprint]) ? entry.fps[fingerprint] : undefined;
+    if ((Number(entry.total) || 0) >= 6) process.exit(0);
+    // The same step blocks up to its limit whatever the worker did in between: in weak-worker
+    // runs most repeated nudges were followed, and waiting for a progress change let a worker
+    // that did nothing stop after one nudge.
+    if (seen && (Number(seen.count) || 0) >= limit) process.exit(0);
+    // The counter is on disk before the block is emitted; if it cannot be written the
+    // worker is not blocked, since nothing would bound the repeats.
+    const at = new Date(now).toISOString();
+    entries[key] = {
+      total: (Number(entry.total) || 0) + 1,
+      at,
+      fps: { ...entry.fps, [fingerprint]: { count: (Number(seen?.count) || 0) + 1, progress, at } },
+    };
+    const temporary = counts + "." + process.pid + ".tmp";
+    try {
+      mkdirSync(join(root, ".visp", "session"), { recursive: true });
+      writeFileSync(temporary, JSON.stringify({ version: 2, entries }));
+      renameSync(temporary, counts);
+    } catch {
+      try { unlinkSync(temporary); } catch {}
+      process.exit(0);
+    }
+    const objective = String(next.objective ?? "").trim().replace(/[.\s]+$/, "");
+    const feature = status.activeFeature;
+    const command = next.command;
+    const reason = !next.feature
+      ? command ? `${objective}. Run: ${command}` : `${objective}.`
+      : kind === "handoff"
+      ? command
+        ? `${objective}. Run: ${command} once, then say in your final message what is still open and that ${feature} needs the human reviewer.`
+        : `${objective}. Say in your final message what is still open and that ${feature} needs the human reviewer.`
+      : kind === "environment"
+      ? `VISP cannot verify ${feature} until its execution environment works: ${objective}.${command ? ` Run: ${command} once.` : ""} If it is still unavailable, say in your final message which capability is missing and that ${feature} is not verified; do not retry it repeatedly.`
+      : `VISP's next step for ${feature}: ${objective}.${command ? ` Run: ${command}.` : ""} If your own \`visp next\` shows a different step, follow that one. If you cannot finish, say in your final message what is left and why.`;
+    process.stdout.write(JSON.stringify({ decision: "block", reason }));
+  } catch {}
+  process.exit(0);
+}
+
+// A worker deleted .visp and the pinned tests with shell commands to get past a scope
+// error. Only such commands are refused; every other command gets no decision here, so
+// the host's own permission rules still apply.
+// `visp work` stamps its authorization with the session that runs it: record the
+// session of each shell command just before it runs, as prompts do.
+function recordSession() {
+  if (typeof input?.session_id !== "string" || !input.session_id) return;
+  try {
+    const directory = join(projectRoot(), ".visp", "session");
+    mkdirSync(directory, { recursive: true });
+    mkdirSync(join(directory, "hosts"), { recursive: true });
+    writeFileSync(join(directory, "hosts", encodeURIComponent(input.session_id) + ".json"),
+      JSON.stringify({ session: input.session_id, at: new Date().toISOString() }));
+    writeFileSync(
+      join(directory, "host-session.json"),
+      JSON.stringify({ session: input.session_id, at: new Date().toISOString() }),
+    );
+  } catch {}
+}
+
+if (input?.tool_name === "Bash") {
+  recordSession();
+  const command = String(input?.tool_input?.command ?? "");
+  const destructive = destructiveShellReason(command);
+  if (destructive) {
+    process.stdout.write(
+      JSON.stringify(
+        deny(destructive),
+      ),
+    );
+    process.exit(0);
+  }
+  const lost = discardedChanges(command);
+  if (lost.length > 0) {
+    process.stdout.write(
+      JSON.stringify(
+        deny(
+          "This command would discard uncommitted changes to " +
+            lost.slice(0, 5).join(", ") +
+            (lost.length > 5 ? " and " + (lost.length - 5) + " more" : "") +
+            ". They may be earlier work: commit them instead (git add -A && git commit -m '<what they are>'); if the commit fails because Git is read-only, leave them uncommitted. To undo an edit of your own, edit the file back.",
+        ),
+      ),
+    );
+  }
+  process.exit(0);
+}
+
+// A worker discarded a previous session's uncommitted work with git checkout to get the
+// clean tree a new feature needs. Commands that would discard uncommitted changes are
+// refused: checkout or restore of changed files, forced checkouts and switches, and hard
+// resets (untracked files included, which a reset to another commit can overwrite).
+// Branch switches that keep changes, staged-only restores and stashes are left alone.
+function shellCommands(command) {
+  const commands = [[]];
+  let word = "";
+  let inWord = false;
+  let quote = "";
+  const end = () => {
+    if (inWord) commands[commands.length - 1].push(word);
+    word = "";
+    inWord = false;
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote) {
+      if (c === quote) quote = "";
+      else if (c === "\\" && quote === '"' && i + 1 < command.length) word += command[++i];
+      else word += c;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      inWord = true;
+    } else if (c === "\\" && i + 1 < command.length) {
+      word += command[++i];
+      inWord = true;
+    } else if (c === "\n" || c === ";" || c === "&" || c === "|") {
+      end();
+      commands.push([]);
+    } else if (/\s/.test(c)) {
+      end();
+    } else {
+      word += c;
+      inWord = true;
+    }
+  }
+  end();
+  return commands.filter((words) => words.length > 0);
+}
+
+function destructiveShellReason(command) {
+  const protectedOperand = (word) => /^(?:\.\/)?(?:\.visp|acceptance)(?:\/|$)/.test(word);
+  for (const words of shellCommands(command)) {
+    const executable = words[0];
+    const operands = words.slice(1).filter((word) => !word.startsWith("-"));
+    // A dry run only lists what a clean would delete.
+    const dryRun = words.slice(2).some((word) => word === "--dry-run" || /^-[A-Za-z]*n[A-Za-z]*$/.test(word));
+    if (executable === "git" && words[1] === "clean" && !dryRun)
+      return "git clean may delete untracked VISP state or acceptance tests; inspect and remove individual files instead.";
+    if (executable === "git" && words[1] === "stash" && words.slice(2).some((word) => /^(?:-[A-Za-z]*[ua]|--include-untracked|--all)$/.test(word)))
+      return "git stash of untracked files may hide VISP state or acceptance tests; commit the work instead.";
+    const gitDestructive = executable === "git" && ["checkout", "restore", "rm", "reset"].includes(words[1]);
+    const fileDestructive = ["rm", "mv"].includes(executable);
+    const findDelete = executable === "find" && words.includes("-delete");
+    if ((gitDestructive || fileDestructive || findDelete) && operands.some(protectedOperand))
+      return "This command would remove VISP state or the pinned acceptance tests. Keep them; if visp reports a scope problem, restore or scope the files it names instead.";
+  }
+  return undefined;
+}
+
+function workingTreeChanges() {
+  const entries = execFileSync("git", ["status", "--porcelain", "-z"], {
+    cwd: projectRoot(),
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+    .toString()
+    .split("\0");
+  const tracked = [];
+  const untracked = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) continue;
+    const code = entry.slice(0, 2);
+    (code === "??" ? untracked : tracked).push(entry.slice(3));
+    if (code[0] === "R" || code[0] === "C") i++;
+  }
+  return { tracked, untracked };
+}
+
+function discardedChanges(command) {
+  const targets = [];
+  let forced = false;
+  let hard = false;
+  for (const words of shellCommands(command)) {
+    const git = words.indexOf("git");
+    if (git < 0) continue;
+    const [sub, ...rest] = words.slice(git + 1);
+    const separator = rest.indexOf("--");
+    const operands = (separator >= 0 ? rest.slice(separator + 1) : rest).filter(
+      (word) => separator >= 0 || !word.startsWith("-"),
+    );
+    const flags = (separator >= 0 ? rest.slice(0, separator) : rest).filter((word) => word.startsWith("-"));
+    if (sub === "reset" && flags.includes("--hard")) hard = true;
+    else if (sub === "checkout" && flags.some((flag) => flag === "--force" || /^-[A-Za-z]*f/.test(flag)))
+      forced = true;
+    else if (sub === "switch" && flags.some((flag) => ["-f", "--force", "--discard-changes"].includes(flag)))
+      forced = true;
+    else if (sub === "checkout" && !flags.some((flag) => ["-b", "-B", "--orphan"].includes(flag)))
+      targets.push(...operands);
+    else if (
+      sub === "restore" &&
+      !(flags.includes("--staged") && !flags.includes("--worktree") && !flags.includes("-W"))
+    )
+      targets.push(...operands);
+  }
+  if (!hard && !forced && targets.length === 0) return [];
+  let changes;
+  try {
+    changes = workingTreeChanges();
+  } catch {
+    return [];
+  }
+  if (hard) return [...changes.tracked, ...changes.untracked];
+  if (forced) return changes.tracked;
+  const prefixes = targets.map((target) => target.replace(/^\.\//, "").replace(/\/$/, ""));
+  return changes.tracked.filter((path) =>
+    prefixes.some((prefix) => prefix === "." || path === prefix || path.startsWith(prefix + "/")),
+  );
+}
+
+const target = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
+
+if (!target) {
+  process.exit(0);
+}
+
+const root = projectRoot();
+function realPath(path, depth = 0) {
+  if (depth > 40) throw new Error("Too many symlinks in " + path);
+  try {
+    return realpathSync.native(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    try {
+      if (lstatSync(path).isSymbolicLink())
+        return realPath(resolve(dirname(path), readlinkSync(path)), depth + 1);
+    } catch (cause) {
+      if (cause?.code !== "ENOENT") throw cause;
+    }
+    const parent = dirname(path);
+    if (parent === path) return path;
+    return resolve(realPath(parent, depth + 1), path.slice(parent.length + 1));
+  }
+}
+
+function outside(path) {
+  return path === ".." || path.startsWith(".." + sep) || isAbsolute(path);
+}
+
+const absoluteTarget = isAbsolute(target) ? target : resolve(input?.cwd ?? root, target);
+const logical = relative(root, absoluteTarget);
+const physical = relative(realPath(root), realPath(absoluteTarget));
+if (isAbsolute(target) && outside(logical) && outside(physical)) process.exit(0);
+if (!outside(logical) && outside(physical)) {
+  process.stdout.write(JSON.stringify(deny(String(target) + " resolves outside the project root")));
+  process.exit(0);
+}
+const path = isAbsolute(target) ? (outside(logical) ? physical : logical) : target;
+const paths = physical !== path && !outside(physical) ? [path, physical] : [path];
+
+// VISP state changes only through visp commands, which validate and record it. A worker
+// that hand-edited the brief left it unreadable and abandoned the workflow. Drafts are
+// the one place the workflow asks agents to write.
+const statePath = path.replaceAll(String.fromCharCode(92), "/").toLowerCase();
+if (
+  (statePath === ".visp" || statePath.startsWith(".visp/")) &&
+  !statePath.startsWith(".visp/drafts/") &&
+  !statePath.split("/").includes("..")
+) {
+  process.stdout.write(
+    JSON.stringify(
+      deny(
+        `${path} is VISP state; change it only through \`visp\` commands. For the brief, pipe changed fields: \`visp brief --patch - --reason "<why>"\`.`,
+      ),
+    ),
+  );
+  process.exit(0);
+}
+
+/**
+ * The guard envelope, or undefined when this output did not come from guard.
+ *
+ * The exit status alone cannot answer that. An argument parser answers
+ * 1 for an unknown option, so a *different* `visp` on
+ * PATH — an older release, a similarly named tool — would make every write look
+ * like a scope violation, and the agent would be sent to widen allowedFiles to
+ * fix what is actually an install problem. A status of 0 from such a binary is
+ * worse still: it would allow the write with nothing having been checked.
+ *
+ * So the envelope is the evidence, not the status. No envelope, no answer.
+ */
+function guardEnvelope(stdout) {
+  try {
+    const parsed = JSON.parse(stdout?.toString() ?? "");
+    const data = parsed?.data;
+    const valid =
+      parsed?.command === "guard" &&
+      typeof parsed.ok === "boolean" &&
+      data?.protocolVersion === 2 &&
+      data.runtime?.buildId === "<BUILD-ID>" &&
+      data.runtime?.version === "<VERSION>" &&
+      Number.isInteger(data.checked) &&
+      data.checked >= 0 &&
+      typeof data.allowed === "boolean" &&
+      Array.isArray(data.violations) &&
+      Array.isArray(data.authorizedTasks) &&
+      data.authorizedTasks.every((task) => typeof task === "string") &&
+      (parsed.ok
+        ? data.allowed === true && data.violations.length === 0
+        : data.allowed === false &&
+          data.violations.length > 0 &&
+          data.violations.every((finding) => typeof finding?.message === "string"));
+    return valid ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+let status = 0;
+let stdout;
+try {
+  const asking =
+    typeof input?.session_id === "string" && input.session_id ? ["--session", input.session_id] : [];
+  stdout = execFileSync(process.execPath, [cli, "guard", "--path", ...paths, "--json", ...asking], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+} catch (error) {
+  status = typeof error?.status === "number" ? error.status : undefined;
+  stdout = error?.stdout;
+  if (error?.code) status = String(error.code);
+}
+
+const envelope = guardEnvelope(stdout);
+
+if (envelope === undefined) {
+  let authorization = "unknown";
+  try {
+    authorization = execFileSync(process.execPath, ["-e", "\nconst { readFileSync, readdirSync, lstatSync } = require(\"node:fs\");\nconst { join } = require(\"node:path\");\nlet unknown = false;\nfunction entries(directory) {\n  try {\n    if (lstatSync(directory).isSymbolicLink()) { unknown = true; return []; }\n    return readdirSync(directory, { withFileTypes: true }).filter(entry => {\n      if (entry.isSymbolicLink()) unknown = true;\n      return entry.isFile() && entry.name.endsWith(\".json\");\n    });\n  } catch(error) {\n    if (error?.code !== \"ENOENT\") unknown = true;\n    return [];\n  }\n}\nfunction read(path) {\n  if (lstatSync(path).isSymbolicLink()) throw new Error(\"Linked state\");\n  return JSON.parse(readFileSync(path, \"utf8\"));\n}\nfunction validIdentity(marker) {\n  return typeof marker?.feature === \"string\" && /^\\d{3}-[a-z0-9][a-z0-9-]*$/.test(marker.feature)\n    && typeof marker.task === \"string\" && /^T\\d{3,}$/.test(marker.task);\n}\nfor (const [directory, version] of [[\".visp/state/product-authorizations\", 2], [\".visp/state/implement-allowed\", 1]]) {\n  for (const entry of entries(directory)) {\n    try {\n      const marker = read(join(directory, entry.name));\n      if (!validIdentity(marker)) throw new Error(\"Invalid authorization identity\");\n      try { lstatSync(join(\".visp\", \"features\", marker.feature)); }\n      catch (error) { if (error?.code === \"ENOENT\") continue; throw error; }\n      if (version === 2) {\n        if (marker.version !== 2) throw new Error(\"Invalid product authorization\");\n        const state = read(join(\".visp\", \"features\", marker.feature, \"product-state.json\"));\n        if (state?.version !== 3 || state.feature !== marker.feature || !state.slices?.[marker.task]) throw new Error(\"Missing product state\");\n        const status = state.slices[marker.task].status;\n        if (status === \"closed\" || status === \"legacy-closed\") continue;\n        if (status !== \"pending\" && status !== \"in-progress\") throw new Error(\"Invalid slice status\");\n      } else {\n        if (marker.kind !== \"implement-marker\") throw new Error(\"Invalid historical marker\");\n        const graph = read(join(\".visp\", \"features\", marker.feature, \"tasks.json\"));\n        if (graph?.kind !== \"tasks\" || graph.feature !== marker.feature || !Array.isArray(graph.tasks)) throw new Error(\"Invalid historical graph\");\n        const matching = graph.tasks.filter(task => task?.id === marker.task);\n        if (matching.length !== 1) throw new Error(\"Missing historical task\");\n        if (matching[0].status === \"done\") continue;\n      }\n      console.log(\"active\");\n      process.exit(0);\n    } catch { unknown = true; }\n  }\n}\nconsole.log(unknown ? \"unknown\" : \"inactive\");\n"], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim();
+  } catch {}
+  // No task is active, so there is nothing to enforce: leave Claude's own permission decision in place.
+  if (authorization === "inactive") process.exit(0);
+  let guardError;
+  try { guardError = JSON.parse(stdout?.toString() ?? "").error?.message; } catch {}
+  const cause = guardError || (status === 0 || status === 1
+    ? `no guard result on stdout — is the installed VISP CLI intact?`
+    : `exit ${status}`);
+  process.stdout.write(
+    JSON.stringify(
+      deny(
+        `visp could not check ${path} (${cause}), so the write was refused rather than allowed unchecked. Run \`visp doctor\` to find out why.`,
+      ),
+    ),
+  );
+  process.exit(0);
+}
+
+if (status === 0 && envelope.ok) {
+  if (typeof input?.session_id === "string") {
+    try {
+      const directory = join(root, ".visp", "session", "edits");
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, encodeURIComponent(input.session_id) + ".json"), JSON.stringify({ at: new Date().toISOString() }));
+    } catch {}
+  }
+  process.exit(0);
+}
+
+let reason = `${path} is outside the scope authorized for the current task.`;
+const first = envelope?.data?.violations?.[0];
+if (first?.message) {
+  // Closing a task clears its authorization, so the window right after
+  // `visp done` has none at all. Name the way forward rather than
+  // leaving the agent with a refusal it cannot act on.
+  if (first.reason === "no-authorization") {
+    reason = `${first.message}. No task is authorized right now — run \`visp next\` to see what is next, then \`visp work --task <id>\`.`;
+  } else if (first.reason === "outside-allowed-files") {
+    reason = `${first.message}. Authorize the task that owns this file, or widen its allowedFiles — do not work around the refusal.`;
+  } else if (first.reason === "transaction-pending") {
+    reason = first.message;
+  } else {
+    reason = `${first.message}. This path cannot be written by any task.`;
+  }
+}
+process.stdout.write(JSON.stringify(deny(reason)));
+
+=== .visp/status.json
+{
+  "kind": "status",
+  "createdAt": "<TIME>",
+  "updatedAt": "<TIME>"
+}
+
+=== AGENTS.visp.md
+# visp
+
+First: `visp feature "<goal>" --source-brief - <<'REQUEST'` (request, then REQUEST). `visp work --check "<test command>"`; `visp brief --template` for many slices.
+Loop: `visp work` → implement → `visp done` → `visp next`. Run `visp accept` only when `visp next` directs it.
+
+- Keep request with --source-brief; preserve outcomes, expectations and scope.allowed.
+- Before editing run visp work; build runnable behavior. Functional outcomes need tests or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
+- Stateful: act, settle, repeat; test failure/restart.
+- If the request has a UI, show status, counts, errors as word-labeled text (`Score: 1500`, `Stone: 2`), not only canvas/icons.
+- UI previews (aim line, predicted path): use the real action's function and start point; check with real input. Do not delete or shrink requested content to pass a check.
+- If visp done runs VISP's reviewer, run or delegate no review; visp next waits. Fix findings, rerun done. Run visp critic/review only when visp next prints it.
+- Run feature/done/verify/accept/next with the host's maximum shell timeout. Leave feature running; background it on blocking hosts. At its id, run visp work. Poll; never duplicate; after kill/error recover by id.
+- Sandbox denied? Rerun with escalation.
+- Missing product evidence stays unresolved. Report reviewer.context honestly. Do not force extra review rounds.
+- Before the final answer, run `visp next`; respect execution refusals.
+
+VISP generates records; see VISP.commands.md.
+
+=== CLAUDE.md
+<!-- visp:instructions:start -->
+Follow the VISP project instructions in [AGENTS.visp.md](AGENTS.visp.md). The package is visp-coder; the executable is `visp`. Use VISP MCP tools when connected: `visp_next({})`, then `visp_<command>` schemas; otherwise use CLI `visp next`.
+
+| When | Command |
+|---|---|
+| Start or resume | `visp next` |
+| New request | `visp feature "<goal>" --source-brief -` |
+| Plan or revise a decision | `visp brief --template` |
+| Implement a slice | `visp work --check "<test command>"` |
+| An ownership/caller/test question | `visp query search "<symbol or behavior>"` |
+| Observe a browser interaction | `visp capture --task <id> --from -` |
+| The slice is usable | `visp done --task <id>` |
+| Next directs final acceptance | `visp accept --feature <id>` |
+
+Research relevant uncertainties with host tools; apply conclusions in the brief. Read [VISP.commands.md](VISP.commands.md) for input examples, critic dispatch and recovery. No custom skill is needed. Reviewer configuration is not proof of invocation or quality.
+<!-- visp:instructions:end -->
+
+=== VISP.commands.md
+# VISP command guide
+
+The executable is `visp`; the package is `visp-coder`. Commands accept `--help`.
+
+`visp next` only reports the next action; it does not record final acceptance. Run `visp accept` when that action directs it.
+
+| When | Command | Next |
+|---|---|---|
+| Start or resume | `visp next` | Read-only routing: follow the returned action; unresolved is not complete. |
+| New request | `visp feature "<goal>" --source-brief -` | Pass the request with a quoted heredoc and the host's maximum timeout. It keeps running while VISP writes acceptance tests: on Codex keep its session open and poll it; on a blocking shell (Claude Code Bash) start it with run_in_background:true and read its output for the id; if the host can do neither, wait for it. Once it prints the feature id, run visp work --feature <id> --check "<test command>" for one slice. Never start feature again: a repeat can create a second feature. After a kill or error, run visp work --feature <id>; add --retry-tests only when work reports the acceptance tests failed or stopped. Use brief --template for several usable slices. |
+| Plan or revise a decision | `visp brief --template` | Prefer --patch - for changed fields; keep the first slice to one usable behavior. |
+| Implement a slice | `visp work --check "<test command>"` | Read relevant outcomes/code, then edit only the authorized scope. --inspect reads without authorizing. |
+| An ownership/caller/test question | `visp query search "<symbol or behavior>"` | Use callers, testsFor or impact with the returned entity; inspect source. |
+| Observe a browser interaction | `visp capture --task <id> --from -` | Use act, settle, act again in one journey; inspect images. After repair, --replay <run-id> repeats the original check. |
+| Only when `visp next` prints a critic command | `visp critic --preflight` | Host-delegated review only (with VISP's own reviewer `visp done` runs it). Setup-needed: inspect capabilities; ready: prepare, delegate, submit, or dispatch through an attached adapter. |
+| Only when `visp next` shows a manual-feedback request | `visp critic feedback --ask "What should I improve in this version?"` | Ask the user with the host's question tool only if it exists and questions are allowed; otherwise `--id <request-id> --defer`. Continue unrelated work. |
+| Only when `visp next` prints a review command | `visp review --task <id> --prepare` | Pause edits until it returns. Read packetPath and images; submit with --session <id> --from -. |
+| The slice is usable | `visp done --task <id>` | Follow its returned action. It may run VISP's reviewer (about 1-2 min): wait, then `visp next`. |
+| Next directs final acceptance | `visp accept --feature <id>` | Run the final product checks and report accepted status or remaining gaps. |
+
+For a literal request containing backticks, dollar signs or quotes, use a quoted heredoc:
+
+```sh
+visp feature "<goal>" --source-brief - <<'REQUEST'
+<verbatim request>
+REQUEST
+visp work --check "<test command>"
+```
+
+## Understand, build, observe
+
+Edit the existing brief returned by --template; preserve originalRequest, feature and acceptanceBaseline.
+Use these field shapes, replacing the illustrative result and file path:
+{
+  "outcomes": [
+    {
+      "id": "O001",
+      "kind": "functional",
+      "statement": "The requested behavior is observable"
+    }
+  ],
+  "slices": [
+    {
+      "id": "T001",
+      "goal": "Deliver the usable behavior",
+      "outcomes": [
+        "O001"
+      ],
+      "scope": {
+        "allowed": [
+          "src/feature.js"
+        ]
+      },
+      "checks": []
+    }
+  ]
+}
+Optional behavior examples use {title, given: [], when, expected: [], outcomes: []}.
+Executable checks use --check-template command or --check-template browser.
+Prefer --patch - --reason "<decision>" for changed fields (arrays merge by ID); use --from - --reason "<decision>" for a full replacement. Status and execution records are generated, not brief inputs.
+
+Use `visp brief --check-template command` or `visp brief --check-template browser` for editable check shapes (MCP: brief with checkTemplate). Replace the example executable or URL/selectors and link only outcomes actually exercised. Descriptive prose belongs in brief examples. Unlinked exploratory checks remain allowed; passing them does not declare coverage.
+
+Keep the template's `acceptanceBaseline` unchanged: VISP pins independently supplied acceptance checks there. Put implementation checks in `checks`; do not hash the source you intend to change into an acceptance expectation.
+Resolve research questions with the host's research tools or a bounded local experiment only when the answer can change implementation. Record the conclusion, evidence and consequence in the existing brief. The retired research/spec/plan/tasks commands are not another workflow. Graph queries answer concrete code questions; an empty graph does not delay a new slice.
+
+Start with one complete behavior through result and recovery. Challenge a slice that includes every level or screen before expanding content. Do not impose arbitrary file or layer counts. Assess functionality, non-functional needs, experience and code quality against the user's request.
+
+## Recovery and legacy features
+
+If `work` reports a browser startup or permission gap, recover the host and retry with
+`visp work --retry-environment`. A startup gap does not prevent scoped implementation. If
+the scope check rejects the work, inspect the named changes, restore unintended changes or
+revise the intended scope, then retry. Keep sandboxing enabled and never work around a URL policy refusal.
+
+For a legacy feature or current product history needing upgrade, use the installed
+`visp-migrate --project <project> preview`, then
+`visp-migrate --project <project> apply`. Preview is read-only; apply preserves a raw backup
+in the migration transaction. Stop old writers before applying and restart MCP with the upgraded
+executable afterward. `visp next` and `visp status` only read state; they never migrate it.
+
+For UI work, recover the browser and capture the usable interaction before spending a product critic call. Continue the same build–observe–fix loop when the critic is unavailable.
+
+For a browser capture, pipe YAML/JSON to `visp capture --task <id> --from -`:
+
+```yaml
+url: project:/index.html
+viewport: {width: 1280, height: 720}
+actions:
+  - {kind: click, selector: "#start", capture: true}
+  - kind: drag
+    selector: "#handle"
+    position: {x: 0.5, y: 0.5}
+    by: {x: -0.4, y: 0.2}
+    captureDuring: true
+    captureAfterMs: [300, 900]
+  - {kind: wait-for, selector: "#result", visibility: visible, capture: true}
+```
+
+Waits use `durationMs` (1–10000). Follow settling waits with `wait-for` or `compare` to establish the expected state. Use real controls. `project:/index.html` serves a static page (HTML/JS/CSS, no backend) from the project on a port VISP chooses, so start nothing; for an app with a backend or build step, start your server on a free port you choose (not a fixed common one such as 3000, which another process may hold) and use its URL. A drag ends at viewport-pixel `to` or, as fractions of the element's box, `by`; it starts at `from` (pixels) or `position` (fractions). `captureDuring: true` captures the held state at full pull before release and `captureAfterMs: [300, 900]` captures again that many ms after release; `position`/`by` refuse rotated, skewed, flipped or offset-path elements, so use pixels there. Each journey allows six total captures, including the automatic initial capture, the final capture when the last action does not request one, `capture: true`, drag `captureDuring: true` and each `captureAfterMs` offset. Operation records are generated. Capture and verify return matching before/after observations; investigate possible regressions and execution gaps, and inspect actual images. Work and review handoffs attach a recheck to findings linked to recorded execution: use its command to revisit the original path, then inspect the result and one nearby behavior affected by the edit. A matching rerun is observed-unassessed, not a resolved finding. These comparisons are advisory, not quality approval. Legacy runs without a saved journey still need --from. A different input that succeeds does not resolve an earlier failed input.
+
+
+=== visp.yml
+preset: javascript
+harness: claude-code
+profile: minimal
+workflow:
+  strictness: standard
+  maxChangedFiles: 40
+  blockedPaths:
+    - .env
+    - .env.*
+    - node_modules
+    - dist
+    - build
+    - .git
+  validationCommands: []
+  flipCheck: auto
+graph:
+  languages:
+    - typescript
+    - javascript
+    - python
+  exclude: []
+context:
+  tokenBudget: 12000
+  maxSnippets: 4
+memory:
+  enabled: true
+telemetry:
+  enabled: true
+critic:
+  enabled: false
+  harness: claude-code
+

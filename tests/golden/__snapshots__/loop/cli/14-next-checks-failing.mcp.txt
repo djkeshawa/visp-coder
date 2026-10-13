@@ -1,0 +1,7 @@
+> visp_next {}
+--- text
+visp_next: {"feature":"001-return-two-from-the-public","task":"T001","action":"fix","objective":"Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check","command":"visp_work {\"feature\":\"001-return-two-from-the-public\",\"task\":\"T001\"}","mayEdit":true,"evidence":{"entries":["C001: failed: expected 2, got 1"],"remaining":0}}
+Full data is already in structuredContent.data.
+
+Next: visp_work {"feature":"001-return-two-from-the-public","task":"T001"}
+--- isError false

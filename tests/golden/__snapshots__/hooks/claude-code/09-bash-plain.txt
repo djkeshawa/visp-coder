@@ -1,0 +1,6 @@
+> .visp/hooks/claude-pretooluse.mjs {"session_id":"golden-session","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls src"}}
+--- stdout
+
+--- stderr
+
+--- exit 0

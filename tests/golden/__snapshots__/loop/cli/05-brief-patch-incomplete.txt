@@ -1,0 +1,9 @@
+$ visp brief --patch .visp/drafts/incomplete.json --reason 'Record an open question'
+--- stdout
+brief: {"feature":"001-return-two-from-the-public","incomplete":true,"outcomes":[],"examples":[],"checks":[],"slices":[]}
+Next: visp next --feature 001-return-two-from-the-public
+Read the full brief with visp brief --feature 001-return-two-from-the-public.
+
+--- stderr
+
+--- exit 0
