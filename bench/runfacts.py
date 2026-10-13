@@ -214,9 +214,14 @@ def usage_limit(run):
 
 
 def invalid(run):
-    """The recorded reason a run is invalid (invalid.json), or None."""
+    """The recorded reason a run is invalid (invalid.json, which may also be made by hand), or None."""
     path = run / "invalid.json"
-    return json.loads(path.read_text()) if path.exists() else None
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except ValueError:
+        return {"reason": "marked invalid by hand", "source": str(path), "match": ""}
 
 
 def mark_if_invalid(run):
