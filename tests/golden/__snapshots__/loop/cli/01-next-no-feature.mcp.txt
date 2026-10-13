@@ -1,0 +1,7 @@
+> visp_next {}
+--- text
+visp_next: {"action":"understand","objective":"Record the original request and define the next useful outcome","command":"visp_feature {\"goal\":\"<goal>\"}","mayEdit":false}
+Full data is already in structuredContent.data.
+
+Next: visp_feature {"goal":"<goal>"}
+--- isError false

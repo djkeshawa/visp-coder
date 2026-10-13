@@ -1,0 +1,10 @@
+$ visp next
+--- stdout
+next: {"feature":"001-return-two-from-the-public","task":"T001","action":"understand","objective":"missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done.","command":"visp verify --feature 001-return-two-from-the-public --task T001","mayEdit":true,"completion":"unresolved-environment","recovery":"missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done.","evidence":{"entries":["C001: missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done."],"remaining":0}}
+Full result: add --json.
+
+Next: visp verify --feature 001-return-two-from-the-public --task T001
+
+--- stderr
+
+--- exit 0

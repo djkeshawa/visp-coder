@@ -1,0 +1,10 @@
+$ visp status
+--- stdout
+001-return-two-from-the-public: 1 outcomes
+refine: Review the assembled product against every mandatory outcome and retained expectation
+
+Next: visp review --handoff --feature 001-return-two-from-the-public
+
+--- stderr
+
+--- exit 0

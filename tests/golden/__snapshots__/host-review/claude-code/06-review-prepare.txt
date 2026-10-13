@@ -1,0 +1,17 @@
+$ visp review --prepare
+--- stdout
+{
+  "session": "<UUID-1>",
+  "feature": "001-return-two-from-the-public",
+  "packetPath": "<PROJECT>/.visp/features/001-return-two-from-the-public/review-sessions/<UUID-1>/packet.json",
+  "responsePath": "<PROJECT>/.visp/features/001-return-two-from-the-public/review-sessions/<UUID-1>/response.json",
+  "recovery": [],
+  "command": "visp review --feature 001-return-two-from-the-public --session <UUID-1> --from -",
+  "instructions": "Read packet.json and its actual images, then complete its submission object without adding subjectDigest, selection or captures. VISP supplies identity. Submit through stdin or responsePath. A configured critic's submitted assessment is already a product review; no duplicate worker approval is needed. A prepared session is not a review or proof of image inspection."
+}
+
+Next: visp review --feature 001-return-two-from-the-public --session <UUID-1> --from -
+
+--- stderr
+
+--- exit 0

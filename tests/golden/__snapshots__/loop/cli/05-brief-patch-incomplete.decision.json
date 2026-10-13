@@ -1,0 +1,19 @@
+{
+  "exitCode": 0,
+  "next": {
+    "action": "understand",
+    "command": "visp brief --feature 001-return-two-from-the-public",
+    "mayEdit": false,
+    "evidence": 1
+  },
+  "product": {
+    "status": "active",
+    "slices": {},
+    "executions": [],
+    "reviews": 0,
+    "openFindings": {
+      "required": 0,
+      "advisory": 0
+    }
+  }
+}

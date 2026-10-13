@@ -1,0 +1,89 @@
+$ visp critic --preflight
+--- stdout
+{
+  "status": "setup-needed",
+  "ready": false,
+  "hostSetup": {
+    "dispatch": {
+      "method": "native-handoff",
+      "model": "claude-sonnet-5",
+      "reasoningEffort": "high",
+      "steps": [
+        "Inspect the host's available delegation tools and restrictions; unreported capability is setup-needed, not a refusal.",
+        "Pipe the actual capability JSON to critic --preflight --capabilities -; no setup file is needed.",
+        "When ready, pipe the same report to critic --prepare --capabilities - for packetPath, responsePath and exact submission commands.",
+        "Delegate one fresh reviewer with the configured model and effort, then submit its unchanged response."
+      ],
+      "capabilityInput": {
+        "preferred": "stdin",
+        "option": "--capabilities -",
+        "fileAlternative": ".visp/critic-capabilities.json",
+        "guidance": "Keep transient host reports on stdin or under .visp/. Creating a report beside product source changes product identity and requires fresh evidence. Requested settings are not observed capabilities."
+      }
+    },
+    "delegation": {
+      "reviewer": {
+        "harness": "claude-code",
+        "model": "claude-sonnet-5",
+        "reasoningEffort": "high"
+      },
+      "provider": "host-configured; not resolved by VISP",
+      "payload": {
+        "projectEvidence": true,
+        "description": "Original request and selected project evidence, which may include source excerpts",
+        "images": false
+      },
+      "authorization": "Use authorization already supplied for this destination and payload. If the host requires clarification, identify its actual provider, configured reviewer and selected project evidence/images before asking. This description does not establish consent or override a host refusal. Do not reserve while required authorization is unresolved."
+    },
+    "recovery": "Independent critic unavailable. Continue baseline host review while resolving the host gap; disclose the limitation. If an attempt is already reserved, record its actual failure with --attempt; an understanding-gap report cannot replace product review.",
+    "retry": "visp critic --feature 001-return-two-from-the-public --task T001 --phase product --preflight",
+    "beforePrepare": "Confirm the actual host can delegate this packet and images with the configured model, effort and restricted tools, and that delegation is authorized. If refused, report delegationAllowed:false; do not reserve or bypass the refusal.",
+    "capabilitiesExample": {
+      "harness": "claude-code",
+      "model": "claude-sonnet-5",
+      "reasoningEffort": "high",
+      "freshContext": true,
+      "readOnly": true,
+      "images": false,
+      "delegationAllowed": false
+    },
+    "provenance": "Example contains requested settings, not verified capabilities. Replace with actual observations; a boolean cannot prove human authorization."
+  },
+  "phase": "product",
+  "sourceOnly": false,
+  "prepareCommand": "visp critic --feature 001-return-two-from-the-public --task T001 --phase product --prepare --capabilities -",
+  "config": {
+    "model": "claude-sonnet-5",
+    "reasoningEffort": "high",
+    "transport": "native",
+    "harness": "claude-code",
+    "maxCalls": 3,
+    "timeoutMs": 180000,
+    "maxImageBytes": 4194304
+  },
+  "gaps": [
+    "Report the host's available reviewer model, reasoning, fresh context, read-only delegation and image access before prepare; do not infer them from the worker model."
+  ],
+  "capabilityProvenance": "host-reported; not independently verified",
+  "requiresImages": false,
+  "next": "Inspect host capabilities and supply --capabilities to preflight; no availability decision has been made",
+  "callsUsed": 0,
+  "callsRemaining": 3,
+  "featureBudget": {
+    "scope": "feature",
+    "limit": 3,
+    "callsUsed": 0,
+    "callsRemaining": 3,
+    "reservableCalls": 3,
+    "reservedMs": 0,
+    "remainingMs": 1080000,
+    "maxReservedMs": 1080000,
+    "understandingCalls": 0,
+    "productCalls": 0,
+    "accounting": "Full timeout reserved per attempt, including uncertain or interrupted calls; unavailable VISP attempts without a response spend time only; not measured provider time or cost"
+  }
+}
+
+--- stderr
+
+--- exit 0
