@@ -51,6 +51,12 @@ describe("tester browser kit gating", () => {
     expect(testerBrowserKitLines("")).toEqual([]);
   });
 
+  it("gives the canvas-worded pixel-art request the same kit as a browser game", () => {
+    const lighthouse = testerBrowserKitLines(text("bench/tasks/lighthouse-pixel/task.md"));
+    expect(lighthouse.length).toBeGreaterThan(3);
+    expect(lighthouse).toEqual(testerBrowserKitLines(text("bench/tasks/slingshot-game/task.md")));
+  });
+
   it("adds the rules and compact API for slingshot and catapult requests", () => {
     for (const request of [text("bench/tasks/slingshot-game/task.md"), catapult]) {
       const lines = testerBrowserKitLines(request);
