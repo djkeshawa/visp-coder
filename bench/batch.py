@@ -14,11 +14,14 @@ starts on the project the first left, notes kept. Timeouts per session: games 36
 other task 2700 s. A visp-codex arm runs with run_codex.py; every other arm with run_claude.py.
 
 Restartable: a finished run is skipped; a run left unfinished by an interrupted batch is moved
-to $VISP_BENCH_RUNS/discarded and run again. After each run the transcripts, results and VISP
-reviewer logs are searched for a usage-limit stop (runfacts.py); such a run gets invalid.json,
-is never scored, and no further runs start, since the limit applies to every run. Run the batch
-again after the limit resets with --rerun-invalid to move invalid runs to discarded/ and redo
-them. --dry-run prints the queue and what would happen to each run, and changes nothing.
+to $VISP_BENCH_RUNS/discarded and run again, after stopping any runner or worker the earlier
+batch left running there (runner.pid, worker.pid). SIGTERM or SIGHUP stops the running runs'
+runners and workers before the driver exits. After each run, runfacts.py checks for a usage-limit
+stop (in CLI error results, API-error events and VISP's failed reviewer and tester records) and
+for a worker failure (the CLI ended a session in error: an API error, no response, a wrapper
+exit); such a run gets invalid.json and is never scored. After a usage limit no further runs
+start, since the limit applies to every run. --rerun-invalid moves invalid runs to discarded/ and
+redoes them. --dry-run prints the queue and what would happen to each run, and changes nothing.
 
 Writes $VISP_BENCH_RUNS/batches/<name>/manifest.json (preset, arms, tasks, the planned runs) and
 batch.log. report.py reads the manifest.
@@ -29,20 +32,22 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
 
-from common import RUNS
+from common import RUNS, stop_recorded
 from judge import CHECKLISTS, GAMES
 from presets import preset
-from runfacts import invalid, is_finished, mark_if_invalid, usage_limit
+from runfacts import invalid, invalidity, is_finished, mark_if_invalid
 
 BENCH = pathlib.Path(__file__).resolve().parent
 TIMEOUTS = {"visual": 2700, "game": 3600, "carryover": 2700, "code": 2700}
 log_lock = threading.Lock()
 stop = threading.Event()
+active, active_lock = set(), threading.Lock()
 
 
 def kind(task):
@@ -78,6 +83,8 @@ def plan(args):
     for rep in range(1, args.reps + 1):
         for index, task in enumerate(tasks):
             task_kind = kind(task)
+            if task_kind == "carryover" and any(arm.startswith("visp-codex:") for _, arm in arms):
+                raise SystemExit(f"{task} has two sessions, which run_carryover.py runs with Claude Code only")
             shift = (rep - 1 + index) % len(arms)
             for name, arm in arms[shift:] + arms[:shift]:
                 runs.append({"name": f"{args.batch}-{task}-{name}-{rep}", "task": task, "kind": task_kind,
@@ -98,14 +105,15 @@ def log(directory, message):
 def state(entry, rerun_invalid, record=True):
     """What the batch does with a run: run, skip, rerun (invalid) or redo (unfinished).
 
-    A finished run is checked for a usage-limit stop first; record=False only looks.
+    A finished run is checked first for a usage-limit stop or a worker failure (runfacts.py);
+    record=False only looks.
     """
     run = RUNS / "runs" / entry["name"]
     if not run.exists():
         return "run"
     if not is_finished(run, entry["twoSessions"]):
         return "redo"
-    if (mark_if_invalid if record else lambda run: invalid(run) or usage_limit(run))(run):
+    if (mark_if_invalid if record else lambda run: invalid(run) or invalidity(run))(run):
         return "rerun" if rerun_invalid else "skip-invalid"
     return "skip"
 
@@ -125,6 +133,13 @@ def execute(entry, args, directory):
     if stop.is_set():
         return name, "not started (usage limit)"
     if action in ("redo", "rerun"):
+        # A driver killed earlier can leave its runner and worker running in this directory.
+        stopped = stop_recorded(run)
+        if stopped and not gone(stopped):
+            log(directory, f"{name}: processes {stopped} of an earlier batch still run; not redone")
+            return name, "busy"
+        if stopped:
+            log(directory, f"{name}: stopped processes {stopped} left by an earlier batch")
         log(directory, f"{name}: moved to {discard(run, 'invalid' if action == 'rerun' else 'unfinished')}")
     setup = subprocess.run([sys.executable, str(BENCH / "setup_arm.py"), entry["task"], entry["arm"], name,
                             "--preset", args.preset], capture_output=True, text=True)
@@ -140,15 +155,36 @@ def execute(entry, args, directory):
         argv = [str(BENCH / "run_claude.py"), name, "--timeout", timeout]
     started = time.time()
     log(directory, f"{name}: started")
-    done = subprocess.run([sys.executable, *argv], capture_output=True, text=True)
-    outcome = "finished" if is_finished(run, entry["twoSessions"]) else f"no result (exit {done.returncode})"
-    stopped = mark_if_invalid(run) if run.exists() and outcome == "finished" else None
+    # Own session, so a signal to the driver's group does not reach it; the driver's handler and a
+    # later batch stop it through runner.pid instead.
+    runner = subprocess.Popen([sys.executable, *argv], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, start_new_session=True)
+    (run / "runner.pid").write_text(str(runner.pid))
+    with active_lock:
+        active.add(run)
+    stdout, stderr = runner.communicate()
+    with active_lock:
+        active.discard(run)
+    (run / "runner.pid").unlink(missing_ok=True)
+    outcome = "finished" if is_finished(run, entry["twoSessions"]) else f"no result (exit {runner.returncode})"
+    stopped = mark_if_invalid(run) if outcome == "finished" else None
     if stopped:
-        stop.set()
-        outcome = f"invalid: {stopped['source']}: {stopped['match'].strip()[:160]!r}"
-    log(directory, f"{name}: {outcome} in {round(time.time() - started)} s {done.stdout.strip()[-200:]} "
-                   f"{done.stderr.strip()[-300:]}".rstrip())
+        if stopped["reason"] == "usage limit":
+            stop.set()
+        outcome = f"invalid ({stopped['reason']}): {stopped['source']}: {stopped['match'].strip()[:160]!r}"
+    log(directory, f"{name}: {outcome} in {round(time.time() - started)} s {stdout.strip()[-200:]} "
+                   f"{stderr.strip()[-300:]}".rstrip())
     return name, outcome
+
+
+def gone(pids, wait=10):
+    """Whether every pid has exited, waiting up to `wait` seconds."""
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if not any(pathlib.Path(f"/proc/{pid}").exists() for pid in pids):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 def lock(directory):
@@ -157,10 +193,25 @@ def lock(directory):
         try:
             os.kill(int(path.read_text()), 0)
             raise SystemExit(f"batch already running (pid {path.read_text()}); {path}")
-        except (ProcessLookupError, ValueError):
+        except (ProcessLookupError, PermissionError, ValueError):
+            # Gone, or the pid now belongs to another user's process: the lock is stale.
             pass
     path.write_text(str(os.getpid()))
     return path
+
+
+def on_signal(directory, lock_path):
+    """On SIGTERM or SIGHUP, stop every running run's runner and worker, then exit."""
+    def handle(number, _frame):
+        stop.set()
+        with active_lock:
+            runs = list(active)
+        for run in runs:
+            log(directory, f"{run.name}: stopped {stop_recorded(run)} on signal {number}")
+        lock_path.unlink(missing_ok=True)
+        os._exit(128 + number)
+    for number in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(number, handle)
 
 
 def main():
@@ -197,6 +248,7 @@ def main():
         return
     directory.mkdir(parents=True, exist_ok=True)
     lock_path = lock(directory)
+    on_signal(directory, lock_path)
     try:
         known = {entry["name"] for entry in runs}
         kept = [entry for entry in (previous or {}).get("runs", []) if entry["name"] not in known]

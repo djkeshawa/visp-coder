@@ -24,9 +24,14 @@ import pathlib
 import re
 
 CLAUDE_PROJECTS = pathlib.Path.home() / ".claude" / "projects"
-# Messages Claude Code and the Codex CLI print when an account's usage limit stops them.
-LIMIT = re.compile(r"(?:you've|you have) hit your (?:[\w-]+ )?limit|usage limit (?:reached|exceeded)"
-                   r"|limit reached[^\n\"]{0,80}resets|limit · resets", re.IGNORECASE)
+# Messages the Claude Code and Codex CLIs give when an account's usage or spend limit stops them:
+# "You've hit your session limit", "... monthly spend limit", "... team's shared budget", "You're
+# out of extra usage", "You're out of usage credits", "you have reached your weekly usage limit",
+# "usage limit reached". They are matched only where a CLI or VISP reports a failure (usage_limit),
+# never in arbitrary tool output, where "Rate limit reached; resets in 30 s" is ordinary.
+LIMIT = re.compile(r"(?:you've|you have) hit your (?:[\w'’-]+ ){0,3}(?:limit|budget)"
+                   r"|you(?:'re| are) out of (?:extra usage|usage credits)"
+                   r"|you have reached your (?:[\w'’-]+ ){0,3}limit|usage limit reached", re.IGNORECASE)
 LEGACY_GAP = 240
 WAIT_TOOLS = {"Monitor", "ScheduleWakeup", "BashOutput", "TaskOutput"}
 # A command is pure waiting when it waits on something and every step in it is one of these.
@@ -84,14 +89,22 @@ def project_key(path):
 
 
 def transcripts(run):
-    """The worker's transcripts for this run, written since the run was set up."""
-    started = (run / "arm.json").stat().st_mtime - 5 if (run / "arm.json").exists() else 0
-    found = {path for path in (CLAUDE_PROJECTS / project_key((run / "project").resolve())).glob("*.jsonl")
-             if path.stat().st_mtime >= started}
+    """The worker's transcripts for this run.
+
+    By the session ids its results recorded; for a run without them (an older or unfinished
+    run), the transcripts under the project's path written since the run was set up.
+    """
+    ids = set()
     for _, result in sessions(run):
-        session = json.loads(result.read_text()).get("sessionId")
-        if session:
-            found.update(CLAUDE_PROJECTS.glob(f"*/{session}.jsonl"))
+        data = json.loads(result.read_text())
+        ids.update(data.get("sessionIds") or [data.get("sessionId")])
+    ids.discard(None)
+    if ids:
+        found = {path for session in ids for path in CLAUDE_PROJECTS.glob(f"*/{session}.jsonl")}
+    else:
+        started = (run / "arm.json").stat().st_mtime - 5 if (run / "arm.json").exists() else 0
+        found = {path for path in (CLAUDE_PROJECTS / project_key((run / "project").resolve())).glob("*.jsonl")
+                 if path.stat().st_mtime >= started}
     return sorted(found, key=lambda path: path.stat().st_mtime)
 
 
@@ -177,40 +190,84 @@ def timing(paths):
             "legacyIdle": round(legacy), "refusals": refusals}
 
 
-def _limit_in(text, source):
-    match = LIMIT.search(text)
+def _limit_in(text, source, whole=False):
+    """A limit message in text, or None; whole=True only accepts text that starts with one."""
+    text = str(text or "")
+    match = LIMIT.match(text.strip()) if whole else LIMIT.search(text)
     if not match:
         return None
-    start = max(0, match.start() - 80)
-    return {"reason": "usage limit", "source": source, "match": text[start:match.end() + 80]}
+    start = max(0, text.find(match.group(0)) - 80)
+    return {"reason": "usage limit", "source": source, "match": text[start:start + 80 + len(match.group(0)) + 80]}
+
+
+def _result_text(result):
+    return " ".join(str(result.get(key) or "") for key in ("report", "raw", "result"))
+
+
+def _failure_fields(project):
+    """(source, text) for VISP's own records of a failed reviewer or tester call."""
+    for path in project.glob(".visp/features/*/critic/*.json"):
+        try:
+            state = json.loads(path.read_text())
+        except ValueError:
+            continue
+        for attempt in state.get("attempts", []) if isinstance(state, dict) else []:
+            if attempt.get("status") != "reviewed":
+                for key in ("message", "error", "failureKind"):
+                    yield f"{path.relative_to(project)} attempt {key}", attempt.get(key)
+    for path in project.glob(".visp/features/*/acceptance-tests.json"):
+        try:
+            record = json.loads(path.read_text())
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            for key in ("reason", "error", "message"):
+                yield f"{path.relative_to(project)} {key}", record.get(key)
 
 
 def usage_limit(run):
     """The first sign that a usage limit cut the run short, or None.
 
-    Searched: each session's result.json (report and raw output), the worker transcripts'
-    messages and tool results (a VISP reviewer stopped by the limit shows there), and VISP's
-    reviewer and tester logs in the finished project.
+    Searched only where a failure is reported: a session's result.json when the CLI reported an
+    error (or its whole result is a limit message), API-error events in the worker transcripts,
+    and VISP's records of failed reviewer and tester calls (critic attempts, acceptance-tests.json).
     """
     for label, path in sessions(run):
         result = json.loads(path.read_text())
-        found = _limit_in(" ".join(str(result.get(key, "")) for key in ("report", "raw", "result")),
-                          f"{label} result.json")
+        found = _limit_in(_result_text(result), f"{label} result.json", whole=not result.get("isError"))
         if found:
             return found
     for path in transcripts(run):
         for event in _events(path):
+            if not (event.get("isApiErrorMessage") or event.get("error")):
+                continue
             for block in _blocks(event):
-                text = block.get("text") or block.get("content")
-                found = _limit_in(text if isinstance(text, str) else json.dumps(text), f"transcript {path.name}")
+                found = _limit_in(block.get("text"), f"transcript {path.name}")
                 if found:
                     return found
-    project = final_project(run)
-    for path in [*project.glob(".visp/features/*/*.log"), *project.glob(".visp/features/*/critic/requests/*/*.json")]:
-        found = _limit_in(path.read_text(errors="replace"), str(path.relative_to(project)))
+    for source, text in _failure_fields(final_project(run)):
+        found = _limit_in(text, source)
         if found:
             return found
     return None
+
+
+def worker_failure(run):
+    """A session the worker's CLI ended in error (an API error, no response, a wrapper exit), or None.
+
+    A worker that gives up or reports failure in its own words ends without a CLI error and stays valid.
+    """
+    for label, path in sessions(run):
+        result = json.loads(path.read_text())
+        if result.get("isError"):
+            return {"reason": "worker failure", "source": f"{label} result.json",
+                    "match": _result_text(result).strip()[:300]}
+    return None
+
+
+def invalidity(run):
+    """Why a finished run cannot be scored: a usage limit or a worker failure, or None."""
+    return usage_limit(run) or worker_failure(run)
 
 
 def invalid(run):
@@ -225,8 +282,8 @@ def invalid(run):
 
 
 def mark_if_invalid(run):
-    """Record and return a usage-limit stop, so the run is never scored."""
-    found = invalid(run) or usage_limit(run)
+    """Record and return why a finished run is invalid, so it is never scored."""
+    found = invalid(run) or invalidity(run)
     if found and not (run / "invalid.json").exists():
         (run / "invalid.json").write_text(json.dumps(found, indent=2))
     return found

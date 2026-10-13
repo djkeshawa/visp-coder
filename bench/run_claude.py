@@ -11,10 +11,10 @@ The model and effort default to the worker of the preset recorded in arm.json (p
 import argparse
 import json
 import os
-import subprocess
+import pathlib
 import time
 
-from common import RUNS, isolate
+from common import RUNS, isolate, run_worker
 
 MODEL = "claude-haiku-4-5-20251001"
 # Spec Kit is driven one command per user turn; each skill ends by naming the next one
@@ -56,21 +56,19 @@ def run_session(project, arm, prompt, model=None, timeout=2700, resume=None, eff
         if session:
             argv += ["--resume", session]
         remaining = max(60, timeout - int(time.time() - started))
-        try:
-            # Own session: a worker signalling its shell's process group (`kill %1` without job
-            # control) must not reach sibling runs in the same batch.
-            completed = subprocess.run(argv, cwd=project, env=env, capture_output=True, text=True,
-                                       timeout=remaining, start_new_session=True)
-        except subprocess.TimeoutExpired:
+        # Own session: a worker signalling its shell's process group (`kill %1` without job
+        # control) must not reach sibling runs in the same batch.
+        code, stdout, stderr, timed_out = run_worker(argv, project, env, remaining,
+                                                     pathlib.Path(project).parent / "worker.pid")
+        if timed_out:
             return {}, True
         try:
-            return json.loads(completed.stdout), False
+            return json.loads(stdout), False
         except ValueError:
-            data = {"raw": completed.stdout[-2000:]}
-            if completed.returncode != 0:
+            data = {"raw": stdout[-2000:]}
+            if code != 0:
                 # claude (or the namespace wrapper) failed before reporting: count it as an error.
-                data.update(is_error=True, exit_code=completed.returncode,
-                            result=f"exit {completed.returncode}: {completed.stderr[-1500:]}")
+                data.update(is_error=True, exit_code=code, result=f"exit {code}: {stderr[-1500:]}")
             return data, False
 
     data, timed_out = turn(prompt, resume)
@@ -98,6 +96,7 @@ def run_session(project, arm, prompt, model=None, timeout=2700, resume=None, eff
         "turns": sum(entry.get("num_turns") or 0 for entry in turns), "userTurns": len(turns),
         "isError": any(entry.get("is_error") for entry in turns),
         "sessionId": next((entry["session_id"] for entry in reversed(turns) if entry.get("session_id")), None),
+        "sessionIds": list(dict.fromkeys(entry["session_id"] for entry in turns if entry.get("session_id"))),
         "inputTokens": total("input_tokens"), "cacheReadTokens": total("cache_read_input_tokens"),
         "cacheWriteTokens": total("cache_creation_input_tokens"), "outputTokens": total("output_tokens"),
         "report": str(data.get("result", ""))[-1500:],
