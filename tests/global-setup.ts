@@ -1,6 +1,7 @@
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { computeBuildId } from "../src/build/build-id.js";
 
 const PREFIX = "visp-run-";
@@ -40,7 +41,7 @@ export default async function setup() {
  * run at once with one line instead. `pnpm test` does not build; `pnpm build:fast` takes ~1 s.
  */
 async function requireCurrentDist(): Promise<void> {
-  const current = computeBuildId(process.cwd());
+  const current = computeBuildId(fileURLToPath(new URL("../", import.meta.url)));
   const baked = await bakedBuildId("dist");
   if (baked === current) return;
   // Exit rather than throw: vitest would add a stack trace and a source excerpt to the one line.
@@ -50,14 +51,14 @@ async function requireCurrentDist(): Promise<void> {
   process.exit(1);
 }
 
-/** The id tsup baked into the bundle: `var BUILD_ID = true ? "<id>" : "dev"`. */
+/** The id tsup baked into the bundle: `var BUILD_ID = true ? "<id>" : "dev"` (a minifier may fold the ternary). */
 async function bakedBuildId(dist: string): Promise<string | undefined> {
   const files = (await readdir(dist).catch(() => [] as string[])).filter((name) =>
     name.endsWith(".js"),
   );
   for (const name of files) {
     const text = await readFile(join(dist, name), "utf8").catch(() => "");
-    const id = /BUILD_ID = true \? "([0-9a-f]{16})"/.exec(text)?.[1];
+    const id = /\bBUILD_ID = (?:true \? )?"([0-9a-f]{16})"/.exec(text)?.[1];
     if (id) return id;
   }
   return undefined;
