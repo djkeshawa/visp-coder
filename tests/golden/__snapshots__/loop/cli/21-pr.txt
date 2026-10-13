@@ -1,0 +1,52 @@
+$ visp pr
+--- stdout
+# Return two from the public value module
+
+Status: active. Every required outcome is satisfied.
+
+## Request
+
+> Make the public value module return two instead of one.
+
+## Outcomes
+
+| Outcome | Priority | Statement | Checks | Behavior | Review |
+| --- | --- | --- | --- | --- | --- |
+| O001 | must | The public value is two | C001 | passed | unassessed |
+
+## Changes
+
+- **T001** Return the promised value (closed; may edit src/value.mjs, checks/value.check.mjs)
+
+Uncommitted changes:
+
+- modified: src/value.mjs
+
+## Checks
+
+| Check | Command | Latest result |
+| --- | --- | --- |
+| C001 | `node checks/value.check.mjs` | passed (exit 0, <TIME>) |
+
+## Intent changes
+
+- <TIME> (agent-proposed, intent): Define the first usable behavior
+
+## Independent review
+
+No independent review is recorded. Treat outcomes without executed checks as unverified.
+
+## Next
+
+Review the assembled product against every mandatory outcome and retained expectation
+
+`visp review --handoff --feature 001-return-two-from-the-public`
+
+Check results come from commands VISP executed. Review judgments are attributed to their reviewer; the actor's own claims are not evidence.
+
+
+Next: visp review --handoff --feature 001-return-two-from-the-public
+
+--- stderr
+
+--- exit 0

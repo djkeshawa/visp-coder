@@ -1,0 +1,6 @@
+> .visp/hooks/claude-pretooluse.mjs {"session_id":"golden-session","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"<PROJECT>/.visp/features/brief.yaml","content":"x"}}
+--- stdout
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":".visp/features/brief.yaml is VISP state; change it only through `visp` commands. For the brief, pipe changed fields: `visp brief --patch - --reason \"<why>\"`."}}
+--- stderr
+
+--- exit 0
