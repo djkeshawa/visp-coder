@@ -124,11 +124,14 @@ export function planAgentDeactivation(current: string | undefined): {
     return { status: "edited" };
   }
 
+  // The line breaks may be CRLF (a checkout converted them); each is taken whole.
   let before = current.slice(0, start);
   let after = current.slice(end);
-  if (before.endsWith("\n\n") && after.startsWith("\n")) after = after.slice(1);
-  else if (before === "" && after.startsWith("\n")) after = after.slice(1);
-  if (before.endsWith("\n\n") && after === "") before = before.slice(0, -1);
+  const blankLine = /(?:\r?\n){2}$/u;
+  const lineBreak = /^\r?\n/u;
+  if (blankLine.test(before) && lineBreak.test(after)) after = after.replace(lineBreak, "");
+  else if (before === "" && lineBreak.test(after)) after = after.replace(lineBreak, "");
+  if (blankLine.test(before) && after === "") before = before.replace(/\r?\n$/u, "");
   return { status: "removed", content: `${before}${after}` };
 }
 

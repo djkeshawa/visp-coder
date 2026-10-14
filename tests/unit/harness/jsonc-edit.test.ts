@@ -69,6 +69,16 @@ describe("removeJsoncMember", () => {
     expect(removeJsoncMember('{"s": {"visp": 1, "b": 2}}', ["s", "visp"])).toBe('{"s": { "b": 2}}');
   });
 
+  it("tidy undoes an insertion: no stray space, an emptied object closes up", () => {
+    const tidy = (source: string, path: string[]) => removeJsoncMember(source, path, true);
+    expect(tidy('{ "a": 1, "visp": 2 }', ["visp"])).toBe('{ "a": 1 }');
+    expect(tidy('{ "visp": 2, "a": 1 }', ["visp"])).toBe('{ "a": 1 }');
+    expect(tidy('{\n  "s": {\n    "visp": 1\n  }\n}\n', ["s", "visp"])).toBe('{\n  "s": {}\n}\n');
+    expect(tidy('{\n  "s": { // keep\n    "visp": 1\n  }\n}\n', ["s", "visp"])).toContain(
+      "// keep",
+    );
+  });
+
   it.each([
     '{"servers":{"github":{"url":"x"}}}',
     '{\n\t"servers": {\n\t\t"github": {},\n\t},\n}\n',

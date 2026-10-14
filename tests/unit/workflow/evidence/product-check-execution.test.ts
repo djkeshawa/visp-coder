@@ -42,6 +42,9 @@ registerHooks({resolve(specifier, context, next) {
   }
   return next(specifier, context);
 }, load(url, context, next) {
+  // The build inlines script sources imported with ?raw as text; do the same from source.
+  if (url.endsWith('?raw') && fileURLToPath(url).startsWith(${JSON.stringify(sourceDirectory)}))
+    return {format:'module', shortCircuit:true, source:'export default ' + JSON.stringify(readFileSync(fileURLToPath(url), 'utf8')) + ';'};
   if (url.endsWith('.ts') && fileURLToPath(url).startsWith(${JSON.stringify(sourceDirectory)}))
     return {format:'module', shortCircuit:true, source:ts.transpileModule(readFileSync(fileURLToPath(url), 'utf8'), {
       compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2023},
@@ -300,6 +303,7 @@ describe("product command check execution boundary", () => {
   it.each([
     ["visp", "capture", "--from", "journey.json"],
     ["pnpm", "exec", "visp", "done"],
+    ["visp", "uninstall"],
     ["npm", "exec", "--", "visp", "review", "--from", "review.json"],
     ["npx", "visp", "verify"],
     [
@@ -330,6 +334,7 @@ describe("product command check execution boundary", () => {
       ["visp", "brief", "--template"],
       ["visp", "review", "--template"],
       ["visp", "install", "--dry-run"],
+      ["visp", "uninstall", "--dry-run"],
       ["node", "test/helper.mjs", "capture"],
       ["pnpm", "test", "--", "--grep", "visp capture"],
     ])

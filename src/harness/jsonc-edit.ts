@@ -53,8 +53,16 @@ export function setJsoncMember(
   return undefined;
 }
 
-/** Removes the member at `path`, with its comma; the text is unchanged when it is absent. */
-export function removeJsoncMember(source: string, path: readonly string[]): string | undefined {
+/**
+ * Removes the member at `path`, with its comma; the text is unchanged when it is absent.
+ * `tidy` undoes an insertion: the space before an inline member goes with it, and an object
+ * left without members closes up as `{}`.
+ */
+export function removeJsoncMember(
+  source: string,
+  path: readonly string[],
+  tidy = false,
+): string | undefined {
   const root = parseJsonc(source);
   if (root?.kind !== "object" || path.length === 0) return undefined;
   let object = root;
@@ -68,7 +76,7 @@ export function removeJsoncMember(source: string, path: readonly string[]): stri
   const found = memberNamed(object, path.at(-1) ?? "");
   if (found === "duplicate") return undefined;
   if (!found) return source;
-  return apply(source, new Layout(source, root).remove(object, found));
+  return apply(source, new Layout(source, root).remove(object, found, tidy));
 }
 
 function nested(path: readonly string[], value: unknown): unknown {
@@ -145,12 +153,22 @@ class Layout {
     ];
   }
 
-  remove(object: Extract<JsoncNode, { kind: "object" }>, member: JsoncMember): Edit[] {
+  remove(
+    object: Extract<JsoncNode, { kind: "object" }>,
+    member: JsoncMember,
+    tidy: boolean,
+  ): Edit[] {
     const index = object.members.indexOf(member);
     const previous = object.members[index - 1];
     const ownLine = !this.inline(object) && this.ownsLine(member.keyStart);
-    const start = ownLine ? this.lineStart(member.keyStart) : member.keyStart;
     const tail = member.comma !== undefined ? member.comma + 1 : member.value.end;
+    // The only member, and nothing else in the braces: the object is empty again, as `{}`.
+    const inner = `${this.source.slice(object.start + 1, member.keyStart)}${this.source.slice(tail, object.end - 1)}`;
+    if (tidy && object.members.length === 1 && inner.trim() === "")
+      return [{ start: object.start + 1, end: object.end - 1, text: "" }];
+    let start = ownLine ? this.lineStart(member.keyStart) : member.keyStart;
+    // Inline, the space that set the member apart goes with it.
+    if (tidy && this.inline(object)) while (/[ \t]/u.test(this.source[start - 1] ?? "")) start--;
     const lineEnd = this.endOfLineTrivia(tail);
     const end = ownLine && this.isNewline(lineEnd) ? this.afterNewline(lineEnd) : tail;
     // The last member has no comma of its own; the one before it then ends the object.
