@@ -262,36 +262,127 @@ if (input?.tool_name === "Bash") {
 // may still run in the background. Only VISP itself counts as the command, with the verb as
 // the first word after it: \`echo "${PRODUCT_NAME} done"\`, \`grep ${PRODUCT_NAME}\` and a request in a
 // heredoc that says "show ${PRODUCT_NAME} status" were refused when any of the three words after
-// \`${PRODUCT_NAME}\` anywhere matched.
+// \`${PRODUCT_NAME}\` anywhere matched. A loop counts only around the VISP command (between its
+// while, until or for and done), so \`...; done && ${PRODUCT_NAME} verify\` is not one.
 // Function declarations, not top-level constants: the Bash branch above runs first.
 function workflowShellCommand(command) {
   const workflow = new Set(["work", "done", "verify", "accept", "next", "pr", "status", "brief", "critic", "review"]);
-  const loops = new Set(["while", "until", "for", "select", "watch"]);
-  const commands = shellCommands(withoutHeredocBodies(command));
-  for (const words of commands) {
-    const verb = vispVerb(words);
-    if (verb && workflow.has(verb))
-      return { command: "${PRODUCT_NAME} " + verb, loop: commands.some((entry) => loops.has(entry[0])) };
+  let depth = 0;
+  for (const words of commandWords(withoutHeredocBodies(command))) {
+    if (["while", "until", "for", "select"].includes(words[0])) depth++;
+    else if (words[0] === "done") depth = Math.max(0, depth - 1);
+    const found = vispInvocation(words);
+    if (found?.script !== undefined) {
+      const inner = workflowShellCommand(found.script);
+      if (inner) return { command: inner.command, loop: inner.loop || depth > 0 };
+    } else if (found && workflow.has(found.verb))
+      return { command: "${PRODUCT_NAME} " + found.verb, loop: depth > 0 || found.watched };
   }
   return undefined;
 }
 
-// The first word after \`${PRODUCT_NAME}\`, its installed path or \`npx ${PACKAGE_NAME}\` when that is
-// the command itself; words before it may only be variable assignments, flags, durations and
-// wrappers such as env, timeout, npx or the do of a loop.
-function vispVerb(words) {
-  const wrappers = new Set(["env", "command", "exec", "nohup", "time", "timeout", "npx", "pnpm", "npm", "yarn", "bunx", "dlx", "watch", "while", "until", "do", "if", "then", "else", "elif", "!", "{"]);
+// Simple commands, split at ; & | newlines, ( ) and command substitutions ($(...) and
+// backticks, also inside double quotes), so the VISP in "$(${PRODUCT_NAME} status)" is a command of
+// its own. Single-quoted text stays one word; arithmetic $((...)) holds no commands.
+function commandWords(command) {
+  const commands = [[]];
+  let word = "";
+  let inWord = false;
+  const quotes = [];
+  const end = () => {
+    if (inWord) commands[commands.length - 1].push(word);
+    word = "";
+    inWord = false;
+  };
+  const split = () => {
+    end();
+    commands.push([]);
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    const quote = quotes[quotes.length - 1];
+    if (quote === "'") {
+      if (c === "'") quotes.pop();
+      else word += c;
+      continue;
+    }
+    if (c === "$" && command.startsWith("((", i + 1)) {
+      let open = 0;
+      for (i++; i < command.length; i++) {
+        if (command[i] === "(") open++;
+        else if (command[i] === ")" && --open === 0) break;
+      }
+      word += "0";
+      inWord = true;
+      continue;
+    }
+    if (c === "$" && command[i + 1] === "(") {
+      quotes.push("$(");
+      i++;
+      split();
+      continue;
+    }
+    if (c === "\`") {
+      if (quote === "\`") quotes.pop();
+      else quotes.push("\`");
+      split();
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') quotes.pop();
+      else if (c === "\\\\" && i + 1 < command.length) word += command[++i];
+      else word += c;
+      continue;
+    }
+    if (c === ")" && quote === "$(") {
+      quotes.pop();
+      split();
+    } else if (c === "'" || c === '"') {
+      quotes.push(c);
+      inWord = true;
+    } else if (c === "\\\\" && i + 1 < command.length) {
+      word += command[++i];
+      inWord = true;
+    } else if ("\\n;&|()".includes(c)) split();
+    else if (/\\s/.test(c)) end();
+    else {
+      word += c;
+      inWord = true;
+    }
+  }
+  end();
+  return commands.filter((words) => words.length > 0);
+}
+
+// VISP as the command itself: the first word, after assignments, flags and their values,
+// durations and wrappers such as env, sudo, timeout, npx or a loop's do. Returns the verb, or
+// the script a shell runs with -c, which is checked the same way.
+function vispInvocation(words) {
+  const wrappers = new Set(["env", "command", "exec", "nohup", "time", "timeout", "sudo", "npx", "pnpm", "npm", "yarn", "bunx", "dlx", "watch", "while", "until", "do", "if", "then", "else", "elif", "!", "{"]);
+  let watched = false;
   for (let index = 0; index < words.length; index++) {
-    const word = words[index].replace(/^\\$?\\(+/, "");
+    const word = words[index];
     if (word === "${PRODUCT_NAME}" || word.endsWith("/${PRODUCT_NAME}") || word === "${PACKAGE_NAME}" || word.startsWith("${PACKAGE_NAME}@"))
-      return words.slice(index + 1).find((next) => !next.startsWith("-"))?.replace(/\\)+$/, "");
-    if (!wrappers.has(word) && !word.startsWith("-") && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) && !/^\\d+(?:\\.\\d+)?[smhd]?$/.test(word))
-      return undefined;
+      return { verb: words.slice(index + 1).find((next) => !next.startsWith("-")), watched };
+    if (/^(?:.*\\/)?(?:ba|z|da)?sh$/.test(word)) {
+      const flag = words.findIndex((next, at) => at > index && /^-[A-Za-z]*c[A-Za-z]*$/.test(next));
+      return flag > 0 && words[flag + 1] !== undefined ? { script: words[flag + 1] } : undefined;
+    }
+    if (word === "watch") watched = true;
+    const previous = words[index - 1] ?? "";
+    const prefix =
+      wrappers.has(word) ||
+      word.startsWith("-") ||
+      /^-[A-Za-z]$/.test(previous) ||
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(word) ||
+      /^\\d+(?:\\.\\d+)?[smhd]?$/.test(word);
+    if (!prefix) return undefined;
   }
   return undefined;
 }
 
 // A heredoc body is input text, such as the request \`${PRODUCT_NAME} feature\` reads, not commands.
+// Arithmetic such as $((1<<2)) does not start one.
 function withoutHeredocBodies(command) {
   const kept = [];
   const pending = [];
@@ -302,7 +393,8 @@ function withoutHeredocBodies(command) {
       continue;
     }
     kept.push(line);
-    for (const match of line.matchAll(/(?<!<)<<(-?)\\s*(['"]?)([^\\s'"<>;&|()]+)\\2/g))
+    const code = line.replace(/\\$?\\(\\([^()]*\\)\\)/g, "0");
+    for (const match of code.matchAll(/(?<!<)<<(-?)\\s*(['"]?)([^\\s'"<>;&|()]+)\\2/g))
       pending.push([match[3], match[1] === "-"]);
   }
   return kept.join("\\n");

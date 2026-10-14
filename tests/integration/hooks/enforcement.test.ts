@@ -242,6 +242,16 @@ describe("generated hooks", () => {
       ["npx @visporg/visp-coder done", "done"],
       ["npx -y @visporg/visp-coder@beta verify", "verify"],
       [`${join(project.root, ".bin/visp")} status`, "status"],
+      ['bash -c "visp done"', "done"],
+      ["sudo visp done", "done"],
+      ["timeout -s KILL 600 visp done", "done"],
+      ["( visp done )", "done"],
+      ["x=$(visp next); echo $x", "next"],
+      // Arithmetic is not a heredoc: the line after it is still a command.
+      ["echo $((1<<2))\nvisp done", "done"],
+      // A loop elsewhere in the line does not make this a loop around visp.
+      ["for f in tests/*.py; do python $f; done && visp verify", "verify"],
+      ["visp done; for f in *.log; do tail -3 $f; done", "done"],
     ]) {
       const response = run(command, true);
       expect(decision(response), command).toBe("deny");
@@ -253,6 +263,9 @@ describe("generated hooks", () => {
       ["until visp status | grep -q accepted; do sleep 10; done", "status"],
       ["while true; do visp next; sleep 30; done", "next"],
       ["watch -n 5 visp status", "status"],
+      ['until [ "$(visp status --json | jq -r .phase)" = accepted ]; do sleep 10; done', "status"],
+      ["until [ `visp status` = ok ]; do sleep 2; done", "status"],
+      ["bash -c 'until visp status; do sleep 1; done'", "status"],
     ])
       for (const background of [true, false]) {
         const response = run(command, background);
@@ -268,6 +281,8 @@ describe("generated hooks", () => {
       "visp ui --port 4000",
       "npm run dev",
       "while pgrep -f node; do sleep 5; done",
+      'git commit -m "fix: make visp done faster"',
+      "echo '$(visp done)'",
     ])
       expect(decision(run(command, true)), command).toBe("");
     // feature keeps writing acceptance tests after it prints the id the worker continues with,
