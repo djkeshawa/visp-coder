@@ -22,7 +22,11 @@ import {
   validateProductCheckCommand,
 } from "./check-command.js";
 import { checkFix, missingAlias } from "./check-executable.js";
-import { recordCheckImages } from "./check-images.js";
+import {
+  type DeclaredImageStates,
+  declaredImageStates,
+  recordCheckImages,
+} from "./check-images.js";
 import {
   configuredMissingTool,
   configuredToolRecovery,
@@ -125,6 +129,7 @@ export async function executeProductCheck(
     ? await pinnedWaivers(workspace, record.brief.feature)
     : undefined;
   let originalEnvironment: Record<string, string> | undefined;
+  const imagesBefore = await declaredImageStates(workspace.paths.root, check);
   const isolation = await prepareProductFlipEnvironment(workspace, record, slice, check, async () =>
     flipEnvironmentIdentity(
       base.comparisonEnvironment,
@@ -174,14 +179,10 @@ export async function executeProductCheck(
       full,
       output,
     );
-    const imaged = await decideCheckImages(
-      workspace,
-      record,
-      check,
-      subjectDigest,
-      base.command,
-      decision,
-    );
+    const imaged = await decideCheckImages(workspace, record, check, subjectDigest, decision, {
+      command: base.command,
+      before: imagesBefore,
+    });
     const { status, note } = imaged;
     const flip = isUnwaivedPass(status, output)
       ? await productFlipCheck(
@@ -242,12 +243,19 @@ async function decideCheckImages(
   record: ProductRecord,
   check: ProductCheck,
   subjectDigest: string,
-  command: string,
   decision: { status: ProductExecution["status"]; note: string },
+  run: { command: string; before: DeclaredImageStates },
 ) {
   const images =
     decision.status === "passed" && check.images?.length
-      ? await recordCheckImages(workspace, record.brief.feature, check, subjectDigest, command)
+      ? await recordCheckImages(
+          workspace,
+          record.brief.feature,
+          check,
+          subjectDigest,
+          run.command,
+          run.before,
+        )
       : undefined;
   if (typeof images === "string")
     return {

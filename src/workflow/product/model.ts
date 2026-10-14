@@ -30,6 +30,14 @@ export const checkImagePathSchema = z
   .refine(
     (path) => !/^(?:[A-Za-z]:)?[\\/]/.test(path) && !path.split(/[\\/]/).includes(".."),
     "a check image is a path inside the project",
+  )
+  .refine(
+    (path) =>
+      path
+        .split(/[\\/]/)
+        .find((part) => part && part !== ".")
+        ?.toLowerCase() !== ".visp",
+    "a check image is a product output, not a file under .visp/",
   );
 const provenance = z.enum(["user-stated", "independent", "agent-proposed", "legacy"]);
 const productOutcomeSchema = z

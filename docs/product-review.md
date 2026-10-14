@@ -97,7 +97,7 @@ The `@visporg/visp-coder/testing` export offers the same building blocks to a pr
 
 ## Images from command checks
 
-A result that is a picture rather than a page, such as a rendered scene, a chart or a generated image, is judged by looking at it. A command check that writes such a file declares it under `images` (up to four PNG, JPEG, WebP or GIF paths inside the project):
+A result that is a picture rather than a page, such as a rendered scene, a chart or a generated image, is judged by looking at it. A command check that writes such a file declares it under `images` (up to four PNG, JPEG, WebP or GIF paths inside the project, not under `.visp/`):
 
 ```yaml
 checks:
@@ -109,7 +109,7 @@ checks:
 
 A check that declares images must cover an `experience` outcome that says how the picture must look, for example that each object, subject and look the request names is recognizable in it; the brief is rejected otherwise. Technical outcomes alone (the file is written, the grid has a size) cannot fail on a picture that does not show what was asked for. With images delivered, the reviewer treats a named subject that is missing, hidden, cut off or reads as something else as a departure from the request (a required finding), unlike polish beyond the request, which stays an optional finish finding.
 
-When the check passes, VISP copies each declared image into the feature's captures as an image of the current product version, and the review packet delivers it to the independent reviewer. A declared image that is missing, larger than 4 MiB or not one of those formats fails the check. Declared images are outputs: writing them does not change the product version, so rerunning the check does not make earlier evidence stale. An SVG or HTML result needs a check that rasterizes it to PNG first.
+When the check passes, VISP copies each declared image into the feature's captures as an image of the current product version, and the review packet delivers it to the independent reviewer. The check must write each declared image every time it runs: an image that is missing afterwards, or left unchanged from before the run (a file from an earlier run, or an existing product file), fails the check, as does one larger than 4 MiB or not in one of those formats. Declared images are outputs: writing them does not change the product version, so rerunning the check does not make earlier evidence stale. A declared image that existed before the feature started (committed, or uncommitted work the feature started from) stays part of the product. An SVG or HTML result needs a check that rasterizes it to PNG first.
 
 ### Pictures without a declaration
 

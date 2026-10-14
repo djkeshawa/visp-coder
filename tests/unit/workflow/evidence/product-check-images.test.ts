@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { deflateSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { sha256 } from "../../../../src/core/hash.js";
@@ -11,8 +11,13 @@ import {
   runProductReview,
   runProductVerify,
 } from "../../../../src/workflow/product/index.js";
+import {
+  inheritedChangesContent,
+  inheritedChangesPath,
+} from "../../../../src/workflow/product/inherited-record.js";
 import { type ProductBrief, productCheckSchema } from "../../../../src/workflow/product/model.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
+import { productSourceSnapshot } from "../../../../src/workflow/product/subject.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { moduleFeedback } from "../../support/product-feedback.js";
 import { productWorkspace } from "../../support/product-workspace.js";
@@ -142,11 +147,63 @@ describe("images declared by a command check", () => {
         executions: [
           {
             status: "failed",
-            output: expect.stringContaining("Declared image out/scene.png is missing"),
+            output: expect.stringContaining(
+              "C001 passed but did not write its declared image out/scene.png in this run",
+            ),
           },
         ],
       },
     });
+  });
+
+  it("fail the check when the declared image is left over from an earlier run", async () => {
+    const workspace = await imageCheck("process.exit(0)", ["out/scene.png"]);
+    await workspace.write("out/scene.png", png(255, 0, 0));
+    const verified = await runProductVerify(await workspace.state());
+    expect(verified).toMatchObject({
+      ok: true,
+      value: {
+        passed: false,
+        executions: [
+          {
+            status: "failed",
+            output: expect.stringContaining(
+              "C001 passed but did not write its declared image out/scene.png in this run; make the check write it",
+            ),
+          },
+        ],
+      },
+    });
+  });
+
+  it("pass when the check rewrites the same image bytes", async () => {
+    const red = JSON.stringify(RED);
+    const workspace = await imageCheck(
+      `require("fs").mkdirSync("out",{recursive:true});require("fs").writeFileSync("out/scene.png",Buffer.from(${red},"base64"))`,
+      ["out/scene.png"],
+    );
+    await workspace.write("out/scene.png", png(255, 0, 0));
+    const verified = await runProductVerify(await workspace.state());
+    expect(verified).toMatchObject({ ok: true, value: { passed: true } });
+  });
+
+  it("stay product when they existed before the feature started", async () => {
+    const workspace = await imageCheck(writeRandomImage, ["out/scene.png"]);
+    await workspace.write("out/scene.png", png(255, 0, 0));
+    const state = await workspace.state();
+    const record = await readProductRecord(state);
+    if (!record.ok) throw new Error(record.error.message);
+    const written = await productSourceSnapshot(state, record.value.brief);
+    expect(written).toMatchObject({ ok: true });
+    if (written.ok) expect(written.value).not.toHaveProperty(["out/scene.png"]);
+    // Uncommitted work the feature started from, as recorded when Git could not be written.
+    await workspace.write(
+      relative(workspace.root, inheritedChangesPath(state, record.value.brief.feature)),
+      inheritedChangesContent({ "out/scene.png": "earlier" }),
+    );
+    const inherited = await productSourceSnapshot(await workspace.state(), record.value.brief);
+    expect(inherited).toMatchObject({ ok: true });
+    if (inherited.ok) expect(inherited.value).toHaveProperty(["out/scene.png"]);
   });
 
   it("fail the check when the declared file is not an image", async () => {
@@ -263,7 +320,16 @@ describe("images declared by a command check", () => {
   it("accept only image files inside the project", () => {
     const check = { id: "C001", command: ["node", "render.mjs"] };
     expect(productCheckSchema.safeParse({ ...check, images: ["out/a.png"] }).success).toBe(true);
-    for (const path of ["../a.png", "/tmp/a.png", "C:\\a.png", "out/a.svg", "out/../../a.png"])
+    for (const path of [
+      "../a.png",
+      "/tmp/a.png",
+      "C:\\a.png",
+      "out/a.svg",
+      "out/../../a.png",
+      ".visp/a.png",
+      "./.visp/features/a.png",
+      ".VISP/a.png",
+    ])
       expect(productCheckSchema.safeParse({ ...check, images: [path] }).success).toBe(false);
     expect(productCheckSchema.safeParse({ ...check, images: [] }).success).toBe(false);
   });
