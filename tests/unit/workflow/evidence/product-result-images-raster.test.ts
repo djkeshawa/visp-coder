@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runProductVerify, updateProductBrief } from "../../../../src/workflow/product/index.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
@@ -128,7 +130,8 @@ describe("SVG pictures the product makes", () => {
     ]);
   });
 
-  it("stop after the browser fails once, and try again on the next run", async () => {
+  // A browser that hangs at startup cost every done, verify and accept its startup timeout.
+  it("stop after the browser fails, and skip SVGs for an hour on this browser", async () => {
     const workspace = await working();
     await workspace.write("art/a.svg", svg("red"));
     await workspace.write("art/b.svg", svg("blue"));
@@ -138,7 +141,15 @@ describe("SVG pictures the product makes", () => {
     expect(await routes(workspace)).toEqual([]);
     raster.answer = "png";
     expect((await runProductVerify(await workspace.state())).ok).toBe(true);
+    expect(raster.renders).toHaveLength(1);
+    // An hour later the browser is tried again.
+    const memory = join(workspace.root, ".visp/session/unrendered-svg.json");
+    const remembered = JSON.parse(await readFile(memory, "utf8"));
+    remembered.browserFailure.at = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    await writeFile(memory, JSON.stringify(remembered));
+    expect((await runProductVerify(await workspace.state())).ok).toBe(true);
     expect(raster.renders).toHaveLength(3);
+    expect(JSON.parse(await readFile(memory, "utf8")).browserFailure).toBeUndefined();
   });
 
   it("remember a picture that does not render until its content changes", async () => {

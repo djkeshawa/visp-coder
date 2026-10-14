@@ -1,5 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
+import { browserExecutableIdentity } from "../../core/browser-executable.js";
 import { type FileMutation, filePrecondition } from "../../core/file-transaction.js";
 import { sha256 } from "../../core/hash.js";
 import { type SvgRasterizer, svgRasterizer } from "../../testing/svg-raster.js";
@@ -15,7 +16,10 @@ const PICTURE = /\.(?:png|jpe?g|webp|gif|svg)$/i;
 const MAX_RESULT_IMAGES = 4;
 const MAX_SVG_BYTES = 1024 * 1024;
 const ROUTE = "result image: ";
-/** SVG contents a working browser could not render; machine-local, like check output logs. */
+/**
+ * SVG contents a working browser could not render, and a browser that failed to run;
+ * machine-local, like check output logs.
+ */
 const UNRENDERED_FILE = "unrendered-svg.json";
 const MAX_UNRENDERED = 200;
 
@@ -31,9 +35,13 @@ export interface PreparedResultImages {
   readonly pictures: readonly ResultPicture[];
   /** SHA-256 of SVG contents that did not render in a working browser. */
   readonly unrendered: readonly string[];
+  /** Whether the browser ran this time, and which browser executable it was. */
+  readonly browser?: { readonly identity: string; readonly worked: boolean };
 }
 
 const NONE: PreparedResultImages = { pictures: [], unrendered: [] };
+/** How long a browser that failed is not started again for result pictures. */
+const BROWSER_RETRY_MS = 60 * 60 * 1000;
 
 /**
  * A picture the product makes (a rendered scene, a chart, a vector drawing) is judged by
@@ -59,7 +67,12 @@ export async function prepareResultImages(
     return NONE;
   const candidates = await resultImagePaths(workspace, record, source.snapshot, source.digest);
   if (!candidates.length) return NONE;
-  const svgs = new SvgRendering(await unrenderedSvgs(workspace));
+  const memory = await renderMemory(workspace);
+  const identity = JSON.stringify(await browserExecutableIdentity());
+  const failedAt = Date.parse(memory.browserFailure?.at ?? "");
+  const browserDown =
+    memory.browserFailure?.identity === identity && Date.now() - failedAt < BROWSER_RETRY_MS;
+  const svgs = new SvgRendering(new Set(memory.sha256), browserDown);
   const pictures: ResultPicture[] = [];
   try {
     for (const path of candidates) {
@@ -79,7 +92,12 @@ export async function prepareResultImages(
   } finally {
     await svgs.close();
   }
-  return { subjectDigest: source.digest, pictures, unrendered: svgs.unrendered };
+  return {
+    subjectDigest: source.digest,
+    pictures,
+    unrendered: svgs.unrendered,
+    ...(svgs.browser === undefined ? {} : { browser: { identity, worked: svgs.browser } }),
+  };
 }
 
 /**
@@ -101,7 +119,7 @@ export async function publishResultImages(
     captures: pictures.map((picture) => picture.capture),
     mutations: [
       ...pictures.map((picture) => picture.mutation),
-      ...(await unrenderedMutation(workspace, prepared.unrendered)),
+      ...(await renderMemoryMutation(workspace, prepared)),
     ],
   };
 }
@@ -150,23 +168,29 @@ async function resultImageBytes(workspace: WorkspaceState, path: string, svgs: S
 
 /**
  * One browser for a run's SVGs, started on the first one not already known not to render;
- * after the browser fails, the run's other SVGs are skipped.
+ * after the browser fails, the run's other SVGs are skipped, and so are the next hour's runs
+ * on the same browser executable: a browser that hangs at startup cost every done, verify
+ * and accept its 10 s startup timeout.
  */
 class SvgRendering {
   readonly unrendered: string[] = [];
+  /** True once the browser rendered or judged a picture, false once it failed. */
+  browser: boolean | undefined;
   private rasterizer: SvgRasterizer | undefined;
-  private browserFailed = false;
 
-  constructor(private readonly known: ReadonlySet<string>) {}
+  constructor(
+    private readonly known: ReadonlySet<string>,
+    private readonly browserDown: boolean,
+  ) {}
 
   async render(svg: Uint8Array): Promise<Buffer | undefined> {
     const digest = sha256(svg);
-    if (this.browserFailed || this.known.has(digest)) return undefined;
+    if (this.browserDown || this.browser === false || this.known.has(digest)) return undefined;
     this.rasterizer ??= svgRasterizer();
     const rendered = await this.rasterizer.render(svg);
+    this.browser = !("failed" in rendered && rendered.failed === "browser");
     if ("png" in rendered) return rendered.png;
     if (rendered.failed === "picture") this.unrendered.push(digest);
-    else this.browserFailed = true;
     return undefined;
   }
 
@@ -179,40 +203,62 @@ function unrenderedPath(workspace: WorkspaceState): string {
   return join(workspace.paths.sessionDir, UNRENDERED_FILE);
 }
 
-function parseUnrendered(text: string | undefined): string[] {
+interface RenderMemory {
+  readonly sha256: string[];
+  readonly browserFailure?: { readonly identity: string; readonly at: string };
+}
+
+function parseRenderMemory(text: string | undefined): RenderMemory {
   try {
-    const parsed = text === undefined ? undefined : (JSON.parse(text) as { sha256?: unknown });
-    return Array.isArray(parsed?.sha256)
-      ? parsed.sha256.filter((entry): entry is string => typeof entry === "string")
-      : [];
+    const parsed =
+      text === undefined
+        ? undefined
+        : (JSON.parse(text) as { sha256?: unknown; browserFailure?: unknown });
+    const failure = parsed?.browserFailure as { identity?: unknown; at?: unknown } | undefined;
+    return {
+      sha256: Array.isArray(parsed?.sha256)
+        ? parsed.sha256.filter((entry): entry is string => typeof entry === "string")
+        : [],
+      ...(typeof failure?.identity === "string" && typeof failure.at === "string"
+        ? { browserFailure: { identity: failure.identity, at: failure.at } }
+        : {}),
+    };
   } catch {
-    return [];
+    return { sha256: [] };
   }
 }
 
-async function unrenderedSvgs(workspace: WorkspaceState): Promise<Set<string>> {
+async function renderMemory(workspace: WorkspaceState): Promise<RenderMemory> {
   const text = await workspace.files.readTextIfExists(unrenderedPath(workspace));
-  return new Set(text.ok ? parseUnrendered(text.value) : []);
+  return parseRenderMemory(text.ok ? text.value : undefined);
 }
 
-async function unrenderedMutation(
+/** Under the lock: SVGs that did not render, and a browser that failed or works again. */
+async function renderMemoryMutation(
   workspace: WorkspaceState,
-  unrendered: readonly string[],
+  prepared: PreparedResultImages,
 ): Promise<FileMutation[]> {
-  if (!unrendered.length) return [];
+  if (!prepared.unrendered.length && !prepared.browser) return [];
   const path = unrenderedPath(workspace);
   const existing = await workspace.files.readTextIfExists(path);
   if (!existing.ok) return [];
-  const merged = [...new Set([...parseUnrendered(existing.value), ...unrendered])].slice(
-    -MAX_UNRENDERED,
-  );
-  return [
-    {
-      kind: "write",
-      path,
-      content: `${JSON.stringify({ version: 1, sha256: merged })}\n`,
-      mode: 0o600,
-      expectedBefore: filePrecondition(existing.value),
-    },
-  ];
+  const before = parseRenderMemory(existing.value);
+  const failure = prepared.browser
+    ? prepared.browser.worked
+      ? undefined
+      : { identity: prepared.browser.identity, at: new Date().toISOString() }
+    : before.browserFailure;
+  const digests = [...new Set([...before.sha256, ...prepared.unrendered])].slice(-MAX_UNRENDERED);
+  const content = `${JSON.stringify({ version: 1, sha256: digests, ...(failure ? { browserFailure: failure } : {}) })}\n`;
+  return content === existing.value
+    ? []
+    : [
+        {
+          kind: "write",
+          path,
+          content,
+          mode: 0o600,
+          expectedBefore: filePrecondition(existing.value),
+        },
+      ];
 }
