@@ -120,3 +120,23 @@ async function snapshot(root: string, path = ""): Promise<Record<string, string>
   }
   return files;
 }
+
+describe("uninstall CLI", () => {
+  it("previews with --dry-run and then removes what install wrote", async () => {
+    await runCli(workspace.root, "install", "--harness", "codex", "--no-hooks", "--no-mcp");
+    const preview = await runJson<{ dryRun: boolean; changes: { path: string }[] }>(
+      workspace.root,
+      "uninstall",
+      "--harness",
+      "codex",
+      "--dry-run",
+    );
+    expect(preview.envelope.data?.dryRun).toBe(true);
+    expect(preview.envelope.data?.changes.map((change) => change.path)).toContain("AGENTS.visp.md");
+    expect(await readFile(join(workspace.root, "AGENTS.visp.md"), "utf8")).toContain("VISP");
+
+    const text = await runCli(workspace.root, "uninstall", "--harness", "codex");
+    expect(text.stdout).toContain("rm -rf .visp visp.yml");
+    await expect(readFile(join(workspace.root, "AGENTS.visp.md"), "utf8")).rejects.toThrow();
+  });
+});
