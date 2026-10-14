@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { productBehaviorProbes } from "./behavior-probes.js";
-import { productCaptureRunSchema } from "./capture-run-model.js";
+import { validCaptureRuns } from "./capture-run-model.js";
 import { evidenceApplies } from "./evidence-references.js";
 import { checksFor, type ProductSlice } from "./model.js";
 import { summarizeLayout, summarizeObservation } from "./observation-summary.js";
@@ -82,15 +82,9 @@ export function reviewInteractionEvidence(
   subject: string,
   slice?: ProductSlice,
 ) {
-  const runs = record.state.captureRuns.flatMap((candidate) => {
-    const parsed = productCaptureRunSchema.safeParse(candidate);
-    if (
-      !parsed.success ||
-      !evidenceApplies(record, subject, parsed.data) ||
-      (slice && parsed.data.task && parsed.data.task !== slice.id)
-    )
+  const runs = validCaptureRuns(record).flatMap((run) => {
+    if (!evidenceApplies(record, subject, run) || (slice && run.task && run.task !== slice.id))
       return [];
-    const run = parsed.data;
     return [
       {
         runId: run.id,

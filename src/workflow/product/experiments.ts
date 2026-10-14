@@ -1,7 +1,7 @@
 import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
-import { productCaptureRunSchema } from "./capture-run-model.js";
+import { type ProductCaptureRun, validCaptureRuns } from "./capture-run-model.js";
 import {
   currentFailedJourneys,
   evidenceApplies,
@@ -149,10 +149,8 @@ export function validateExperimentResolutions(
   const failed = latestCurrentJourneys(record, subject, slice?.id).filter(
     (run) => run.status && run.status !== "completed",
   );
-  const current = record.state.captureRuns.flatMap((entry) => {
-    const run = productCaptureRunSchema.safeParse(entry);
-    return run.success && evidenceApplies(record, subject, run.data) ? [run.data] : [];
-  });
+  const stored = validCaptureRuns(record);
+  const current = stored.filter((run) => evidenceApplies(record, subject, run));
   const seen = new Set<string>();
   for (const resolution of parsed.data) {
     const failure = failed.find((run) => run.id === resolution.runId);
@@ -180,12 +178,8 @@ export function validateExperimentResolutions(
       replacement.status !== "completed" ||
       replacement.task !== failure.task ||
       !sameJourneyIntent(failure, replacement) ||
-      record.state.captureRuns.findIndex(
-        (run) => productCaptureRunSchema.safeParse(run).data?.id === replacement.id,
-      ) <=
-        record.state.captureRuns.findIndex(
-          (run) => productCaptureRunSchema.safeParse(run).data?.id === failure.id,
-        ) ||
+      stored.findIndex((run) => run.id === replacement.id) <=
+        stored.findIndex((run) => run.id === failure.id) ||
       failed.some((run) => run.journeyKey === replacement.journeyKey)
     )
       return err(
@@ -233,7 +227,7 @@ export function validateExperimentResolutions(
   return ok(parsed.data);
 }
 
-type Journey = ReturnType<typeof productCaptureRunSchema.parse>;
+type Journey = ProductCaptureRun;
 
 function canDiagnoseAssertion(record: ProductRecord, failure: Journey, replacement?: Journey) {
   return (

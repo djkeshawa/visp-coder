@@ -1,6 +1,6 @@
 import { hashValue } from "../../core/hash.js";
 import { productJourneyKey } from "../evidence/product-journey.js";
-import { productCaptureRunSchema } from "./capture-run-model.js";
+import { validCaptureRuns } from "./capture-run-model.js";
 import {
   describeProductCheck,
   isBrowserCheckCommand,
@@ -89,10 +89,7 @@ function identifiedCounterexample(record: ProductRecord, entry: ProductExecution
   )
     return false;
   if (!isBrowserCheckCommand(check.command)) return !entry.captureRunId && !!entry.verifierDigest;
-  const matching = record.state.captureRuns.flatMap((input) => {
-    const parsed = productCaptureRunSchema.safeParse(input);
-    return parsed.success && parsed.data.id === entry.captureRunId ? [parsed.data] : [];
-  });
+  const matching = validCaptureRuns(record).filter((run) => run.id === entry.captureRunId);
   if (matching.length !== 1) return false;
   const run = matching[0];
   return (
@@ -237,10 +234,7 @@ function matchingJourneyPair(
   counterevidence: readonly string[],
   environmentChange?: RepairEnvironmentChange,
 ): FunctionalRepairWitness | undefined {
-  const runs = record.state.captureRuns.flatMap((input) => {
-    const parsed = productCaptureRunSchema.safeParse(input);
-    return parsed.success ? [parsed.data] : [];
-  });
+  const runs = validCaptureRuns(record);
   const unique = uniqueIds(runs);
   const uniqueExecution = uniqueIds(record.state.executions);
   const intact = (run: (typeof runs)[number]) =>

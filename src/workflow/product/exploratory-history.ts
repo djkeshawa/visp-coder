@@ -1,5 +1,5 @@
 import { historicalFailureIdentity } from "../evidence/journey-history.js";
-import { productCaptureRunSchema } from "./capture-run-model.js";
+import { type ProductCaptureRun, validCaptureRuns } from "./capture-run-model.js";
 import { journeyOwnershipIndex } from "./journey-ownership.js";
 import type { ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
@@ -10,12 +10,9 @@ const MAX_REFERENCE_LENGTH = 160;
 /** Only intact, uniquely identified runner failures can supply historical negative evidence. */
 export function exploratoryFailureHistory(record: ProductRecord, slice?: ProductSlice) {
   const ids = captureRunIdCounts(record.state.captureRuns);
-  const representatives = new Map<string, ReturnType<typeof productCaptureRunSchema.parse>>();
+  const representatives = new Map<string, ProductCaptureRun>();
   let total = 0;
-  for (const candidate of record.state.captureRuns) {
-    const parsed = productCaptureRunSchema.safeParse(candidate);
-    if (!parsed.success) continue;
-    const run = parsed.data;
+  for (const run of validCaptureRuns(record)) {
     if (
       run.expectation?.basis !== "agent-proposed" ||
       run.expectation.outcomes.length ||
@@ -42,7 +39,7 @@ export function exploratoryFailureHistory(record: ProductRecord, slice?: Product
 }
 
 /** Original failed observations stay stale; these references can only retain a required finding. */
-export function historicalFailureReferences(run: ReturnType<typeof productCaptureRunSchema.parse>) {
+export function historicalFailureReferences(run: ProductCaptureRun) {
   return [
     `HIST-${run.id}`,
     ...run.operations
@@ -139,16 +136,14 @@ export function historicalFindingJourney(record: ProductRecord, evidence: readon
     if (!reference.startsWith("HIST-")) continue;
     const id = reference.slice(5);
     if (ids.get(id) !== 1) continue;
-    for (const candidate of record.state.captureRuns) {
-      const run = productCaptureRunSchema.safeParse(candidate);
+    for (const run of validCaptureRuns(record)) {
       if (
-        run.success &&
-        run.data.id === id &&
-        run.data.failure?.kind === "behavior" &&
-        run.data.status !== "completed" &&
-        historicalFailureIdentity(run.data)
+        run.id === id &&
+        run.failure?.kind === "behavior" &&
+        run.status !== "completed" &&
+        historicalFailureIdentity(run)
       )
-        return run.data;
+        return run;
     }
   }
   return undefined;

@@ -45,3 +45,28 @@ export const productCaptureRunSchema = z.object({
   captures: z.array(captureSchema),
   operations: z.array(captureOperationSchema),
 });
+
+export type ProductCaptureRun = z.infer<typeof productCaptureRunSchema>;
+
+/**
+ * The runner-executed capture runs of a record that parse. The state stores them as unchecked
+ * JSON, so a run damaged on disk is skipped here and never counts as evidence.
+ */
+export function validCaptureRuns(source: CaptureRunSource): ProductCaptureRun[] {
+  return captureRunEntries(source).map((entry) => entry.run);
+}
+
+/** Each valid run beside the stored value it came from, for callers that hand the stored value on. */
+export function captureRunEntries(
+  source: CaptureRunSource,
+): { readonly stored: unknown; readonly run: ProductCaptureRun }[] {
+  const candidates = "state" in source ? source.state.captureRuns : source;
+  return candidates.flatMap((stored) => {
+    const parsed = productCaptureRunSchema.safeParse(stored);
+    return parsed.success ? [{ stored, run: parsed.data }] : [];
+  });
+}
+
+type CaptureRunSource =
+  | { readonly state: { readonly captureRuns: readonly unknown[] } }
+  | readonly unknown[];
