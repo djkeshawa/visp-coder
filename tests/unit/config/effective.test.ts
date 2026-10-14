@@ -56,7 +56,7 @@ it("refuses to explain a stale loaded configuration using new file provenance", 
 });
 
 it("keeps new-feature critic defaults separate from an existing feature's pinned opt-out", async () => {
-  const setup = await productWorkspace();
+  const setup = await productWorkspace({ flip: true });
   project = setup.workspace;
   await project.write(
     "visp.yml",
@@ -73,7 +73,7 @@ it("keeps new-feature critic defaults separate from an existing feature's pinned
 });
 
 it("explains the live display-only flip setting", async () => {
-  ({ workspace: project } = await productWorkspace());
+  ({ workspace: project } = await productWorkspace({ flip: true }));
   const state = await project.state();
   const config = await readFile(state.paths.config, "utf8");
   expect(config).toContain("flipCheck: auto");

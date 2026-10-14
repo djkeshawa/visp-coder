@@ -5,14 +5,19 @@ import {
 } from "../../../src/workflow/product/index.js";
 import { TestWorkspace } from "./workspace.js";
 
-/** Real product setup shared by adapter tests; the verifier reads the public module. */
-export async function productWorkspace(options: { critic?: boolean } = {}): Promise<{
+/**
+ * Real product setup shared by adapter tests; the verifier reads the public module. The flip
+ * check is off unless a test passes `flip: true`, because it doubles every passing check.
+ */
+export async function productWorkspace(
+  options: { critic?: boolean; flip?: boolean } = {},
+): Promise<{
   workspace: TestWorkspace;
   brief: ProductBrief;
 }> {
-  // Setup commits run the installed hook, so it is built once per test file and copied.
+  // Building the template takes about half a second, so it is built once per test file and copied.
   const { workspace, value } = await TestWorkspace.cached(
-    `product:${options.critic === true}`,
+    `product:${options.critic === true}:${options.flip === true}`,
     async () => {
       const built = await buildProductWorkspace(options);
       return { workspace: built.workspace, value: built.brief };
@@ -21,7 +26,7 @@ export async function productWorkspace(options: { critic?: boolean } = {}): Prom
   return { workspace, brief: value };
 }
 
-async function buildProductWorkspace(options: { critic?: boolean }): Promise<{
+async function buildProductWorkspace(options: { critic?: boolean; flip?: boolean }): Promise<{
   workspace: TestWorkspace;
   brief: ProductBrief;
 }> {
@@ -31,7 +36,7 @@ async function buildProductWorkspace(options: { critic?: boolean }): Promise<{
       "test/value.test.mjs":
         "import {test} from 'node:test'; import assert from 'node:assert/strict'; import {value} from '../src/value.mjs'; test('the promised value',()=>assert.equal(value,2));\n",
     },
-    options,
+    { critic: options.critic, flip: options.flip === true },
   );
   try {
     await workspace.installFoundation();

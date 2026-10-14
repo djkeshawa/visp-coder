@@ -29,7 +29,7 @@ async function fixture(
     workspace: Awaited<ReturnType<typeof productWorkspace>>["workspace"],
   ) => Promise<void>,
 ) {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   for (const [path, content] of Object.entries(files)) await w.write(path, content);
