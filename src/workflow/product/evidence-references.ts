@@ -559,18 +559,25 @@ export function resolveAssessmentEvidence(
  * whole review was discarded or its outcome left unassessed: about 30 reviews across the
  * benchmarks, among them every voxel-scene run's. A citation of evidence VISP marked
  * unavailable is dropped when the same list still cites other known evidence that VISP did
- * not mark unavailable. Stale, unknown and ambiguous citations are never dropped.
+ * not mark unavailable. Stale, unknown and ambiguous citations are never dropped: VISP marks
+ * an ambiguous ID unavailable too, but it stays cited, so the judgment that rests on it is
+ * still refused or left unavailable.
  */
 export function withoutUnavailableCitations(
   references: readonly string[],
   catalogue: ProductEvidenceCatalogue,
 ): { kept: string[]; dropped: string[] } {
-  const status = (id: string) =>
-    catalogue.entries.find((entry) => entry.id === (catalogue.aliases.get(id) ?? id))?.status;
+  const ambiguous = ambiguousEvidenceIds(catalogue.entries);
+  const status = (reference: string) => {
+    const id = catalogue.aliases.get(reference) ?? reference;
+    return ambiguous.has(id)
+      ? "ambiguous"
+      : catalogue.entries.find((entry) => entry.id === id)?.status;
+  };
   const dropped = references.filter((id) => status(id) === "unavailable");
   const kept = references.filter((id) => status(id) !== "unavailable");
-  if (!dropped.length || !kept.some((id) => status(id) !== undefined))
-    return { kept: [...references], dropped: [] };
+  const usable = (id: string) => status(id) !== undefined && status(id) !== "ambiguous";
+  if (!dropped.length || !kept.some(usable)) return { kept: [...references], dropped: [] };
   return { kept, dropped };
 }
 

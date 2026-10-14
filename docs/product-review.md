@@ -202,7 +202,7 @@ Specific findings stay open until addressed with current counterevidence. Submit
 
 If a known finding lacks sufficient repair evidence, VISP records the rest of the review and leaves that finding open with the reason in `limitations`.
 
-Evidence that VISP lists as unavailable (a core file it could not deliver as text, a rendered image it did not capture) cannot support a judgment. When an assessment, finding, resolution or probe cites it beside evidence VISP delivered, VISP drops the unavailable citation instead of discarding the review, and records `VISP dropped citations of evidence it could not deliver: ...` in the summary (assessments) or `limitations`. A judgment marked `unclear` or `unavailable` keeps its citations, and citations of stale, unknown or ambiguous evidence are never dropped.
+Evidence that VISP lists as unavailable (a core file it could not deliver as text, a rendered image it did not capture) cannot support a judgment. When an assessment, finding, resolution or probe cites it beside evidence VISP delivered, VISP drops the unavailable citation instead of discarding the review, and records `VISP dropped citations of evidence it could not deliver: ...` in the summary (assessments) or `limitations`. A judgment marked `unclear` or `unavailable` keeps its citations, and citations of stale, unknown or ambiguous evidence are never dropped, so a review citing an ambiguous evidence ID is still refused.
 
 For a finding with recorded execution evidence, `work`, critic packets and review sessions include a `recheck` that names the journey or check to rerun and its replay or verify command. A matching later execution is labeled `observed-unassessed` until a reviewer judges it.
 

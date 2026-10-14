@@ -13,7 +13,7 @@
 
 ### Fixed
 - A desktop app importing a Claude Code project wrote `AGENTS.md`, `.codex/` and `.agents/` into it mid-run; as product files they made an acceptance stale and failed `visp done` with a scope violation the worker could not resolve. Untracked files of another coding host are no longer part of the product identity, scope check or input warnings (tracked ones, the configured host's own files, and ones a slice scope names or forbids or the configuration blocks still are).
-- A review was discarded, or an outcome left unassessed, when the reviewer cited evidence VISP had listed as unavailable (a rendered PNG VISP could not deliver as text) beside current evidence: about 30 reviews across the benchmarks, among them every voxel-scene run's. Such a citation is now dropped and recorded as a limitation (`VISP dropped citations of evidence it could not deliver: ...`) when the same verdict also cites known evidence. A judgment marked unclear or unavailable keeps its citations, and stale, unknown and ambiguous citations are never dropped.
+- A review was discarded, or an outcome left unassessed, when the reviewer cited evidence VISP had listed as unavailable (a rendered PNG VISP could not deliver as text) beside current evidence: about 30 reviews across the benchmarks, among them every voxel-scene run's. Such a citation is now dropped and recorded as a limitation (`VISP dropped citations of evidence it could not deliver: ...`) when the same verdict also cites known evidence. A judgment marked unclear or unavailable keeps its citations, and stale, unknown and ambiguous citations are never dropped (a citation of an ambiguous ID, which VISP also lists as unavailable, still makes the review fail as before).
 
 ## 0.5.0-beta.3 - 2026-10-12
 
