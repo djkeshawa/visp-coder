@@ -9,12 +9,13 @@ import {
   planCodexMcpRegistration,
   planCodexMcpUnregistration,
 } from "./codex-mcp-registration.js";
+import { removeJsoncMember, setJsoncMember } from "./jsonc-edit.js";
 
 /**
  * Registers visp as an MCP server in the harness's project configuration,
  * merging into whatever is already there. Other servers are left untouched:
  * clobbering a project's MCP configuration to add one entry would be a poor
- * trade.
+ * trade. Only the VISP entry's text changes, so comments and layout survive.
  */
 
 export const MCP_CONFIG_FILE = ".mcp.json";
@@ -103,12 +104,8 @@ export function planMcpRegistration(
 ): Result<PlannedMcpRegistration> {
   if (harness === "codex") return planCodexMcpRegistration(current, force);
   const shape = registrationShape(harness);
-  let config: McpConfig = {};
-  if (current !== undefined && current.trim() !== "") {
-    const parsed = parseConfig(current);
-    if (!parsed) return ok({ status: "malformed" });
-    config = parsed;
-  }
+  const config = parseConfigText(current);
+  if (config === "malformed") return ok({ status: "malformed" });
 
   const containerPresent = Object.hasOwn(config, shape.container);
   const existingServers = optionalObject(config[shape.container]);
@@ -124,10 +121,20 @@ export function planMcpRegistration(
   }
 
   servers[MCP_SERVER_NAME] = shape.entry;
-  return ok({
-    status: existing !== undefined ? "replaced" : "added",
-    content: formatConfig({ ...config, [shape.container]: servers }),
-  });
+  const content = registeredText(current, shape, { ...config, [shape.container]: servers });
+  // An edit that would not read back as intended is not written.
+  if (content === undefined) return ok({ status: "malformed" });
+  return ok({ status: existing !== undefined ? "replaced" : "added", content });
+}
+
+/** A new file is written whole; an existing one changes only in the VISP entry's text. */
+function registeredText(
+  current: string | undefined,
+  shape: RegistrationShape,
+  next: McpConfig,
+): string | undefined {
+  if (current === undefined || current.trim() === "") return formatConfig(next);
+  return verified(setJsoncMember(current, [shape.container, MCP_SERVER_NAME], shape.entry), next);
 }
 
 /** Removes only the exact generated VISP server entry and preserves every other setting. */
@@ -153,10 +160,18 @@ export function planMcpUnregistration(
 
   const servers = { ...existingServers };
   delete servers[MCP_SERVER_NAME];
-  return {
-    status: "removed",
-    content: formatConfig({ ...parsed, [shape.container]: servers }),
-  };
+  const content = verified(removeJsoncMember(current ?? "", [shape.container, MCP_SERVER_NAME]), {
+    ...parsed,
+    [shape.container]: servers,
+  });
+  return content === undefined ? { status: "malformed" } : { status: "removed", content };
+}
+
+/** The edited text, when it reads back as exactly the intended configuration. */
+function verified(edited: string | undefined, expected: McpConfig): string | undefined {
+  if (edited === undefined) return undefined;
+  const parsed = parseConfig(edited);
+  return parsed !== undefined && isDeepStrictEqual(parsed, expected) ? edited : undefined;
 }
 
 /** Distinguishes a removable generated entry from config that requires manual review. */

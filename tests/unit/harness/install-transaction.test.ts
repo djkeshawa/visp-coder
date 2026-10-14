@@ -23,6 +23,37 @@ afterEach(async () => {
 });
 
 describe("transactional harness installation", () => {
+  // Host MCP configuration may hold tokens and hand-written comments; keep the old text first.
+  it("backs up a host MCP configuration before rewriting it, outside the repository", async () => {
+    const before = '{\n  // hosted servers\n  "servers": { "github": { "url": "x" } }\n}\n';
+    await workspace.write(".vscode/mcp.json", before);
+    const state = await workspace.state();
+    const installed = await installHarness(state.paths, {
+      harness: "copilot",
+      profile: "minimal",
+      hooks: [],
+      mcp: true,
+    });
+    expect(installed.ok).toBe(true);
+
+    const after = await readFile(join(workspace.root, ".vscode/mcp.json"), "utf8");
+    expect(after).toContain("// hosted servers");
+    const backups = join(workspace.root, ".visp/state/backups/.vscode");
+    const saved = await readdir(backups);
+    expect(saved).toEqual([expect.stringMatching(/^mcp\.json\.[0-9a-f]{12}$/)]);
+    expect(await readFile(join(backups, saved[0] ?? ""), "utf8")).toBe(before);
+
+    // Nothing to rewrite, nothing to back up.
+    const again = await installHarness(state.paths, {
+      harness: "copilot",
+      profile: "minimal",
+      hooks: [],
+      mcp: true,
+    });
+    expect(again.ok).toBe(true);
+    expect(await readdir(backups)).toEqual(saved);
+  });
+
   it("creates missing nested parents on the first install and stays idempotent", async () => {
     const state = await workspace.state();
     const first = await installHarness(state.paths, {

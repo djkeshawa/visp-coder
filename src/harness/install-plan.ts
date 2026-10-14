@@ -3,7 +3,7 @@ import { balancedCritic, type CriticConfig } from "../config/critic.js";
 import { resolveCriticDefault } from "../config/critic-defaults.js";
 import { parseConfig } from "../config/load.js";
 import type { VispConfig } from "../config/schema.js";
-import { type Harness, PROFILES, type Profile } from "../core/constants.js";
+import { DIR, type Harness, PROFILES, type Profile, STATE_DIR } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { run } from "../core/exec.js";
 import { type FileMutation, filePrecondition } from "../core/file-transaction.js";
@@ -335,6 +335,8 @@ async function planPreviousMcpRegistration(
     );
     return ok(undefined);
   }
+  const backup = await planConfigBackup(fs, registration.path, current.value, planned);
+  if (!backup.ok) return backup;
   planned.mutations.push({
     kind: "write",
     path: registration.path,
@@ -342,6 +344,32 @@ async function planPreviousMcpRegistration(
     expectedBefore: filePrecondition(current.value),
   });
   planned.assets.push({ path: mcpRegistrationLabel(registration.path), status: "removed" });
+  return ok(undefined);
+}
+
+/**
+ * The text of a host configuration VISP is about to rewrite, kept under the ignored
+ * `.visp/state/backups/`: MCP configuration can hold tokens, which must not land beside it in
+ * the repository. One copy per distinct text.
+ */
+async function planConfigBackup(
+  fs: ProjectFileSystem,
+  path: string,
+  text: string | undefined,
+  plan: InstallPlan,
+): Promise<Result<void>> {
+  if (text === undefined || text.trim() === "") return ok(undefined);
+  const backup = `${STATE_DIR}/${DIR.state}/backups/${path}.${assetFingerprint(text)}`;
+  if (plan.mutations.some((mutation) => mutation.path === backup)) return ok(undefined);
+  const existing = await fs.readTextIfExists(backup);
+  if (!existing.ok) return existing;
+  if (existing.value !== text)
+    plan.mutations.push({
+      kind: "write",
+      path: backup,
+      content: text,
+      expectedBefore: filePrecondition(existing.value),
+    });
   return ok(undefined);
 }
 
@@ -769,6 +797,8 @@ async function planMcp(
     );
   }
   if (registration.value.content !== undefined) {
+    const backup = await planConfigBackup(fs, path, current.value, plan);
+    if (!backup.ok) return backup;
     plan.mutations.push({
       kind: "write",
       path,
@@ -781,6 +811,8 @@ async function planMcp(
     if (!old.ok) return old;
     const removal = planMcpUnregistration(old.value, "claude-code");
     if (removal.status === "removed" && removal.content !== undefined) {
+      const backup = await planConfigBackup(fs, ".mcp.json", old.value, plan);
+      if (!backup.ok) return backup;
       plan.mutations.push({
         kind: "write",
         path: ".mcp.json",

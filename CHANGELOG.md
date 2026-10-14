@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Registering the MCP server in a JSON or JSONC host configuration (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.json`) re-serialized the whole file, so every comment and the file's own layout were lost, with no backup. `visp install` now changes only the `visp` entry's text, in the file's own indentation and line endings, and uninstall removes only that entry. Before rewriting any host MCP configuration, Codex's TOML included, it keeps the previous text under the git-ignored `.visp/state/backups/`.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed
