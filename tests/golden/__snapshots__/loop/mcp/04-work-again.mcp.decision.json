@@ -1,13 +1,5 @@
 {
   "isError": false,
-  "ok": true,
-  "nextAction": {
-    "tool": "visp_done",
-    "arguments": {
-      "feature": "001-return-two-from-the-public",
-      "task": "T001"
-    }
-  },
   "next": {
     "action": "implement",
     "command": "visp done --feature 001-return-two-from-the-public --task T001",

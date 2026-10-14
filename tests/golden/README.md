@@ -5,6 +5,10 @@ for fixed scenarios. Each step's text is stored as a readable file under `__snap
 
 - `<step>.txt`: a CLI call as a worker reads it (command, stdout, stderr, exit code).
 - `<step>.mcp.txt`: an MCP tool call's text content, as a host's model reads it.
+- `<step>.mcp.data.json`: the same call's `structuredContent`, which some hosts give the
+  model instead of the text. `--json` CLI steps show the full CLI envelope.
+- `mcp-surface/<profile>/`: what an MCP host loads before any call: server instructions,
+  every tool's name, description and input schema, and the resources with their contents.
 - `<step>.decision.json`: the decision VISP holds after the step (next action and command,
   whether the worker may edit, slice and feature status, executions, open findings, pinned
   tests and disputes).
@@ -18,6 +22,15 @@ PATH that record what VISP sends and answer from a plan the scenario sets. Check
 trivial `node` scripts. `support/normalize.ts` replaces only values that differ between
 runs or machines: temporary and home paths, the Node and repository paths, timestamps,
 random IDs, hashes, commit IDs, the build ID and version, and check timings.
+
+Derived digests are replaced by numbered tokens, the same value keeping one number within a
+file: SHA-256 digests (subject, contract and environment digests, file hashes) as
+`<SHA256-n>`, hash-derived evidence and finding IDs (`FB-`, `R-`, `SRC-`, `CODE-`,
+`CODE-DIFF-`, `PROBE-`, `BRIEF-`) as `<HEX-n>`, execution, session and attempt IDs as
+`<UUID-n>`, candidate IDs as `<CAN-n>`, and abbreviated commit IDs in VISP's lists of later
+commits as `<COMMIT-n>`. A change in which digest a reference points to still shows; a
+change in a digest's value alone does not. Git blob IDs in diffs are content hashes and are
+kept as they are.
 
 ## The rule
 

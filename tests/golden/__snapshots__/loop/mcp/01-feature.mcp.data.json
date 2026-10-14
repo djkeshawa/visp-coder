@@ -1,0 +1,31 @@
+{
+  "tool": "visp_feature",
+  "ok": true,
+  "data": {
+    "brief": {
+      "version": 2,
+      "feature": "001-return-two-from-the-public",
+      "incomplete": false,
+      "originalRequest": "Make the public value module return two instead of one.",
+      "goal": "Return two from the public value module",
+      "outcomes": [],
+      "examples": [],
+      "decisions": [],
+      "uncertainties": [],
+      "checks": [],
+      "slices": [],
+      "acceptanceBaseline": []
+    },
+    "intent": {
+      "kind": "intent",
+      "createdAt": "<TIME>",
+      "id": "001-return-two-from-the-public",
+      "goal": "Return two from the public value module",
+      "sourceBrief": "Make the public value module return two instead of one.",
+      "sourceBriefHash": "<SHA256-1>",
+      "riskLevel": "low",
+      "acceptanceBaseline": [],
+      "branch": "main"
+    }
+  }
+}
