@@ -1,6 +1,6 @@
 import { openEvents, signIn } from "./api.js";
 import { onKey } from "./keyboard.js";
-import { startLive } from "./live.js";
+import { liveHandlers, startLive } from "./live.js";
 import { render } from "./render.js";
 import { loadFeature, loadMeta, loadOverview, loadRequests, refreshVisible } from "./resources.js";
 import { applyRoute } from "./router.js";
@@ -42,30 +42,25 @@ async function start(): Promise<void> {
   });
   applyRoute();
   void loadRequests();
-  // The stream names what changed. Only while it is down does the page poll, because the
-  // product's own files can change without VISP writing state.
+  // The stream names what changed, but sees only `.visp/`. While it is open the open feature
+  // is also re-read every 30 s and a second after each change, since edits to the product's
+  // own files make checks stale without an event; while it is down the page polls.
   startLive({
     open: openEvents,
-    onChange: (change) => {
-      void loadOverview();
-      void loadRequests();
-      const route = state.route;
-      if (
-        route.view === "feature" &&
-        (change.features.includes(route.feature) || change.features.includes("*"))
-      )
-        void loadFeature(route.feature);
-    },
-    onState: (live) => {
-      const recovered = state.live !== "live" && live === "live";
-      state.live = live;
-      if (recovered) refreshVisible();
-      schedule();
-    },
-    poll: () => {
-      if (document.visibilityState === "visible" && state.route.view === "feature")
-        void loadFeature(state.route.feature);
-    },
+    ...liveHandlers({
+      route: () => state.route,
+      visible: () => document.visibilityState === "visible",
+      signedOut: () => state.signedOut,
+      live: () => state.live,
+      setLive: (live) => {
+        state.live = live;
+      },
+      loadOverview: () => void loadOverview(),
+      loadRequests: () => void loadRequests(),
+      loadFeature: (id) => void loadFeature(id),
+      refreshVisible,
+      schedule,
+    }),
   });
 }
 

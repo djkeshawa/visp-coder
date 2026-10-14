@@ -43,7 +43,9 @@ Keyboard: `1`–`5` switch tabs, `n` opens Needs you, `r` refreshes, `Esc` goes 
 
 The server watches `.visp/` and tells the page which feature changed, so checks, reviews and questions appear within a moment of being recorded. The sidebar shows "Live", "Connecting…" or "Updates paused".
 
-While that connection is open the page doesn't poll. Edits to your product's own files, which VISP doesn't record, show up when you return to the tab, press `r`, or the next recorded change arrives. If the connection drops, the page re-reads the open feature every ten seconds while it's visible and tries to reconnect, waiting 1 s, then 2 s, doubling up to 30 s between tries. When the connection comes back, the polling stops and the page refreshes once.
+The event stream sees only `.visp/`, and your product's own files can change without VISP writing anything, which makes recorded checks out of date. So while the page is visible it also re-reads the open feature every 30 seconds and once, a second after each change event, and whenever you return to the tab.
+
+If the connection drops, the page re-reads the open feature every ten seconds instead and tries to reconnect, waiting 1 s, then 2 s, doubling up to 30 s between tries. When the connection comes back, the page refreshes once and goes back to the slower re-read. It stops reconnecting if the dashboard no longer accepts the page's link, for example after a restart; paste the new link.
 
 ## Security
 
