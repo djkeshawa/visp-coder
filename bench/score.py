@@ -3,7 +3,7 @@
 Usage: score.py <task> [--stage 1] <run_name> [<run_name> ...]
 Writes hidden.json (hidden-stage1.json with --stage 1) beside each project and prints one line
 per run. A two-session run's modes are scored as <run>/<mode>; run_carryover.py scores the first
-session itself.
+session itself. Runs marked invalid (invalid.json, a usage limit stopped them) are skipped.
 """
 import json
 import pathlib
@@ -20,6 +20,9 @@ if names[:1] == ["--stage"]:
     stage, names = names[:2], names[2:]
 for name in names:
     project = RUNS / "runs" / name / "project"
+    if (RUNS / "runs" / name.split("/")[0] / "invalid.json").exists():
+        print(f"{name}: skipped, the run is invalid (invalid.json)")
+        continue
     out = subprocess.run([sys.executable, str(BENCH / "tasks" / task / "hidden_test.py"), str(project), *stage],
                          capture_output=True, text=True, timeout=600)
     (project.parent / ("hidden-stage1.json" if stage else "hidden.json")).write_text(out.stdout)

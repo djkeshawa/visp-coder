@@ -40,11 +40,21 @@ describe("tester browser kit gating", () => {
     for (const task of quiet)
       for (const prompt of promptsOf(task))
         expect(testerBrowserKitLines(prompt.body), prompt.name).toEqual([]);
-    for (const task of readdirSync(tasks).filter((name) => !name.includes("game")))
+    // lighthouse-pixel asks for a "64×64 pixel canvas scaled up", which reads as a browser canvas.
+    const canvas = ["lighthouse-pixel"];
+    for (const task of readdirSync(tasks).filter(
+      (name) => !name.includes("game") && !canvas.includes(name),
+    ))
       for (const prompt of promptsOf(task))
         expect(testerBrowserKitLines(prompt.body), prompt.name).toEqual([]);
     expect(testerBrowserKitLines("Export the report as CSV.")).toEqual([]);
     expect(testerBrowserKitLines("")).toEqual([]);
+  });
+
+  it("gives the canvas-worded pixel-art request the same kit as a browser game", () => {
+    const lighthouse = testerBrowserKitLines(text("bench/tasks/lighthouse-pixel/task.md"));
+    expect(lighthouse.length).toBeGreaterThan(3);
+    expect(lighthouse).toEqual(testerBrowserKitLines(text("bench/tasks/slingshot-game/task.md")));
   });
 
   it("adds the rules and compact API for slingshot and catapult requests", () => {
