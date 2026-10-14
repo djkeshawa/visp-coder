@@ -1,4 +1,5 @@
 import { afterEach, it } from "vitest";
+import { saveTestsRecord } from "../../src/workflow/product/independent-tests.js";
 import { BRIEF, GOAL, GoldenProject, REQUEST, Recorder } from "./support/project.js";
 
 /**
@@ -18,6 +19,7 @@ it("walks feature, brief, work and done through the CLI", async () => {
   await run.mcp("01-next-no-feature", "visp_next");
   await run.cli("02-feature", ["feature", GOAL, "--source-brief", REQUEST]);
   await run.cli("03-next-no-slices", ["next"]);
+  await run.cli("03b-work-inspect-no-slices", ["work", "--inspect"]);
   await run.cli("04-brief-template", ["brief", "--template"]);
   await run.mcp("04-brief-template", "visp_brief", { template: true });
 
@@ -36,6 +38,7 @@ it("walks feature, brief, work and done through the CLI", async () => {
     "Record an open question",
   ]);
   await run.cli("06-next-brief-incomplete", ["next"]);
+  await run.cli("06b-work-brief-incomplete", ["work"]);
 
   await project.workspace.write(".visp/drafts/brief.json", JSON.stringify(BRIEF));
   await run.cli("07-brief-patch", [
@@ -50,10 +53,12 @@ it("walks feature, brief, work and done through the CLI", async () => {
   await run.cli("09-work-first", ["work"]);
   await run.cli("10-next-authorized", ["next"]);
   await run.cli("11-work-again", ["work", "--task", "T001"]);
+  await run.cli("11b-work-json", ["work", "--json"]);
   await run.cli("12-work-inspect", ["work", "--inspect"]);
   await run.cli("13-done-failing", ["done"]);
   await run.cli("14-next-checks-failing", ["next"]);
   await run.mcp("14-next-checks-failing", "visp_next");
+  await run.cli("14b-next-json", ["next", "--json"]);
   await project.setValue(2);
   await run.cli("15-done-passing", ["done"]);
   await run.cli("16-next-review-owed", ["next"]);
@@ -74,4 +79,25 @@ it("works the whole request as one slice with work --check", async () => {
   await project.setValue(2);
   await run.cli("04-done", ["done"]);
   await run.cli("05-next", ["next"]);
+});
+
+it("tells the worker an independent tester is still writing, or stopped", async () => {
+  project = await GoldenProject.create();
+  const run = new Recorder(project, "loop/tester-record");
+  const feature = await project.startFeature();
+  const running = {
+    version: 1 as const,
+    status: "running" as const,
+    startedAt: new Date().toISOString(),
+    model: "gpt-5.6-sol",
+  };
+  await saveTestsRecord(await project.workspace.state(), feature, running, undefined);
+  await run.cli("01-work-tester-running", ["work"]);
+  await saveTestsRecord(
+    await project.workspace.state(),
+    feature,
+    { ...running, startedAt: "2026-01-01T00:00:00.000Z" },
+    running,
+  );
+  await run.cli("02-work-tester-stopped", ["work"]);
 });
