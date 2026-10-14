@@ -86,7 +86,7 @@ function actionArguments(
   goal: string | undefined,
   arguments_: Record<string, string | boolean>,
 ): Record<string, string | boolean> {
-  if (tool === TOOL.feature && goal) arguments_.goal = goal;
+  if (tool === TOOL.feature && goal !== undefined) arguments_.goal = goal;
   if (tool === TOOL.critic) {
     arguments_.operation =
       arguments_.preflight === true
