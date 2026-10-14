@@ -78,7 +78,7 @@ Wall time is the runner's measure over every session. The worker's own transcrip
 
 `report.py` compares the first arm (the base, or `--base`) with each other arm, task by task.
 
-Each task kind has required scores: the hidden pass rate where the task has hidden checks, the judge's overall score and checklist passes for the visual tasks and games, and the code-quality score for every task but the visual ones. Missing output scores the minimum: hidden checks with no result pass nothing, and no image (or no `index.html`) is judged 1 with no checklist item. A score file that is missing or holds a failed judge call (including the judge's own CLI hitting a limit) gives no score; the run is listed and `--score` judges it again.
+Each task kind has required scores: the hidden pass rate where the task has hidden checks, the judge's overall score and checklist passes for the visual tasks and games, and the code-quality score for every task but the visual ones. Missing output scores the minimum: hidden checks with no result pass nothing, a visual task with no image file is judged on the `index.html` it delivered, as served, and with neither (or a game with no `index.html`) it is judged 1 with no checklist item. A score file that is missing or holds a failed judge call (including the judge's own CLI hitting a limit) gives no score; the run is listed and `--score` judges it again.
 
 A task is incomplete, and fails, unless both arms have the same number of valid runs, at least one, and every required score for each. A candidate passes a complete task when:
 
