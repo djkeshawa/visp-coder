@@ -15,7 +15,9 @@ import {
   currentJourneyFailures,
   currentJourneyFeedback,
   evidenceSupportGaps,
+  type ProductEvidenceCatalogue,
   resolveAssessmentEvidence,
+  withoutUnavailableCitations,
 } from "../../../../src/workflow/product/evidence-references.js";
 import {
   initialProductState,
@@ -809,4 +811,59 @@ it("preserves stale, out-of-slice and syntax-only eligibility for CHECK aliases"
   );
   expect(unbound.entries.find((entry) => entry.id === "CHECK-invented")?.kind).toBe("source");
   expect(evidenceSupportGaps(["CHECK-invented"], unbound, "O001", true)).not.toHaveLength(0);
+});
+
+describe("citations of evidence VISP could not deliver", () => {
+  const entry = (
+    id: string,
+    status: ProductEvidenceCatalogue["entries"][number]["status"],
+  ): ProductEvidenceCatalogue["entries"][number] => ({
+    id,
+    kind: "execution",
+    status,
+    summary: id,
+    outcomes: [],
+  });
+  const catalogue: ProductEvidenceCatalogue = {
+    entries: [
+      entry("EXEC-OK", "available"),
+      entry("SRC-PNG", "unavailable"),
+      // Two receipts with one ID: VISP lists both as unavailable, but the ID is ambiguous.
+      entry("EXEC-DUP", "unavailable"),
+      entry("EXEC-DUP", "unavailable"),
+      entry("EXEC-OLD", "stale"),
+    ],
+    aliases: new Map([["C001", "EXEC-OK"]]),
+    sources: [],
+    sourceClaims: [] as unknown as ProductEvidenceCatalogue["sourceClaims"],
+  };
+
+  it("are dropped beside evidence VISP delivered", () => {
+    expect(withoutUnavailableCitations(["SRC-PNG", "C001"], catalogue)).toEqual({
+      kept: ["C001"],
+      dropped: ["SRC-PNG"],
+    });
+  });
+
+  it("are kept when nothing else cited is usable", () => {
+    expect(withoutUnavailableCitations(["SRC-PNG", "UNKNOWN"], catalogue)).toEqual({
+      kept: ["SRC-PNG", "UNKNOWN"],
+      dropped: [],
+    });
+  });
+
+  it("never include an ambiguous ID, which keeps the judgment unavailable as before", () => {
+    expect(withoutUnavailableCitations(["EXEC-DUP", "SRC-PNG", "C001"], catalogue)).toEqual({
+      kept: ["EXEC-DUP", "C001"],
+      dropped: ["SRC-PNG"],
+    });
+    // An ambiguous ID is not usable evidence that would let an unavailable one be dropped.
+    expect(withoutUnavailableCitations(["EXEC-DUP", "SRC-PNG"], catalogue)).toEqual({
+      kept: ["EXEC-DUP", "SRC-PNG"],
+      dropped: [],
+    });
+    expect(evidenceSupportGaps(["EXEC-DUP", "C001"], catalogue).join(" ")).toContain(
+      "EXEC-DUP: ambiguous evidence ID",
+    );
+  });
 });

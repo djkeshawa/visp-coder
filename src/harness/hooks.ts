@@ -19,7 +19,7 @@ import { hookCommand } from "./claude-settings.js";
 
 /** Identifies a file visp wrote, so install never clobbers a foreign hook. */
 export const HOOK_MARKER = "managed by visp";
-export const HOOK_TEMPLATE_VERSION = 16;
+export const HOOK_TEMPLATE_VERSION = 17;
 
 /**
  * Claude Code PreToolUse hook. Receives the tool call on stdin and blocks a
@@ -225,6 +225,26 @@ if (input?.tool_name === "Bash") {
     );
     process.exit(0);
   }
+  const workflow = workflowShellCommand(command);
+  // Only Claude Code has run_in_background; Codex runs this hook too, so a loop's refusal
+  // names no setting of one host.
+  const background = input?.tool_input?.run_in_background === true;
+  if (workflow && (workflow.loop || background)) {
+    process.stdout.write(
+      JSON.stringify(
+        deny(
+          background
+            ? "Run \`" + workflow.command + "\` by itself in the foreground, not in a loop: repeat it without run_in_background and with timeout 600000. " +
+                "It prints its result and the next step; while a review runs, \`${PRODUCT_NAME} next\` waits for it. " +
+                "If the host moves the command to the background, wait for its completion notice, then run \`${PRODUCT_NAME} next\`; do not poll with pgrep, tail -f or sleep loops."
+            : "Run \`" + workflow.command + "\` by itself, not in a loop, with the host's maximum shell timeout. " +
+                "It prints its result and the next step; while a review runs, \`${PRODUCT_NAME} next\` waits for it. " +
+                "Do not poll with pgrep, tail -f or sleep loops.",
+        ),
+      ),
+    );
+    process.exit(0);
+  }
   const lost = discardedChanges(command);
   if (lost.length > 0) {
     process.stdout.write(
@@ -239,6 +259,153 @@ if (input?.tool_name === "Bash") {
     );
   }
   process.exit(0);
+}
+
+// Workers started visp done and accept as background tasks and then waited for them with
+// loops that never ended on their own (pgrep -f matching its own shell, tail -f piped to
+// grep -m1): commands that returned in 15 s left them idle for up to 9 minutes. VISP's
+// workflow commands bound their own waits, so they run in the foreground, and never inside a
+// loop, which keeps polling until the host's timeout. \`${PRODUCT_NAME} feature\` keeps writing
+// acceptance tests after it prints the feature id and \`${PRODUCT_NAME} ui\` is a server, so both
+// may still run in the background. Only VISP itself counts as the command, with the verb as
+// the first word after it: \`echo "${PRODUCT_NAME} done"\`, \`grep ${PRODUCT_NAME}\` and a request in a
+// heredoc that says "show ${PRODUCT_NAME} status" were refused when any of the three words after
+// \`${PRODUCT_NAME}\` anywhere matched. A loop counts only around the VISP command (between its
+// while, until or for and done), so \`...; done && ${PRODUCT_NAME} verify\` is not one.
+// Function declarations, not top-level constants: the Bash branch above runs first.
+function workflowShellCommand(command) {
+  const workflow = new Set(["work", "done", "verify", "accept", "next", "pr", "status", "brief", "critic", "review"]);
+  let depth = 0;
+  for (const words of commandWords(withoutHeredocBodies(command))) {
+    if (["while", "until", "for", "select"].includes(words[0])) depth++;
+    else if (words[0] === "done") depth = Math.max(0, depth - 1);
+    const found = vispInvocation(words);
+    if (found?.script !== undefined) {
+      const inner = workflowShellCommand(found.script);
+      if (inner) return { command: inner.command, loop: inner.loop || depth > 0 };
+    } else if (found && workflow.has(found.verb))
+      return { command: "${PRODUCT_NAME} " + found.verb, loop: depth > 0 || found.watched };
+  }
+  return undefined;
+}
+
+// Simple commands, split at ; & | newlines, ( ) and command substitutions ($(...) and
+// backticks, also inside double quotes), so the VISP in "$(${PRODUCT_NAME} status)" is a command of
+// its own. Single-quoted text stays one word; arithmetic $((...)) holds no commands.
+function commandWords(command) {
+  const commands = [[]];
+  let word = "";
+  let inWord = false;
+  const quotes = [];
+  const end = () => {
+    if (inWord) commands[commands.length - 1].push(word);
+    word = "";
+    inWord = false;
+  };
+  const split = () => {
+    end();
+    commands.push([]);
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    const quote = quotes[quotes.length - 1];
+    if (quote === "'") {
+      if (c === "'") quotes.pop();
+      else word += c;
+      continue;
+    }
+    if (c === "$" && command.startsWith("((", i + 1)) {
+      let open = 0;
+      for (i++; i < command.length; i++) {
+        if (command[i] === "(") open++;
+        else if (command[i] === ")" && --open === 0) break;
+      }
+      word += "0";
+      inWord = true;
+      continue;
+    }
+    if (c === "$" && command[i + 1] === "(") {
+      quotes.push("$(");
+      i++;
+      split();
+      continue;
+    }
+    if (c === "\`") {
+      if (quote === "\`") quotes.pop();
+      else quotes.push("\`");
+      split();
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') quotes.pop();
+      else if (c === "\\\\" && i + 1 < command.length) word += command[++i];
+      else word += c;
+      continue;
+    }
+    if (c === ")" && quote === "$(") {
+      quotes.pop();
+      split();
+    } else if (c === "'" || c === '"') {
+      quotes.push(c);
+      inWord = true;
+    } else if (c === "\\\\" && i + 1 < command.length) {
+      word += command[++i];
+      inWord = true;
+    } else if ("\\n;&|()".includes(c)) split();
+    else if (/\\s/.test(c)) end();
+    else {
+      word += c;
+      inWord = true;
+    }
+  }
+  end();
+  return commands.filter((words) => words.length > 0);
+}
+
+// VISP as the command itself: the first word, after assignments, flags and their values,
+// durations and wrappers such as env, sudo, timeout, npx or a loop's do. Returns the verb, or
+// the script a shell runs with -c, which is checked the same way.
+function vispInvocation(words) {
+  const wrappers = new Set(["env", "command", "exec", "nohup", "time", "timeout", "sudo", "npx", "pnpm", "npm", "yarn", "bunx", "dlx", "watch", "while", "until", "do", "if", "then", "else", "elif", "!", "{"]);
+  let watched = false;
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index];
+    if (word === "${PRODUCT_NAME}" || word.endsWith("/${PRODUCT_NAME}") || word === "${PACKAGE_NAME}" || word.startsWith("${PACKAGE_NAME}@"))
+      return { verb: words.slice(index + 1).find((next) => !next.startsWith("-")), watched };
+    if (/^(?:.*\\/)?(?:ba|z|da)?sh$/.test(word)) {
+      const flag = words.findIndex((next, at) => at > index && /^-[A-Za-z]*c[A-Za-z]*$/.test(next));
+      return flag > 0 && words[flag + 1] !== undefined ? { script: words[flag + 1] } : undefined;
+    }
+    if (word === "watch") watched = true;
+    const previous = words[index - 1] ?? "";
+    const prefix =
+      wrappers.has(word) ||
+      word.startsWith("-") ||
+      /^-[A-Za-z]$/.test(previous) ||
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(word) ||
+      /^\\d+(?:\\.\\d+)?[smhd]?$/.test(word);
+    if (!prefix) return undefined;
+  }
+  return undefined;
+}
+
+// A heredoc body is input text, such as the request \`${PRODUCT_NAME} feature\` reads, not commands.
+// Arithmetic such as $((1<<2)) does not start one.
+function withoutHeredocBodies(command) {
+  const kept = [];
+  const pending = [];
+  for (const line of command.split("\\n")) {
+    if (pending.length) {
+      const [delimiter, tabs] = pending[0];
+      if ((tabs ? line.replace(/^\\t+/, "") : line) === delimiter) pending.shift();
+      continue;
+    }
+    kept.push(line);
+    const code = line.replace(/\\$?\\(\\([^()]*\\)\\)/g, "0");
+    for (const match of code.matchAll(/(?<!<)<<(-?)\\s*(['"]?)([^\\s'"<>;&|()]+)\\2/g))
+      pending.push([match[3], match[1] === "-"]);
+  }
+  return kept.join("\\n");
 }
 
 // A worker discarded a previous session's uncommitted work with git checkout to get the

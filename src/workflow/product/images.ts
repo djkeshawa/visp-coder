@@ -249,7 +249,7 @@ function orderedCaptures(
   return { valid, conflicts };
 }
 
-async function readImageBytes(workspace: WorkspaceState, path: string) {
+export async function readImageBytes(workspace: WorkspaceState, path: string) {
   const metadata = await workspace.files.metadata?.(path);
   if (
     metadata &&

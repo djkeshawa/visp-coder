@@ -177,6 +177,32 @@ it("asks for one optional finish finding that can never fail an outcome", () => 
   expect(productReviewInstructions()).not.toContain("judge finish once");
 });
 
+it("requires what the request names to be recognizable in the images, unlike finish", () => {
+  const visual = productReviewInstructions({ visual: true });
+  expect(visual).toContain(
+    "Recognizability is not finish and overrides the finish rule: every object or subject the request names for a picture or screen to show, and every concrete look it names (named colours or palette, a named art style such as pixel art, voxel or isometric, a viewpoint), must be recognizable",
+  );
+  // "A clean, modern design" or "a polished game" is never a required, outcome-failing finding.
+  expect(visual).toContain(
+    "evaluative words (modern, clean, beautiful, polished) stay finish or advisory",
+  );
+  // Finish no longer lists what the recognizability rule makes required.
+  expect(visual).toContain(
+    "for what the request describes (materials or texture, depth, visible feedback for hits or changes)",
+  );
+  expect(visual).not.toContain("recognizable objects");
+  expect(visual).toContain(
+    "missing, hidden behind something else, cut off, or reads as something different is a departure from the request",
+  );
+  expect(visual).toContain("do not mark an outcome that covers it satisfied");
+  // Ordinary apps name no visual subjects: the rule adds nothing for their controls.
+  expect(visual).toContain(
+    "an app's controls, forms and data tables fall under the criteria above, and polish beyond what the request names stays finish.",
+  );
+  // Without images there is nothing to recognize; code review keeps its own rules.
+  expect(productReviewInstructions()).not.toContain("Recognizability");
+});
+
 it("lets a specific request statement govern a case a general rule also covers", () => {
   expect(CRITIC_INSTRUCTIONS).toContain(
     "an implementation that makes it impossible for that option to match or apply under those conditions is a required finding",

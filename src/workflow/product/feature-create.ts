@@ -31,11 +31,8 @@ import {
   type HostRequest,
   hostRequest,
 } from "./host-prompts.js";
-import {
-  captureInheritedChanges,
-  inheritedChangesContent,
-  inheritedChangesPath,
-} from "./inherited-changes.js";
+import { captureInheritedChanges } from "./inherited-changes.js";
+import { inheritedChangesContent, inheritedChangesPath } from "./inherited-record.js";
 import {
   initialProductState,
   type ProductBrief,

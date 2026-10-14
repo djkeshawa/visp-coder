@@ -553,6 +553,34 @@ export function resolveAssessmentEvidence(
   });
 }
 
+/**
+ * Reviewers that opened an output VISP could not deliver as text (a rendered PNG listed as an
+ * unavailable core file, or the core-gaps note) cited it beside current evidence, and the
+ * whole review was discarded or its outcome left unassessed: about 30 reviews across the
+ * benchmarks, among them every voxel-scene run's. A citation of evidence VISP marked
+ * unavailable is dropped when the same list still cites other known evidence that VISP did
+ * not mark unavailable. Stale, unknown and ambiguous citations are never dropped: VISP marks
+ * an ambiguous ID unavailable too, but it stays cited, so the judgment that rests on it is
+ * still refused or left unavailable.
+ */
+export function withoutUnavailableCitations(
+  references: readonly string[],
+  catalogue: ProductEvidenceCatalogue,
+): { kept: string[]; dropped: string[] } {
+  const ambiguous = ambiguousEvidenceIds(catalogue.entries);
+  const status = (reference: string) => {
+    const id = catalogue.aliases.get(reference) ?? reference;
+    return ambiguous.has(id)
+      ? "ambiguous"
+      : catalogue.entries.find((entry) => entry.id === id)?.status;
+  };
+  const dropped = references.filter((id) => status(id) === "unavailable");
+  const kept = references.filter((id) => status(id) !== "unavailable");
+  const usable = (id: string) => status(id) !== undefined && status(id) !== "ambiguous";
+  if (!dropped.length || !kept.some(usable)) return { kept: [...references], dropped: [] };
+  return { kept, dropped };
+}
+
 export function evidenceSupportGaps(
   references: readonly string[],
   catalogue: ProductEvidenceCatalogue,

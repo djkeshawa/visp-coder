@@ -23,6 +23,11 @@ import {
 } from "./check-command.js";
 import { checkFix, missingAlias } from "./check-executable.js";
 import {
+  type DeclaredImageStates,
+  declaredImageStates,
+  recordCheckImages,
+} from "./check-images.js";
+import {
   configuredMissingTool,
   configuredToolRecovery,
   isConfiguredCheck,
@@ -124,6 +129,7 @@ export async function executeProductCheck(
     ? await pinnedWaivers(workspace, record.brief.feature)
     : undefined;
   let originalEnvironment: Record<string, string> | undefined;
+  const imagesBefore = await declaredImageStates(workspace.paths.root, check);
   const isolation = await prepareProductFlipEnvironment(workspace, record, slice, check, async () =>
     flipEnvironmentIdentity(
       base.comparisonEnvironment,
@@ -164,7 +170,7 @@ export async function executeProductCheck(
     );
     const full = redact(raw);
     const decided = waivedResult(output, full, workspace.paths.root, waivers);
-    const { status, note } = await commandDecision(
+    const decision = await commandDecision(
       workspace,
       record,
       check,
@@ -173,6 +179,11 @@ export async function executeProductCheck(
       full,
       output,
     );
+    const imaged = await decideCheckImages(workspace, record, check, subjectDigest, decision, {
+      command: base.command,
+      before: imagesBefore,
+    });
+    const { status, note } = imaged;
     const flip = isUnwaivedPass(status, output)
       ? await productFlipCheck(
           workspace,
@@ -205,9 +216,11 @@ export async function executeProductCheck(
         durationMs: output.ok ? output.value.durationMs : Date.now() - started,
         output: [note, evidence].filter(Boolean).join("\n"),
         ...(waivers ? { pinnedFailures: pinnedFailureSummary(full, waivers) } : {}),
+        ...imaged.execution,
       },
-      state: record.state,
+      state: imaged.state,
       mutations: [
+        ...imaged.mutations,
         {
           kind: "write",
           path: join(workspace.paths.sessionDir, "check-output", `${base.id}.log`),
@@ -222,6 +235,44 @@ export async function executeProductCheck(
       console.warn(redact(`comparison environment cleanup failed: ${String(cause)}`));
     });
   }
+}
+
+/** A passing check that declares images must have produced them; they become review captures. */
+async function decideCheckImages(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  check: ProductCheck,
+  subjectDigest: string,
+  decision: { status: ProductExecution["status"]; note: string },
+  run: { command: string; before: DeclaredImageStates },
+) {
+  const images =
+    decision.status === "passed" && check.images?.length
+      ? await recordCheckImages(
+          workspace,
+          record.brief.feature,
+          check,
+          subjectDigest,
+          run.command,
+          run.before,
+        )
+      : undefined;
+  if (images && "note" in images)
+    return {
+      status: images.status,
+      note: images.note,
+      execution: {},
+      state: record.state,
+      mutations: [],
+    };
+  return {
+    ...decision,
+    execution: images ? { checkImages: images.captures.map((capture) => capture.id) } : {},
+    state: images
+      ? { ...record.state, captures: [...record.state.captures, ...images.captures] }
+      : record.state,
+    mutations: images?.mutations ?? [],
+  };
 }
 
 async function commandDecision(

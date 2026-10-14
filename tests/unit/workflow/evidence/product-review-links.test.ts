@@ -87,7 +87,7 @@ function assess(
     subject,
     [outcome],
     options.selected ?? images,
-    () => options.runs ?? [run],
+    () => ({ captureRuns: options.runs ?? [run], checkImages: new Set<string>() }),
     { ...catalogue, entries: options.entries ?? catalogue.entries },
   );
 }
@@ -219,7 +219,7 @@ describe("tool-owned review image links", () => {
         subject,
         [{ ...outcome, expectations: [expected] }],
         [...images, ...mobileImages],
-        () => [run, mobileRun],
+        () => ({ captureRuns: [run, mobileRun], checkImages: new Set<string>() }),
         { ...catalogue, entries },
       );
       expect(result).toMatchObject({

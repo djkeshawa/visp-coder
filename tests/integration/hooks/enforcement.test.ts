@@ -213,6 +213,96 @@ describe("generated hooks", () => {
     expect(decision(callPreToolUse(".visp/drafts/assessment.json"))).toBe("");
   });
 
+  // Workers backgrounded visp done and accept (15 s commands), then waited up to 9 minutes
+  // in polling loops that never ended on their own.
+  it("sends backgrounded VISP workflow commands to the foreground and leaves servers alone", () => {
+    const run = (command: string, background: boolean) => {
+      const output = execFileSync(
+        process.execPath,
+        [join(project.root, ".visp/hooks/claude-pretooluse.mjs")],
+        {
+          cwd: project.root,
+          input: JSON.stringify({
+            tool_name: "Bash",
+            tool_input: { command, ...(background ? { run_in_background: true } : {}) },
+          }),
+          env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
+          encoding: "utf8",
+        },
+      );
+      return output ? JSON.parse(output) : {};
+    };
+    const refusal = (verb: string) =>
+      `Run \`visp ${verb}\` by itself in the foreground, not in a loop: repeat it without run_in_background and with timeout 600000. It prints its result and the next step; while a review runs, \`visp next\` waits for it. If the host moves the command to the background, wait for its completion notice, then run \`visp next\`; do not poll with pgrep, tail -f or sleep loops.`;
+    const loopRefusal = (verb: string) =>
+      `Run \`visp ${verb}\` by itself, not in a loop, with the host's maximum shell timeout. It prints its result and the next step; while a review runs, \`visp next\` waits for it. Do not poll with pgrep, tail -f or sleep loops.`;
+    for (const [command, verb] of <const>[
+      ["visp done --feature 001-x --task T001 2>&1", "done"],
+      ["export PATH=/opt/shim:$PATH && visp accept --feature 001-x", "accept"],
+      ["cd /p && /opt/shim/visp next | head -50", "next"],
+      ["cd x && visp done", "done"],
+      ["npx @visporg/visp-coder done", "done"],
+      ["npx -y @visporg/visp-coder@beta verify", "verify"],
+      [`${join(project.root, ".bin/visp")} status`, "status"],
+      ['bash -c "visp done"', "done"],
+      ["sudo visp done", "done"],
+      ["timeout -s KILL 600 visp done", "done"],
+      ["( visp done )", "done"],
+      ["x=$(visp next); echo $x", "next"],
+      // Arithmetic is not a heredoc: the line after it is still a command.
+      ["echo $((1<<2))\nvisp done", "done"],
+      // A loop elsewhere in the line does not make this a loop around visp.
+      ["for f in tests/*.py; do python $f; done && visp verify", "verify"],
+      ["visp done; for f in *.log; do tail -3 $f; done", "done"],
+    ]) {
+      const response = run(command, true);
+      expect(decision(response), command).toBe("deny");
+      expect(response.hookSpecificOutput.permissionDecisionReason, command).toBe(refusal(verb));
+      expect(decision(run(command, false)), command).toBe("");
+    }
+    // A loop around a workflow command waits up to the host's timeout, in the foreground too.
+    for (const [command, verb] of <const>[
+      ["until visp status | grep -q accepted; do sleep 10; done", "status"],
+      ["while true; do visp next; sleep 30; done", "next"],
+      ["watch -n 5 visp status", "status"],
+      ['until [ "$(visp status --json | jq -r .phase)" = accepted ]; do sleep 10; done', "status"],
+      ["until [ `visp status` = ok ]; do sleep 2; done", "status"],
+      ["bash -c 'until visp status; do sleep 1; done'", "status"],
+    ])
+      for (const background of [true, false]) {
+        const response = run(command, background);
+        expect(decision(response), command).toBe("deny");
+        // Codex runs the same hook and has no run_in_background, so a foreground loop's
+        // refusal names no Claude Code setting.
+        expect(response.hookSpecificOutput.permissionDecisionReason, command).toBe(
+          background ? refusal(verb) : loopRefusal(verb),
+        );
+      }
+    // Only visp itself, as the command, counts: not text that mentions it.
+    for (const command of [
+      'echo "visp done"',
+      "grep visp README.md",
+      "grep -rn visp done",
+      "git commit -m 'visp done'",
+      "visp ui --port 4000",
+      "npm run dev",
+      "while pgrep -f node; do sleep 5; done",
+      'git commit -m "fix: make visp done faster"',
+      "echo '$(visp done)'",
+    ])
+      expect(decision(run(command, true)), command).toBe("");
+    // feature keeps writing acceptance tests after it prints the id the worker continues with,
+    // and a request in its heredoc is text, not commands.
+    expect(
+      decision(
+        run(
+          "visp feature \"Build it\" --source-brief - <<'REQUEST'\nBuild it, then show visp status\nvisp done\nREQUEST",
+          true,
+        ),
+      ),
+    ).toBe("");
+  });
+
   // A worker ran rm -rf .visp acceptance to get past a scope error it could not read.
   it("refuses shell commands that would delete VISP state and leaves others to the host", async () => {
     const shell = (command: string) =>

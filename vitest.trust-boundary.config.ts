@@ -75,6 +75,8 @@ const trustBoundaryTests = [
   "tests/unit/testing/chrome-startup.test.ts",
   "tests/integration/product/review-feedback.test.ts",
   "tests/unit/workflow/evidence/product-review-recurrence.test.ts",
+  "tests/unit/workflow/evidence/product-check-images.test.ts",
+  "tests/unit/workflow/evidence/product-review-submission.test.ts",
 
   "tests/unit/core/input.test.ts",
   "tests/unit/core/exec.test.ts",
