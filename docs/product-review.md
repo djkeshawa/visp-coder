@@ -113,7 +113,7 @@ When the check passes, VISP copies each declared image into the feature's captur
 
 ### Pictures without a declaration
 
-The product's pictures reach the reviewer even when no check declares them. After the checks pass on an unchanged product, VISP captures up to four PNG, JPEG, WebP, GIF or SVG files in the product that were written since the feature started (newest first, each once per product version, and not the declared images above). An SVG is rendered in a fresh browser, since reviewers can view PNG files but not SVG ones; an SVG over 1 MiB is skipped. These captures never fail a check. Declaring the image on a check remains the reliable way, because it also makes the picture's look an outcome the reviewer can fail.
+The product's pictures reach the reviewer even when no check declares them. After the checks pass on an unchanged product, VISP captures up to four PNG, JPEG, WebP, GIF or SVG files in the product that were written since the feature started (newest first, each once per product version, and not the declared images above). An SVG is rendered in a browser, since reviewers can view PNG files but not SVG ones: one browser per run, started before VISP takes its state lock, so other VISP commands are not kept waiting. An SVG over 1 MiB is skipped, the run's remaining SVGs are skipped once the browser fails, and an SVG that does not render is not tried again until its content changes. These captures never fail a check. Declaring the image on a check remains the reliable way, because it also makes the picture's look an outcome the reviewer can fail.
 
 ### Files of another coding host
 

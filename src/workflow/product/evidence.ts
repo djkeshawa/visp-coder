@@ -38,7 +38,11 @@ import {
   type ProductState,
 } from "./model.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
-import { recordResultImages } from "./result-images.js";
+import {
+  type PreparedResultImages,
+  prepareResultImages,
+  publishResultImages,
+} from "./result-images.js";
 import { reviewBaselineMutations } from "./review-baseline.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
@@ -116,6 +120,13 @@ async function execute(
     snapshot,
   );
   if (!checked.ok) return checked;
+  // Rendering an SVG starts a browser; it happens before the lock, published only if current.
+  const pictures = await prepareResultImages(
+    workspace,
+    record,
+    options.signal?.aborted ? [] : checked.value,
+    { digest: source, snapshot },
+  );
   return withProductMutation(workspace, async () => {
     if (options.signal?.aborted) return cancelledExecution();
     const loaded = await readProductRecord(workspace, { feature: record.brief.feature });
@@ -135,27 +146,13 @@ async function execute(
       close,
       accept,
       prepared.value.committedChanges,
+      pictures,
       options.signal,
     );
     return finished.ok
       ? ok({ ...finished.value, ...flipBatchTiming(record, loaded.value) })
       : finished;
   });
-}
-
-/** Only a passing run on an unchanged product shows the version its pictures belong to. */
-function passedResultImages(
-  workspace: WorkspaceState,
-  record: ProductRecord,
-  executions: readonly ProductExecution[],
-  source: string,
-  after: { digest: string; snapshot: Record<string, string> },
-) {
-  return source === after.digest &&
-    executions.length > 0 &&
-    executions.every((execution) => execution.status === "passed")
-    ? recordResultImages(workspace, record, after.snapshot, after.digest)
-    : Promise.resolve({ captures: [], mutations: [] });
 }
 
 function flipBatchTiming(before: ProductRecord, after: ProductRecord): { flipDurationMs?: number } {
@@ -179,6 +176,7 @@ async function finishExecution(
   close: boolean,
   accept: boolean,
   committedChanges: string[],
+  prepared: PreparedResultImages,
   signal?: AbortSignal,
 ): Promise<Result<ProductVerification>> {
   const afterSnapshot = await productSourceSnapshot(workspace, record.brief);
@@ -187,10 +185,7 @@ async function finishExecution(
   if (!after.ok) return after;
   const timestamp = new Date().toISOString();
   // Pictures the product made reach the reviewer as images of the version the checks passed.
-  const pictures = await passedResultImages(workspace, record, executions, source, {
-    digest: after.value,
-    snapshot: afterSnapshot.value,
-  });
+  const pictures = await publishResultImages(workspace, record, prepared, after.value);
   const next = {
     ...record.state,
     pendingVerification: undefined,
