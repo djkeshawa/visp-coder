@@ -190,7 +190,9 @@ describe("the minimal profile", () => {
     // declared its PNG; an undeclared picture reaches the reviewer only as source.
     // 423 -> 453: that rule also names the experience outcome an image check must cover (the
     // brief is rejected without one) and keeps the requested format beside the PNG.
-    expect(guide.length / 4).toBeLessThanOrEqual(453);
+    // 453 -> 452: "never rerun feature" replaced "Poll; never duplicate", which invited shell
+    // loops around visp status.
+    expect(guide.length / 4).toBeLessThanOrEqual(452);
     expect(guide).toContain("At its id, run visp work");
     expect(guide).toContain("Leave feature running; background it on blocking hosts");
     expect(guide).toContain(
@@ -248,7 +250,7 @@ describe("generated workflow routing", () => {
       expect(guide).toContain("Browser journeys must not mutate VISP state");
       expect(guide).toContain("only when visp next prints it");
       expect(guide).toContain("run or delegate no review");
-      expect(guide).toContain("Poll; never duplicate");
+      expect(guide).toContain("never rerun feature");
       expect(guide).toContain("At its id, run visp work");
       expect(guide).not.toContain("visp review --prepare");
       expect(commandGuide()).toContain("No category declarations, example-coverage ledger");
