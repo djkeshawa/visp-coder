@@ -282,7 +282,7 @@ Run `visp pr` and report its evidence and unresolved limitations without embelli
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\" || exit 2"
+            "command": "h=\"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\"; if [ -f \"$h\" ]; then node \"$h\" || exit 2; else s=\"$CLAUDE_PROJECT_DIR/.visp/state\"; r=; for d in \"$s\" \"$s/product-authorizations\" \"$s/implement-allowed\"; do if [ -L \"$d\" ] || { [ -e \"$d\" ] && ! { [ -r \"$d\" ] && [ -x \"$d\" ]; }; }; then r=1; fi; done; for m in \"$s\"/product-authorizations/*.json \"$s\"/implement-allowed/*.json; do if [ -e \"$m\" ] || [ -L \"$m\" ]; then r=1; fi; done; if [ -n \"$r\" ]; then echo \"visp: .visp/hooks/claude-pretooluse.mjs is missing and a VISP slice may be authorized, so this write was refused. Run visp install --harness claude-code (or visp doctor --fix), then retry. Do not edit .claude/settings.json.\" >&2; exit 2; fi; fi"
           }
         ]
       },
@@ -291,7 +291,7 @@ Run `visp pr` and report its evidence and unresolved limitations without embelli
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\""
+            "command": "h=\"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\"; [ ! -f \"$h\" ] || node \"$h\""
           }
         ]
       }
@@ -301,7 +301,7 @@ Run `visp pr` and report its evidence and unresolved limitations without embelli
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\""
+            "command": "h=\"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\"; [ ! -f \"$h\" ] || node \"$h\""
           }
         ]
       }
@@ -311,7 +311,7 @@ Run `visp pr` and report its evidence and unresolved limitations without embelli
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\"",
+            "command": "h=\"$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs\"; [ ! -f \"$h\" ] || node \"$h\"",
             "timeout": 180
           }
         ]
