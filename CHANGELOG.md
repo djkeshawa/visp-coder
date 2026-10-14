@@ -8,6 +8,7 @@
 ### Fixed
 - Hooks written by the same VISP build installed at another path (nvm, npx, a local `node_modules`) no longer count as missing. Every generated hook embeds the path of the CLI that wrote it and was compared byte for byte, so `visp feature` refused to start on hosts other than Claude Code and `visp doctor` reported the hooks as stale or edited. The check now re-renders the hook with the path it embeds: the build ID, version and template must match, and the CLI it calls must exist.
 - A `[mcp_servers.visp]` table added to `.codex/config.toml` by hand is accepted when it starts this VISP build (`node` with this build's CLI and `serve --mcp`; other keys may differ). It was always reported as customized: `visp doctor` suggested `doctor --fix`, which answered "add it manually", which the user had already done. For a table that does not start this build, doctor and install now say exactly what to set, or to delete the table and rerun `visp install`.
+- Registering the MCP server in a JSON or JSONC host configuration (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `opencode.json`) re-serialized the whole file, so every comment and the file's own layout were lost, with no backup. `visp install` now changes only the `visp` entry's text, in the file's own indentation and line endings, and uninstall removes only that entry. Before rewriting any host MCP configuration, Codex's TOML included, it keeps the previous text under the git-ignored `.visp/state/backups/`.
 
 ## 0.5.0-beta.3 - 2026-10-12
 

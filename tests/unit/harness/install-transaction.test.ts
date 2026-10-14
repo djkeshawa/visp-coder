@@ -23,6 +23,60 @@ afterEach(async () => {
 });
 
 describe("transactional harness installation", () => {
+  // Host MCP configuration may hold tokens and hand-written comments; keep the old text first.
+  it("backs up a host MCP configuration before rewriting it, outside the repository", async () => {
+    const before = '{\n  // hosted servers\n  "servers": { "github": { "url": "x" } }\n}\n';
+    await workspace.write(".vscode/mcp.json", before);
+    const state = await workspace.state();
+    const installed = await installHarness(state.paths, {
+      harness: "copilot",
+      profile: "minimal",
+      hooks: [],
+      mcp: true,
+    });
+    expect(installed.ok).toBe(true);
+
+    const after = await readFile(join(workspace.root, ".vscode/mcp.json"), "utf8");
+    expect(after).toContain("// hosted servers");
+    const backups = join(workspace.root, ".visp/state/backups/.vscode");
+    const saved = await readdir(backups);
+    expect(saved).toEqual([expect.stringMatching(/^mcp\.json\.\d{13}-[0-9a-f]{12}$/)]);
+    expect(await readFile(join(backups, saved[0] ?? ""), "utf8")).toBe(before);
+
+    // Nothing to rewrite, nothing to back up.
+    const again = await installHarness(state.paths, {
+      harness: "copilot",
+      profile: "minimal",
+      hooks: [],
+      mcp: true,
+    });
+    expect(again.ok).toBe(true);
+    expect(await readdir(backups)).toEqual(saved);
+  });
+
+  // Each backup may hold tokens; only the latest few per file are kept.
+  it("keeps the five latest backups of a host MCP configuration", async () => {
+    const state = await workspace.state();
+    for (let round = 0; round < 7; round++) {
+      await workspace.write(
+        ".vscode/mcp.json",
+        `{\n  // round ${round}\n  "servers": { "github": { "url": "x" } }\n}\n`,
+      );
+      const installed = await installHarness(state.paths, {
+        harness: "copilot",
+        profile: "minimal",
+        hooks: [],
+        mcp: true,
+      });
+      expect(installed.ok).toBe(true);
+    }
+    const backups = join(workspace.root, ".visp/state/backups/.vscode");
+    const saved = (await readdir(backups)).sort();
+    expect(saved).toHaveLength(5);
+    const kept = await Promise.all(saved.map((name) => readFile(join(backups, name), "utf8")));
+    expect(kept.map((text) => /round (\d)/.exec(text)?.[1])).toEqual(["2", "3", "4", "5", "6"]);
+  });
+
   it("creates missing nested parents on the first install and stays idempotent", async () => {
     const state = await workspace.state();
     const first = await installHarness(state.paths, {

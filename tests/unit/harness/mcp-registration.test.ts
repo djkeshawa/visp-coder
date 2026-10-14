@@ -208,12 +208,130 @@ describe("OpenCode MCP registration", () => {
       join(root, OPENCODE_CONFIG_FILE),
       '{\n // project settings\n "model": "my-model",\n "permission": {"edit": "ask",},\n "mcp": {"github": {"type": "remote", "url": "https://example.test"},},\n}\n',
     );
+    const before = await readFile(join(root, OPENCODE_CONFIG_FILE), "utf8");
     const result = await registerMcpServer(root, true, "opencode");
     expect(result.ok && result.value).toBe("added");
-    const config = await readConfig(OPENCODE_CONFIG_FILE);
-    expect(config.model).toBe("my-model");
-    expect(config.permission).toEqual({ edit: "ask" });
-    expect(config.mcp?.github).toEqual({ type: "remote", url: "https://example.test" });
+    const visp = {
+      type: "local",
+      command: ["node", runtimeIdentity().executable, "serve", "--mcp"],
+    };
+    // A server map written on one line gets the entry on that line too; the comment stays.
+    expect(await readFile(join(root, OPENCODE_CONFIG_FILE), "utf8")).toBe(
+      before.replace(
+        '"https://example.test"},},',
+        `"https://example.test"}, "visp": ${JSON.stringify(visp)},},`,
+      ),
+    );
+  });
+});
+
+/**
+ * VS Code, Cursor and OpenCode read these files as JSONC, and people comment them. The merge
+ * used to parse and re-serialize the whole file, so every comment and the file's own layout
+ * were lost. Only the VISP entry may change.
+ */
+describe("JSONC MCP configuration edits", () => {
+  const entry = (indent: string, base: string) =>
+    JSON.stringify(
+      { type: "stdio", command: "node", args: [runtimeIdentity().executable, "serve", "--mcp"] },
+      null,
+      indent,
+    ).replaceAll("\n", `\n${base}`);
+
+  beforeEach(async () => {
+    await mkdir(join(root, ".vscode"), { recursive: true });
+  });
+
+  it("adds the entry after the last server and keeps every other byte", async () => {
+    const before = [
+      "// Project MCP servers",
+      "{",
+      '    "servers": {',
+      "        // GitHub's hosted server",
+      '        "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" }, // hosted',
+      "    },",
+      "    /* inputs are prompted */",
+      '    "inputs": [],',
+      "}",
+      "",
+    ].join("\n");
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    const result = await registerMcpServer(root, false, "copilot");
+
+    expect(result.ok && result.value).toBe("added");
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      before.replace("// hosted\n", `// hosted\n        "visp": ${entry("    ", "        ")},\n`),
+    );
+  });
+
+  it("adds a comma after a last server that has none, and keeps CRLF line ends", async () => {
+    const before =
+      '{\r\n  // servers\r\n  "servers": {\r\n    "github": { "url": "x" } // hosted\r\n  }\r\n}\r\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    await registerMcpServer(root, false, "copilot");
+
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      before.replace(
+        '"github": { "url": "x" } // hosted\r\n',
+        `"github": { "url": "x" }, // hosted\r\n    "visp": ${entry("  ", "    ").replaceAll("\n", "\r\n")}\r\n`,
+      ),
+    );
+  });
+
+  it("adds the servers object when the file has none", async () => {
+    const before = '{\n\t// no servers yet\n\t"inputs": []\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    await registerMcpServer(root, false, "copilot");
+
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      `{\n\t// no servers yet\n\t"inputs": [],\n\t"servers": {\n\t\t"visp": ${entry("\t", "\t\t")}\n\t}\n}\n`,
+    );
+  });
+
+  it("replaces only an older VISP entry when upgrading", async () => {
+    const before =
+      '{\n  "servers": {\n    // VISP\n    "visp": { "command": "visp", "args": ["serve", "--mcp"] }, // old\n    "other": {}\n  }\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    const result = await registerMcpServer(root, false, "copilot");
+
+    expect(result.ok && result.value).toBe("replaced");
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      before.replace('{ "command": "visp", "args": ["serve", "--mcp"] }', entry("  ", "    ")),
+    );
+  });
+
+  // Windows editors may save a byte order mark; it is kept, not a reason to refuse the file.
+  it("edits a file that starts with a byte order mark and keeps the mark", async () => {
+    const before = '\uFEFF{\n  // servers\n  "servers": {}\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    const result = await registerMcpServer(root, false, "copilot");
+
+    expect(result.ok && result.value).toBe("added");
+    const after = await readFile(join(root, ".vscode/mcp.json"), "utf8");
+    expect(after.startsWith('\uFEFF{\n  // servers\n  "servers": {\n    "visp": ')).toBe(true);
+    const removed = planMcpUnregistration(after, "copilot");
+    expect(removed.status).toBe("removed");
+    expect(removed.content?.startsWith("\uFEFF")).toBe(true);
+  });
+
+  it("removes only the VISP entry on uninstall", async () => {
+    const kept =
+      '{\n  "servers": {\n    // the hosted one\n    "github": { "url": "x" } // hosted\n  }\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), kept);
+    await registerMcpServer(root, false, "copilot");
+    const installed = await readFile(join(root, ".vscode/mcp.json"), "utf8");
+
+    const removed = planMcpUnregistration(installed, "copilot");
+
+    expect(removed).toEqual({
+      status: "removed",
+      content: kept.replace("}, // hosted", "} // hosted"),
+    });
   });
 });
 

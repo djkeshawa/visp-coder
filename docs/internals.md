@@ -16,6 +16,8 @@ The hooks read the JSON envelope from `visp guard --json` rather than the exit c
 
 The generated CI workflow pins the VISP version that generated it, so a new release cannot change the verdict on an unchanged repository. A `pull_request` checkout is detached, so the workflow passes `--branch` to find the feature.
 
+`visp install` edits a host's JSON or JSONC MCP configuration in place: only the text of the `visp` entry changes, in the file's own indentation and line endings, so comments and layout stay; an edit that would not read back as intended is refused rather than written. Before rewriting any host MCP configuration (Codex's TOML included) it keeps the previous text under the git-ignored `.visp/state/backups/` (the latest five per file), since these files can hold tokens. A leading byte order mark is kept.
+
 MCP registration exposes tools; it does not intercept writes. Codex edits through `apply_patch`, which its hooks do not intercept, so for Codex the `pre-commit` hook and `visp done` enforce scope; its installed hooks (`.visp/hooks/codex-hooks.mjs`, wired into `.codex/hooks.json`) record prompts, refuse shell commands that would delete VISP state, and send the worker back on Stop.
 
 MCP tool calls run in the VISP server process, outside a coding host's command sandbox and approval flow. This includes checks launched by `visp_verify` and `visp_done` and browser capture. Review check commands before authorizing a slice, especially a new executable or argument vector. The MCP `visp_capture` tool accepts journeys and replays; its browser binary is chosen by the operator's environment (`CHROME_BIN`) or the installed browser, not by a tool argument.
