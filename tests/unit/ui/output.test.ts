@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { outputHeadline, stripAnsi } from "../../../src/ui/output.js";
+import { outputHeadline } from "../../../src/ui/output.js";
+import { stripAnsi } from "../../../src/ui/output-patterns.js";
 
 const nodeTestPass = [
   "✔ report has a header (0.9ms)",
