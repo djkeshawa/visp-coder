@@ -13,8 +13,9 @@ import {
 import { independentSources } from "./independent-sources.js";
 import { deliveredReviewEvidenceIds } from "./review-context.js";
 import { generatedSourceReferences, reviewCitationGap } from "./review-delivery-validation.js";
-import { productReviewSubmissionSchema, runProductReviewRequest } from "./review-request.js";
+import { runProductReviewRequest } from "./review-request.js";
 import { deliveredSourceEvidence, reviewPacketBudgetGap } from "./review-source-delivery.js";
+import { productReviewSubmissionSchema } from "./review-submission-model.js";
 import { independentReviewerContext, reviewerHandoffCandidates } from "./reviewer-handoff.js";
 import { type ProductSelection, readProductRecord } from "./store.js";
 

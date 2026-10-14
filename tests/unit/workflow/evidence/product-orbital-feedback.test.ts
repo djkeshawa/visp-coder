@@ -6,10 +6,8 @@ import { needsBrowser } from "../../../../src/workflow/product/environment.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { currentFailedJourneys } from "../../../../src/workflow/product/evidence-references.js";
 import { runProductReview } from "../../../../src/workflow/product/review.js";
-import {
-  productReviewSubmissionSchema,
-  runProductReviewRequest,
-} from "../../../../src/workflow/product/review-request.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
+import { productReviewSubmissionSchema } from "../../../../src/workflow/product/review-submission-model.js";
 import { runProductNext } from "../../../../src/workflow/product/status.js";
 import { readProductRecord, saveProductState } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
