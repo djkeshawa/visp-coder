@@ -1,0 +1,38 @@
+{
+  "tool": "visp_status",
+  "ok": true,
+  "data": {
+    "feature": "001-return-two-from-the-public",
+    "subjectDigest": "<SHA256-1>",
+    "outcomes": [
+      {
+        "id": "O001",
+        "statement": "The public value is two",
+        "priority": "must",
+        "behavior": "passed",
+        "review": "unassessed",
+        "requiredReview": false,
+        "satisfied": true
+      }
+    ],
+    "next": {
+      "feature": "001-return-two-from-the-public",
+      "action": "refine",
+      "objective": "Review the assembled product against every mandatory outcome and retained expectation",
+      "command": "visp review --handoff --feature 001-return-two-from-the-public",
+      "evidence": [
+        "O001: final goal assessment unassessed; review the current product against the original request"
+      ],
+      "mayEdit": false
+    },
+    "report": "# Return two from the public value module\n\nStatus: active. Every required outcome is satisfied.\n\n## Request\n\n> Make the public value module return two instead of one.\n\n## Outcomes\n\n| Outcome | Priority | Statement | Checks | Behavior | Review |\n| --- | --- | --- | --- | --- | --- |\n| O001 | must | The public value is two | C001 | passed | unassessed |\n\n## Changes\n\n- **T001** Return the promised value (closed; may edit src/value.mjs, checks/value.check.mjs)\n\nUncommitted changes:\n\n- modified: src/value.mjs\n\n## Checks\n\n| Check | Command | Latest result |\n| --- | --- | --- |\n| C001 | `node checks/value.check.mjs` | passed (exit 0, <TIME>) |\n\n## Independent review\n\nNo independent review is recorded. Treat outcomes without executed checks as unverified.\n\n## Next\n\nReview the assembled product against every mandatory outcome and retained expectation\n\n`visp review --handoff --feature 001-return-two-from-the-public`\n\nCheck results come from commands VISP executed. Review judgments are attributed to their reviewer; the actor's own claims are not evidence.\n"
+  },
+  "nextCommand": "visp_review {\"handoff\":true,\"feature\":\"001-return-two-from-the-public\"}",
+  "nextAction": {
+    "tool": "visp_review",
+    "arguments": {
+      "handoff": true,
+      "feature": "001-return-two-from-the-public"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "tool": "visp_next",
+  "ok": true,
+  "data": {
+    "action": "understand",
+    "objective": "Record the original request and define the next useful outcome",
+    "command": "visp feature \"<goal>\"",
+    "evidence": [],
+    "mayEdit": false
+  },
+  "nextCommand": "visp_feature {\"goal\":\"<goal>\"}",
+  "nextAction": {
+    "tool": "visp_feature",
+    "arguments": {
+      "goal": "<goal>"
+    }
+  }
+}

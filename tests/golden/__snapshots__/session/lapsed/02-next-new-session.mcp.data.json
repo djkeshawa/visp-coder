@@ -1,0 +1,20 @@
+{
+  "tool": "visp_next",
+  "ok": true,
+  "data": {
+    "action": "understand",
+    "objective": "The user's request in this session is not part of 001-return-two-from-the-public, which an earlier session left open: start it as its own feature",
+    "command": "visp feature \"<the user's request>\"",
+    "evidence": [
+      "Only if the user asked to continue \"Return two from the public value module\": visp work --feature 001-return-two-from-the-public --task T001"
+    ],
+    "mayEdit": false
+  },
+  "nextCommand": "visp_feature {\"goal\":\"<the user's request>\"}",
+  "nextAction": {
+    "tool": "visp_feature",
+    "arguments": {
+      "goal": "<the user's request>"
+    }
+  }
+}
