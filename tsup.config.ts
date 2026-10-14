@@ -12,12 +12,13 @@ const rawScripts: NonNullable<Options["esbuildPlugins"]>[number] = {
   setup(build) {
     build.onResolve({ filter: /\.script\.mjs\?raw$/ }, (args) => ({
       path: resolve(args.resolveDir, args.path.replace(/\?raw$/, "")),
-      namespace: "raw-script",
+      suffix: "?raw",
     }));
-    build.onLoad({ filter: /.*/, namespace: "raw-script" }, (args) => ({
-      contents: readFileSync(args.path, "utf8"),
-      loader: "text",
-    }));
+    build.onLoad({ filter: /\.script\.mjs$/ }, (args) =>
+      args.suffix === "?raw"
+        ? { contents: readFileSync(args.path, "utf8"), loader: "text" }
+        : undefined,
+    );
   },
 };
 

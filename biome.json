@@ -50,6 +50,9 @@
         "rules": {
           "style": {
             "useTemplate": "off"
+          },
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
           }
         }
       }

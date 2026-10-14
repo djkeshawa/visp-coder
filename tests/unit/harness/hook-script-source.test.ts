@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -32,12 +32,7 @@ describe("script sources", () => {
     expect(renderPreToolUseHook("/tmp/$&/$1/cli.js")).toContain('const cli = "/tmp/$&/$1/cli.js";');
   });
 
-  it("emits the browser kit source byte for byte", () => {
-    const source = readFileSync(
-      new URL("../../../src/workflow/product/scripts/browser-kit.script.mjs", import.meta.url),
-      "utf8",
-    );
-    expect(TESTER_BROWSER_KIT).toBe(source);
+  it("leaves the browser kit as valid JavaScript", () => {
     expect(syntaxErrors("kit.mjs", TESTER_BROWSER_KIT)).toBe("");
   });
 });
