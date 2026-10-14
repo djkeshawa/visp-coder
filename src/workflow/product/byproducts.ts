@@ -138,14 +138,18 @@ export function foreignHostFile(
   protection: HostFileProtection,
 ): boolean {
   const own = HOST_FILES[harness];
-  if (tracked || !own || matchesAny(path, protection.guarded)) return false;
+  if (tracked || !own) return false;
   const normalized = normalizePath(path);
-  if (protection.named.some((pattern) => namesPath(pattern, normalized))) return false;
-  return (
+  // Most paths are no host's file; the protection patterns are matched only for those that are.
+  const foreign =
     !hostFile(normalized, own) &&
     Object.entries(HOST_FILES).some(
       ([name, host]) => name !== harness && hostFile(normalized, host),
-    )
+    );
+  return (
+    foreign &&
+    !matchesAny(path, protection.guarded) &&
+    !protection.named.some((pattern) => namesPath(pattern, normalized))
   );
 }
 
