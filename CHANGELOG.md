@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A reviewer or tester killed with SIGKILL left its private copy of the Codex sign-in (`auth.json`) in the temporary directory for up to an hour. The copy now names the process that made it, and the next reviewer, tester or `visp doctor` removes it as soon as that process has ended.
+- A sign-in that could not be copied for the reviewer was ignored, so `codex exec` then failed with an unrelated-looking error. VISP now stops with an error naming the file it could not copy, and when no `auth.json` exists and Codex fails, the error names where it looked.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed

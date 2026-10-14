@@ -4,7 +4,11 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as execRun } from "../../core/exec.js";
 import { redactStrings } from "../../core/redaction.js";
-import { sweepStaleTempDirectories } from "../../core/stale-temp.js";
+import {
+  markOwner,
+  sweepAbandonedCredentialHomes,
+  sweepStaleTempDirectories,
+} from "../../core/stale-temp.js";
 import type { ProductCriticHost } from "./critic.js";
 import type { CriticPacket } from "./critic-packet.js";
 
@@ -51,7 +55,8 @@ export function codexExecCriticHost(options: {
     },
     async review(packet, config) {
       // Directories from reviews that were killed before they could clean up hold a copy of
-      // the sign-in; a review takes minutes, so an hour-old one is abandoned.
+      // the sign-in; a review takes minutes, so an hour-old one is abandoned. Copies whose
+      // owner has ended go sooner, in runCodexStructured.
       await sweepStaleTempDirectories(STALE_REVIEW_NAMES, STALE_REVIEW_MS);
       const directory = await mkdtemp(join(tmpdir(), "visp-critic-"));
       try {
@@ -129,6 +134,7 @@ export function claudeExecCriticHost(options: {
     },
     async review(packet, config) {
       await sweepStaleTempDirectories(STALE_REVIEW_NAMES, STALE_REVIEW_MS);
+      await sweepAbandonedCredentialHomes();
       const directory = await mkdtemp(join(tmpdir(), "visp-critic-"));
       try {
         const images = await writeImages(directory, packet);
@@ -317,7 +323,8 @@ export async function runCodexStructured(options: {
     responsePath,
     "-",
   ];
-  const codexHome = await privateCodexHome(options.directory);
+  await sweepAbandonedCredentialHomes();
+  const { home: codexHome, missing } = await privateCodexHome(options.directory);
   const termination = forwardTermination(options.signal);
   let result: RunResult;
   try {
@@ -338,7 +345,7 @@ export async function runCodexStructured(options: {
     .catch(() => undefined);
   if (result.exitCode !== 0)
     throw new Error(
-      `codex exec exited ${result.exitCode ?? "without a status"}: ${(result.error ?? result.stderr).slice(-1200)}${process.platform === "win32" && result.error ? " Check the npm codex.cmd shim and PATH." : ""}`,
+      `codex exec exited ${result.exitCode ?? "without a status"}: ${(result.error ?? result.stderr).slice(-1200)}${process.platform === "win32" && result.error ? " Check the npm codex.cmd shim and PATH." : ""}${missing ? ` No Codex sign-in was found at ${missing}; sign in with codex login, or set CODEX_HOME to the directory that holds your sign-in.` : ""}`,
     );
   return JSON.parse(await readFile(responsePath, "utf8"));
 }
@@ -455,12 +462,24 @@ export const REVIEWER_ACTIVITY_FILE = "reviewer-activity.jsonl";
  * its home even with --ephemeral. The reviewer runs with a private copy of the sign-in in
  * this call's temporary directory, which is removed after the review.
  */
-async function privateCodexHome(directory: string): Promise<string> {
+async function privateCodexHome(directory: string): Promise<{ home: string; missing?: string }> {
   const home = join(directory, "codex-home");
   await mkdir(home, { mode: 0o700 });
+  // Named before the sign-in lands, so a sweep can remove the copy once this process is gone.
+  await markOwner(home);
   const operatorHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
-  await copyFile(join(operatorHome, "auth.json"), join(home, "auth.json")).catch(() => undefined);
-  return home;
+  const source = join(operatorHome, "auth.json");
+  try {
+    await copyFile(source, join(home, "auth.json"));
+    return { home };
+  } catch (cause) {
+    // Without the file Codex may still sign in another way; say so only if it then fails.
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return { home, missing: source };
+    await rm(home, REMOVE_TEMPORARY).catch(() => undefined);
+    throw new Error(
+      `Could not copy the Codex sign-in ${source} into the reviewer's private Codex home ${home}: ${cause instanceof Error ? cause.message : String(cause)}. Check that file's permissions, or set CODEX_HOME to the directory that holds your sign-in.`,
+    );
+  }
 }
 
 /** Images travel as files (`--image`), not base64 inside the prompt. */

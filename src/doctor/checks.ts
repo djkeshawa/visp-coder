@@ -7,6 +7,7 @@ import { describeCommand, resolveCommand, run } from "../core/exec.js";
 import { inspectFileTransactions } from "../core/file-transaction.js";
 import { isRepository } from "../core/git.js";
 import { ok, type Result } from "../core/result.js";
+import { sweepAbandonedCredentialHomes } from "../core/stale-temp.js";
 import { inspectStateLock, STATE_LOCK_DIRECTORY } from "../core/state-lock.js";
 import { checkCurrency, openProjectStore } from "../graph/index.js";
 import { skillCatalog } from "../skills/catalog.js";
@@ -56,6 +57,8 @@ export async function runChecks(
   state: WorkspaceState,
   runtime: DoctorRuntime = {},
 ): Promise<DoctorReport> {
+  // A killed reviewer or tester's sign-in copy goes now, not at the next review.
+  await sweepAbandonedCredentialHomes();
   const checks: Check[] = [
     await checkStateOwnership(state),
     await checkTransactions(state),

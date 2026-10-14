@@ -1,9 +1,12 @@
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { applyFileTransaction } from "../../../src/core/file-transaction.js";
 import { err, ok } from "../../../src/core/result.js";
+import { markOwner } from "../../../src/core/stale-temp.js";
 import { type Check, type DoctorRuntime, runChecks } from "../../../src/doctor/checks.js";
 import { applyFixes } from "../../../src/doctor/fix.js";
 import { indexRepository } from "../../../src/graph/index.js";
@@ -92,6 +95,21 @@ it("reports Codex hook trust as unknown until the project and hooks are trusted"
     ].join("\n"),
   );
   expect(await check("codex hooks trust")).toMatchObject({ status: "ok" });
+});
+
+// A killed reviewer's sign-in copy should not wait for the next review to be removed.
+it("removes a sign-in copy left by a reviewer that has ended", async () => {
+  const temporary = join(workspace.root, "tmp-sandbox");
+  const home = join(temporary, "visp-critic-aBc123", "codex-home");
+  await mkdir(home, { recursive: true });
+  await writeFile(join(home, "auth.json"), "{}");
+  const ended = spawnSync(process.execPath, ["-e", "console.log(process.pid)"], {
+    encoding: "utf8",
+  });
+  await markOwner(home, Number(ended.stdout.trim()));
+  vi.stubEnv("TMPDIR", temporary);
+  await runChecks(await workspace.state(), healthyDoctorRuntime);
+  expect(existsSync(home)).toBe(false);
 });
 
 it("repeats the manual activation step for a generic host", async () => {

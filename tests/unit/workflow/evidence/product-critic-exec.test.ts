@@ -253,6 +253,41 @@ process.exit(3);
   }
 });
 
+// A failed copy used to be swallowed, so Codex later failed with an unrelated-looking error.
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "names the sign-in it could not copy, and the one it could not find",
+  async () => {
+    const { fake, work } = await fakeCodex('console.error("401 Unauthorized"); process.exit(1);');
+    const operatorHome = join(work, "operator-home");
+    await mkdir(operatorHome);
+    const previous = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = operatorHome;
+    const run = () =>
+      runCodexStructured({
+        executable: fake,
+        root: process.cwd(),
+        directory: work,
+        model: "gpt-5.6-sol",
+        schema: {},
+        prompt: "hello",
+      });
+    try {
+      await expect(run()).rejects.toThrow(
+        `No Codex sign-in was found at ${join(operatorHome, "auth.json")}`,
+      );
+      await writeFile(join(operatorHome, "auth.json"), "{}");
+      await chmod(join(operatorHome, "auth.json"), 0o000);
+      await expect(run()).rejects.toThrow(
+        `Could not copy the Codex sign-in ${join(operatorHome, "auth.json")}`,
+      );
+    } finally {
+      await chmod(join(operatorHome, "auth.json"), 0o600).catch(() => undefined);
+      if (previous === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previous;
+    }
+  },
+);
+
 it("removes abandoned reviewer directories at the start of a review and keeps fresh ones", async () => {
   const old = new Date(Date.now() - 2 * 60 * 60_000);
   const stale = ["visp-critic-aB3dE9", "visp-review-Zy81xQ"];

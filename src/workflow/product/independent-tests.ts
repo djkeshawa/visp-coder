@@ -25,7 +25,11 @@ import { matchesPattern } from "../../core/patterns.js";
 import { processIdentity } from "../../core/process-identity.js";
 import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
-import { removeTreeBestEffort, sweepStaleTempDirectories } from "../../core/stale-temp.js";
+import {
+  removeTreeBestEffort,
+  sweepAbandonedCredentialHomes,
+  sweepStaleTempDirectories,
+} from "../../core/stale-temp.js";
 import { prepareCommand } from "../../core/windows-command.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment, privateTemporaryDirectory } from "./acceptance-environment.js";
@@ -343,6 +347,7 @@ const CLAUDE_EXISTING_CODE =
 /** One tester session in a fresh temporary directory, removed afterwards. */
 async function testerSession(session: (directory: string) => Promise<unknown>): Promise<unknown> {
   await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
+  await sweepAbandonedCredentialHomes();
   const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
   const started = Date.now();
   try {
