@@ -1,0 +1,10 @@
+$ visp next
+--- stdout
+next: {"feature":"001-return-two-from-the-public","task":"T001","action":"understand","objective":"Continue the authorized slice while recovering the failed check's execution environment or correcting its command; required checks remain unresolved","command":"visp verify --feature 001-return-two-from-the-public --task T001 --retry-environment","mayEdit":true,"completion":"unresolved-environment","recovery":"Inspect the recorded execution error first. For a missing command, correct its executable/arguments or recover the installed tool; manual action descriptions belong in brief examples, not executable checks. For a browser permission failure, request the host's supported execution permission, then run --retry-environment in that approved context. On Codex, where exec_command exposes it, this means sandbox_permissions: require_escalated with a justification; it is a host tool argument, not a VISP flag. Retrying the same sandbox or changing Chrome aliases does not recover permission. If the host refuses, retain the gap. For a missing browser, select an installed binary via CHROME_BIN. Keep browser sandboxing enabled. A URL-policy refusal requires a permitted review surface or an explicit review gap, never a workaround.","evidence":{"entries":["C001: Error: spawn EPERM\nVISP: the host sandbox may have denied process, filesystem or network access. Inspect the recorded denial and rerun the same visp command with the host's supported sandbox escalation when appropriate; do not change working product code to work around host restrictions."],"remaining":0}}
+Full result: add --json.
+
+Next: visp verify --feature 001-return-two-from-the-public --task T001 --retry-environment
+
+--- stderr
+
+--- exit 0

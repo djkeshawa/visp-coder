@@ -1,3 +1,4 @@
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, it } from "vitest";
 import { runHook, SESSION } from "./support/hooks.js";
@@ -55,17 +56,30 @@ it("answers Claude Code's edit, shell, prompt and stop hooks", async () => {
   await claude("13-stop-work", { hook_event_name: "Stop" });
   await claude("14-stop-work-again", { hook_event_name: "Stop" });
   await claude("15-stop-work-limit", { hook_event_name: "Stop" });
+  // Counts older than a day are forgotten, so the same step blocks again.
+  const counts = join(project.root, ".visp/session/stop-blocks.json");
+  const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  await writeFile(
+    counts,
+    (await readFile(counts, "utf8")).replace(/"at":"[^"]+"/g, `"at":"${dayAgo}"`),
+  );
+  await claude("16-stop-after-a-day", { hook_event_name: "Stop" });
+  // Six blocks in one session and feature are the most, whatever the step.
+  const stored = JSON.parse(await readFile(counts, "utf8"));
+  for (const entry of Object.values(stored.entries) as { total: number }[]) entry.total = 6;
+  await writeFile(counts, JSON.stringify(stored));
+  await claude("17-stop-after-six-blocks", { hook_event_name: "Stop" });
   const background = (command: string) => ({
     ...bash(command),
     tool_input: { command, run_in_background: true },
   });
-  await claude("16-bash-background-done", background("visp done 2>&1 | tail -40"));
+  await claude("18-bash-background-done", background("visp done 2>&1 | tail -40"));
   await claude(
-    "17-bash-loop-status",
+    "19-bash-loop-status",
     bash("until visp status | grep -q accepted; do sleep 10; done"),
   );
   await claude(
-    "18-bash-background-feature",
+    "20-bash-background-feature",
     background(
       "visp feature --source-brief - <<'REQUEST'\nShow visp status in the footer.\nREQUEST",
     ),
