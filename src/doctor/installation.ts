@@ -21,6 +21,10 @@ import {
   hookCommand,
   preToolUseRegistration,
 } from "../harness/claude-settings.js";
+import {
+  codexRegistrationAdvice,
+  codexRegistrationProblem,
+} from "../harness/codex-mcp-registration.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { verifyGuardHandshake } from "../harness/guard-handshake.js";
 import {
@@ -31,7 +35,11 @@ import {
 } from "../harness/hooks.js";
 import { type InstallState, readInstallState } from "../harness/install-state.js";
 import { verifyRequestedMcp } from "../harness/install-verification.js";
-import { mcpConfigFile } from "../harness/mcp-registration.js";
+import {
+  CODEX_CONFIG_FILE,
+  mcpConfigFile,
+  planMcpRegistration,
+} from "../harness/mcp-registration.js";
 import { type Asset, planFor } from "../harness/targets.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import type { Check, DoctorRuntime } from "./checks.js";
@@ -122,14 +130,35 @@ export async function checkMcpRegistration(state: WorkspaceState): Promise<Check
     harness: state.config.harness,
     mcp: true,
   });
-  return verified.ok
-    ? { name: "mcp registration", status: "ok", detail: `${path} registers VISP` }
-    : {
-        name: "mcp registration",
-        status: "warn",
-        detail: `${path} does not contain a usable VISP MCP registration`,
-        recovery: `${PRODUCT_NAME} doctor --fix`,
-      };
+  if (verified.ok)
+    return { name: "mcp registration", status: "ok", detail: `${path} registers VISP` };
+  // `doctor --fix` never rewrites a Codex table VISP did not write, so advising it would loop.
+  const customized = await customizedCodexEntry(state);
+  if (customized)
+    return {
+      name: "mcp registration",
+      status: "warn",
+      detail: `${path} ${codexRegistrationProblem(customized.unreadable)}`,
+      recovery: `In ${path}, ${codexRegistrationAdvice(customized.unreadable)}`,
+    };
+  return {
+    name: "mcp registration",
+    status: "warn",
+    detail: `${path} does not contain a usable VISP MCP registration`,
+    recovery: `${PRODUCT_NAME} doctor --fix`,
+  };
+}
+
+async function customizedCodexEntry(
+  state: WorkspaceState,
+): Promise<{ readonly unreadable: boolean } | undefined> {
+  if (state.config.harness !== "codex") return undefined;
+  const current = await state.files.readTextIfExists(CODEX_CONFIG_FILE);
+  if (!current.ok) return undefined;
+  const planned = planMcpRegistration(current.value, false, "codex");
+  return planned.ok && planned.value.status === "customized"
+    ? { unreadable: planned.value.unreadable === true }
+    : undefined;
 }
 
 async function inspectHarnessAssetFiles(

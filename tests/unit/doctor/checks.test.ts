@@ -181,6 +181,40 @@ describe("the enforcement check", () => {
     expect(await check("mcp registration")).toMatchObject({ status: "ok" });
   });
 
+  // `doctor --fix` cannot rewrite a table VISP did not write, so advising it looped.
+  it("accepts a hand-added Codex MCP table and ends its advice for one it cannot use", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "codex");
+    const state = await workspace.state();
+    const installed = await installHarness(state.paths, { harness: "codex", hooks: [], mcp: true });
+    expect(installed.ok).toBe(true);
+    const config = join(workspace.root, CODEX_CONFIG_FILE);
+    const cli = JSON.stringify(runtimeIdentity().executable);
+    await writeFile(
+      config,
+      `[mcp_servers.visp]\ncommand = "node"\nargs = [${cli}, "serve", "--mcp"]\n`,
+    );
+    expect(await check("mcp registration")).toMatchObject({ status: "ok" });
+
+    await writeFile(config, '[mcp_servers.visp]\ncommand = "visp"\nargs = ["serve", "--mcp"]\n');
+    const result = await check("mcp registration");
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("[mcp_servers.visp]");
+    expect(result.recovery).not.toContain("--fix");
+    expect(result.recovery).toContain(`args = [${cli}, "serve", "--mcp"]`);
+    const repairs = await applyFixes(await workspace.state(), [result]);
+    const detail = repairs.map((repair) => repair.detail).join(" ");
+    expect(detail).not.toContain("add [mcp_servers.visp] manually");
+    expect(detail).toContain(`args = [${cli}, "serve", "--mcp"]`);
+
+    // A table VISP cannot read is not said to start another build.
+    await writeFile(config, '[mcp_servers.visp]\ncommand = "node"\nenv.TOKEN = "x"\n');
+    const unreadable = await check("mcp registration");
+    expect(unreadable.detail).toContain("VISP could not read");
+    expect(unreadable.detail).not.toContain("does not start this VISP build");
+    const repaired = await applyFixes(await workspace.state(), [unreadable]);
+    expect(repaired.map((repair) => repair.detail).join(" ")).toContain("VISP could not read");
+  });
+
   it("keeps a project or environment recovery instead of prescribing a global reinstall", async () => {
     await installEverything();
     const result = await check("enforcement", {

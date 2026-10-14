@@ -37,6 +37,7 @@ import {
   planPreToolUseRegistration,
   planPreToolUseUnregistration,
 } from "./claude-settings.js";
+import { codexRegistrationAdvice, codexRegistrationProblem } from "./codex-mcp-registration.js";
 import { preCommitHookPath } from "./git-hook.js";
 import {
   HOOK_MARKER,
@@ -749,7 +750,9 @@ async function planMcp(
   if (registration.value.status === "malformed" || registration.value.status === "customized") {
     if (options.harness === "codex") {
       plan.manualSteps.push(
-        `${path} could not be merged; add [mcp_servers.visp] manually or rerun visp install --no-mcp. Other installation assets will still be installed.`,
+        registration.value.status === "customized"
+          ? `${path} ${codexRegistrationProblem(registration.value.unreadable)}: ${codexRegistrationAdvice(registration.value.unreadable)}. Other installation assets will still be installed.`
+          : `${path} could not be merged; add [mcp_servers.visp] manually or rerun visp install --no-mcp. Other installation assets will still be installed.`,
       );
       return ok(undefined);
     }
