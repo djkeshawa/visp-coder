@@ -260,7 +260,7 @@ function validateImageChecks(brief: ProductBrief, context: z.RefinementCtx): voi
       context.addIssue({
         code: "custom",
         path: ["checks"],
-        message: `${check.id} declares images, so it must cover an experience outcome: add an outcome with kind: experience naming what the picture must show (each object, subject and look the request names, recognizable), and list its ID in the outcomes of ${check.id}${checkSlices(brief, check.id)}`,
+        message: `${check.id} declares images, so it must cover an experience outcome: add an outcome with kind: experience naming what the picture must show (each object, subject and concrete look the request names, recognizable), and list its ID in the outcomes of ${check.id}${checkSlices(brief, check.id)}`,
       });
 }
 

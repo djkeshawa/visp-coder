@@ -180,7 +180,11 @@ it("asks for one optional finish finding that can never fail an outcome", () => 
 it("requires what the request names to be recognizable in the images, unlike finish", () => {
   const visual = productReviewInstructions({ visual: true });
   expect(visual).toContain(
-    "Recognizability is not finish and overrides the finish rule: every object, subject or look the request names for a picture or screen to show",
+    "Recognizability is not finish and overrides the finish rule: every object or subject the request names for a picture or screen to show, and every concrete look it names (named colours or palette, a named art style such as pixel art, voxel or isometric, a viewpoint), must be recognizable",
+  );
+  // "A clean, modern design" or "a polished game" is never a required, outcome-failing finding.
+  expect(visual).toContain(
+    "evaluative words (modern, clean, beautiful, polished) stay finish or advisory",
   );
   // Finish no longer lists what the recognizability rule makes required.
   expect(visual).toContain(
@@ -193,7 +197,7 @@ it("requires what the request names to be recognizable in the images, unlike fin
   expect(visual).toContain("do not mark an outcome that covers it satisfied");
   // Ordinary apps name no visual subjects: the rule adds nothing for their controls.
   expect(visual).toContain(
-    "Only objects, subjects or looks the request names count; an app's controls, forms and data tables fall under the criteria above, and polish beyond what the request names stays finish.",
+    "an app's controls, forms and data tables fall under the criteria above, and polish beyond what the request names stays finish.",
   );
   // Without images there is nothing to recognize; code review keeps its own rules.
   expect(productReviewInstructions()).not.toContain("Recognizability");
