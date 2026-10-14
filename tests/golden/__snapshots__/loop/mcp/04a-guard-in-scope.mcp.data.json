@@ -1,0 +1,18 @@
+{
+  "tool": "visp_guard",
+  "ok": true,
+  "data": {
+    "runtime": {
+      "version": "<VERSION>",
+      "buildId": "<BUILD-ID>",
+      "executable": "<REPO>/dist/cli.js"
+    },
+    "protocolVersion": 2,
+    "checked": 1,
+    "allowed": true,
+    "violations": [],
+    "authorizedTasks": [
+      "T001"
+    ]
+  }
+}
