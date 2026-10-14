@@ -63,24 +63,29 @@ export function byproductProtection(workspace: WorkspaceState, brief?: ProductBr
 }
 
 /**
- * The same protection, split: `named` are the scope and check inputs, which protect another
- * host's file only when they name it; `guarded` are forbidden and blocked paths, which always do.
+ * The same protection, split: `named` are the scope, check inputs and forbidden paths, which
+ * protect another host's file only when they name it; `guarded` are blocked paths, which
+ * always do.
  */
 export function hostFileProtection(
   workspace: WorkspaceState,
   brief?: ProductBrief,
 ): HostFileProtection {
   return {
-    named: sourceInputPatterns(workspace, brief),
-    guarded: [
+    named: [
+      ...sourceInputPatterns(workspace, brief),
       ...(brief?.slices.flatMap((slice) => slice.scope.forbidden) ?? []),
-      ...workspace.config.workflow.blockedPaths.flatMap((rule) => [
-        rule,
-        `${rule}/**`,
-        ...(rule.includes("/") ? [] : [`**/${rule}`, `**/${rule}/**`]),
-      ]),
     ],
+    guarded: blockedPatterns(workspace),
   };
+}
+
+function blockedPatterns(workspace: WorkspaceState): string[] {
+  return workspace.config.workflow.blockedPaths.flatMap((rule) => [
+    rule,
+    `${rule}/**`,
+    ...(rule.includes("/") ? [] : [`**/${rule}`, `**/${rule}/**`]),
+  ]);
 }
 
 export interface HostFileProtection {
@@ -153,16 +158,21 @@ export function foreignHostFile(
   );
 }
 
-/** The pattern matches the path through a literal leading part that is the path or a parent of it. */
+// The pattern matches the path through a literal part that is the path or a parent of it:
+// `AGENTS.md`, `.codex/**` and `.codex/` name `.codex/hooks.json`, and a literal after a
+// leading `**/` names the file at any depth; `**` and `*.md` name nothing.
 function namesPath(pattern: string, path: string): boolean {
-  const segments = normalizePath(pattern)
-    .replace(/^(?:\.\/)+/, "")
-    .split("/");
+  const normalized = normalizePath(pattern).replace(/^(?:\.\/)+/, "");
+  const directory = normalized.endsWith("/");
+  const anywhere = /^(?:\*\*\/)+/.exec(normalized)?.[0] ?? "";
+  const segments = normalized.slice(anywhere.length).replace(/\/$/, "").split("/");
   const glob = segments.findIndex((segment) => /[*?[\]{}!]/.test(segment));
   const literal = (glob < 0 ? segments : segments.slice(0, glob)).join("/");
+  if (!literal) return false;
+  const parts = path.split("/");
+  const suffixes = anywhere ? parts.map((_, at) => parts.slice(at).join("/")) : [path];
   return (
-    literal !== "" &&
-    (path === literal || path.startsWith(`${literal}/`)) &&
-    matchesAny(path, [pattern])
+    suffixes.some((suffix) => suffix === literal || suffix.startsWith(`${literal}/`)) &&
+    matchesAny(path, [directory ? `${normalized}**` : normalized])
   );
 }

@@ -46,6 +46,14 @@ describe("another coding host's files", () => {
         guarded: ["**/.codex/**"],
       }),
     ).toBe(false);
+    // A bare file name under any directory, and a directory with a trailing slash, name it.
+    expect(foreignHostFile("AGENTS.md", false, "claude-code", named(["**/AGENTS.md"]))).toBe(false);
+    expect(foreignHostFile(".codex/hooks.json", false, "claude-code", named([".codex/"]))).toBe(
+      false,
+    );
+    expect(
+      foreignHostFile(".codex/hooks.json", false, "claude-code", named(["**/.codex/**"])),
+    ).toBe(false);
     // A catch-all or extension pattern does not name another host's file.
     for (const pattern of ["**", "**/*", "*", "./**", "./**/*", "**/*.md", "*.md"])
       expect(foreignHostFile("AGENTS.md", false, "claude-code", named([pattern])), pattern).toBe(
@@ -94,6 +102,11 @@ describe("another coding host's files", () => {
     expect(await paths(workspace, scoped({ forbidden: [".codex/**"] }))).toContain(
       ".codex/config.toml",
     );
+    // A forbidden catch-all names no file, so it does not pull another app's file in.
+    for (const forbidden of [["**"], ["*.md"], ["**/*.md"]])
+      expect(await paths(workspace, scoped({ forbidden })), forbidden.join()).not.toContain(
+        "GEMINI.md",
+      );
     const state = await claudeCode(workspace);
     const blocked = await productSourceSnapshot(
       {
