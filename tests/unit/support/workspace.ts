@@ -33,7 +33,7 @@ export class TestWorkspace {
 
   static async create(
     files: Record<string, string | Uint8Array> = {},
-    options: { critic?: boolean } = {},
+    options: { critic?: boolean; flip?: boolean } = {},
   ): Promise<TestWorkspace> {
     const root = await realpath(await mkdtemp(join(tmpdir(), "visp-workspace-")));
     const workspace = new TestWorkspace(root, await writeShim());
@@ -49,9 +49,12 @@ export class TestWorkspace {
     const init = await runInit({ root, harness: "generic" });
     if (!init.ok) throw new Error(`init failed: ${init.error.message}`);
     // Baseline tests deliberately opt out of model review; critic tests opt into its default.
-    if (!options.critic) {
+    // The flip check reruns every passing check on the reverted source, so a workspace whose
+    // tests do not look at flip results can turn it off (`flip: false`) and halve the check time.
+    if (!options.critic || options.flip === false) {
       const config = parse(await readFile(join(root, "visp.yml"), "utf8"));
-      config.critic = { ...config.critic, enabled: false };
+      if (!options.critic) config.critic = { ...config.critic, enabled: false };
+      if (options.flip === false) config.workflow = { ...config.workflow, flipCheck: "off" };
       await workspace.write("visp.yml", stringify(config));
     }
 
