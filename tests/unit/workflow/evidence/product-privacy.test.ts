@@ -104,7 +104,9 @@ it("stores only hashes for private inputs and image evidence in candidates", asy
 
 it("masks credentials in the request before saving or publishing and tells the caller", async () => {
   const { TestWorkspace } = await import("../../support/workspace.js");
-  const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+  const { createProductFeature } = await import(
+    "../../../../src/workflow/product/feature-create.js"
+  );
   const { runProductReport } = await import("../../../../src/workflow/product/status.js");
   project = await TestWorkspace.create();
   await project.installFoundation();

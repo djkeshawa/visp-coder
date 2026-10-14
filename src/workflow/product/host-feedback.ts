@@ -2,6 +2,7 @@ import { z } from "zod";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { updateProductBrief } from "./brief.js";
 import {
@@ -272,7 +273,7 @@ async function consumeResearch(
     question,
     implication: conclusion.data.implication,
     check: check.id,
-    command: `visp work --feature ${brief.feature}${selection.task ? ` --task ${selection.task}` : ""}`,
+    command: cliCommand("work", { feature: brief.feature, task: selection.task }),
   });
 }
 

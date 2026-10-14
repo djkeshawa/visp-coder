@@ -1,11 +1,9 @@
 import { afterEach, expect, it } from "vitest";
 import { sha256 } from "../../../../src/core/hash.js";
 import type { Result } from "../../../../src/core/result.js";
-import {
-  createProductFeature,
-  updateProductBrief,
-} from "../../../../src/workflow/product/brief.js";
+import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
+import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import { runProductReview } from "../../../../src/workflow/product/review.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { recordedProductJourney } from "../../support/product-journey.js";

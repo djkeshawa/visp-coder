@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { launchesReviewer } from "../../config/critic.js";
 import { ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { finalProductAssessmentGaps, outcomeStatuses } from "./assessment.js";
 import { cancelledExecution } from "./check-lifecycle.js";
@@ -550,7 +551,7 @@ function waitingNext(feature: string): Result<ProductNext> {
     feature,
     objective:
       "Independent review is still running. Run the command again to wait for its findings; editing pauses until it returns.",
-    command: `visp next --feature ${feature}`,
+    command: cliCommand("next", { feature }),
     evidence: [],
     mayEdit: false,
   });

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import type { ReviewerCapacity } from "./critic-capacity.js";
 import type { DisputeRuling } from "./independent-review.js";
@@ -673,13 +674,13 @@ function upheldOverride(
         action: "implement",
         objective:
           "The independent reviewer upheld the disputed pinned test(s). Run visp done again: the suite skips them",
-        command: `visp done --feature ${feature}${task ? ` --task ${task}` : ""}`,
+        command: cliCommand("done", { feature, task }),
       }
     : {
         action: "accept",
         objective:
           "The independent reviewer upheld the disputed pinned test(s). Run visp accept again: they are waived",
-        command: `visp accept --feature ${feature}`,
+        command: cliCommand("accept", { feature }),
       };
 }
 
@@ -694,7 +695,7 @@ function handedOffOverride(
     objective: cannotRule
       ? `The independent reviewer cannot rule on the dispute of ${tests} (its review budget is spent or it is unavailable). Hand it to the human reviewer: run visp pr, which lists it`
       : `The independent reviewer left the dispute of ${tests} unruled twice. Hand it to the human reviewer: run visp pr, which lists it`,
-    command: `visp pr --feature ${feature}`,
+    command: cliCommand("pr", { feature }),
     completion: "handoff",
   };
 }
@@ -734,7 +735,7 @@ export async function pinnedHandoff(
   return {
     action: "fix",
     completion: "handoff",
-    command: `visp pr --feature ${feature}`,
+    command: cliCommand("pr", { feature }),
     objective: `The pinned suite ${first.check} ${what} the same way in ${first.count} runs while the product changed${first.line ? ` (${first.line})` : ""}. More runs will not change it; if the error names something your product should provide, provide it first. Then run visp pr: it hands the suite to the human reviewer`,
   };
 }

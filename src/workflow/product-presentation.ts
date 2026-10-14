@@ -1,3 +1,4 @@
+import { cliCommand } from "./next-action.js";
 import type { ProductReviewBundle } from "./product/review.js";
 
 /** A mutation acknowledges new judgments without replaying images and the execution journal. */
@@ -64,9 +65,9 @@ export function productReviewReceipt(bundle: ProductReviewBundle) {
             bundle.coverageRemaining ||
             bundle.gaps.length ||
             bundle.feedbackPlan.gaps.length
-          ? `visp review --feature ${bundle.feature}`
+          ? cliCommand("review", { feature: bundle.feature })
           : "visp next",
-    detailCommand: `visp review --feature ${bundle.feature}`,
+    detailCommand: cliCommand("review", { feature: bundle.feature }),
   };
 }
 

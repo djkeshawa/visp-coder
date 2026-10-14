@@ -5,6 +5,7 @@ import { fromUnknown, vispError } from "../../core/errors.js";
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import { productReviewReceipt } from "../product-presentation.js";
 import type { WorkspaceState } from "../state.js";
 import { experimentRecoverySuggestions } from "./experiments.js";
@@ -144,7 +145,12 @@ export function prepareReviewSession(
               aliases: new Map(),
             },
           ),
-          command: `visp review --feature ${bundle.feature}${bundle.task ? ` --task ${bundle.task}` : ""} --session ${id} --from -`,
+          command: cliCommand("review", {
+            feature: bundle.feature,
+            task: bundle.task,
+            session: id,
+            from: "-",
+          }),
           instructions:
             "Read packet.json and its actual images, then complete its submission object without adding subjectDigest, selection or captures. VISP supplies identity. Submit through stdin or responsePath. A configured critic's submitted assessment is already a product review; no duplicate worker approval is needed. A prepared session is not a review or proof of image inspection.",
         })

@@ -6,13 +6,7 @@ export {
   saveCriticDefaults,
   saveCriticEnabled,
 } from "../../config/critic-defaults.js";
-export {
-  createProductFeature,
-  type ProductBriefUpdate,
-  type ProductFeatureOptions,
-  type ProductFeatureOutcome,
-  updateProductBrief,
-} from "./brief.js";
+export { type ProductBriefUpdate, updateProductBrief } from "./brief.js";
 export { type ProductReviewChallenge, productReviewChallenges } from "./coverage.js";
 export {
   type CriticAdapter,
@@ -36,6 +30,8 @@ export {
   runProductReview,
   runProductVerify,
 } from "./evidence.js";
+export { createProductFeature } from "./feature-create.js";
+export type { ProductFeatureOptions, ProductFeatureOutcome } from "./feature-model.js";
 export { productFeedbackPlan } from "./feedback.js";
 export {
   type ProductFeedback,

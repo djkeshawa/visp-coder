@@ -1,7 +1,7 @@
 import { readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { createProductFeature } from "../../../../src/workflow/product/brief.js";
+import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import { FEATURE_STARTING_FILE } from "../../../../src/workflow/product/host-prompts.js";
 import { runProductNext } from "../../../../src/workflow/product/status.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";

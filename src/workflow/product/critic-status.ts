@@ -1,4 +1,5 @@
 import { ok } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
 import { candidatePath } from "./candidate.js";
@@ -214,7 +215,7 @@ function criticSummary(
       : {}),
     evidenceRequest: last?.response?.evidenceRequest,
     command: needsWork
-      ? `visp work --feature ${state.feature}${state.task ? ` --task ${state.task}` : ""}`
+      ? cliCommand("work", { feature: state.feature, task: state.task })
       : undefined,
     limitation:
       "Critic judgments are advisory evidence, not automatic acceptance or proof of the best candidate.",

@@ -1,3 +1,4 @@
+import { cliCommand } from "../next-action.js";
 import type { CriticPhase, CriticRequest, CriticState } from "./critic-model.js";
 
 /** A fresh attempt, never a replay or an automatic waiver of a host refusal. */
@@ -19,7 +20,7 @@ export function criticRecovery(state: CriticState, phase: CriticPhase, remaining
   const last = state.attempts.at(-1);
   if (last?.status !== "unavailable" || (last.phase ?? "product") !== phase) return undefined;
   const available = remaining >= (phase === "understanding" ? 2 : 1);
-  const base = `visp critic --feature ${state.feature}${state.task ? ` --task ${state.task}` : ""} --phase ${phase}`;
+  const base = cliCommand("critic", { feature: state.feature, task: state.task, phase });
   return {
     after: last.id,
     failureKind: last.failureKind ?? "unclassified-legacy-failure",

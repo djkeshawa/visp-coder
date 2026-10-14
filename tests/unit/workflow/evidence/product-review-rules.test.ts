@@ -6,7 +6,7 @@ import {
   SOURCE_ADVICE_INSTRUCTIONS,
   UNDERSTANDING_CRITIC_INSTRUCTIONS,
 } from "../../../../src/workflow/product/review-instructions.js";
-import { repairObjective } from "../../../../src/workflow/product/status-next.js";
+import { repairObjective } from "../../../../src/workflow/product/status-next-review.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 

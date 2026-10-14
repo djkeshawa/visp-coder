@@ -1,11 +1,8 @@
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
-import {
-  createProductFeature,
-  type ProductFeatureOptions,
-  type ProductFeatureOutcome,
-} from "./brief.js";
+import { createProductFeature } from "./feature-create.js";
+import type { ProductFeatureOptions, ProductFeatureOutcome } from "./feature-model.js";
 import { hostRequest } from "./host-prompts.js";
 import {
   executionRefusal,

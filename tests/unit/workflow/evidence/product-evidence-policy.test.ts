@@ -7,15 +7,13 @@ import {
   applicableExecutions,
   applicableReviews,
 } from "../../../../src/workflow/product/assessment.js";
-import {
-  createProductFeature,
-  updateProductBrief,
-} from "../../../../src/workflow/product/brief.js";
+import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import {
   runProductAccept,
   runProductDone,
   runProductVerify,
 } from "../../../../src/workflow/product/evidence.js";
+import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import { runProductReview } from "../../../../src/workflow/product/review.js";
 import { runProductNext, runProductStatus } from "../../../../src/workflow/product/status.js";
 import { historicalAcceptanceNext } from "../../../../src/workflow/product/status-history.js";
