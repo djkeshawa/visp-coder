@@ -7,9 +7,9 @@ import { branchFeatures } from "../../src/workflow/product/branch-scope.js";
 import { updateProductBrief } from "../../src/workflow/product/brief.js";
 import { allocateFeatureId } from "../../src/workflow/product/feature-id.js";
 import { mergeProjectRules, removeProjectRule } from "../../src/workflow/product/project-rules.js";
+import { productScopes } from "../../src/workflow/product/scopes.js";
 import { runProductNext, runProductStatus } from "../../src/workflow/product/status.js";
 import { runProductWork } from "../../src/workflow/product/work.js";
-import { authorizedScopes } from "../../src/workflow/state.js";
 import { productWorkspace } from "../unit/support/product-workspace.js";
 import type { TestWorkspace } from "../unit/support/workspace.js";
 
@@ -29,7 +29,7 @@ it("recovers next, status and authorization after switching away from a feature"
   expect(next.ok && next.value.objective).toContain("main");
   expect(next.ok && next.value.command).not.toContain("visp feature");
   expect((await runProductStatus(state)).ok).toBe(true);
-  expect(await authorizedScopes(state)).toEqual({ ok: true, value: [] });
+  expect(await productScopes(state)).toEqual({ ok: true, value: [] });
   expect(
     execFileSync(process.execPath, ["-e", AUTHORIZATION_CHECK], {
       cwd: project.root,
