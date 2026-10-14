@@ -33,3 +33,20 @@ it("reports a check that cannot run as an environment step", async () => {
     ),
   );
 });
+
+it("notes a likely sandbox denial in a check's output", async () => {
+  project = await GoldenProject.create();
+  const run = new Recorder(project, "environment/sandbox-denial");
+  await project.startFeature({
+    ...BRIEF,
+    checks: [
+      {
+        ...BRIEF.checks[0],
+        command: ["node", "-e", "console.error('Error: spawn EPERM'); process.exitCode = 1"],
+      },
+    ],
+  });
+  await run.cli("01-work", ["work"]);
+  await run.cli("02-done", ["done"]);
+  await run.cli("03-next", ["next"]);
+});
