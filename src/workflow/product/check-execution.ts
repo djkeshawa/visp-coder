@@ -257,10 +257,10 @@ async function decideCheckImages(
           run.before,
         )
       : undefined;
-  if (typeof images === "string")
+  if (images && "note" in images)
     return {
-      status: "failed" as const,
-      note: images,
+      status: images.status,
+      note: images.note,
       execution: {},
       state: record.state,
       mutations: [],

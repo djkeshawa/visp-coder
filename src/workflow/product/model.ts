@@ -26,7 +26,10 @@ const id = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
 /** An image a check writes, relative to the project root, delivered to the reviewer when it passes. */
 export const checkImagePathSchema = z
   .string()
-  .regex(/\.(?:png|jpe?g|webp|gif)$/i, "a check image must be a .png, .jpg, .webp or .gif file")
+  .regex(
+    /\.(?:png|jpe?g|webp|gif|svg)$/i,
+    "a check image must be a .png, .jpg, .webp, .gif or .svg file",
+  )
   .refine(
     (path) => !/^(?:[A-Za-z]:)?[\\/]/.test(path) && !path.split(/[\\/]/).includes(".."),
     "a check image is a path inside the project",

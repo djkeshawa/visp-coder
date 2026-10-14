@@ -1,7 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { deflateSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "../../../../src/core/hash.js";
 import { checkImageCaptures } from "../../../../src/workflow/product/assessment.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
@@ -22,6 +23,10 @@ import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { moduleFeedback } from "../../support/product-feedback.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import { pngHeader, type TestWorkspace } from "../../support/workspace.js";
+
+const chrome =
+  spawnSync(process.env.CHROME_BIN ?? "google-chrome", ["--version"], { timeout: 10_000 })
+    .status === 0;
 
 const workspaces: TestWorkspace[] = [];
 afterEach(async () => {
@@ -229,7 +234,7 @@ describe("images declared by a command check", () => {
     [
       "is not an image",
       'fs.writeFileSync("out/scene.png","<svg/>")',
-      "C001's declared image out/scene.png is not a PNG, JPEG, WebP or GIF file; make the check write one of those formats",
+      "C001's declared image out/scene.png is not a PNG, JPEG, WebP, GIF or SVG file; make the check write one of those formats",
     ],
     [
       "is a symbolic link",
@@ -263,6 +268,64 @@ describe("images declared by a command check", () => {
       });
     },
   );
+
+  const writeSvg = (svg: string) =>
+    `require("fs").mkdirSync("out",{recursive:true});require("fs").writeFileSync("out/scene.svg",${JSON.stringify(svg)})`;
+  const SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20"><rect width="40" height="20" fill="#1a3cff"/></svg>';
+
+  it.skipIf(!chrome)("render a declared SVG in a browser for the reviewer", async () => {
+    const workspace = await imageCheck(writeSvg(SVG), ["out/scene.svg"]);
+    const verified = await runProductVerify(await workspace.state());
+    expect(verified).toMatchObject({ ok: true, value: { passed: true } });
+    const record = await readProductRecord(await workspace.state());
+    if (!record.ok) throw new Error(record.error.message);
+    const capture = record.value.state.captures.at(-1) as { path: string; route: string };
+    expect(capture.route).toBe("check C001: out/scene.svg");
+    const bytes = await readFile(join(workspace.root, capture.path));
+    expect(bytes.subarray(1, 4).toString("ascii")).toBe("PNG");
+  });
+
+  it.skipIf(!chrome)("fail the check when a declared SVG does not render", async () => {
+    const workspace = await imageCheck(writeSvg("<svg"), ["out/scene.svg"]);
+    expect(await runProductVerify(await workspace.state())).toMatchObject({
+      ok: true,
+      value: {
+        passed: false,
+        executions: [
+          {
+            status: "failed",
+            output: expect.stringContaining(
+              "C001's declared image out/scene.svg did not render in a browser; make the check write a valid SVG",
+            ),
+          },
+        ],
+      },
+    });
+  });
+
+  it("report a declared SVG VISP cannot render as an environment failure", async () => {
+    const workspace = await imageCheck(writeSvg(SVG), ["out/scene.svg"]);
+    vi.stubEnv("CHROME_BIN", join(workspace.root, "missing-chrome"));
+    try {
+      expect(await runProductVerify(await workspace.state())).toMatchObject({
+        ok: true,
+        value: {
+          passed: false,
+          executions: [
+            {
+              status: "environment-failed",
+              output: expect.stringContaining(
+                "VISP could not run a browser to render C001's declared image out/scene.svg; make Chrome or Chromium available (CHROME_BIN), or make the check write a PNG",
+              ),
+            },
+          ],
+        },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   it("are refused on a browser journey, whose captures already reach the reviewer", async () => {
     const { workspace, brief } = await productWorkspace();
@@ -419,11 +482,12 @@ describe("images declared by a command check", () => {
   it("accept only image files inside the project", () => {
     const check = { id: "C001", command: ["node", "render.mjs"] };
     expect(productCheckSchema.safeParse({ ...check, images: ["out/a.png"] }).success).toBe(true);
+    expect(productCheckSchema.safeParse({ ...check, images: ["out/a.svg"] }).success).toBe(true);
     for (const path of [
       "../a.png",
       "/tmp/a.png",
       "C:\\a.png",
-      "out/a.svg",
+      "out/a.html",
       "out/../../a.png",
       ".visp/a.png",
       "./.visp/features/a.png",
