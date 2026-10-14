@@ -97,7 +97,7 @@ export function prepareReviewSession(
         "Does the implementation fulfill the original request? Identify consequential observed problems and uncertainty.",
       images: images.map((image) => image.metadata),
       submission: independentReviewTemplate(),
-      responseSchema: independentReviewJsonSchema(session.evidenceIds),
+      responseSchema: await independentReviewJsonSchema(session.evidenceIds),
     };
     const gap = reviewPacketBudgetGap(packet, session.evidenceIds);
     if (gap) return err(vispError("STAGE_BLOCKED", gap));

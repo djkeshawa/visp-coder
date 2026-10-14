@@ -237,7 +237,7 @@ it("launches the reviewer when the only failure is a disputed pinned test", asyn
     testSource: expect.stringContaining("value % 2"),
   });
   expect(packets[0]?.instructions).toContain("disputes lists pinned acceptance tests");
-  const schema = independentReviewJsonSchema([], [], [ODD]) as {
+  const schema = (await independentReviewJsonSchema([], [], [ODD])) as {
     properties: { disputes: { items: { properties: { test: { enum: string[] } } } } };
   };
   expect(schema.properties.disputes.items.properties.test.enum).toEqual([ODD]);

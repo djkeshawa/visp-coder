@@ -3,8 +3,6 @@
 ## Unreleased
 
 ### Changed
-- **`visp ui` polls less while its live connection is up.** With the event stream open the page re-reads the open feature every 30 s (and once a second after each change) instead of every 10 s, so edits to your product's own files still show. If the connection drops, the page polls every 10 s and reconnects with a growing delay (1 s up to 30 s), and stops reconnecting when the dashboard no longer accepts its link.
-
 ### Fixed
 - Hooks written by the same VISP build installed at another path (nvm, npx, a local `node_modules`) no longer count as missing. Every generated hook embeds the path of the CLI that wrote it and was compared byte for byte, so `visp feature` refused to start on hosts other than Claude Code and `visp doctor` reported the hooks as stale or edited. The check now re-renders the hook with the path it embeds: the build ID, version and template must match, and the CLI it calls must exist.
 - A `[mcp_servers.visp]` table added to `.codex/config.toml` by hand is accepted when it starts this VISP build (`node` with this build's CLI and `serve --mcp`; other keys may differ). It was always reported as customized: `visp doctor` suggested `doctor --fix`, which answered "add it manually", which the user had already done. For a table that does not start this build, doctor and install now say exactly what to set, or to delete the table and rerun `visp install`.

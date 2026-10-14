@@ -491,7 +491,7 @@ it("limits native provider citations to delivered evidence without inventing fal
   }
   expect(packet.current.evidence.some((entry) => entry.status === "not-delivered")).toBe(false);
   fields.length = 0;
-  collect(independentReviewJsonSchema([]));
+  collect(await independentReviewJsonSchema([]));
   for (const field of fields) {
     expect(field.maxItems).toBe(0);
     expect(field.items).not.toHaveProperty("enum");

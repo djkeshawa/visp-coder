@@ -32,7 +32,7 @@ export interface ProductFeedbackHost {
   readonly review?: (
     request: ReturnType<typeof independentReviewerContext> & {
       submission: ReturnType<typeof independentReviewTemplate>;
-      responseSchema: ReturnType<typeof independentReviewJsonSchema>;
+      responseSchema: Awaited<ReturnType<typeof independentReviewJsonSchema>>;
     },
     options: { model: string; signal: AbortSignal; context: "fresh-preferred"; timeoutMs?: number },
   ) => Promise<unknown>;
@@ -93,7 +93,7 @@ export async function runProductHostFeedback(
     sources: sources.value,
     evidence,
     submission: independentReviewTemplate(),
-    responseSchema: independentReviewJsonSchema(ids),
+    responseSchema: await independentReviewJsonSchema(ids),
   };
   const deliveredEvidence = {
     ids,
