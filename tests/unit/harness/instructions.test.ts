@@ -43,9 +43,13 @@ it("routes review through visp next and starts work while feature writes tests",
     );
     // "Poll" invited shell loops around visp status, which the hook now refuses.
     expect(guide).not.toContain("Poll; never duplicate");
+    expect(guide).not.toContain("Poll done/verify/accept handles");
     expect(guide).not.toContain("Retain and poll the command handle");
     expect(guide).not.toContain("delegate nothing");
   }
+  expect(renderAgentGuide()).toContain(
+    "Wait on done/verify/accept handles until they return; completed checks are saved for retry after interruption.",
+  );
   expect(renderAgentGuide()).toContain(
     "Use at least 10 minutes for feature/done/verify/accept/next",
   );

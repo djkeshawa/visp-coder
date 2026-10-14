@@ -19,8 +19,9 @@ const COMPACT_RULES = `- Keep request with --source-brief; preserve outcomes, ex
 
 const RULES_FOR_AGENTS = `- The original request and independent acceptance expectations cannot be weakened by a method revision.
   An explicit intent change records the reason and provenance; it is not proof of human authorization.
-- Use at least 10 minutes for feature/done/verify/accept/next when the host supports it. Poll done/verify/accept handles;
-  completed checks are saved for retry after interruption. Inspect sandbox denials before using supported escalation.
+- Use at least 10 minutes for feature/done/verify/accept/next when the host supports it.
+  Wait on done/verify/accept handles until they return; completed checks are saved for retry after interruption.
+  Inspect sandbox denials before using supported escalation.
 - Write Given/When/Then examples and counterexamples for stateful behavior. Check downstream results,
   boundaries, failure, and recovery. Preview and runtime should share a model or a consistency check,
   and both must satisfy an expectation that does not come from the implementation.
