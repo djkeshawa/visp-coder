@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
-import { productJourneyGaps, productJourneyImageLinks } from "../evidence/product-journey.js";
+import { productJourneyImageLinks } from "../evidence/product-journey.js";
 import type { ProductReviewImage } from "../evidence/product-review.js";
+import { experienceObservationGaps } from "./assessment.js";
 import {
   evidenceSupportGaps,
   type ProductEvidenceCatalogue,
@@ -16,7 +17,10 @@ export function validateAssessments(
   subject: string,
   outcomes: readonly ProductOutcome[],
   images: readonly ProductReviewImage[],
-  captureRuns: (outcome: string) => readonly unknown[],
+  observations: (outcome: string) => {
+    readonly captureRuns: readonly unknown[];
+    readonly checkImages: ReadonlySet<string>;
+  },
   catalogue: ProductEvidenceCatalogue,
 ): Result<ProductAssessment[]> {
   if (options.subjectDigest !== subject)
@@ -58,10 +62,16 @@ export function validateAssessments(
   for (const assessment of parsed.data) {
     const resolved = resolveAssessmentEvidence(assessment, catalogue);
     if (!resolved.ok) return resolved;
-    const runs = captureRuns(assessment.outcome);
-    const linked = linkExecutionImages(resolved.value, subject, images, runs, catalogue);
+    const observed = observations(assessment.outcome);
+    const linked = linkExecutionImages(
+      resolved.value,
+      subject,
+      images,
+      observed.captureRuns,
+      catalogue,
+    );
     const supported = assessEvidenceSupport(linked, outcomes, catalogue);
-    assessments.push(assessImageLink(supported, outcomes, images, subject, runs));
+    assessments.push(assessImageLink(supported, outcomes, images, subject, observed));
   }
   return ok(assessments);
 }
@@ -203,7 +213,7 @@ function assessImageLink(
   outcomes: readonly ProductOutcome[],
   images: readonly ProductReviewImage[],
   subjectDigest: string,
-  captureRuns: readonly unknown[],
+  observed: { readonly captureRuns: readonly unknown[]; readonly checkImages: ReadonlySet<string> },
 ): ProductAssessment {
   const outcome = outcomes.find((entry) => entry.id === assessment.outcome);
   const requiresImage = outcome?.kind === "experience";
@@ -213,9 +223,9 @@ function assessImageLink(
   if (assessment.status !== "satisfied" || !requiresImage) return assessment;
   const journey =
     outcome?.priority === "must"
-      ? productJourneyGaps({
+      ? experienceObservationGaps({
           subjectDigest,
-          captureRuns,
+          ...observed,
           images,
           linkedEvidence: assessment.evidence,
         })

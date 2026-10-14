@@ -3,7 +3,7 @@ import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { ProductReviewImage } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
-import { applicableProductCaptureRuns } from "./assessment.js";
+import { applicableProductCaptureRuns, checkImageCaptures } from "./assessment.js";
 import {
   applyCoverageFailures,
   type ProductReviewChallenge,
@@ -110,7 +110,10 @@ export async function submitReview(context: ReviewSubmissionContext) {
     subject,
     outcomes,
     images,
-    (outcome) => applicableProductCaptureRuns(record, subject, outcome),
+    (outcome) => ({
+      captureRuns: applicableProductCaptureRuns(record, subject, outcome),
+      checkImages: checkImageCaptures(record, subject, outcome),
+    }),
     catalogue,
   );
   if (!validated.ok) return validated;

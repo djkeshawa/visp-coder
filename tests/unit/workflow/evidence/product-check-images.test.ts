@@ -3,11 +3,18 @@ import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { sha256 } from "../../../../src/core/hash.js";
+import { checkImageCaptures } from "../../../../src/workflow/product/assessment.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
-import { runProductReview, runProductVerify } from "../../../../src/workflow/product/index.js";
+import {
+  runProductAccept,
+  runProductDone,
+  runProductReview,
+  runProductVerify,
+} from "../../../../src/workflow/product/index.js";
 import { type ProductBrief, productCheckSchema } from "../../../../src/workflow/product/model.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
+import { moduleFeedback } from "../../support/product-feedback.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
 
@@ -188,6 +195,69 @@ describe("images declared by a command check", () => {
       reason: "Declare the render and how it must look",
     });
     expect(covered.ok).toBe(true);
+  });
+
+  it("satisfy a must experience outcome with the check's image, without a browser journey", async () => {
+    const workspace = await imageCheck(writeRandomImage, ["out/scene.png"]);
+    const done = await runProductDone(await workspace.state());
+    expect(done).toMatchObject({ ok: true, value: { closed: true } });
+    const bundle = await runProductReview(await workspace.state(), {});
+    if (!bundle.ok) throw new Error(bundle.error.message);
+    const image = bundle.value.images.find((entry) => entry.route === "check C001: out/scene.png");
+    if (!image) throw new Error("the check image was not delivered");
+    const feedback = moduleFeedback(bundle.value);
+    const reviewed = await runProductReview(await workspace.state(), {
+      subjectDigest: bundle.value.subjectDigest,
+      feedback: {
+        ...feedback,
+        dimensions: feedback.dimensions.map((entry) =>
+          entry.dimension === "experience"
+            ? {
+                ...entry,
+                status: "satisfied" as const,
+                reason: "The rendered scene shows the requested objects",
+                evidence: [image.id, "C001"],
+              }
+            : entry,
+        ),
+      },
+      assessments: [
+        { outcome: "O001", status: "satisfied", summary: "The test passed", evidence: ["C001"] },
+        {
+          outcome: "O002",
+          status: "satisfied",
+          summary: "Each named object is recognizable in the rendered scene",
+          evidence: [image.id, "C001"],
+        },
+      ],
+    });
+    if (!reviewed.ok) throw new Error(reviewed.error.message);
+    expect(reviewed.value.assessments.find((entry) => entry.outcome === "O002")).toMatchObject({
+      status: "satisfied",
+    });
+    const accepted = await runProductAccept(await workspace.state());
+    expect(accepted).toMatchObject({ ok: true, value: { passed: true } });
+
+    // A browser journey covering the outcome still has to be observed.
+    const record = await readProductRecord(await workspace.state());
+    if (!record.ok) throw new Error(record.error.message);
+    const subject = bundle.value.subjectDigest;
+    expect(checkImageCaptures(record.value, subject, "O002")).toContain(image.id);
+    const journey = {
+      id: "C002",
+      command: {
+        kind: "browser-journey" as const,
+        journey: { url: "http://localhost/", actions: [] },
+      },
+      outcomes: ["O002"],
+      files: [],
+      environment: "browser" as const,
+    };
+    const withJourney = {
+      ...record.value,
+      brief: { ...record.value.brief, checks: [...record.value.brief.checks, journey] },
+    };
+    expect(checkImageCaptures(withJourney, subject, "O002").size).toBe(0);
   });
 
   it("accept only image files inside the project", () => {
