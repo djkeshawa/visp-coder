@@ -450,13 +450,20 @@ if (input?.tool_name === "Bash") {
     process.exit(0);
   }
   const workflow = workflowShellCommand(command);
-  if (workflow && (workflow.loop || input?.tool_input?.run_in_background === true)) {
+  // Only Claude Code has run_in_background; Codex runs this hook too, so a loop's refusal
+  // names no setting of one host.
+  const background = input?.tool_input?.run_in_background === true;
+  if (workflow && (workflow.loop || background)) {
     process.stdout.write(
       JSON.stringify(
         deny(
-          "Run `" + workflow.command + "` by itself in the foreground, not in a loop: repeat it without run_in_background and with timeout 600000. " +
-            "It prints its result and the next step; while a review runs, `visp next` waits for it. " +
-            "If the host moves the command to the background, wait for its completion notice, then run `visp next`; do not poll with pgrep, tail -f or sleep loops.",
+          background
+            ? "Run `" + workflow.command + "` by itself in the foreground, not in a loop: repeat it without run_in_background and with timeout 600000. " +
+                "It prints its result and the next step; while a review runs, `visp next` waits for it. " +
+                "If the host moves the command to the background, wait for its completion notice, then run `visp next`; do not poll with pgrep, tail -f or sleep loops."
+            : "Run `" + workflow.command + "` by itself, not in a loop, with the host's maximum shell timeout. " +
+                "It prints its result and the next step; while a review runs, `visp next` waits for it. " +
+                "Do not poll with pgrep, tail -f or sleep loops.",
         ),
       ),
     );
