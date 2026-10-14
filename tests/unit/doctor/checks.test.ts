@@ -92,9 +92,12 @@ it("lists only the other host's files VISP leaves out of the product", async () 
   expect(revised.ok).toBe(true);
   await workspace.write("AGENTS.md", "# Requested\n");
   await workspace.write("GEMINI.md", "# Imported\n");
-  const found = await check("other host files");
-  expect(found.detail).toContain("GEMINI.md");
-  expect(found.detail).not.toContain("AGENTS.md");
+  // Committing them would make them product and deleting them removes another app's files.
+  expect(await check("other host files")).toEqual({
+    name: "other host files",
+    status: "ok",
+    detail: "VISP ignores these as product: GEMINI.md; no action needed",
+  });
 });
 
 it("reports Codex hook trust as unknown until the project and hooks are trusted", async () => {

@@ -429,7 +429,7 @@ async function checkGit(state: WorkspaceState): Promise<Check> {
   };
 }
 
-/** Another host's files that appeared in the project are ignored as product; say so once. */
+/** Another host's files that appeared in the project are ignored as product; say which. */
 async function checkForeignHostFiles(state: WorkspaceState): Promise<Check> {
   const name = "other host files";
   if (!(await isRepository(state.paths.root)))
@@ -444,13 +444,13 @@ async function checkForeignHostFiles(state: WorkspaceState): Promise<Check> {
     .filter((path) => foreignHostFile(path, false, state.config.harness, protection));
   if (!foreign.length)
     return { name, status: "ok", detail: "No untracked files of another coding host" };
+  // Not a warning with a fix: committing them makes them product again (and a scope failure)
+  // and deleting them removes another app's files.
   const shown = foreign.slice(0, 5).join(", ");
   return {
     name,
-    status: "warn",
-    detail: `Untracked files of another coding host are not part of the product VISP checks: ${shown}${foreign.length > 5 ? ` (+${foreign.length - 5} more)` : ""}`,
-    recovery:
-      "Commit them if the product needs them; otherwise delete them or add them to .gitignore",
+    status: "ok",
+    detail: `VISP ignores these as product: ${shown}${foreign.length > 5 ? ` (+${foreign.length - 5} more)` : ""}; no action needed`,
   };
 }
 
