@@ -49,6 +49,23 @@ export function parseWorkflowMode(value: string): Result<WorkflowMode> {
   );
 }
 
+/**
+ * What `feature` accepts besides the goal: a risk level (default low) and the deprecated
+ * workflow mode, which is checked but changes nothing. The risk error comes first.
+ */
+export function parseFeatureStart(
+  risk: string | undefined,
+  workflow: string | undefined,
+): Result<RiskLevel> {
+  const level = parseRiskLevel(risk ?? "low");
+  if (!level.ok) return level;
+  if (workflow) {
+    const mode = parseWorkflowMode(workflow);
+    if (!mode.ok) return mode;
+  }
+  return level;
+}
+
 export function parseFeatureId(value: string): Result<string> {
   return parseArtifactId(value, featureIdSchema, "feature", "visp status");
 }

@@ -2,12 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
-import {
-  featureIdSchema,
-  parseRiskLevel,
-  parseWorkflowMode,
-  taskIdSchema,
-} from "../../core/input.js";
+import { featureIdSchema, parseFeatureStart, taskIdSchema } from "../../core/input.js";
 import type { Result } from "../../core/result.js";
 import { productCheckTemplate } from "../../workflow/product/check-guidance.js";
 import { runProductNextAfterReview } from "../../workflow/product/done-review.js";
@@ -188,12 +183,8 @@ export function registerWorkflowTools(server: McpServer, root: string): void {
         .strict(),
     },
     async (args) => {
-      const risk = parseRiskLevel(args.riskLevel ?? "low");
+      const risk = parseFeatureStart(args.riskLevel, args.workflow);
       if (!risk.ok) return failure(TOOL.feature, risk.error);
-      if (args.workflow) {
-        const mode = parseWorkflowMode(args.workflow);
-        if (!mode.ok) return failure(TOOL.feature, mode.error);
-      }
       const state = await mutatingWorkspaceFor(root);
       return state.ok
         ? productReply(
