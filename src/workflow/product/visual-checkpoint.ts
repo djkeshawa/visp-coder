@@ -1,6 +1,7 @@
 import { cliCommand } from "../next-action.js";
+import { validCaptureRuns } from "./capture-run-model.js";
 import { needsBrowser } from "./environment.js";
-import { evidenceApplies, productCaptureRunSchema } from "./evidence-references.js";
+import { evidenceApplies } from "./evidence-references.js";
 import type { ProductSlice } from "./model.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS, observationSequence } from "./observation-preview.js";
 import type { ProductRecord } from "./store.js";
@@ -19,14 +20,10 @@ export function visualCheckpoint(
     (outcome) => outcome.kind === "experience" && (!slice || slice.outcomes.includes(outcome.id)),
   );
   if (!outcomes.length) return undefined;
-  const runs = record.state.captureRuns.flatMap((candidate) => {
-    const parsed = productCaptureRunSchema.safeParse(candidate);
-    return parsed.success &&
-      evidenceApplies(record, subject, parsed.data) &&
-      (!slice || !parsed.data.task || parsed.data.task === slice.id)
-      ? [parsed.data]
-      : [];
-  });
+  const runs = validCaptureRuns(record).filter(
+    (run) =>
+      evidenceApplies(record, subject, run) && (!slice || !run.task || run.task === slice.id),
+  );
   const review = record.state.reviews.findLast(
     (entry) =>
       entry.subjectDigest === subject &&

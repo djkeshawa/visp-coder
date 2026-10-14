@@ -2,6 +2,7 @@ import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { productBehaviorProbes } from "./behavior-probes.js";
+import { validCaptureRuns } from "./capture-run-model.js";
 import { productCheckGuidance } from "./check-guidance.js";
 import { environmentRecovery } from "./environment-model.js";
 import {
@@ -9,7 +10,6 @@ import {
   currentFailedJourneys,
   evidenceApplies,
   type ProductEvidenceCatalogue,
-  productCaptureRunSchema,
   supportsBehaviorEvidence,
   withoutUnavailableCitations,
 } from "./evidence-references.js";
@@ -212,16 +212,16 @@ function journeyQuestion(record: ProductRecord, subject: string, slice?: Product
   const signature = (message: string) =>
     productFailureSignature({ check: "browser", status: "failed", exitCode: 1, output: message });
   const failureSignature = signature(failed.failure?.message ?? "");
-  const attempts = record.state.captureRuns.reduce<number>((count, candidate) => {
-    const run = productCaptureRunSchema.safeParse(candidate);
-    return run.success &&
-      evidenceApplies(record, subject, run.data) &&
-      run.data.task === failed.task &&
-      run.data.failure?.kind === "behavior" &&
-      signature(run.data.failure.message) === failureSignature
-      ? count + 1
-      : count;
-  }, 0);
+  const attempts = validCaptureRuns(record).reduce<number>(
+    (count, run) =>
+      evidenceApplies(record, subject, run) &&
+      run.task === failed.task &&
+      run.failure?.kind === "behavior" &&
+      signature(run.failure.message) === failureSignature
+        ? count + 1
+        : count,
+    0,
+  );
   return {
     question: `Which input convention, handler or state transition explains ${failed.failure?.message.slice(0, 600)}? Compare the expected behavior with a different hypothesis before only changing input coordinates or tuning constants.`,
     repeated: attempts >= 2,

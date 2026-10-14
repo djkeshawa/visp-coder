@@ -1,5 +1,6 @@
 import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
+import { captureRunEntries } from "./capture-run-model.js";
 import { type ProductReviewChallenge, selectReviewChallenges } from "./coverage.js";
 import { needsBrowser } from "./environment.js";
 import {
@@ -7,7 +8,6 @@ import {
   evidenceApplies,
   type ProductEvidenceCatalogue,
   type ProductEvidenceReference,
-  productCaptureRunSchema,
 } from "./evidence-references.js";
 import { experimentReviewContext } from "./experiments.js";
 import { productFeedbackPlan } from "./feedback.js";
@@ -114,17 +114,17 @@ export function assembleReviewBundle(input: ReviewBundleInput): ProductReviewBun
       )
       .slice(-12),
     captureRuns: newestRunPerJourney(
-      record.state.captureRuns.filter((candidate) => {
-        const run = productCaptureRunSchema.safeParse(candidate);
-        if (!run.success || !evidenceApplies(record, subject, run.data)) return false;
-        return (
-          !slice ||
-          !run.data.task ||
-          record.brief.slices
-            .find((entry) => entry.id === run.data.task)
-            ?.outcomes.some((id) => slice.outcomes.includes(id))
-        );
-      }),
+      captureRunEntries(record)
+        .filter(
+          ({ run }) =>
+            evidenceApplies(record, subject, run) &&
+            (!slice ||
+              !run.task ||
+              record.brief.slices
+                .find((entry) => entry.id === run.task)
+                ?.outcomes.some((id) => slice.outcomes.includes(id))),
+        )
+        .map(({ stored }) => stored),
       3,
     ),
     previousAssessments: previous,

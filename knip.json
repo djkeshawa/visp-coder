@@ -17,13 +17,5 @@
   "ignoreExportsUsedInFile": true,
   "rules": {
     "cycles": "error"
-  },
-  "cycles": {
-    "allow": [
-      [
-        "src/workflow/product/evidence-references.ts",
-        "src/workflow/product/exploratory-history.ts"
-      ]
-    ]
   }
 }
