@@ -330,6 +330,7 @@ describe("product command check execution boundary", () => {
       ["visp", "brief", "--template"],
       ["visp", "review", "--template"],
       ["visp", "install", "--dry-run"],
+      ["visp", "uninstall", "--dry-run"],
       ["node", "test/helper.mjs", "capture"],
       ["pnpm", "test", "--", "--grep", "visp capture"],
     ])

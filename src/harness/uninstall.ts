@@ -141,7 +141,7 @@ function outcomeOf(options: UninstallOptions, plan: Plan): UninstallOutcome {
     remaining: [".visp/", "visp.yml"],
     manualSteps: [
       ...plan.manualSteps,
-      "Kept on purpose: .visp/ (feature history, state, backups of edited configuration) and visp.yml. Delete them by hand if you want them gone: rm -rf .visp visp.yml",
+      "Kept on purpose: .visp/ (feature history, state, backups of edited configuration), visp.yml and the .visp entries `visp init` added to .gitignore. Delete them by hand if you want them gone: rm -rf .visp visp.yml",
     ],
   };
 }
