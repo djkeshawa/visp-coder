@@ -1,5 +1,5 @@
 import { chmod, lstat, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { processIdentity } from "./process-identity.js";
 
@@ -60,7 +60,7 @@ const CREDENTIAL_HOME = "codex-home";
 export async function markOwner(directory: string, pid = process.pid): Promise<void> {
   await writeFile(
     join(directory, OWNER_FILE),
-    JSON.stringify({ pid, ...(await processIdentity(pid)) }),
+    JSON.stringify({ pid, host: hostname(), ...(await processIdentity(pid)) }),
     { mode: 0o600 },
   );
 }
@@ -83,8 +83,12 @@ export async function sweepAbandonedCredentialHomes(dir: string = tmpdir()): Pro
   }
 }
 
+/**
+ * The state lock's rules: only a PID on this host, in this PID namespace, can be checked, so
+ * a copy whose owner is elsewhere (another container sharing /tmp, a network home) is kept.
+ */
 async function ownerEnded(directory: string): Promise<boolean> {
-  let recorded: { pid?: unknown; processStart?: unknown; bootId?: unknown };
+  let recorded: Record<string, unknown>;
   try {
     recorded = JSON.parse(await readFile(join(directory, OWNER_FILE), "utf8"));
   } catch {
@@ -92,9 +96,10 @@ async function ownerEnded(directory: string): Promise<boolean> {
   }
   const pid = recorded.pid;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
-  if (pid === process.pid) return false;
+  if (pid === process.pid || recorded.host !== hostname()) return false;
   const current = await processIdentity(pid);
   if (recorded.bootId && current.bootId && recorded.bootId !== current.bootId) return true;
+  if (recorded.pidNamespace !== current.pidNamespace) return false;
   // The PID was reused by a process that started later.
   if (
     recorded.processStart &&

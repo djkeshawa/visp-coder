@@ -98,7 +98,7 @@ it("reports Codex hook trust as unknown until the project and hooks are trusted"
 });
 
 // A killed reviewer's sign-in copy should not wait for the next review to be removed.
-it("removes a sign-in copy left by a reviewer that has ended", async () => {
+it("removes a sign-in copy left by a reviewer that has ended only with --fix", async () => {
   const temporary = join(workspace.root, "tmp-sandbox");
   const home = join(temporary, "visp-critic-aBc123", "codex-home");
   await mkdir(home, { recursive: true });
@@ -108,7 +108,10 @@ it("removes a sign-in copy left by a reviewer that has ended", async () => {
   });
   await markOwner(home, Number(ended.stdout.trim()));
   vi.stubEnv("TMPDIR", temporary);
-  await runChecks(await workspace.state(), healthyDoctorRuntime);
+  // Plain doctor reports; it changes nothing on disk.
+  const report = await runChecks(await workspace.state(), healthyDoctorRuntime);
+  expect(existsSync(home)).toBe(true);
+  await applyFixes(await workspace.state(), report.checks, { guardHandshake: healthyGuard });
   expect(existsSync(home)).toBe(false);
 });
 
