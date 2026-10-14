@@ -24,7 +24,7 @@ import { independentReviewerContext, productReviewerContext } from "./reviewer-h
 import { withProductMutation } from "./runtime.js";
 import { json, type ProductRecord, readProductRecord } from "./store.js";
 
-export { reviewJudgmentsSchema } from "./review-request.js";
+export { reviewJudgmentsSchema } from "./review-submission-model.js";
 
 const sessionSchema = z
   .object({

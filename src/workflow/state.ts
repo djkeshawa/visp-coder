@@ -12,7 +12,6 @@ import {
   isRepository,
   workingTreeChanges,
 } from "../core/git.js";
-import { parseFeatureId } from "../core/input.js";
 import { isExecutableMode } from "../core/mode.js";
 import { ProjectPaths } from "../core/paths.js";
 import { normalizePath } from "../core/patterns.js";
@@ -29,12 +28,9 @@ import { preCommitHookPath } from "../harness/git-hook.js";
 import { renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
 import { planFor } from "../harness/targets.js";
 import { now } from "./artifacts/common.js";
-import type { ImplementMarker } from "./artifacts/evidence.js";
 import type { Status } from "./artifacts/project.js";
 import { ArtifactStore } from "./artifacts/store.js";
-import { findTask, type Task } from "./artifacts/tasks.js";
 import { type Override, overrideStoreSchema, type Policy, policySchema } from "./policy/schema.js";
-import { productScopes } from "./product/scopes.js";
 
 /**
  * Loads everything a command needs in one pass. Commands receive this rather
@@ -186,20 +182,6 @@ export async function savePolicy(paths: ProjectPaths, policy: Policy): Promise<R
   return new RecoveringProjectFileSystem(paths.root).writeJson(paths.policy, policy);
 }
 
-/** The feature a command should act on: an explicit choice, or the active one. */
-export function resolveFeature(state: WorkspaceState, explicit?: string): Result<string> {
-  if (explicit !== undefined) return parseFeatureId(explicit);
-  const feature = explicit ?? state.status?.activeFeature;
-  if (!feature) {
-    return err(
-      vispError("NO_ACTIVE_FEATURE", state.checkoutNotice ?? "No feature is active", {
-        recovery: state.checkoutNotice ? "git switch -" : 'visp feature "<goal>"',
-      }),
-    );
-  }
-  return ok(feature);
-}
-
 export interface FoundationContext {
   readonly harnessInstalled?: boolean;
   readonly enforcementInstalled?: boolean;
@@ -331,86 +313,4 @@ export interface ScopeOptions {
    * shell command stands in.
    */
   readonly hostSession?: string;
-}
-
-/**
- * Scopes that a change may legitimately fall under.
- *
- * Active authorizations say what may be edited now. Completed tasks matter for a
- * different question: work that visp already verified and closed still has to be
- * committable, and clearing its marker must not strand it in the working tree.
- */
-export async function authorizedScopes(
-  state: WorkspaceState,
-  options: ScopeOptions = {},
-): Promise<Result<ImplementMarker[]>> {
-  const feature = options.feature ?? state.status?.activeFeature;
-  if (feature) {
-    const brief = await state.files.exists(state.paths.featureFile(feature, "brief.yaml"));
-    if (!brief.ok) return brief;
-    if (brief.value) return productScopes(state, options);
-  }
-
-  return legacyAuthorizedScopes(state, options);
-}
-
-/** Historical evidence readers retain their original scope interpretation. */
-async function legacyAuthorizedScopes(
-  state: WorkspaceState,
-  options: ScopeOptions,
-): Promise<Result<ImplementMarker[]>> {
-  const feature = options.feature ?? state.status?.activeFeature;
-  if (options.source === "tasks") {
-    if (!feature) return ok([]);
-    const graph = await state.store.readTasksIfExists(feature);
-    if (!graph.ok) return graph;
-    if (!graph.value) return ok([]);
-    return ok(graph.value.tasks.map((task) => markerFor(feature, task)));
-  }
-
-  const active = await readOpenMarkers(state);
-  if (!active.ok || !options.includeDone) return active;
-  if (!feature) return active;
-
-  const graph = await state.store.readTasksIfExists(feature);
-  if (!graph.ok || !graph.value) return active;
-
-  const authorized = new Set(active.value.map((marker) => marker.task));
-  const completed = graph.value.tasks
-    .filter((task) => task.status === "done" && !authorized.has(task.id))
-    .map((task) => markerFor(feature, task));
-
-  return ok([...active.value, ...completed]);
-}
-
-/** Only a task proven closed can retire its marker; missing state stays conservative. */
-async function readOpenMarkers(state: WorkspaceState): Promise<Result<ImplementMarker[]>> {
-  const active = await state.store.readActiveMarkers();
-  if (!active.ok) return active;
-
-  const graphs = new Map<string, Awaited<ReturnType<ArtifactStore["readTasksIfExists"]>>>();
-  const open: ImplementMarker[] = [];
-  for (const marker of active.value) {
-    let graph = graphs.get(marker.feature);
-    if (!graph) {
-      graph = await state.store.readTasksIfExists(marker.feature);
-      graphs.set(marker.feature, graph);
-    }
-    if (!graph.ok) return graph;
-    const task = graph.value ? findTask(graph.value, marker.task) : undefined;
-    if (task?.status !== "done") open.push(marker);
-  }
-  return ok(open);
-}
-
-function markerFor(feature: string, task: Task): ImplementMarker {
-  return {
-    kind: "implement-marker",
-    createdAt: now(),
-    feature,
-    task: task.id,
-    allowedFiles: task.allowedFiles,
-    expectedFiles: task.expectedFiles,
-    forbiddenFiles: task.forbiddenFiles,
-  };
 }

@@ -2,12 +2,8 @@ import type { Command } from "commander";
 import { parseFeatureId, parseTaskId } from "../core/input.js";
 import { discoverProjectRoot } from "../core/project-root.js";
 import type { Result } from "../core/result.js";
-import {
-  loadWorkspace,
-  loadWorkspaceForMutation,
-  resolveFeature,
-  type WorkspaceState,
-} from "../workflow/state.js";
+import { resolveFeature } from "../workflow/feature-selection.js";
+import { loadWorkspace, loadWorkspaceForMutation, type WorkspaceState } from "../workflow/state.js";
 
 /** Options every command accepts, declared once on the root program. */
 export interface GlobalOptions {

@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
-import { compactTrail, pruneProductTrail } from "../../../../src/workflow/product/trail.js";
+import { compactTrail } from "../../../../src/workflow/product/trail.js";
+import { pruneProductTrail } from "../../../../src/workflow/product/trail-prune.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
 

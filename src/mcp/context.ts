@@ -1,11 +1,7 @@
 import { parseFeatureId } from "../core/input.js";
 import { ok, type Result } from "../core/result.js";
-import {
-  loadWorkspace,
-  loadWorkspaceForMutation,
-  resolveFeature,
-  type WorkspaceState,
-} from "../workflow/state.js";
+import { resolveFeature } from "../workflow/feature-selection.js";
+import { loadWorkspace, loadWorkspaceForMutation, type WorkspaceState } from "../workflow/state.js";
 
 /**
  * The MCP equivalent of `src/cli/context.ts`: one place that turns a project
