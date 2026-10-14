@@ -445,14 +445,14 @@ if (input?.tool_name === "Bash") {
     );
     process.exit(0);
   }
-  const backgrounded = input?.tool_input?.run_in_background === true ? backgroundedWorkflowCommand(command) : undefined;
-  if (backgrounded) {
+  const workflow = workflowShellCommand(command);
+  if (workflow && (workflow.loop || input?.tool_input?.run_in_background === true)) {
     process.stdout.write(
       JSON.stringify(
         deny(
-          "Run `" + backgrounded + "` in the foreground: repeat this call without run_in_background and with timeout 600000. " +
-            "VISP bounds its own waits (`visp next` waits for a running review) and prints the result and the next step when it returns. " +
-            "If the host still moves it to the background, run `visp next` instead of polling with pgrep, tail -f or sleep loops.",
+          "Run `" + workflow.command + "` by itself in the foreground, not in a loop: repeat it without run_in_background and with timeout 600000. " +
+            "It prints its result and the next step; while a review runs, `visp next` waits for it. " +
+            "If the host moves the command to the background, wait for its completion notice, then run `visp next`; do not poll with pgrep, tail -f or sleep loops.",
         ),
       ),
     );
@@ -477,19 +477,56 @@ if (input?.tool_name === "Bash") {
 // Workers started visp done and accept as background tasks and then waited for them with
 // loops that never ended on their own (pgrep -f matching its own shell, tail -f piped to
 // grep -m1): commands that returned in 15 s left them idle for up to 9 minutes. VISP's
-// workflow commands bound their own waits, so they run in the foreground. `visp feature`
-// keeps writing acceptance tests after it prints the feature id and `visp ui` is a
-// server, so both may still run in the background.
-// A function declaration, not a top-level constant: the Bash branch above runs first.
-function backgroundedWorkflowCommand(command) {
+// workflow commands bound their own waits, so they run in the foreground, and never inside a
+// loop, which keeps polling until the host's timeout. `visp feature` keeps writing
+// acceptance tests after it prints the feature id and `visp ui` is a server, so both
+// may still run in the background. Only VISP itself counts as the command, with the verb as
+// the first word after it: `echo "visp done"`, `grep visp` and a request in a
+// heredoc that says "show visp status" were refused when any of the three words after
+// `visp` anywhere matched.
+// Function declarations, not top-level constants: the Bash branch above runs first.
+function workflowShellCommand(command) {
   const workflow = new Set(["work", "done", "verify", "accept", "next", "pr", "status", "brief", "critic", "review"]);
-  for (const words of shellCommands(command)) {
-    const index = words.findIndex((word) => word === "visp" || word.endsWith("/visp"));
-    if (index < 0) continue;
-    const verb = words.slice(index + 1, index + 4).find((word) => workflow.has(word));
-    if (verb) return "visp " + verb;
+  const loops = new Set(["while", "until", "for", "select", "watch"]);
+  const commands = shellCommands(withoutHeredocBodies(command));
+  for (const words of commands) {
+    const verb = vispVerb(words);
+    if (verb && workflow.has(verb))
+      return { command: "visp " + verb, loop: commands.some((entry) => loops.has(entry[0])) };
   }
   return undefined;
+}
+
+// The first word after `visp`, its installed path or `npx @visporg/visp-coder` when that is
+// the command itself; words before it may only be variable assignments, flags, durations and
+// wrappers such as env, timeout, npx or the do of a loop.
+function vispVerb(words) {
+  const wrappers = new Set(["env", "command", "exec", "nohup", "time", "timeout", "npx", "pnpm", "npm", "yarn", "bunx", "dlx", "watch", "while", "until", "do", "if", "then", "else", "elif", "!", "{"]);
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index].replace(/^\$?\(+/, "");
+    if (word === "visp" || word.endsWith("/visp") || word === "@visporg/visp-coder" || word.startsWith("@visporg/visp-coder@"))
+      return words.slice(index + 1).find((next) => !next.startsWith("-"))?.replace(/\)+$/, "");
+    if (!wrappers.has(word) && !word.startsWith("-") && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) && !/^\d+(?:\.\d+)?[smhd]?$/.test(word))
+      return undefined;
+  }
+  return undefined;
+}
+
+// A heredoc body is input text, such as the request `visp feature` reads, not commands.
+function withoutHeredocBodies(command) {
+  const kept = [];
+  const pending = [];
+  for (const line of command.split("\n")) {
+    if (pending.length) {
+      const [delimiter, tabs] = pending[0];
+      if ((tabs ? line.replace(/^\t+/, "") : line) === delimiter) pending.shift();
+      continue;
+    }
+    kept.push(line);
+    for (const match of line.matchAll(/(?<!<)<<(-?)\s*(['"]?)([^\s'"<>;&|()]+)\2/g))
+      pending.push([match[3], match[1] === "-"]);
+  }
+  return kept.join("\n");
 }
 
 // A worker discarded a previous session's uncommitted work with git checkout to get the

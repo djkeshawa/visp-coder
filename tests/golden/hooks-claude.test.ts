@@ -55,4 +55,19 @@ it("answers Claude Code's edit, shell, prompt and stop hooks", async () => {
   await claude("13-stop-work", { hook_event_name: "Stop" });
   await claude("14-stop-work-again", { hook_event_name: "Stop" });
   await claude("15-stop-work-limit", { hook_event_name: "Stop" });
+  const background = (command: string) => ({
+    ...bash(command),
+    tool_input: { command, run_in_background: true },
+  });
+  await claude("16-bash-background-done", background("visp done 2>&1 | tail -40"));
+  await claude(
+    "17-bash-loop-status",
+    bash("until visp status | grep -q accepted; do sleep 10; done"),
+  );
+  await claude(
+    "18-bash-background-feature",
+    background(
+      "visp feature --source-brief - <<'REQUEST'\nShow visp status in the footer.\nREQUEST",
+    ),
+  );
 });

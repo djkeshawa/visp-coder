@@ -232,26 +232,54 @@ describe("generated hooks", () => {
       );
       return output ? JSON.parse(output) : {};
     };
-    for (const command of [
-      "visp done --feature 001-x --task T001 2>&1",
-      "export PATH=/opt/shim:$PATH && visp accept --feature 001-x",
-      "cd /p && /opt/shim/visp next | head -50",
+    const refusal = (verb: string) =>
+      `Run \`visp ${verb}\` by itself in the foreground, not in a loop: repeat it without run_in_background and with timeout 600000. It prints its result and the next step; while a review runs, \`visp next\` waits for it. If the host moves the command to the background, wait for its completion notice, then run \`visp next\`; do not poll with pgrep, tail -f or sleep loops.`;
+    for (const [command, verb] of <const>[
+      ["visp done --feature 001-x --task T001 2>&1", "done"],
+      ["export PATH=/opt/shim:$PATH && visp accept --feature 001-x", "accept"],
+      ["cd /p && /opt/shim/visp next | head -50", "next"],
+      ["cd x && visp done", "done"],
+      ["npx @visporg/visp-coder done", "done"],
+      ["npx -y @visporg/visp-coder@beta verify", "verify"],
+      [`${join(project.root, ".bin/visp")} status`, "status"],
     ]) {
       const response = run(command, true);
       expect(decision(response), command).toBe("deny");
-      expect(response.hookSpecificOutput.permissionDecisionReason).toContain(
-        "without run_in_background and with timeout 600000",
-      );
+      expect(response.hookSpecificOutput.permissionDecisionReason, command).toBe(refusal(verb));
       expect(decision(run(command, false)), command).toBe("");
     }
-    expect(decision(run("visp ui --port 4000", true))).toBe("");
-    // feature keeps writing acceptance tests after it prints the id the worker continues with.
+    // A loop around a workflow command waits up to the host's timeout, in the foreground too.
+    for (const [command, verb] of <const>[
+      ["until visp status | grep -q accepted; do sleep 10; done", "status"],
+      ["while true; do visp next; sleep 30; done", "next"],
+      ["watch -n 5 visp status", "status"],
+    ])
+      for (const background of [true, false]) {
+        const response = run(command, background);
+        expect(decision(response), command).toBe("deny");
+        expect(response.hookSpecificOutput.permissionDecisionReason, command).toBe(refusal(verb));
+      }
+    // Only visp itself, as the command, counts: not text that mentions it.
+    for (const command of [
+      'echo "visp done"',
+      "grep visp README.md",
+      "grep -rn visp done",
+      "git commit -m 'visp done'",
+      "visp ui --port 4000",
+      "npm run dev",
+      "while pgrep -f node; do sleep 5; done",
+    ])
+      expect(decision(run(command, true)), command).toBe("");
+    // feature keeps writing acceptance tests after it prints the id the worker continues with,
+    // and a request in its heredoc is text, not commands.
     expect(
       decision(
-        run("visp feature \"Build it\" --source-brief - <<'REQUEST'\nBuild it\nREQUEST", true),
+        run(
+          "visp feature \"Build it\" --source-brief - <<'REQUEST'\nBuild it, then show visp status\nvisp done\nREQUEST",
+          true,
+        ),
       ),
     ).toBe("");
-    expect(decision(run("npm run dev", true))).toBe("");
   });
 
   // A worker ran rm -rf .visp acceptance to get past a scope error it could not read.
