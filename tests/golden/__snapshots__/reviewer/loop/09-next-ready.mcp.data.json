@@ -1,0 +1,19 @@
+{
+  "tool": "visp_next",
+  "ok": true,
+  "data": {
+    "feature": "001-return-two-from-the-public",
+    "action": "accept",
+    "objective": "Run final checks against the assembled product and preserved expectations",
+    "command": "visp accept --feature 001-return-two-from-the-public",
+    "evidence": [],
+    "mayEdit": false
+  },
+  "nextCommand": "visp_accept {\"feature\":\"001-return-two-from-the-public\"}",
+  "nextAction": {
+    "tool": "visp_accept",
+    "arguments": {
+      "feature": "001-return-two-from-the-public"
+    }
+  }
+}

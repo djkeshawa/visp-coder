@@ -1,0 +1,34 @@
+{
+  "resources": [
+    {
+      "name": "status",
+      "title": "Workflow status",
+      "uri": "visp://status",
+      "description": "Current product progress, outcomes, gaps and next action. Use visp_status with detail for full history.",
+      "mimeType": "application/json"
+    },
+    {
+      "name": "policy",
+      "title": "Active policy",
+      "uri": "visp://policy",
+      "description": "Strictness, the rules currently in force, and live overrides.",
+      "mimeType": "application/json"
+    },
+    {
+      "name": "scope",
+      "title": "Authorized scope",
+      "uri": "visp://scope",
+      "description": "Tasks currently authorized to write, with their allowed and forbidden globs.",
+      "mimeType": "application/json"
+    }
+  ],
+  "resourceTemplates": [
+    {
+      "name": "feature-brief",
+      "title": "Working brief",
+      "uriTemplate": "visp://feature/{id}/brief",
+      "description": "The single authored product brief.",
+      "mimeType": "application/json"
+    }
+  ]
+}
