@@ -70,7 +70,7 @@ const SCENE = {
 };
 
 /** The check writes whichever image the script names; a different image on every run. */
-async function imageCheck(script: string, images: string[]) {
+async function imageCheck(script: string, images: string[], scope: string[] = []) {
   const { workspace, brief } = await productWorkspace();
   workspaces.push(workspace);
   await workspace.write("src/value.mjs", "export const value = 2;\n");
@@ -82,6 +82,10 @@ async function imageCheck(script: string, images: string[]) {
       command: [process.execPath, "-e", script],
       outcomes: [...check.outcomes, SCENE.id],
       images,
+    })),
+    slices: brief.slices.map((slice) => ({
+      ...slice,
+      scope: { ...slice.scope, allowed: [...slice.scope.allowed, ...scope] },
     })),
   };
   const changed = await updateProductBrief(await workspace.state(), {
@@ -329,6 +333,22 @@ describe("images declared by a command check", () => {
 
   it("satisfy a must experience outcome with the check's image, without a browser journey", async () => {
     const workspace = await imageCheck(writeRandomImage, ["out/scene.png"]);
+    await reviewWithCheckImage(workspace, "satisfied");
+    const accepted = await runProductAccept(await workspace.state());
+    expect(accepted).toMatchObject({ ok: true, value: { passed: true } });
+  });
+
+  // A canvas web game observes play through captured journeys; one still frame is not play.
+  it("do not stand in for a journey when the slice owning the outcome has a web UI", async () => {
+    const workspace = await imageCheck(writeRandomImage, ["out/scene.png"], ["index.html"]);
+    await workspace.write("index.html", "<canvas></canvas>\n");
+    const assessment = await reviewWithCheckImage(workspace, "unavailable");
+    expect(assessment?.summary).toContain("interaction journey");
+    const accepted = await runProductAccept(await workspace.state());
+    expect(accepted).toMatchObject({ ok: true, value: { passed: false } });
+  });
+
+  async function reviewWithCheckImage(workspace: TestWorkspace, expected: string) {
     const done = await runProductDone(await workspace.state());
     expect(done).toMatchObject({ ok: true, value: { closed: true } });
     const bundle = await runProductReview(await workspace.state(), {});
@@ -362,12 +382,18 @@ describe("images declared by a command check", () => {
       ],
     });
     if (!reviewed.ok) throw new Error(reviewed.error.message);
-    expect(reviewed.value.assessments.find((entry) => entry.outcome === "O002")).toMatchObject({
-      status: "satisfied",
-    });
-    const accepted = await runProductAccept(await workspace.state());
-    expect(accepted).toMatchObject({ ok: true, value: { passed: true } });
+    const assessment = reviewed.value.assessments.find((entry) => entry.outcome === "O002");
+    expect(assessment).toMatchObject({ status: expected });
+    return assessment;
+  }
 
+  it("name the images that stand in for a journey only without a browser journey", async () => {
+    const workspace = await imageCheck(writeRandomImage, ["out/scene.png"]);
+    await runProductDone(await workspace.state());
+    const bundle = await runProductReview(await workspace.state(), {});
+    if (!bundle.ok) throw new Error(bundle.error.message);
+    const image = bundle.value.images.find((entry) => entry.route === "check C001: out/scene.png");
+    if (!image) throw new Error("the check image was not delivered");
     // A browser journey covering the outcome still has to be observed.
     const record = await readProductRecord(await workspace.state());
     if (!record.ok) throw new Error(record.error.message);

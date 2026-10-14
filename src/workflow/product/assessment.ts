@@ -15,6 +15,7 @@ import { productFeedbackGaps } from "./feedback.js";
 import { inspectProductImages } from "./images.js";
 import {
   checksFor,
+  hasWebUiScope,
   latestExecutionsByOwner,
   PRODUCT_REVIEW_POLICY,
   type ProductAssessment,
@@ -93,8 +94,10 @@ export function applicableProductCaptureRuns(
  * Images that current passing checks declaring images wrote for this outcome. A static
  * picture (a Python render, an SVG) has no browser journey; reviewers marked such an outcome
  * satisfied from the check's image and VISP stored it unavailable, so acceptance could never
- * pass. When no browser-journey check covers the outcome, a linked image from this set
- * stands in for the before/input/after journey. Empty when a browser journey covers it.
+ * pass. When no browser-journey check covers the outcome and no slice that owns it (any
+ * slice, for an outcome none owns) builds a web UI, a linked image from this set stands in for the before/input/after journey. A web
+ * game observes play through captured journeys, so one still frame of it never does: the set
+ * is empty then.
  */
 export function checkImageCaptures(
   record: ProductRecord,
@@ -102,7 +105,11 @@ export function checkImageCaptures(
   outcome: string,
 ): ReadonlySet<string> {
   const checks = record.brief.checks.filter((check) => check.outcomes.includes(outcome));
-  if (checks.some((check) => isBrowserCheckCommand(check.command))) return new Set();
+  const owners = record.brief.slices.filter((slice) => slice.outcomes.includes(outcome));
+  // An outcome no slice owns is judged on the whole feature.
+  const scope = owners.length ? owners : record.brief.slices;
+  if (checks.some((check) => isBrowserCheckCommand(check.command)) || hasWebUiScope(scope))
+    return new Set();
   const imaged = new Set(checks.filter((check) => check.images?.length).map((check) => check.id));
   return new Set(
     applicableExecutions(record, subject).flatMap((execution) =>

@@ -189,7 +189,7 @@ Report `reviewer.context` honestly (`fresh`, `current`, `unavailable` or `unspec
 - Every mandatory outcome and each of its expectations needs a current assessment before `accept`.
 - A satisfied judgment must cite current, successful, related evidence. Failed, stale or unknown executions, and references to the original request, cannot support it.
 - An expectation with a `viewport` needs an image captured at that viewport.
-- A required experience outcome needs before, input and after images from an executed journey. VISP derives these links from the runner record when the reviewer cites the check's evidence ID. A static picture has no journey: when no browser-journey check covers the outcome, a cited current image from a passing check that declares `images` and covers the outcome is enough.
+- A required experience outcome needs before, input and after images from an executed journey. VISP derives these links from the runner record when the reviewer cites the check's evidence ID. A static picture has no journey: when no browser-journey check covers the outcome and no slice that owns it writes a web page or component (`.html`, `.jsx`, `.tsx`, `.vue`, `.svelte`), a cited current image from a passing check that declares `images` and covers the outcome is enough. A web game still needs its journey; one still frame does not show play.
 - Nonvisual outcomes do not need screenshots.
 
 ## Resolving findings

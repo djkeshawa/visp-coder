@@ -404,6 +404,13 @@ export function sliceDigest(brief: ProductBrief, slice: ProductSlice): string {
   });
 }
 
+/** A slice that may write a page or component file builds a web UI, observed through journeys. */
+export function hasWebUiScope(slices: readonly ProductSlice[]): boolean {
+  return slices.some((slice) =>
+    slice.scope.allowed.some((path) => /\.(?:html?|jsx|tsx|vue|svelte)$/.test(path)),
+  );
+}
+
 export function checksFor(brief: ProductBrief, slice?: ProductSlice): ProductCheck[] {
   return slice ? brief.checks.filter((check) => slice.checks.includes(check.id)) : brief.checks;
 }
