@@ -105,9 +105,21 @@ export class TestWorkspace {
     });
   }
 
-  commit(message: string): void {
+  /**
+   * Setup commits skip the installed pre-commit hook (a whole `visp` process, about 250 ms each,
+   * against 12 ms without) and Git's automatic maintenance. A test about the hook itself passes
+   * `hooks: true`.
+   */
+  commit(message: string, { hooks = false }: { hooks?: boolean } = {}): void {
     this.git("add", "-A");
-    this.git("commit", "-q", "-m", message);
+    this.git(
+      ...(hooks ? [] : ["-c", "maintenance.auto=false", "-c", "gc.auto=0"]),
+      "commit",
+      "-q",
+      ...(hooks ? [] : ["--no-verify"]),
+      "-m",
+      message,
+    );
   }
 
   async state(): Promise<WorkspaceState> {
