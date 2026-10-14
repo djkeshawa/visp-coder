@@ -70,6 +70,7 @@ const SCALAR_FIELDS = [
   "command",
   "instructions",
   "approach",
+  "contextId",
 ] as const;
 const LIST_FIELDS = [
   "outcomes",
@@ -113,7 +114,7 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}${skillText(data.skills)}${deliveryText(data.delivery)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}${skillText(data.skills)}${deliveryText(data.delivery, channel)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
 }
 
 function ambiguityText(tests: unknown): string {
@@ -217,11 +218,31 @@ function addObservationSummary(data: Record<string, unknown>, summary: Record<st
   if (data.images) summary.images = Array.isArray(data.images) ? data.images.length : undefined;
 }
 
-/** Sections a re-authorization left out, so the worker knows they still apply and where they are. */
-function deliveryText(delivery: unknown): string {
-  const unchanged = object(delivery).unchanged;
-  if (!Array.isArray(unchanged) || unchanged.length === 0) return "";
-  return `\nNot repeated (unchanged since this session's last work reply): ${unchanged.join(", ")}. They still apply; the read-only details below show them.`;
+/** How a reply names a reference section it left out. */
+const SECTION_NAMES: Readonly<Record<string, string>> = {
+  files: "source excerpts",
+  graph: "related files",
+  memory: "memory notes",
+  skills: "skills",
+  examples: "examples",
+  decisions: "decisions",
+  acceptanceBaseline: "the acceptance baseline",
+  projectMemory: "earlier project decisions",
+};
+
+/** Sections left out because the worker named an earlier reply it still has in view. */
+function deliveryText(delivery: unknown, channel: ReplyChannel): string {
+  const { known, unchanged } = object(delivery);
+  if (typeof known !== "string" || !Array.isArray(unchanged)) return "";
+  const names = unchanged.flatMap((entry) =>
+    typeof entry === "string" && SECTION_NAMES[entry] ? [SECTION_NAMES[entry]] : [],
+  );
+  if (names.length === 0) return "";
+  const listed =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  const tool = channel === "mcp" ? "visp_work" : "visp work";
+  const without = channel === "mcp" ? "without known" : "without --known";
+  return `\n${(listed ?? "").charAt(0).toUpperCase()}${(listed ?? "").slice(1)} from your earlier ${tool} reply (context ${known}) are not repeated. If you don't have them in view, call ${tool} again ${without}.`;
 }
 
 function detailCommand(name: string, data: Record<string, unknown>, channel: ReplyChannel): string {

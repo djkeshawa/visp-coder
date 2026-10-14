@@ -66,8 +66,10 @@ export interface ProductContextContent {
     current: boolean;
     truncated?: boolean;
   }[];
-  /** Reference sections left out: unchanged since this session's last `work` reply. */
-  readonly delivery?: { readonly unchanged: readonly string[] };
+  /** Names this pack, so a later `work --known <contextId>` can leave out what is unchanged. */
+  readonly contextId?: string;
+  /** Reference sections left out: unchanged since the reply the worker named with `--known`. */
+  readonly delivery?: { readonly known: string; readonly unchanged: readonly string[] };
 }
 
 export interface ProductWorkContext extends ProductContextContent {

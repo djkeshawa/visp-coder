@@ -127,6 +127,8 @@ REQUEST
 visp work --check "<test command>"
 \`\`\`
 
+A repeat \`visp work\` may pass \`--known <contextId>\` from an earlier reply still in view; that reply's unchanged excerpts are not repeated.
+
 ## Understand, build, observe
 
 ${BRIEF_INPUT_HELP}

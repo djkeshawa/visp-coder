@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -146,9 +145,6 @@ export function productReply(
 }
 
 export function registerWorkflowTools(server: McpServer, root: string): void {
-  // A host starts one MCP server per session, so the server identifies whom `work` replies
-  // went to: a restarted server, like a new session, gets the full context again.
-  const deliverySession = `mcp:${randomUUID()}`;
   for (const [name, run] of [
     [
       TOOL.next,
@@ -256,6 +252,12 @@ export function registerWorkflowTools(server: McpServer, root: string): void {
               "Test command for the slice; on a feature without slices, work the whole request as one slice",
             ),
           detail: z.boolean().optional(),
+          known: z
+            .string()
+            .optional()
+            .describe(
+              "contextId of an earlier work reply still in view; its unchanged source excerpts and related files are not repeated",
+            ),
         })
         .strict(),
     },
@@ -268,7 +270,7 @@ export function registerWorkflowTools(server: McpServer, root: string): void {
               ? runProductContext(state.value, args)
               : runProductWork(
                   state.value,
-                  { ...args, deliverySession },
+                  args,
                   configuredTestsStarter(state.value, "mcp"),
                   testsWaitMs(state.value, "mcp"),
                 )),

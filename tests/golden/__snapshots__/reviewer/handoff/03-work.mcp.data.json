@@ -149,6 +149,7 @@
         ".visp/memory"
       ]
     },
+    "contextId": "<HEX-2>",
     "next": {
       "feature": "001-return-two-from-the-public",
       "task": "T001",

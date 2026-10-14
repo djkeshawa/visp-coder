@@ -56,6 +56,7 @@ import { readCommandInput, readStandardInput } from "../input.js";
 import { emit, emitError } from "../output.js";
 
 interface ProductOptions extends GlobalOptions {
+  known?: string;
   finding?: string;
   execution?: string;
   feature?: string;
@@ -382,6 +383,10 @@ export const workCommand = () =>
           : runProductWork(state, opts, configuredTestsStarter(state), testsWaitMs(state, "cli")),
   )
     .option("--inspect", "Read context without authorization, environment probing or graph refresh")
+    .option(
+      "--known <contextId>",
+      "contextId of an earlier work reply still in view: its unchanged excerpts are not repeated",
+    )
     .option(
       "--retry-tests",
       "Retry an independent tester that failed for an environment reason (requires --feature)",

@@ -10,7 +10,7 @@ import { updateProductBrief } from "./brief.js";
 import { validateProductCheckCommand } from "./check-command.js";
 import { uninstalledAlias } from "./check-executable.js";
 import { buildProductContext } from "./context.js";
-import { planDelivery } from "./context-delivery.js";
+import { planContext } from "./context-delivery.js";
 import type { ProductWorkContext } from "./context-types.js";
 import { correctionReasons } from "./corrections.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
@@ -81,8 +81,8 @@ export async function runProductContext(
 export interface ProductWorkOptions extends ProductSelection {
   /** A check command: on a feature without slices, work the whole request as one slice. */
   readonly check?: string;
-  /** Who receives the reply, when the adapter knows better than the host's records (MCP). */
-  readonly deliverySession?: string;
+  /** The contextId of an earlier reply still in the worker's view: unchanged sections are left out. */
+  readonly known?: string;
 }
 
 export async function runProductWork(
@@ -286,11 +286,11 @@ async function runProductWorkLocked(
   if (!granted.ok) return granted;
   const auth = granted.value.authorization;
   const next = workingState(current, slice, auth, timestamp, reopen, subject.value, findings);
-  const delivery = await planDelivery(workspace, context.value, auth.contractDigest, options);
+  const delivery = await planContext(workspace, context.value, auth.contractDigest, options.known);
   if (!delivery.ok) return delivery;
   const saved = await saveProductState(workspace, record.value, next, [
     ...granted.value.mutations,
-    ...(delivery.value.mutation ? [delivery.value.mutation] : []),
+    delivery.value.mutation,
   ]);
   await retainRegressionScopeBaseline(workspace, auth, saved.ok);
   return saved.ok

@@ -1,7 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import type { Result } from "../../../../src/core/result.js";
+import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
+import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import {
   type ProductWorkContext,
   runProductContext,
@@ -11,20 +11,19 @@ import { compactProductReply } from "../../../../src/workflow/product-compact-te
 import { productWorkspace } from "../../support/product-workspace.js";
 
 /**
- * Re-authorizing an unchanged slice repeated the whole context pack (source excerpts, graph,
- * memory, skills) to a worker that already had it from the same session. Only what changed
- * since this session's last delivery is sent again; a new session, an unknown session and
- * `--inspect` always get the full pack, and the reply says how to read what was left out.
+ * Re-authorizing an unchanged slice repeated the whole context pack. Only the worker knows
+ * whether an earlier reply is still in its view (hosts keep one MCP server across chats,
+ * /clear and compaction), so leaving material out is opt-in: every reply names its pack with a
+ * contextId, and only a `work` that passes it back as `known` gets the unchanged reference
+ * sections left out. Without it, or after the slice's contract changed, the full pack is sent.
  */
 let setup: Awaited<ReturnType<typeof productWorkspace>>;
 
 beforeEach(async () => {
   setup = await productWorkspace();
-  vi.stubEnv("CODEX_THREAD_ID", "");
 });
 
 afterEach(async () => {
-  vi.unstubAllEnvs();
   await setup.workspace.destroy();
 });
 
@@ -33,74 +32,96 @@ function value<T>(result: Result<T>): T {
   return result.value;
 }
 
-async function hostSession(session: string): Promise<void> {
-  const directory = join(setup.workspace.root, ".visp/session");
-  await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "host-session.json"), JSON.stringify({ session }));
-}
+const work = async (known?: string) =>
+  value(
+    await runProductWork(await setup.workspace.state(), {
+      task: "T001",
+      ...(known ? { known } : {}),
+    }),
+  );
 
-const work = async (options: { deliverySession?: string } = {}) =>
-  value(await runProductWork(await setup.workspace.state(), { task: "T001", ...options }));
+const pack = (context: ProductWorkContext) => ({
+  files: context.files.length,
+  graph: context.graph.length,
+});
 
-function pack(context: ProductWorkContext) {
-  return { files: context.files.length, graph: context.graph.length };
-}
-
-it("sends a host session only what changed since its last work reply", async () => {
-  await hostSession("session-1");
+it("sends the full pack on every repeat unless the worker names an earlier reply", async () => {
   const first = await work();
+  expect(first.contextId).toMatch(/^[a-f0-9]{12}$/);
   expect(first.files.length).toBeGreaterThan(0);
   expect(first.graph.length).toBeGreaterThan(0);
-  expect(first.delivery).toBeUndefined();
-
   const again = await work();
-  expect(pack(again)).toEqual({ files: 0, graph: 0 });
-  expect(again.delivery?.unchanged).toEqual(expect.arrayContaining(["files", "graph"]));
-  // Never trimmed: the request, outcomes, scope and current findings stay in every reply.
-  expect(again.originalRequest).toBe(first.originalRequest);
-  expect(again.outcomes).toEqual(first.outcomes);
-  expect(again.scope).toEqual(first.scope);
-  expect(again.feedbackPlan).toEqual(first.feedbackPlan);
-  expect(again.budget.estimatedTokens).toBeLessThan(first.budget.estimatedTokens);
-  const text = compactProductReply("work", again, "cli") ?? "";
-  expect(text).toContain(
-    "Not repeated (unchanged since this session's last work reply): files, graph",
+  expect(pack(again)).toEqual(pack(first));
+  expect(again.delivery).toBeUndefined();
+  expect(again.contextId).toBe(first.contextId);
+  expect(compactProductReply("work", again, "cli")).toContain(`"contextId":"${first.contextId}"`);
+});
+
+it("leaves out what is unchanged since the reply the worker names", async () => {
+  const first = await work();
+  const known = await work(first.contextId);
+  expect(pack(known)).toEqual({ files: 0, graph: 0 });
+  expect(known.delivery).toEqual({ known: first.contextId, unchanged: ["files", "graph"] });
+  // Never left out: the request, outcomes, scope, checks and findings.
+  expect(known.originalRequest).toBe(first.originalRequest);
+  expect(known.outcomes).toEqual(first.outcomes);
+  expect(known.scope).toEqual(first.scope);
+  expect(known.checks).toEqual(first.checks);
+  expect(known.feedbackPlan).toEqual(first.feedbackPlan);
+  expect(known.budget.estimatedTokens).toBeLessThan(first.budget.estimatedTokens);
+  expect(compactProductReply("work", known, "cli")).toContain(
+    `Source excerpts and related files from your earlier visp work reply (context ${first.contextId}) are not repeated. If you don't have them in view, call visp work again without --known.`,
   );
-  expect(text).toContain("visp work --inspect --feature");
+  expect(compactProductReply("visp_work", known, "mcp")).toContain(
+    `from your earlier visp_work reply (context ${first.contextId}) are not repeated. If you don't have them in view, call visp_work again without known.`,
+  );
 
-  // A changed source excerpt is sent again; the unchanged graph is not.
+  // A changed excerpt is sent again; the unchanged related files are not.
   await setup.workspace.write("src/value.mjs", "export const value = 2;\n");
-  const changed = await work();
+  const changed = await work(first.contextId);
   expect(changed.files.length).toBeGreaterThan(0);
+  expect(changed.delivery?.unchanged).toEqual(["graph"]);
+  expect(compactProductReply("work", changed, "cli")).toContain("Related files from your earlier");
 
-  // Reading the context never reduces it.
+  // Reading the context never leaves anything out.
   const inspected = value(await runProductContext(await setup.workspace.state(), { task: "T001" }));
-  expect(inspected.files.length).toBeGreaterThan(0);
-  expect(inspected.graph.length).toBeGreaterThan(0);
+  expect(pack(inspected)).toEqual(pack(first));
   expect(inspected.delivery).toBeUndefined();
 });
 
-it("sends the full pack to a new session and when no session is known", async () => {
-  await work();
-  expect(pack(await work())).toEqual(pack(await work()));
-  expect((await work()).delivery).toBeUndefined();
+it("sends everything when the named reply is unknown or the brief changed since", async () => {
+  const first = await work();
+  const unknown = await work("0123456789ab");
+  expect(pack(unknown)).toEqual(pack(first));
+  expect(unknown.delivery).toBeUndefined();
 
-  await hostSession("session-1");
-  await work();
-  await hostSession("session-2");
-  const other = await work();
-  expect(other.files.length).toBeGreaterThan(0);
-  expect(other.delivery).toBeUndefined();
+  const record = value(await readProductRecord(await setup.workspace.state()));
+  value(
+    await updateProductBrief(await setup.workspace.state(), {
+      brief: {
+        ...record.brief,
+        slices: record.brief.slices.map((slice) => ({
+          ...slice,
+          goal: `${slice.goal}, as the public module's value`,
+        })),
+      },
+      reason: "Name the module in the slice goal",
+    }),
+  );
+  const revised = await work(first.contextId);
+  expect(revised.files.length).toBeGreaterThan(0);
+  expect(revised.graph.length).toBeGreaterThan(0);
+  expect(revised.delivery).toBeUndefined();
+  expect(revised.contextId).not.toBe(first.contextId);
 });
 
-it("keys MCP deliveries to the server process the host started", async () => {
-  await hostSession("session-1");
-  await work({ deliverySession: "mcp:1" });
-  const again = await work({ deliverySession: "mcp:1" });
-  expect(again.delivery?.unchanged).toEqual(expect.arrayContaining(["files", "graph"]));
-  expect(compactProductReply("visp_work", again, "mcp")).toContain(
-    'visp_work {"feature":"001-return-two-from-the-public","task":"T001","inspect":true}',
-  );
-  const restarted = await work({ deliverySession: "mcp:2" });
-  expect(restarted.files.length).toBeGreaterThan(0);
+// Work moved to another branch: the feature follows it, so `visp pr` and CI find it there.
+it("records the branch a slice is worked on when it moved", async () => {
+  await work();
+  setup.workspace.git("switch", "-q", "-c", "feature/value-two");
+  await work();
+  const state = await setup.workspace.state();
+  const record = value(await readProductRecord(state));
+  const intent = value(await state.store.readIntent(record.brief.feature));
+  expect(intent.branch).toBe("feature/value-two");
 });
