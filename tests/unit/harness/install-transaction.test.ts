@@ -75,6 +75,8 @@ describe("transactional harness installation", () => {
     expect(saved).toHaveLength(5);
     const kept = await Promise.all(saved.map((name) => readFile(join(backups, name), "utf8")));
     expect(kept.map((text) => /round (\d)/.exec(text)?.[1])).toEqual(["2", "3", "4", "5", "6"]);
+    // Numbered after the newest backup, not by the clock, so a replayed plan names the same file.
+    expect(saved.map((name) => Number(/\.(\d{13})-/.exec(name)?.[1]))).toEqual([3, 4, 5, 6, 7]);
   });
 
   it("creates missing nested parents on the first install and stays idempotent", async () => {
