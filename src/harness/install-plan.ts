@@ -376,9 +376,13 @@ async function planConfigBackup(
     if (!removal.ok) return removal;
     plan.mutations.push(removal.value);
   }
+  // A sequence number after the newest backup, not the clock, so the same project state always
+  // plans the same backup path (interrupted installs replay their plan).
+  const newest = earlier.map((name) => Number(/^\d+/.exec(name.slice(prefix.length))?.[0] ?? 0));
+  const next = Math.max(0, ...newest) + 1;
   plan.mutations.push({
     kind: "write",
-    path: `${directory}/${prefix}${String(Date.now()).padStart(13, "0")}-${fingerprint}`,
+    path: `${directory}/${prefix}${String(next).padStart(13, "0")}-${fingerprint}`,
     content: text,
     expectedBefore: { existed: false },
   });
