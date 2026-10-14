@@ -240,11 +240,13 @@ describe("capture publication lifecycle", () => {
         journeyKey: expect.any(String),
       },
     ]);
-    const bytes = await readFile(
-      join(state.paths.featureDir(feature), "captures", `run-${result.value.runId}.json`),
-      "utf8",
-    );
-    expect(JSON.parse(bytes)).toEqual(record.value.state.captureRuns[0]);
+    // The committed state is the one record of a run; no ignored duplicate is written.
+    await expect(
+      readFile(
+        join(state.paths.featureDir(feature), "captures", `run-${result.value.runId}.json`),
+        "utf8",
+      ),
+    ).rejects.toThrow();
     expect(record.value.state.reviews).toEqual([]);
     const work = await runProductWork(await workspace.state(), { feature, task: "T001" });
     const done = await runProductDone(await workspace.state(), { feature, task: "T001" });

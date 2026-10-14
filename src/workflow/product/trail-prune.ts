@@ -83,7 +83,11 @@ function referencedFile(
   name: string,
   references: Set<string>,
 ) {
-  const identity = name.replace(/\.(json|png)$/, "").replace(/^run-/, "");
+  // Earlier builds also wrote each capture run to captures/run-<id>.json. No command reads
+  // those copies, so they go even when something still names the run: a run in the trail is
+  // in the product state, and one rotated out of it was never read back from its copy.
+  if (/^run-.*\.json$/u.test(name)) return false;
+  const identity = name.replace(/\.(json|png)$/, "");
   return references.has(identity) || references.has(workspace.paths.relative(path) ?? path);
 }
 
