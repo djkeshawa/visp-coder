@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { sha256 } from "../../../src/core/hash.js";
+import { hashValue, sha256 } from "../../../src/core/hash.js";
 import { EventJournal } from "../../../src/runner/artifacts.js";
 import { inspectStudyBudget } from "../../../src/runner/budgets.js";
 import type { RunnerSpec } from "../../../src/runner/contracts.js";
@@ -251,6 +251,24 @@ describe.skipIf(process.platform === "win32")("optional runner with real fixture
     await runExperiment(spec, { outputRoot: join(root, "runs") });
     await writeFile(join(root, "runs", spec.id, "events", "00000001.json"), "{}\n");
     await expect(inspectRun(join(root, "runs", spec.id))).rejects.toThrow(/event|integrity/i);
+  });
+
+  // Integrity hashes only prove the files agree with each other; their shape is checked too.
+  it("rejects receipts whose fields have the wrong shape even when their hashes agree", async () => {
+    await runExperiment(spec, { outputRoot: join(root, "runs") });
+    const directory = join(root, "runs", spec.id);
+    const resultPath = join(directory, "result.json");
+    const original = JSON.parse(await readFile(resultPath, "utf8"));
+    const result = { ...original.result, usage: "none" };
+    await writeFile(resultPath, JSON.stringify({ result, hash: hashValue(result) }));
+    await expect(inspectRun(directory)).rejects.toThrow(/usage/);
+
+    await writeFile(resultPath, JSON.stringify(original));
+    const manifestPath = join(directory, "manifest.json");
+    const envelope = JSON.parse(await readFile(manifestPath, "utf8"));
+    const manifest = { ...envelope.manifest, runtime: "unknown" };
+    await writeFile(manifestPath, JSON.stringify({ manifest, hash: hashValue(manifest) }));
+    await expect(inspectRun(directory)).rejects.toThrow(/runtime/);
   });
 
   it("records estimated budget overruns and read-only source changes as unsuccessful", async () => {

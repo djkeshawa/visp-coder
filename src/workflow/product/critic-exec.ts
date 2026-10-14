@@ -468,13 +468,13 @@ async function writeImages(directory: string, packet: CriticPacket) {
   const paths: string[] = [];
   const images = await Promise.all(
     packet.current.images.map(async (image, index) => {
-      const entry = image as unknown as Record<string, unknown>;
-      if (typeof entry.data !== "string") return image;
-      const extension = String(entry.mimeType ?? "image/png").split("/")[1] ?? "png";
+      // The type promises bytes; an entry without them is still passed on unchanged.
+      if (typeof image.data !== "string") return image;
+      const extension = image.mimeType.split("/")[1] ?? "png";
       const path = join(directory, `image-${index}.${extension}`);
-      await writeFile(path, Buffer.from(entry.data, "base64"));
+      await writeFile(path, Buffer.from(image.data, "base64"));
       paths.push(path);
-      const { data: _data, ...rest } = entry;
+      const { data: _data, ...rest } = image;
       return { ...rest, file: path };
     }),
   );

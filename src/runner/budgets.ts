@@ -37,7 +37,7 @@ const requestSchema = z
   );
 export type StudyBudgetRequest = z.infer<typeof requestSchema>;
 const approvalSchema = z.object({ schemaVersion: z.literal(1), ...approvalFields }).strict();
-const reservationSchema = z
+export const reservationSchema = z
   .object({
     ...requestSchema.innerType().shape,
     schemaVersion: z.literal(1),

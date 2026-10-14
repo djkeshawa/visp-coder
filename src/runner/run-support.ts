@@ -1,12 +1,33 @@
 import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
 import { hashValue, sha256 } from "../core/hash.js";
 import { BUILD_ID, VERSION } from "../core/version.js";
 import { adapterFor } from "./adapters.js";
 import { assertOutside } from "./artifacts.js";
-import type { StudyBudgetReservation } from "./budgets.js";
-import type { NormalizedUsage, RunnerSpec } from "./contracts.js";
+import { reservationSchema, type StudyBudgetReservation } from "./budgets.js";
+import { type NormalizedUsage, type RunnerSpec, runnerSpecSchema } from "./contracts.js";
 import { execute, executionEnvironment, git } from "./process.js";
+
+/** The manifest as `manifestFor` writes it, so a reader checks its shape, not only its hash. */
+export const runManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    spec: runnerSpecSchema,
+    worktree: z.string(),
+    hostExecutableRealpath: z.string(),
+    startedAt: z.string().datetime(),
+    runtime: z
+      .object({ visp: z.string(), buildId: z.string(), node: z.string(), platform: z.string() })
+      .strict(),
+    environmentVariableNames: z.array(z.string()),
+    resumedFrom: z.string().nullable(),
+    instructionEvidence: z.literal("pinned-files-only"),
+    provenance: z.literal("local-runner"),
+    initialSnapshotHash: z.string(),
+    budgetReservation: reservationSchema,
+  })
+  .strict();
 
 export interface RunManifest {
   readonly schemaVersion: 1;
