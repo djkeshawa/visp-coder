@@ -1,0 +1,21 @@
+{
+  "tool": "visp_next",
+  "ok": true,
+  "data": {
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "action": "implement",
+    "objective": "Return the promised value",
+    "command": "visp work --feature 001-return-two-from-the-public --task T001",
+    "evidence": [],
+    "mayEdit": false
+  },
+  "nextCommand": "visp_work {\"feature\":\"001-return-two-from-the-public\",\"task\":\"T001\"}",
+  "nextAction": {
+    "tool": "visp_work",
+    "arguments": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001"
+    }
+  }
+}

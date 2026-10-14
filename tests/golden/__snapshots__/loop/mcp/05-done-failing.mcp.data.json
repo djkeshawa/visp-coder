@@ -1,0 +1,181 @@
+{
+  "tool": "visp_done",
+  "ok": true,
+  "data": {
+    "delivery": {
+      "status": "unresolved-product",
+      "summary": "Not complete: required product checks or assessments remain unresolved."
+    },
+    "nextCommand": "visp work --feature 001-return-two-from-the-public --task T001",
+    "warnings": [],
+    "committedChanges": [],
+    "feedbackPlan": {
+      "observationPlan": {
+        "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+        "sequence": [
+          "Real input → assert settled result → input again → assert settled result",
+          "If applicable: reset/cancel pending work → restart → outlive old completion; new state stays intact"
+        ],
+        "probes": [
+          {
+            "kind": "independent-result",
+            "status": "unassessed"
+          }
+        ],
+        "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+      },
+      "nextProbe": {
+        "kind": "independent-result",
+        "when": "The public value is two",
+        "expected": [
+          "The public value is two"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.",
+        "id": "PROBE-<HEX-1>"
+      },
+      "probeResponses": [],
+      "focus": "fix",
+      "research": {
+        "question": "Which handler or state transition explains C001: expected 2, got 1?",
+        "method": "Use the host's research capability for external facts, or a bounded local experiment for repository behavior. Choose whichever can resolve this question.",
+        "consume": "Update the existing brief decision with the conclusion, evidence, implementation implication and affected check; remove only the uncertainty actually resolved. Then build or correct the slice.",
+        "required": false
+      },
+      "trace": {
+        "question": "Which handler or state transition explains C001: expected 2, got 1?",
+        "command": "visp work --feature 001-return-two-from-the-public --task T001",
+        "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+      },
+      "findings": [],
+      "findingsRemaining": 0,
+      "gaps": [],
+      "gapsRemaining": 0,
+      "nextCheck": "Rerun C001 after correcting its failed behavior; preserve the original outcome and check a relevant counterexample."
+    },
+    "next": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001",
+      "action": "fix",
+      "objective": "Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check",
+      "command": "visp work --feature 001-return-two-from-the-public --task T001",
+      "evidence": [
+        "C001: failed: expected 2, got 1"
+      ],
+      "mayEdit": true
+    },
+    "trace": {
+      "graph": [
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:expected",
+          "path": "checks/value.check.mjs",
+          "name": "expected",
+          "detail": "variable",
+          "startLine": 3,
+          "endLine": 3,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:name",
+          "path": "checks/value.check.mjs",
+          "name": "name",
+          "detail": "variable",
+          "startLine": 2,
+          "endLine": 2,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#file",
+          "path": "src/value.mjs",
+          "name": "value.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 2,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#file",
+          "path": "checks/value.check.mjs",
+          "name": "value.check.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 9,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#variable:value",
+          "path": "src/value.mjs",
+          "name": "value",
+          "detail": "variable",
+          "startLine": 1,
+          "endLine": 1,
+          "distance": 1
+        }
+      ],
+      "notes": []
+    },
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "subjectDigest": "<SHA256-1>",
+    "passed": false,
+    "closed": false,
+    "executions": [
+      {
+        "id": "<UUID-1>",
+        "comparisonEnvironment": "<SHA256-2>",
+        "check": "C001",
+        "task": "T001",
+        "subjectDigest": "<SHA256-1>",
+        "contractDigest": "<SHA256-3>",
+        "createdAt": "<TIME>",
+        "command": "node checks/value.check.mjs",
+        "provenance": "supervisor-executed",
+        "assertions": "agent-reported",
+        "status": "failed",
+        "exitCode": 1,
+        "durationMs": <N>,
+        "output": "expected 2, got 1"
+      }
+    ],
+    "outcomes": [
+      {
+        "id": "O001",
+        "statement": "The public value is two",
+        "priority": "must",
+        "behavior": "failed",
+        "review": "unassessed",
+        "requiredReview": false,
+        "satisfied": false
+      }
+    ],
+    "gaps": [
+      "O001: behavior failed; review unassessed",
+      "C001: failed",
+      "C001: failed: expected 2, got 1",
+      "C001: no current passing execution"
+    ],
+    "journeyFeedback": {
+      "runs": [],
+      "omitted": 0
+    },
+    "behaviorChanges": {
+      "checks": [],
+      "omitted": 0
+    }
+  },
+  "nextCommand": "visp_work {\"feature\":\"001-return-two-from-the-public\",\"task\":\"T001\"}",
+  "nextAction": {
+    "tool": "visp_work",
+    "arguments": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001"
+    }
+  }
+}

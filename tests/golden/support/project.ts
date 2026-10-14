@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { afterAll, expect } from "vitest";
+import { afterAll, expect, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { registerTools } from "../../../src/mcp/tools/index.js";
 import { outstandingFeedback } from "../../../src/workflow/product/findings.js";
@@ -30,11 +30,17 @@ const home = mkdtempSync(join(tmpdir(), "visp-golden-home-"));
 const isolated = {
   HOME: home,
   CODEX_HOME: join(home, ".codex"),
+  // Git reads $XDG_CONFIG_HOME/git/config and the system config too; a developer's
+  // core.hooksPath there would bypass the hook VISP installs.
+  XDG_CONFIG_HOME: join(home, ".config"),
+  GIT_CONFIG_NOSYSTEM: "1",
   GIT_AUTHOR_DATE: FIXTURE_COMMIT_DATE,
   GIT_COMMITTER_DATE: FIXTURE_COMMIT_DATE,
 };
 const outer = Object.fromEntries(Object.keys(isolated).map((name) => [name, process.env[name]]));
 Object.assign(process.env, isolated);
+// A scenario is many real commands in sequence: 10-25 s when the machine is busy.
+vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 afterAll(async () => {
   for (const [name, value] of Object.entries(outer)) {
     if (value === undefined) delete process.env[name];
@@ -49,9 +55,19 @@ export const GOAL = "Return two from the public value module";
 
 const FILES = {
   "src/value.mjs": "export const value = 1;\n",
-  // A trivial, deterministic check: it prints the value it saw and passes only for two.
-  "checks/value.check.mjs":
-    'import { value } from "../src/value.mjs";\nif (value === 2) console.log("value is 2");\nelse {\n  console.log("expected 2, got " + value);\n  process.exitCode = 1;\n}\n',
+  // A trivial, deterministic check: it prints what it saw and passes only for the promised
+  // export (`value`, two, by default; `label`, "two", when named).
+  "checks/value.check.mjs": [
+    'import * as product from "../src/value.mjs";',
+    'const name = process.argv[2] ?? "value";',
+    'const expected = name === "label" ? "two" : 2;',
+    'if (product[name] === expected) console.log(name + " is " + expected);',
+    "else {",
+    '  console.log("expected " + expected + ", got " + product[name]);',
+    "  process.exitCode = 1;",
+    "}",
+    "",
+  ].join("\n"),
 };
 
 export const BRIEF = {
@@ -299,6 +315,19 @@ function productGates(record: ProductRecord) {
   };
 }
 
+/** Commands that read state without changing it. */
+function readOnly(args: readonly string[]): boolean {
+  const [command, ...flags] = args;
+  if (command === "next" || command === "status" || command === "pr" || command === "rules")
+    return true;
+  if (command === "brief") return !flags.includes("--patch") && !flags.includes("--from");
+  return command === "work" && flags.includes("--inspect");
+}
+function readOnlyTool(tool: string, args: Record<string, unknown>): boolean {
+  if (tool === "visp_brief") return args.patch === undefined && args.brief === undefined;
+  return tool === "visp_next" || tool === "visp_status" || (tool === "visp_work" && !!args.inspect);
+}
+
 type ToolHandler = (args: Record<string, unknown>, extra: object) => Promise<CallToolResult>;
 
 function mcpText(result: CallToolResult): string {
@@ -367,7 +396,8 @@ export class Recorder {
   async cli(name: string, args: readonly string[]): Promise<CliResult> {
     const result = await this.project.cli(...args);
     await this.save(`${name}.txt`, cliTranscript(args, result));
-    await this.decision(name, { exitCode: result.exitCode });
+    // A read-only step cannot change the decision the step before it recorded.
+    if (!readOnly(args)) await this.decision(name, { exitCode: result.exitCode });
     return result;
   }
 
@@ -379,14 +409,13 @@ export class Recorder {
   ) {
     const reply = await this.project.mcp(tool, args, options);
     await this.save(`${name}.mcp.txt`, mcpTranscript(tool, args, reply));
-    const structured = reply.result.structuredContent as
-      | { ok?: boolean; nextAction?: unknown }
-      | undefined;
-    await this.decision(`${name}.mcp`, {
-      isError: reply.result.isError === true,
-      ok: structured?.ok,
-      nextAction: structured?.nextAction,
-    });
+    // Hosts that forward only structured content give the model this, not the text.
+    await this.save(
+      `${name}.mcp.data.json`,
+      JSON.stringify(reply.result.structuredContent ?? null, null, 2),
+    );
+    if (!readOnlyTool(tool, args))
+      await this.decision(`${name}.mcp`, { isError: reply.result.isError === true });
     return reply;
   }
 
