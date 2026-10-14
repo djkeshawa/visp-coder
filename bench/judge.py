@@ -6,7 +6,7 @@ the newest image the worker wrote; SVG is rasterized in headless Chrome) and cop
 anonymous name. For a game task, serves the project and takes a 1280 x 800 screenshot of
 index.html at the start of level 1. The judge model (Sonnet 5.5 at high effort, or the run's
 preset judge) checks a fixed per-task checklist and gives an overall 1-10 score. Writes judge.json
-beside the project. A run with no image (or no index.html) scores 1 with no checklist item passed;
+beside the project. A visual run with no image file is judged on its index.html as served, like a game; a run with neither scores 1 with no checklist item passed;
 a failed judge call is recorded as `error` and scores nothing. Runs marked invalid are skipped.
 """
 import functools
@@ -210,6 +210,11 @@ def judge(name):
         source = str(image.relative_to(project)) if image else None
         image = raster(image, directory) if image else None
         what = "one image"
+        if not image and (project / "index.html").is_file():
+            # These requests name no file format, so a page that draws the picture is a delivery
+            # too; judge what it shows when opened, as for the games.
+            image, source = game_screen(project, directory), "index.html"
+            what = "the picture the delivered page shows when it is opened in a browser"
     if not image:
         # Nothing to judge is the lowest score, as a hidden check with no result passes nothing.
         result = {"run": name, "task": task, "image": None, "missing": "no image produced",
