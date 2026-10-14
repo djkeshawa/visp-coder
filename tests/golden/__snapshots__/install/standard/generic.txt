@@ -262,6 +262,8 @@ REQUEST
 visp work --check "<test command>"
 ```
 
+A repeat `visp work` may pass `--known <contextId>` from an earlier reply still in view; that reply's unchanged excerpts are not repeated.
+
 ## Understand, build, observe
 
 Edit the existing brief returned by --template; preserve originalRequest, feature and acceptanceBaseline.

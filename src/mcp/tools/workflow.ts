@@ -241,6 +241,12 @@ export function registerWorkflowTools(server: McpServer, root: string): void {
               "Test command for the slice; on a feature without slices, work the whole request as one slice",
             ),
           detail: z.boolean().optional(),
+          known: z
+            .string()
+            .optional()
+            .describe(
+              "contextId of an earlier work reply still in view; its unchanged source excerpts and related files are not repeated",
+            ),
         })
         .strict(),
     },

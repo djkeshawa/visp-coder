@@ -10,6 +10,7 @@ import { updateProductBrief } from "./brief.js";
 import { validateProductCheckCommand } from "./check-command.js";
 import { uninstalledAlias } from "./check-executable.js";
 import { buildProductContext } from "./context.js";
+import { planContext } from "./context-delivery.js";
 import type { ProductWorkContext } from "./context-types.js";
 import { correctionReasons } from "./corrections.js";
 import { requireNoPendingCriticReview } from "./critic-policy.js";
@@ -81,6 +82,8 @@ export async function runProductContext(
 export interface ProductWorkOptions extends ProductSelection {
   /** A check command: on a feature without slices, work the whole request as one slice. */
   readonly check?: string;
+  /** The contextId of an earlier reply still in the worker's view: unchanged sections are left out. */
+  readonly known?: string;
 }
 
 export async function runProductWork(
@@ -218,7 +221,7 @@ function unusedId(existing: readonly string[], prefix: string): string {
  */
 async function runWorkAndReviewRoute(
   workspace: WorkspaceState,
-  options: ProductSelection,
+  options: ProductWorkOptions,
 ): Promise<Result<ProductWorkContext>> {
   const worked = await withProductMutation(workspace, () =>
     runProductWorkLocked(workspace, options),
@@ -241,7 +244,7 @@ async function runWorkAndReviewRoute(
 
 async function runProductWorkLocked(
   workspace: WorkspaceState,
-  options: ProductSelection,
+  options: ProductWorkOptions,
 ): Promise<Result<{ context: ProductWorkContext; advice?: string }>> {
   const record = await readProductRecord(workspace, options);
   if (!record.ok) return record;
@@ -279,40 +282,67 @@ async function runProductWorkLocked(
   if (!understanding.ok) return understanding;
   const context = await buildProductContext(workspace, current, slice, snapshot.value, true, true);
   if (!context.ok) return context;
-  const path = authorizationPath(workspace, record.value.brief.feature);
-  const before = await workspace.files.readTextIfExists(path);
-  if (!before.ok) return before;
   const timestamp = new Date().toISOString();
-  const granted = await grantAuthorization(
-    workspace,
-    record.value,
-    slice,
-    snapshot.value,
-    timestamp,
-  );
+  const granted = await grantWrites(workspace, record.value, slice, snapshot.value, timestamp);
   if (!granted.ok) return granted;
   const auth = granted.value.authorization;
-  const status = await statusMutation(workspace, record.value.brief.feature, slice.id, "work");
-  if (!status.ok) return status;
   const next = workingState(current, slice, auth, timestamp, reopen, subject.value, findings);
-  const branch = await workBranchMutation(workspace, record.value);
-  if (!branch.ok) return branch;
+  const delivery = await planContext(workspace, context.value, auth.contractDigest, options.known);
+  if (!delivery.ok) return delivery;
   const saved = await saveProductState(workspace, record.value, next, [
-    ...branch.value,
-    { kind: "write", path, content: json(auth), expectedBefore: filePrecondition(before.value) },
-    status.value,
+    ...granted.value.mutations,
+    delivery.value.mutation,
   ]);
   await retainRegressionScopeBaseline(workspace, auth, saved.ok);
   return saved.ok
     ? ok({
         context: {
-          ...context.value,
-          notes: [...context.value.notes, ...staleTaskNote(workspace, record.value)],
+          ...delivery.value.context,
+          notes: [...delivery.value.context.notes, ...staleTaskNote(workspace, record.value)],
           criticUnderstanding: understanding.value,
         },
         advice: firstDoneAdvice(record.value, slice, granted.value.prior, subject.value),
       })
     : saved;
+}
+
+/** The grant and the writes that record it: the work branch, the authorization and the status. */
+async function grantWrites(
+  workspace: WorkspaceState,
+  record: ProductRecord,
+  slice: ProductSlice,
+  snapshot: Record<string, string>,
+  timestamp: string,
+): Promise<
+  Result<{
+    authorization: ProductAuthorization;
+    prior?: ProductAuthorization;
+    mutations: FileMutation[];
+  }>
+> {
+  const path = authorizationPath(workspace, record.brief.feature);
+  const before = await workspace.files.readTextIfExists(path);
+  if (!before.ok) return before;
+  const granted = await grantAuthorization(workspace, record, slice, snapshot, timestamp);
+  if (!granted.ok) return granted;
+  const status = await statusMutation(workspace, record.brief.feature, slice.id, "work");
+  if (!status.ok) return status;
+  const branch = await workBranchMutation(workspace, record);
+  if (!branch.ok) return branch;
+  const { authorization } = granted.value;
+  return ok({
+    ...granted.value,
+    mutations: [
+      ...branch.value,
+      {
+        kind: "write",
+        path,
+        content: json(authorization),
+        expectedBefore: filePrecondition(before.value),
+      },
+      status.value,
+    ],
+  });
 }
 
 /**

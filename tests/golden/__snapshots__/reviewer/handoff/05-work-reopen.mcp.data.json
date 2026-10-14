@@ -208,6 +208,7 @@
         ".visp/memory"
       ]
     },
+    "contextId": "<HEX-3>",
     "next": {
       "feature": "001-return-two-from-the-public",
       "task": "T001",
