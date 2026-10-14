@@ -88,38 +88,8 @@
         "environment": "node"
       }
     ],
-    "files": [
-      {
-        "path": "checks/value.check.mjs",
-        "content": "import * as product from \"../src/value.mjs\";\nconst name = process.argv[2] ?? \"value\";\nconst expected = name === \"label\" ? \"two\" : 2;\nif (product[name] === expected) console.log(name + \" is \" + expected);\nelse {\n  console.log(\"expected \" + expected + \", got \" + product[name]);\n  process.exitCode = 1;\n}\n",
-        "truncated": false
-      },
-      {
-        "path": "src/value.mjs",
-        "content": "export const value = 1;\n",
-        "truncated": false
-      }
-    ],
-    "graph": [
-      {
-        "kind": "entity",
-        "key": "checks/value.check.mjs#variable:expected",
-        "path": "checks/value.check.mjs",
-        "name": "expected",
-        "detail": "variable",
-        "startLine": 3,
-        "endLine": 3
-      },
-      {
-        "kind": "entity",
-        "key": "src/value.mjs#variable:value",
-        "path": "src/value.mjs",
-        "name": "value",
-        "detail": "variable",
-        "startLine": 1,
-        "endLine": 1
-      }
-    ],
+    "files": [],
+    "graph": [],
     "memory": [],
     "notes": [],
     "mayEdit": true,
@@ -134,7 +104,7 @@
     "feedback": [],
     "budget": {
       "tokenBudget": 12000,
-      "estimatedTokens": 1458,
+      "estimatedTokens": 1211,
       "status": "within-budget",
       "omitted": {
         "files": 0,
@@ -147,6 +117,12 @@
         ".visp/features/001-return-two-from-the-public/brief.yaml",
         ".visp/features/001-return-two-from-the-public/product-state.json",
         ".visp/memory"
+      ]
+    },
+    "delivery": {
+      "unchanged": [
+        "files",
+        "graph"
       ]
     },
     "next": {

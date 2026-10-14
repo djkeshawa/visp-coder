@@ -140,26 +140,7 @@
         "truncated": false
       }
     ],
-    "graph": [
-      {
-        "kind": "entity",
-        "key": "checks/value.check.mjs#variable:expected",
-        "path": "checks/value.check.mjs",
-        "name": "expected",
-        "detail": "variable",
-        "startLine": 3,
-        "endLine": 3
-      },
-      {
-        "kind": "entity",
-        "key": "src/value.mjs#variable:value",
-        "path": "src/value.mjs",
-        "name": "value",
-        "detail": "variable",
-        "startLine": 1,
-        "endLine": 1
-      }
-    ],
+    "graph": [],
     "memory": [],
     "notes": [],
     "mayEdit": true,
@@ -193,7 +174,7 @@
     "feedback": [],
     "budget": {
       "tokenBudget": 12000,
-      "estimatedTokens": 2163,
+      "estimatedTokens": 2029,
       "status": "within-budget",
       "omitted": {
         "files": 0,
@@ -206,6 +187,11 @@
         ".visp/features/001-return-two-from-the-public/brief.yaml",
         ".visp/features/001-return-two-from-the-public/product-state.json",
         ".visp/memory"
+      ]
+    },
+    "delivery": {
+      "unchanged": [
+        "graph"
       ]
     },
     "next": {
