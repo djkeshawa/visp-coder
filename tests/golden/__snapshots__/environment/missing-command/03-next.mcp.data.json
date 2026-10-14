@@ -1,0 +1,24 @@
+{
+  "tool": "visp_next",
+  "ok": true,
+  "data": {
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "action": "understand",
+    "objective": "missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done.",
+    "command": "visp verify --feature 001-return-two-from-the-public --task T001",
+    "evidence": [
+      "C001: missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done."
+    ],
+    "mayEdit": true,
+    "completion": "unresolved-environment",
+    "recovery": "missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done."
+  },
+  "nextCommand": "visp_next {\"feature\":\"001-return-two-from-the-public\"}",
+  "nextAction": {
+    "tool": "visp_next",
+    "arguments": {
+      "feature": "001-return-two-from-the-public"
+    }
+  }
+}

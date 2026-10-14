@@ -1,0 +1,8 @@
+$ visp work
+--- stdout
+
+--- stderr
+Error: Complete the migrated draft brief before authorization
+Try: visp brief
+
+--- exit 1

@@ -83,7 +83,7 @@ Respond only with JSON that matches the provided output schema.
         "reference": "checks/value.check.mjs",
         "sha256": "<SHA256-7>",
         "available": true,
-        "excerpt": "import { value } from \"../src/value.mjs\";\nif (value === 2) console.log(\"value is 2\");\nelse {\n  console.log(\"expected 2, got \" + value);\n  process.exitCode = 1;\n}\n",
+        "excerpt": "import * as product from \"../src/value.mjs\";\nconst name = process.argv[2] ?? \"value\";\nconst expected = name === \"label\" ? \"two\" : 2;\nif (product[name] === expected) console.log(name + \" is \" + expected);\nelse {\n  console.log(\"expected \" + expected + \", got \" + product[name]);\n  process.exitCode = 1;\n}\n",
         "coreOutcomes": [
           "O001"
         ],
