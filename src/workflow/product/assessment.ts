@@ -2,13 +2,13 @@ import { sha256 } from "../../core/hash.js";
 import { productJourneyGaps } from "../evidence/product-journey.js";
 import type { ProductReviewCapture } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import { isBrowserCheckCommand, productCheckSupportsBehavior } from "./check-command.js";
 import { currentCoverage, productReviewChallenges } from "./coverage.js";
 import {
   currentJourneyFailures,
   evidenceApplies,
   evidenceSupportGaps,
-  productCaptureRunSchema,
   productEvidenceCatalogue,
 } from "./evidence-references.js";
 import { productFeedbackGaps } from "./feedback.js";

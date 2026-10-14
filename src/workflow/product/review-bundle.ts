@@ -1,5 +1,6 @@
 import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import { type ProductReviewChallenge, selectReviewChallenges } from "./coverage.js";
 import { needsBrowser } from "./environment.js";
 import {
@@ -7,7 +8,6 @@ import {
   evidenceApplies,
   type ProductEvidenceCatalogue,
   type ProductEvidenceReference,
-  productCaptureRunSchema,
 } from "./evidence-references.js";
 import { experimentReviewContext } from "./experiments.js";
 import { productFeedbackPlan } from "./feedback.js";

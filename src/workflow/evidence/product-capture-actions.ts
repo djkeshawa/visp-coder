@@ -1,6 +1,6 @@
 import { vispError } from "../../core/errors.js";
 import { err, ok } from "../../core/result.js";
-import { productCaptureRunSchema } from "../product/evidence-references.js";
+import { productCaptureRunSchema } from "../product/capture-run-model.js";
 import { isExploratoryJourney, journeyRetirementSchema } from "../product/journey-ownership.js";
 import { withProductMutation } from "../product/runtime.js";
 import { selectProductSlice } from "../product/scopes.js";

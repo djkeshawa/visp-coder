@@ -1,4 +1,5 @@
-import { type ProductEvidenceCatalogue, productCaptureRunSchema } from "./evidence-references.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
+import type { ProductEvidenceCatalogue } from "./evidence-references.js";
 import type { ProductFeedback } from "./feedback-model.js";
 import {
   type FunctionalFinding,

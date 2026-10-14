@@ -2,6 +2,7 @@ import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { productBehaviorProbes } from "./behavior-probes.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import { productCheckGuidance } from "./check-guidance.js";
 import { environmentRecovery } from "./environment-model.js";
 import {
@@ -9,7 +10,6 @@ import {
   currentFailedJourneys,
   evidenceApplies,
   type ProductEvidenceCatalogue,
-  productCaptureRunSchema,
   supportsBehaviorEvidence,
   withoutUnavailableCitations,
 } from "./evidence-references.js";

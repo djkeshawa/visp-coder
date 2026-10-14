@@ -1,6 +1,7 @@
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { browserJourneySchema } from "../../testing/browser-journey.js";
+import { productCaptureRunSchema } from "../product/capture-run-model.js";
 import {
   cancelledExecution,
   mergeCaptureState,
@@ -8,7 +9,6 @@ import {
 } from "../product/check-lifecycle.js";
 import { criticRouteCommand } from "../product/critic-guidance.js";
 import { supportedHostCaptureRecovery } from "../product/environment-model.js";
-import { productCaptureRunSchema } from "../product/evidence-references.js";
 import { inspectProductImages } from "../product/images.js";
 import { productObservationPlan } from "../product/observation-plan.js";
 import { withProductMutation } from "../product/runtime.js";

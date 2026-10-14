@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
-import { browserInputIdentitySchema } from "../../testing/browser-input-identity.js";
-import { browserJourneySchema } from "../../testing/browser-journey.js";
 import { replayBatchCommand, replaySuggestions } from "../evidence/capture-replay.js";
 import {
   currentExactReplay,
@@ -15,6 +13,7 @@ import {
 import { imageDimensions } from "../evidence/observations/media.js";
 import type { ProductReviewImage } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
+import { type captureOperationSchema, productCaptureRunSchema } from "./capture-run-model.js";
 import { productCheckSupportsBehavior } from "./check-command.js";
 import { reviewCodeSources } from "./code-context.js";
 import { exploratoryFailureHistory, historicalFailureReferences } from "./exploratory-history.js";
@@ -82,48 +81,6 @@ export function evidenceApplies(
 function evidenceInSlice(task: string | undefined, selectedSlice?: ProductSlice): boolean {
   return !selectedSlice || !task || task === selectedSlice.id;
 }
-
-const operation = z.object({
-  id: z.string(),
-  kind: z.enum([
-    "navigate",
-    "measure",
-    "pointer",
-    "touch",
-    "keyboard",
-    "capture",
-    "observe",
-    "scroll",
-  ]),
-  description: z.string().optional(),
-  measurement: z.object({ json: z.string(), truncated: z.boolean() }).optional(),
-});
-export const productCaptureRunSchema = z.object({
-  id: z.string().optional(),
-  version: z.union([z.literal(1), z.literal(2)]),
-  provenance: z.literal("runner-executed"),
-  subjectDigest: z.string(),
-  outcomeDigest: z.string().optional(),
-  contractDigest: z.string().optional(),
-  task: z.string().optional(),
-  journeyDigest: z.string().optional(),
-  comparisonEnvironment: z.string().optional(),
-  journey: browserJourneySchema.optional(),
-  journeyKey: z.string().optional(),
-  expectation: journeyExpectationSchema.optional(),
-  status: z.enum(["completed", "failed", "timed-out", "cancelled"]).optional(),
-  completedInputs: z.array(browserInputIdentitySchema).optional(),
-  failure: z
-    .object({
-      kind: z.string(),
-      message: z.string(),
-      operationId: z.string().optional(),
-      input: browserInputIdentitySchema.optional(),
-    })
-    .optional(),
-  captures: z.array(captureSchema),
-  operations: z.array(operation),
-});
 
 const control = z.object({
   id: z.string(),
@@ -508,7 +465,7 @@ function controlReferences(
 }
 
 function observationStatus(
-  observed: z.infer<typeof operation>,
+  observed: z.infer<typeof captureOperationSchema>,
 ): ProductEvidenceReference["status"] {
   if (observed.kind !== "observe" && observed.kind !== "scroll") return "available";
   if (!observed.measurement || observed.measurement.truncated) return "unavailable";

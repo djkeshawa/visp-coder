@@ -1,16 +1,13 @@
 import { hashValue } from "../../core/hash.js";
 import { productJourneyKey } from "../evidence/product-journey.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import {
   describeProductCheck,
   isBrowserCheckCommand,
   productCheckSupportsBehavior,
 } from "./check-command.js";
 import { type RepairEnvironmentChange, repairEnvironments } from "./comparison-environment.js";
-import {
-  evidenceApplies,
-  latestCurrentJourneys,
-  productCaptureRunSchema,
-} from "./evidence-references.js";
+import { evidenceApplies, latestCurrentJourneys } from "./evidence-references.js";
 import type { ProductExecution } from "./model.js";
 import { findingReproductions } from "./reproduction-bindings.js";
 import type { ProductRecord } from "./store.js";

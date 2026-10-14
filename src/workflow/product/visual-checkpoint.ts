@@ -1,6 +1,7 @@
 import { cliCommand } from "../next-action.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import { needsBrowser } from "./environment.js";
-import { evidenceApplies, productCaptureRunSchema } from "./evidence-references.js";
+import { evidenceApplies } from "./evidence-references.js";
 import type { ProductSlice } from "./model.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS, observationSequence } from "./observation-preview.js";
 import type { ProductRecord } from "./store.js";

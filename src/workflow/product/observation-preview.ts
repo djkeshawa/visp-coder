@@ -1,4 +1,5 @@
-import { evidenceApplies, productCaptureRunSchema } from "./evidence-references.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
+import { evidenceApplies } from "./evidence-references.js";
 import type { ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
 

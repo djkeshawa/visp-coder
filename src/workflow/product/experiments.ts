@@ -1,12 +1,12 @@
 import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import {
   currentFailedJourneys,
   evidenceApplies,
   latestCurrentJourneys,
   type ProductEvidenceCatalogue,
-  productCaptureRunSchema,
   sameJourneyIntent,
 } from "./evidence-references.js";
 import { type ExperimentResolution, experimentResolutionsSchema } from "./experiment-model.js";

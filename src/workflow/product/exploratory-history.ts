@@ -1,5 +1,5 @@
 import { historicalFailureIdentity } from "../evidence/journey-history.js";
-import { productCaptureRunSchema } from "./evidence-references.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import { journeyOwnershipIndex } from "./journey-ownership.js";
 import type { ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
