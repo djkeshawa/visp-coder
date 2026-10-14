@@ -26,10 +26,6 @@
         "src/workflow/product/store.ts"
       ],
       [
-        "src/workflow/product/store.ts",
-        "src/workflow/product/trail.ts"
-      ],
-      [
         "src/workflow/product/evidence-references.ts",
         "src/workflow/product/exploratory-history.ts"
       ]
