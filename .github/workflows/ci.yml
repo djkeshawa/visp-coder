@@ -8,6 +8,10 @@ on:
 # Everything `pnpm release:check` runs, split into jobs that run side by side. Each job runs
 # the script it replaces, so keep the two in step when a script changes. The last job, `check`,
 # is the single result to require on a branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   trust-boundary:
     strategy:
@@ -108,7 +112,7 @@ jobs:
 
   check:
     if: always()
-    needs: [static, test, browser, qualification, trust-coverage, package]
+    needs: [trust-boundary, static, test, browser, qualification, trust-coverage, package]
     runs-on: ubuntu-latest
     steps:
       - name: Every part passed
