@@ -195,7 +195,8 @@ async function finishExecution(
   };
   const current: ProductRecord = { ...record, state: next };
   const gaps = await executionGaps(workspace, current, slice, after.value, commands, executions);
-  if (source !== after.value) gaps.push(changedProductGap(snapshot, afterSnapshot.value));
+  if (source !== after.value)
+    gaps.push(changedProductGap(snapshot, afterSnapshot.value, record.brief.checks));
   if (close)
     gaps.push(
       ...outstandingFeedback(current)
@@ -499,7 +500,11 @@ async function executionGaps(
   return gaps;
 }
 
-function changedProductGap(before: Record<string, string>, after: Record<string, string>): string {
+function changedProductGap(
+  before: Record<string, string>,
+  after: Record<string, string>,
+  checks: readonly ProductCheck[],
+): string {
   const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
     .filter((path) => before[path] !== after[path])
     .sort();
@@ -508,7 +513,26 @@ function changedProductGap(before: Record<string, string>, after: Record<string,
   if (!changed.length) return `${prefix} Control, runtime or environment inputs changed.`;
   const paths = changed.slice(0, 12).map((path) => JSON.stringify(path.slice(0, 200)));
   const omitted = changed.length > paths.length ? ` (+${changed.length - paths.length} more)` : "";
-  return `${prefix} Changed input paths: ${paths.join(", ")}${omitted}. ${CHECK_OUTPUT_GUIDANCE}`;
+  return [
+    `${prefix} Changed input paths: ${paths.join(", ")}${omitted}. ${CHECK_OUTPUT_GUIDANCE}`,
+    ...productImageNotes(changed, checks),
+  ].join(" ");
+}
+
+/**
+ * A declared image that existed before the feature started stays product, so a check that
+ * rewrites it, differently each run, changes the product every run; "make the check write it"
+ * cannot fix that, a new output path can.
+ */
+function productImageNotes(changed: readonly string[], checks: readonly ProductCheck[]) {
+  return checks.flatMap((check) =>
+    (check.images ?? [])
+      .filter((image) => changed.includes(image.replace(/\\/g, "/").replace(/^\.\//, "")))
+      .map(
+        (image) =>
+          `${check.id}'s declared image ${image} existed before the feature started, so it is product and writing it changes the product; write the image to a new untracked path, e.g. out/<name>.png, and declare that path.`,
+      ),
+  );
 }
 
 async function completionState(

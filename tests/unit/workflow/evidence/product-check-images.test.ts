@@ -211,6 +211,19 @@ describe("images declared by a command check", () => {
     expect(verified).toMatchObject({ ok: true, value: { passed: true } });
   });
 
+  it("say how to stop changing the product when a declared image is a committed file", async () => {
+    const workspace = await imageCheck(writeRandomImage, ["out/scene.png"]);
+    await workspace.write("out/scene.png", png(1, 2, 3));
+    workspace.git("add", "out/scene.png");
+    workspace.git("commit", "-q", "--no-verify", "-m", "commit the rendered picture");
+    const verified = await runProductVerify(await workspace.state());
+    expect(verified).toMatchObject({ ok: true, value: { passed: false } });
+    if (!verified.ok) return;
+    expect(verified.value.gaps.join("\n")).toContain(
+      "C001's declared image out/scene.png existed before the feature started, so it is product and writing it changes the product; write the image to a new untracked path, e.g. out/<name>.png, and declare that path",
+    );
+  });
+
   it("stay product when they existed before the feature started", async () => {
     const workspace = await imageCheck(writeRandomImage, ["out/scene.png"]);
     await workspace.write("out/scene.png", png(255, 0, 0));
