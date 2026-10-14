@@ -20,6 +20,7 @@ import {
   CLAUDE_SETTINGS_FILE,
   hasClaudeSessionHooks,
   hookCommand,
+  inspectPreToolUseResidue,
   preToolUseRegistration,
 } from "../harness/claude-settings.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
@@ -430,13 +431,22 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
   return { inactive: "edit hook (script written, not wired into settings)" };
 }
 
-/** Settings are committed, the script is not: they still run, refusing while a slice may be authorized. */
+/** Settings are committed, the script is not: what the settings still run without it. */
 async function missingEditHook(state: WorkspaceState, hookPath: string): Promise<SurfaceState> {
-  const wired = await preToolUseRegistration(state.paths.root, hookPath);
-  return wired.ok && (wired.value === "present" || wired.value === "customized")
-    ? {
-        inactive: `edit hook (script missing; Claude Code refuses writes while a slice is authorized, until ${PRODUCT_NAME} install restores it)`,
-      }
+  const settings = await state.files.readTextIfExists(CLAUDE_SETTINGS_FILE);
+  if (!settings.ok) return { inactive: "edit hook" };
+  const residue = inspectPreToolUseResidue(settings.value, hookPath);
+  if (residue.current)
+    return {
+      inactive: `edit hook (script missing; Claude Code refuses writes while a slice is authorized, until ${PRODUCT_NAME} install restores it)`,
+    };
+  // An earlier build ran the script directly, with no fallback for a missing one.
+  if (residue.exact)
+    return {
+      inactive: `edit hook (script missing; settings run an earlier VISP command, which fails every edit until ${PRODUCT_NAME} install)`,
+    };
+  return residue.customized
+    ? { inactive: "edit hook (script missing; settings registration is stale or edited)" }
     : { inactive: "edit hook" };
 }
 

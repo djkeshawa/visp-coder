@@ -161,6 +161,22 @@ describe("the enforcement check", () => {
     await applyFixes(await workspace.state(), [result], { guardHandshake: healthyGuard });
     expect(await check("enforcement")).toMatchObject({ status: "ok" });
   });
+  // An earlier build's `node … || exit 2` has no fallback: without the script every edit fails.
+  it("says an earlier build's settings command fails every edit without the script", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    const path = join(workspace.root, ".claude/settings.json");
+    const settings = JSON.parse(await readFile(path, "utf8"));
+    settings.hooks.PreToolUse[0].hooks[0].command =
+      'node "$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs" || exit 2';
+    await writeFile(path, JSON.stringify(settings));
+    await rm(join(workspace.root, CLAUDE_PRE_TOOL_USE_HOOK));
+    const result = await check("enforcement");
+    expect(result.detail).toContain("earlier VISP command");
+    expect(result.detail).not.toContain("while a slice is authorized");
+    await applyFixes(await workspace.state(), [result], { guardHandshake: healthyGuard });
+    expect(await check("enforcement")).toMatchObject({ status: "ok" });
+  });
   it("detects and repairs a deleted Codex MCP registration", async () => {
     await setConfigScalar((await workspace.state()).paths, "harness", "codex");
     const state = await workspace.state();
