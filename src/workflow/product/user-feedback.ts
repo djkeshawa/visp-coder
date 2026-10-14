@@ -55,6 +55,11 @@ export function userFeedbackPlan(
   };
 }
 
+/** `status` only reads; asking, replying and deferring record state. */
+export function userFeedbackOperationWrites(operation: string | undefined): boolean {
+  return operation !== "status";
+}
+
 export async function runProductUserFeedback(
   workspace: WorkspaceState,
   input: unknown,

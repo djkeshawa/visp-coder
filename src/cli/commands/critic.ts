@@ -1,6 +1,10 @@
 import { Command } from "commander";
 import { fromUnknown } from "../../core/errors.js";
-import { type CriticAdapter, runProductCritic } from "../../workflow/product/critic.js";
+import {
+  type CriticAdapter,
+  criticOperationWrites,
+  runProductCritic,
+} from "../../workflow/product/critic.js";
 import { configuredCriticLauncher } from "../../workflow/product/critic-exec.js";
 import { rejectedCriticReview } from "../../workflow/product/critic-status.js";
 import type { UserFeedbackHost } from "../../workflow/product/user-feedback.js";
@@ -103,9 +107,9 @@ export function criticCommand(
       >(cmd);
       try {
         const operation = criticOperation(opts);
-        const state = await (["status", "preflight"].includes(operation)
-          ? workspace(opts)
-          : mutatingWorkspace(opts));
+        const state = await (criticOperationWrites(operation)
+          ? mutatingWorkspace(opts)
+          : workspace(opts));
         if (!state.ok) {
           process.exitCode = emitError("critic", state.error, { json: isJson(opts) });
           return;

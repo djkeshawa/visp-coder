@@ -44,6 +44,11 @@ export interface ProductCriticHost {
 }
 export type CriticAdapter = ProductCriticHost | { unavailable: string };
 
+/** `status` and `preflight` only read; every other operation records state. */
+export function criticOperationWrites(operation: string | undefined): boolean {
+  return !["status", "preflight"].includes(operation ?? "status");
+}
+
 export async function runProductCritic(
   workspace: WorkspaceState,
   input: unknown,

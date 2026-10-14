@@ -1,5 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type CriticAdapter, runProductCritic } from "../../workflow/product/critic.js";
+import {
+  type CriticAdapter,
+  criticOperationWrites,
+  runProductCritic,
+} from "../../workflow/product/critic.js";
 import { criticRequestSchema } from "../../workflow/product/critic-model.js";
 import { rejectedCriticReview } from "../../workflow/product/critic-status.js";
 import { mutatingWorkspaceFor, workspaceFor } from "../context.js";
@@ -22,9 +26,9 @@ export function registerCriticTool(
       inputSchema: criticRequestSchema,
     },
     async (args, extra) => {
-      const state = await (["status", "preflight"].includes(args.operation ?? "status")
-        ? workspaceFor(root)
-        : mutatingWorkspaceFor(root));
+      const state = await (criticOperationWrites(args.operation)
+        ? mutatingWorkspaceFor(root)
+        : workspaceFor(root));
       if (!state.ok) return failure("visp_critic", state.error);
       const result = await runProductCritic(
         state.value,
