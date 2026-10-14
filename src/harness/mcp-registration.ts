@@ -194,10 +194,13 @@ function planJsonUnregistration(
 
   const servers = { ...existingServers };
   delete servers[MCP_SERVER_NAME];
-  const content = verified(removeJsoncMember(current ?? "", [shape.container, MCP_SERVER_NAME]), {
-    ...parsed,
-    [shape.container]: servers,
-  });
+  const content = verified(
+    removeJsoncMember(current ?? "", [shape.container, MCP_SERVER_NAME], true),
+    {
+      ...parsed,
+      [shape.container]: servers,
+    },
+  );
   return content === undefined ? { status: "malformed" } : { status: "removed", content };
 }
 

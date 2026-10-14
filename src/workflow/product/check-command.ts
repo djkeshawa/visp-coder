@@ -69,11 +69,16 @@ function directWorkflowMutation(argv: string[]): boolean {
         (command === "review" && entry === "--dispatch"),
     );
   if (command === "work" && args.includes("--inspect")) return false;
-  if ((command === "install" || command === "migrate") && args.includes("--dry-run")) return false;
+  if (
+    (command === "install" || command === "uninstall" || command === "migrate") &&
+    args.includes("--dry-run")
+  )
+    return false;
   const mutations = new Set([
     "init",
     "setup",
     "install",
+    "uninstall",
     "start",
     "feature",
     "context",

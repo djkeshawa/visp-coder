@@ -354,11 +354,11 @@ async function planPreviousMcpRegistration(
  * `.visp/state/backups/`: MCP configuration can hold tokens, which must not land beside it in
  * the repository. One copy per distinct text, and only the latest few per file.
  */
-async function planConfigBackup(
+export async function planConfigBackup(
   fs: ProjectFileSystem,
   path: string,
   text: string | undefined,
-  plan: InstallPlan,
+  plan: { readonly mutations: FileMutation[] },
 ): Promise<Result<void>> {
   if (text === undefined || text.trim() === "") return ok(undefined);
   const directory = dirname(`${STATE_DIR}/${DIR.state}/backups/${path}`);
@@ -392,7 +392,10 @@ async function planConfigBackup(
 /** Backups kept per host configuration file. */
 const KEPT_BACKUPS = 5;
 
-async function removalOf(fs: ProjectFileSystem, path: string): Promise<Result<FileMutation>> {
+export async function removalOf(
+  fs: ProjectFileSystem,
+  path: string,
+): Promise<Result<FileMutation>> {
   const content = await fs.readBytes(path);
   if (!content.ok) return content;
   const metadata = await fs.readMetadata(path);

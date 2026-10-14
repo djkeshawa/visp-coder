@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { DIR, PRODUCT_NAME, STATE_DIR } from "../core/constants.js";
 import { ProjectFileSystem } from "../core/fs.js";
 import { ok, type Result } from "../core/result.js";
+import { removeJsoncMember, setJsoncMember } from "./jsonc-edit.js";
 
 /**
  * Registers the PreToolUse hook in the project's `.claude/settings.json`,
@@ -298,6 +299,93 @@ export function planPreToolUseUnregistration(
       ),
     ),
   };
+}
+
+export interface PlannedClaudeSettingsRemoval {
+  readonly status: UnregistrationStatus;
+  /** The settings text without VISP's entries; absent when the file would be left empty. */
+  readonly content?: string;
+  /** Nothing is left once VISP's entries go, so the file itself can be deleted. */
+  readonly empty?: true;
+  /** An edited entry that names the hook script stays (without `force`). */
+  readonly customized?: true;
+}
+
+/**
+ * Uninstall: drops every entry VISP generated (or, with `force`, every entry naming the
+ * script) and the containers that emptied. Only the hook events VISP touched are re-rendered;
+ * the rest of the file keeps its bytes, so a project's own settings and layout survive.
+ */
+export function planClaudeSettingsRemoval(
+  current: string | undefined,
+  hookPath: string,
+  force: boolean,
+): PlannedClaudeSettingsRemoval {
+  if (current === undefined || current.trim() === "") return { status: "absent" };
+  const parsed = parseSettings(current);
+  if (parsed === "malformed") return { status: "malformed" };
+  const existing = preToolUseEntries(parsed);
+  if (existing === "malformed") return { status: "malformed" };
+
+  const drop = (entry: HookEntry) =>
+    force ? referencesHook(entry, hookPath) : isGeneratedEditEntry(entry, hookPath);
+  const stripped = withoutPromptHook(
+    { ...parsed, hooks: { ...(parsed.hooks ?? {}), PreToolUse: existing.filter((e) => !drop(e)) } },
+    hookPath,
+  );
+  const next = withoutEmptyHooks(stripped, parsed);
+  const customized = inspectPreToolUseResidue(current, hookPath).customized && !force;
+  if (isDeepStrictEqual(next, parsed)) {
+    return customized ? { status: "customized", customized: true } : { status: "absent" };
+  }
+  const flag = customized ? ({ customized: true } as const) : {};
+  if (Object.keys(next).length === 0) return { status: "removed", empty: true, ...flag };
+  return { status: "removed", content: spanEdited(current, parsed, next), ...flag };
+}
+
+/** Event lists and the `hooks` object that VISP emptied go; ones the project left empty stay. */
+function withoutEmptyHooks(settings: ClaudeSettings, original: ClaudeSettings): ClaudeSettings {
+  const hooks: Record<string, unknown> = { ...(settings.hooks ?? {}) };
+  const before = siblingHooks(original);
+  for (const [event, value] of Object.entries(hooks)) {
+    if (Array.isArray(value) && value.length === 0 && (before[event] as unknown[])?.length !== 0)
+      delete hooks[event];
+  }
+  const next: ClaudeSettings = { ...settings };
+  const emptied = Object.keys(hooks).length === 0 && Object.keys(before).length > 0;
+  if (emptied || original.hooks === undefined) delete next.hooks;
+  else next.hooks = hooks as ClaudeSettings["hooks"];
+  return next;
+}
+
+/**
+ * `next` written into `source` by touching only the `hooks` members that differ. Falls back to
+ * a whole-file rewrite when a span edit cannot be made safely or does not read back as `next`.
+ */
+function spanEdited(source: string, before: ClaudeSettings, next: ClaudeSettings): string {
+  const text = editHooks(source, siblingHooks(before), next.hooks && siblingHooks(next));
+  try {
+    if (text !== undefined && isDeepStrictEqual(JSON.parse(text), next)) return text;
+  } catch {
+    // Fall through to the whole-file rewrite.
+  }
+  return formatSettings(next);
+}
+
+function editHooks(
+  source: string,
+  was: Record<string, unknown>,
+  now: Record<string, unknown> | undefined,
+): string | undefined {
+  if (now === undefined) return removeJsoncMember(source, ["hooks"], true);
+  let text: string | undefined = source;
+  for (const event of Object.keys(was)) {
+    if (text === undefined) break;
+    if (!(event in now)) text = removeJsoncMember(text, ["hooks", event], true);
+    else if (!isDeepStrictEqual(was[event], now[event]))
+      text = setJsoncMember(text, ["hooks", event], now[event]);
+  }
+  return text;
 }
 
 /** Distinguishes removable generated entries from project-customized references. */
