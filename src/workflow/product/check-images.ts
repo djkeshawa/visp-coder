@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { BigIntStats } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { FileMutation } from "../../core/file-transaction.js";
@@ -11,6 +12,8 @@ import type { ProductCheck } from "./model.js";
 
 /** The size and formats the review packet delivers; a larger image would never reach the reviewer. */
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+/** The model API refuses an image larger than this on either side, so it is never delivered. */
+const MAX_IMAGE_SIDE = 8000;
 
 export interface CheckImages {
   readonly captures: ProductReviewCapture[];
@@ -35,21 +38,42 @@ export async function recordCheckImages(
   const captures: ProductReviewCapture[] = [];
   const mutations: FileMutation[] = [];
   for (const path of check.images ?? []) {
-    const after = await fileState(workspace.paths.root, path);
-    if (after === undefined || after === before.get(path))
+    const after = await fileStats(workspace.paths.root, path);
+    if (!after || identity(after) === before.get(path))
       return `${check.id} passed but did not write its declared image ${path} in this run; make the check write it`;
-    const bytes = await readImageBytes(workspace, path);
-    if (!bytes) return `Declared image ${path} is missing or larger than 4 MiB after the check ran`;
+    const bytes = after.isFile() ? await readImageBytes(workspace, path) : undefined;
+    const problem = declaredImageProblem(after, bytes && Buffer.from(bytes));
+    if (problem || !bytes) return `${check.id}'s declared image ${path} ${problem ?? UNREADABLE}`;
     const capture = imageCapture(workspace, feature, Buffer.from(bytes), subjectDigest, {
       route: `check ${check.id}: ${path}`,
       steps: [command],
     });
-    if (!capture)
-      return `Declared image ${path} is not a PNG, JPEG, WebP or GIF image VISP can deliver`;
+    if (!capture) return `${check.id}'s declared image ${path} ${UNREADABLE}`;
     captures.push(capture.capture);
     mutations.push(capture.mutation);
   }
   return { captures, mutations };
+}
+
+const UNREADABLE = "could not be read inside the project; make the check write it there";
+
+/** Why VISP cannot deliver a declared image, and what the check should do instead. */
+function declaredImageProblem(stats: BigIntStats, bytes: Buffer | undefined): string | undefined {
+  if (!stats.isFile())
+    return "is a symbolic link or not a regular file; make the check write the image file itself";
+  if (stats.size > MAX_IMAGE_BYTES)
+    return "is larger than 4 MiB; make the check write a smaller image";
+  if (!bytes) return undefined;
+  const dimensions = imageDimensions(bytes);
+  if (!imageMimeType(bytes) || !dimensions)
+    return "is not a PNG, JPEG, WebP or GIF file; make the check write one of those formats";
+  return deliverableSize(dimensions)
+    ? undefined
+    : `is ${dimensions.width}×${dimensions.height} pixels; make the check write one at most ${MAX_IMAGE_SIDE} pixels on each side`;
+}
+
+function deliverableSize(dimensions: { width: number; height: number }): boolean {
+  return dimensions.width <= MAX_IMAGE_SIDE && dimensions.height <= MAX_IMAGE_SIDE;
 }
 
 /** Each declared image's file identity before the check ran; undefined when it did not exist. */
@@ -65,16 +89,25 @@ export async function declaredImageStates(
   check: ProductCheck,
 ): Promise<DeclaredImageStates> {
   const states = new Map<string, string | undefined>();
-  for (const path of check.images ?? []) states.set(path, await fileState(root, path));
+  for (const path of check.images ?? []) {
+    const stats = await fileStats(root, path);
+    states.set(path, stats && identity(stats));
+  }
   return states;
 }
 
-async function fileState(root: string, path: string): Promise<string | undefined> {
-  const stats = await lstat(join(root, path), { bigint: true }).catch(() => undefined);
-  return stats && [stats.dev, stats.ino, stats.size, stats.mtimeNs, stats.ctimeNs].join(":");
+function fileStats(root: string, path: string): Promise<BigIntStats | undefined> {
+  return lstat(join(root, path), { bigint: true }).catch(() => undefined);
 }
 
-/** A review capture of one image of this product version, or undefined if VISP cannot deliver it. */
+function identity(stats: BigIntStats): string {
+  return [stats.dev, stats.ino, stats.size, stats.mtimeNs, stats.ctimeNs].join(":");
+}
+
+/**
+ * A review capture of one image of this product version, or undefined if VISP cannot deliver
+ * it: not one of the formats, over 4 MiB or over 8000 pixels on a side.
+ */
 export function imageCapture(
   workspace: WorkspaceState,
   feature: string,
@@ -84,7 +117,8 @@ export function imageCapture(
 ): { capture: ProductReviewCapture; mutation: FileMutation } | undefined {
   const mimeType = imageMimeType(buffer);
   const dimensions = imageDimensions(buffer);
-  if (!mimeType || !dimensions || buffer.length > MAX_IMAGE_BYTES) return undefined;
+  if (!mimeType || !dimensions || !deliverableSize(dimensions) || buffer.length > MAX_IMAGE_BYTES)
+    return undefined;
   const id = `CAP-${randomUUID()}`;
   const copy = join(
     workspace.paths.featureDir(feature),

@@ -250,7 +250,13 @@ function validateImageChecks(brief: ProductBrief, context: z.RefinementCtx): voi
     brief.outcomes.filter((entry) => entry.kind === "experience").map((entry) => entry.id),
   );
   for (const check of brief.checks)
-    if (check.images?.length && !check.outcomes.some((outcome) => experiences.has(outcome)))
+    if (check.images?.length && typeof check.command === "object" && !Array.isArray(check.command))
+      context.addIssue({
+        code: "custom",
+        path: ["checks"],
+        message: `${check.id} is a browser journey, whose captures already reach the reviewer; remove its images, which only a command check writes`,
+      });
+    else if (check.images?.length && !check.outcomes.some((outcome) => experiences.has(outcome)))
       context.addIssue({
         code: "custom",
         path: ["checks"],

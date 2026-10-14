@@ -21,7 +21,7 @@ import { productSourceSnapshot } from "../../../../src/workflow/product/subject.
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { moduleFeedback } from "../../support/product-feedback.js";
 import { productWorkspace } from "../../support/product-workspace.js";
-import type { TestWorkspace } from "../../support/workspace.js";
+import { pngHeader, type TestWorkspace } from "../../support/workspace.js";
 
 const workspaces: TestWorkspace[] = [];
 afterEach(async () => {
@@ -206,17 +206,75 @@ describe("images declared by a command check", () => {
     if (inherited.ok) expect(inherited.value).toHaveProperty(["out/scene.png"]);
   });
 
-  it("fail the check when the declared file is not an image", async () => {
-    const workspace = await imageCheck(
-      'require("fs").mkdirSync("out",{recursive:true});require("fs").writeFileSync("out/scene.png","<svg/>")',
-      ["out/scene.png"],
-    );
-    const verified = await runProductVerify(await workspace.state());
-    expect(verified).toMatchObject({
-      ok: true,
-      value: {
-        passed: false,
-        executions: [{ status: "failed", output: expect.stringContaining("is not a PNG") }],
+  it.each([
+    [
+      "is not an image",
+      'fs.writeFileSync("out/scene.png","<svg/>")',
+      "C001's declared image out/scene.png is not a PNG, JPEG, WebP or GIF file; make the check write one of those formats",
+    ],
+    [
+      "is a symbolic link",
+      `fs.writeFileSync("real.png",Buffer.from(${JSON.stringify(png(1, 2, 3).toString("base64"))},"base64"));fs.symlinkSync("../real.png","out/scene.png")`,
+      "C001's declared image out/scene.png is a symbolic link or not a regular file; make the check write the image file itself",
+    ],
+    [
+      "is larger than 4 MiB",
+      `fs.writeFileSync("out/scene.png",Buffer.concat([Buffer.from(${JSON.stringify(pngHeader(10, 10).toString("base64"))},"base64"),Buffer.alloc(5*1024*1024)]))`,
+      "C001's declared image out/scene.png is larger than 4 MiB; make the check write a smaller image",
+    ],
+    [
+      "has more pixels than a reviewer accepts",
+      `fs.writeFileSync("out/scene.png",Buffer.from(${JSON.stringify(pngHeader(9000, 10).toString("base64"))},"base64"))`,
+      "C001's declared image out/scene.png is 9000×10 pixels; make the check write one at most 8000 pixels on each side",
+    ],
+  ])(
+    "fail the check, naming it and what to do, when the declared file %s",
+    async (_case, write, note) => {
+      const workspace = await imageCheck(
+        `const fs=require("fs");fs.mkdirSync("out",{recursive:true});${write}`,
+        ["out/scene.png"],
+      );
+      const verified = await runProductVerify(await workspace.state());
+      expect(verified).toMatchObject({
+        ok: true,
+        value: {
+          passed: false,
+          executions: [{ status: "failed", output: expect.stringContaining(note) }],
+        },
+      });
+    },
+  );
+
+  it("are refused on a browser journey, whose captures already reach the reviewer", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    const journey = await updateProductBrief(await workspace.state(), {
+      brief: {
+        ...brief,
+        outcomes: [...brief.outcomes, SCENE],
+        checks: [
+          ...brief.checks,
+          {
+            id: "C002",
+            command: {
+              kind: "browser-journey" as const,
+              journey: { url: "project:/index.html", actions: [] },
+            },
+            outcomes: [SCENE.id],
+            files: [],
+            environment: "browser" as const,
+            images: ["out/scene.png"],
+          },
+        ],
+      },
+      reason: "Declare an image on a journey",
+    });
+    expect(journey).toMatchObject({
+      ok: false,
+      error: {
+        message: expect.stringContaining(
+          "C002 is a browser journey, whose captures already reach the reviewer; remove its images, which only a command check writes",
+        ),
       },
     });
   });

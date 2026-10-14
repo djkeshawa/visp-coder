@@ -15,7 +15,7 @@ import {
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
-import type { TestWorkspace } from "../../support/workspace.js";
+import { pngHeader, type TestWorkspace } from "../../support/workspace.js";
 
 const workspaces: TestWorkspace[] = [];
 afterEach(async () => {
@@ -113,6 +113,16 @@ describe("pictures the product makes", () => {
     const all = await captures(workspace);
     expect(all).toHaveLength(2);
     expect(new Set(all.map((capture) => capture.subjectDigest)).size).toBe(2);
+  });
+
+  it("leave out an image with more pixels than a reviewer accepts", async () => {
+    const workspace = await working();
+    await workspace.write("art/poster.png", pngHeader(9000, 10));
+    await workspace.write("art/scene.png", png(255, 0, 0));
+    expect((await runProductVerify(await workspace.state())).ok).toBe(true);
+    expect((await captures(workspace)).map((capture) => capture.route)).toEqual([
+      "result image: art/scene.png",
+    ]);
   });
 
   it("leave out images that predate the feature and add nothing while a check fails", async () => {
