@@ -1,11 +1,28 @@
 import { readFileSync } from "node:fs";
-import { defineConfig } from "tsup";
+import { resolve } from "node:path";
+import { defineConfig, type Options } from "tsup";
 import { computeBuildId } from "./src/build/build-id.js";
 
 const { version } = JSON.parse(readFileSync("./package.json", "utf8")) as { version: string };
 const buildId = computeBuildId(process.cwd());
 
+// `import text from "./x.script.mjs?raw"` inlines the file's text, as Vite does in the tests.
+const rawScripts: NonNullable<Options["esbuildPlugins"]>[number] = {
+  name: "raw-scripts",
+  setup(build) {
+    build.onResolve({ filter: /\.script\.mjs\?raw$/ }, (args) => ({
+      path: resolve(args.resolveDir, args.path.replace(/\?raw$/, "")),
+      namespace: "raw-script",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "raw-script" }, (args) => ({
+      contents: readFileSync(args.path, "utf8"),
+      loader: "text",
+    }));
+  },
+};
+
 export default defineConfig({
+  esbuildPlugins: [rawScripts],
   entry: {
     cli: "src/cli/main.ts",
     migrate: "src/migration/main.ts",
