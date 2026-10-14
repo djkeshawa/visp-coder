@@ -149,8 +149,8 @@ export function validateExperimentResolutions(
   const failed = latestCurrentJourneys(record, subject, slice?.id).filter(
     (run) => run.status && run.status !== "completed",
   );
-  const stored = validCaptureRuns(record);
-  const current = stored.filter((run) => evidenceApplies(record, subject, run));
+  const runs = validCaptureRuns(record);
+  const current = runs.filter((run) => evidenceApplies(record, subject, run));
   const seen = new Set<string>();
   for (const resolution of parsed.data) {
     const failure = failed.find((run) => run.id === resolution.runId);
@@ -178,8 +178,8 @@ export function validateExperimentResolutions(
       replacement.status !== "completed" ||
       replacement.task !== failure.task ||
       !sameJourneyIntent(failure, replacement) ||
-      stored.findIndex((run) => run.id === replacement.id) <=
-        stored.findIndex((run) => run.id === failure.id) ||
+      runs.findIndex((run) => run.id === replacement.id) <=
+        runs.findIndex((run) => run.id === failure.id) ||
       failed.some((run) => run.journeyKey === replacement.journeyKey)
     )
       return err(

@@ -60,13 +60,10 @@ export function validCaptureRuns(source: CaptureRunSource): ProductCaptureRun[] 
 export function captureRunEntries(
   source: CaptureRunSource,
 ): { readonly stored: unknown; readonly run: ProductCaptureRun }[] {
-  const candidates = "state" in source ? source.state.captureRuns : source;
-  return candidates.flatMap((stored) => {
+  return source.state.captureRuns.flatMap((stored) => {
     const parsed = productCaptureRunSchema.safeParse(stored);
     return parsed.success ? [{ stored, run: parsed.data }] : [];
   });
 }
 
-type CaptureRunSource =
-  | { readonly state: { readonly captureRuns: readonly unknown[] } }
-  | readonly unknown[];
+type CaptureRunSource = { readonly state: { readonly captureRuns: readonly unknown[] } };
