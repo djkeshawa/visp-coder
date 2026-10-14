@@ -1,0 +1,12 @@
+$ visp done
+--- stdout
+done: {"feature":"001-return-two-from-the-public","task":"T001","passed":false,"closed":false,"delivery":{"status":"unresolved-environment","summary":"Not complete: required execution or review could not run. Recover the environment; product quality remains unverified."},"recovery":"missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done.","checks":[{"check":"C001","status":"environment-failed","exitCode":-1,"output":"missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done."}],"unresolved":["O001: behavior unassessed; review unassessed"],"gaps":{"entries":["C001: environment-failed","C001: environment-failed: missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done.","C001: no current passing execution"],"remaining":0},"nextProbe":"State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.","next":{"action":"understand","objective":"missing-command: \"golden-missing-tool\" is not installed in this environment. Check C001 was not run, so nothing about the product was tested. Use an installed executable in the check (visp brief --patch -), then run visp done.","command":"visp verify --feature 001-return-two-from-the-public --task T001"}}
+Full result: add --json. Tool success does not imply product acceptance.
+
+Next: visp verify --feature 001-return-two-from-the-public --task T001
+
+--- stderr
+VISP C001: running
+VISP C001: environment-failed
+
+--- exit 1
