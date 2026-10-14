@@ -21,6 +21,7 @@ import {
   skillDescription,
   skillName,
   skillPath,
+  skillRecord,
 } from "./store.js";
 import { type Support, supportFor, supportForRefs } from "./support.js";
 import { revisionMutation, skillVersion } from "./versions.js";
@@ -53,7 +54,7 @@ async function proposeLocked(
   const id = checkedId.value;
   const index = await readIndex(state);
   if (!index.ok) return index;
-  const existing = index.value.skills.find((skill) => skill.id === id);
+  const existing = skillRecord(index.value, id);
   if (existing?.state === "admitted") {
     return err(
       vispError(

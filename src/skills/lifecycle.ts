@@ -15,6 +15,7 @@ import {
   readSkillBody,
   readSkillHistory,
   skillPath,
+  skillRecord,
 } from "./store.js";
 import { currentSupport } from "./support.js";
 import { revisionMutation, skillVersion } from "./versions.js";
@@ -30,7 +31,7 @@ export async function findSkill(state: WorkspaceState, id: string): Promise<Resu
   if (!checked.ok) return checked;
   const index = await readIndex(state);
   if (!index.ok) return index;
-  const found = index.value.skills.find((skill) => skill.id === id);
+  const found = skillRecord(index.value, id);
   return found
     ? ok(found)
     : err(

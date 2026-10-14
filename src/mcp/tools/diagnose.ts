@@ -7,7 +7,7 @@ import { withRuntimeDiagnostic } from "../../core/runtime-agreement.js";
 import { runtimeIdentity } from "../../core/version.js";
 import { runChecks } from "../../doctor/checks.js";
 import { readCurrentLineage } from "../../skills/lineage.js";
-import { readIndex, readSkillBody } from "../../skills/store.js";
+import { readIndex, readSkillBody, skillRecord } from "../../skills/store.js";
 import { TOOL } from "../constants.js";
 import { workspaceFor } from "../context.js";
 import { failure, reply } from "../reply.js";
@@ -107,7 +107,7 @@ export function registerSkillTools(server: McpServer, root: string): void {
       const index = await readIndex(state.value);
       if (!index.ok) return failure(TOOL.skillShow, index.error);
 
-      const record = index.value.skills.find((skill) => skill.id === args.id);
+      const record = skillRecord(index.value, args.id);
       if (!record) {
         return failure(TOOL.skillShow, {
           code: "ARTIFACT_MISSING",
