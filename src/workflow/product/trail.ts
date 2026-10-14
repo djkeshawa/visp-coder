@@ -128,7 +128,10 @@ function referencedFile(
   name: string,
   references: Set<string>,
 ) {
-  const identity = name.replace(/\.(json|png)$/, "").replace(/^run-/, "");
+  // Earlier builds also wrote each capture run to captures/run-<id>.json; the product state
+  // holds the same record and is the only one read, so the copy is never needed.
+  if (/^run-.*\.json$/u.test(name)) return false;
+  const identity = name.replace(/\.(json|png)$/, "");
   return references.has(identity) || references.has(workspace.paths.relative(path) ?? path);
 }
 

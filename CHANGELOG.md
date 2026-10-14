@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- A capture run is recorded once, in the feature's product state, which every command reads and which is committed with the trail. It was also written to the git-ignored `captures/run-<id>.json`, which nothing read. `visp trail prune` removes the copies earlier builds wrote.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed
