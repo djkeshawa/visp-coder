@@ -253,7 +253,7 @@ These come from Hyper's ADR 0004 (`code_automation_llm/visp-hyper-agent/docs/adr
 - No network requests except to the loopback server. Fonts self-hosted: reuse the Fira subsets from `visp-labs/assets/fonts/`.
 - Visual design follows `code_automation_llm/visp-cockpit/design/visp-cockpit.dc.html` for layout and component states, recoloured to Visp Code's blue (`--code` token in `visp-labs/styles.css`). Light and dark themes follow the system.
 - Keyboard navigable, visible focus, WCAG 2.2 AA contrast, usable from 900 px wide (narrower is not a goal for 0.1).
-- Live updates: an `EventSource` on `/api/v1/events`. A change event re-fetches only the named resource. On disconnect, show "live updates paused" and retry with backoff; never show old data as current.
+- Live updates: an `EventSource` on `/api/v1/events`. A change event re-fetches only the named resource. On disconnect, show "live updates paused", retry with backoff (1 s doubling to 30 s) and poll the open feature every 10 s until the stream is back; never show old data as current.
 
 ## 13. VS Code extension (0.3)
 
