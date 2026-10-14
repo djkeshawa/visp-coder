@@ -1,0 +1,221 @@
+{
+  "tool": "visp_done",
+  "ok": true,
+  "data": {
+    "delivery": {
+      "status": "slice-closed",
+      "summary": "This slice is closed. Run visp next before reporting the feature complete."
+    },
+    "nextCommand": "visp review --handoff --feature 001-return-two-from-the-public",
+    "checkpoint": {
+      "candidate": "<CAN-1>",
+      "provenance": "First observed implementation; not a passing quality assessment. Preserve it when correcting behavior or visuals."
+    },
+    "warnings": [],
+    "committedChanges": [],
+    "feedbackPlan": {
+      "observationPlan": {
+        "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+        "sequence": [
+          "Real input → assert settled result → input again → assert settled result",
+          "If applicable: reset/cancel pending work → restart → outlive old completion; new state stays intact"
+        ],
+        "probes": [
+          {
+            "kind": "independent-result",
+            "status": "unassessed"
+          }
+        ],
+        "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+      },
+      "nextProbe": {
+        "kind": "independent-result",
+        "when": "The public value is two",
+        "expected": [
+          "The public value is two"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.",
+        "id": "PROBE-<HEX-1>"
+      },
+      "probeResponses": [],
+      "focus": "implement",
+      "trace": {
+        "question": "Which code owns Return the promised value, and which callers and tests will change?",
+        "command": "visp work --feature 001-return-two-from-the-public --task T001",
+        "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+      },
+      "findings": [],
+      "findingsRemaining": 0,
+      "gaps": [],
+      "gapsRemaining": 0,
+      "nextCheck": "Exercise the next complete behavior, then inspect whether the result fulfills the original request across relevant quality dimensions."
+    },
+    "next": {
+      "feature": "001-return-two-from-the-public",
+      "action": "refine",
+      "objective": "Review the assembled product against every mandatory outcome and retained expectation",
+      "command": "visp review --handoff --feature 001-return-two-from-the-public",
+      "evidence": [
+        "O001: final goal assessment unassessed; review the current product against the original request"
+      ],
+      "mayEdit": false
+    },
+    "trace": {
+      "graph": [
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:expected",
+          "path": "checks/value.check.mjs",
+          "name": "expected",
+          "detail": "variable",
+          "startLine": 3,
+          "endLine": 3,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:name",
+          "path": "checks/value.check.mjs",
+          "name": "name",
+          "detail": "variable",
+          "startLine": 2,
+          "endLine": 2,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#file",
+          "path": "src/value.mjs",
+          "name": "value.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 2,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#file",
+          "path": "checks/value.check.mjs",
+          "name": "value.check.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 9,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#variable:value",
+          "path": "src/value.mjs",
+          "name": "value",
+          "detail": "variable",
+          "startLine": 1,
+          "endLine": 1,
+          "distance": 1
+        }
+      ],
+      "notes": []
+    },
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "subjectDigest": "<SHA256-1>",
+    "passed": true,
+    "closed": true,
+    "executions": [
+      {
+        "id": "<UUID-1>",
+        "comparisonEnvironment": "<SHA256-2>",
+        "check": "C001",
+        "task": "T001",
+        "subjectDigest": "<SHA256-1>",
+        "contractDigest": "<SHA256-3>",
+        "createdAt": "<TIME>",
+        "command": "node checks/value.check.mjs",
+        "provenance": "supervisor-executed",
+        "flip": {
+          "revertedFiles": [
+            "src/value.mjs"
+          ],
+          "preservedValidationFiles": [
+            "checks/value.check.mjs"
+          ],
+          "commands": [
+            {
+              "command": "node checks/value.check.mjs",
+              "exitCode": 1,
+              "passed": false,
+              "durationMs": <N>,
+              "output": "expected 2, got 1\n\n"
+            }
+          ],
+          "failsWithoutChange": "unchecked",
+          "reason": "expected 2, got 1"
+        },
+        "flipCacheKey": "<SHA256-4>",
+        "flipDurationMs": <N>,
+        "assertions": "agent-reported",
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": <N>,
+        "output": "value is 2"
+      }
+    ],
+    "outcomes": [
+      {
+        "id": "O001",
+        "statement": "The public value is two",
+        "priority": "must",
+        "behavior": "passed",
+        "review": "unassessed",
+        "requiredReview": false,
+        "satisfied": true
+      }
+    ],
+    "gaps": [],
+    "journeyFeedback": {
+      "runs": [],
+      "omitted": 0
+    },
+    "behaviorChanges": {
+      "checks": [
+        {
+          "check": "C001",
+          "change": "recovered-execution",
+          "sameSubject": false,
+          "before": {
+            "runId": "<UUID-2>",
+            "subjectDigest": "<SHA256-5>",
+            "status": "failed",
+            "detail": "expected 2, got 1",
+            "detailTruncated": false,
+            "measurements": [],
+            "captureIds": []
+          },
+          "after": {
+            "runId": "<UUID-1>",
+            "subjectDigest": "<SHA256-1>",
+            "status": "passed",
+            "detail": "value is 2",
+            "detailTruncated": false,
+            "measurements": [],
+            "captureIds": []
+          },
+          "guidance": "Compare the actual behavior and images. A passing run does not establish quality; changed output may be expected. Historical images are references, not current evidence. Preserve working behavior while investigating differences.",
+          "outputChanged": true
+        }
+      ],
+      "omitted": 0
+    },
+    "flipDurationMs": <N>
+  },
+  "nextCommand": "visp_review {\"handoff\":true,\"feature\":\"001-return-two-from-the-public\"}",
+  "nextAction": {
+    "tool": "visp_review",
+    "arguments": {
+      "handoff": true,
+      "feature": "001-return-two-from-the-public"
+    }
+  }
+}

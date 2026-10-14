@@ -1,13 +1,5 @@
 {
   "isError": false,
-  "ok": true,
-  "nextAction": {
-    "tool": "visp_review",
-    "arguments": {
-      "handoff": true,
-      "feature": "001-return-two-from-the-public"
-    }
-  },
   "next": {
     "action": "refine",
     "command": "visp review --handoff --feature 001-return-two-from-the-public",

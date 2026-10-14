@@ -1,0 +1,45 @@
+{
+  "tool": "visp_next",
+  "ok": true,
+  "data": {
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "action": "fix",
+    "objective": "Reopen the implicated slice and correct the current product finding or failed assembled check",
+    "command": "visp work --feature 001-return-two-from-the-public --task T001",
+    "evidence": [
+      "O001: behavior passed; review failed",
+      "O001: final goal assessment failed: Only the named export is two.",
+      "FB-<HEX-1>: functional: The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two. Next check: Import the default export of src/value.mjs and compare it with two"
+    ],
+    "mayEdit": false,
+    "criticAdvice": {
+      "status": "feedback",
+      "guidance": "Use the recorded findings to choose the next correction. VISP re-runs its reviewer inside visp done; delegate nothing and run no review command. Actual failures and missing product evidence remain unresolved.",
+      "findings": [
+        {
+          "dimension": "functional",
+          "problem": "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two",
+          "nextCheck": "Import the default export of src/value.mjs and compare it with two",
+          "outcomes": [
+            "O001"
+          ],
+          "required": true,
+          "evidence": [
+            "<UUID-1>"
+          ]
+        }
+      ],
+      "limitations": [],
+      "comparisons": []
+    }
+  },
+  "nextCommand": "visp_work {\"feature\":\"001-return-two-from-the-public\",\"task\":\"T001\"}",
+  "nextAction": {
+    "tool": "visp_work",
+    "arguments": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001"
+    }
+  }
+}
