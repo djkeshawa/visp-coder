@@ -153,7 +153,7 @@ On VISP's own benchmark (`bench/`: four tasks with hidden checks, Claude Haiku 4
 - [Runner](docs/runner.md): the optional `visp-runner` experiment runner
 - [Internals](docs/internals.md): state integrity, learning records and prompt design
 - [Research summary](docs/research-summary.md): what VISP's own experiments have shown
-- [Contributing](CONTRIBUTING.md) and [changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md), [code of conduct](CODE_OF_CONDUCT.md), [security policy](SECURITY.md) and [changelog](CHANGELOG.md)
 
 ## License
 

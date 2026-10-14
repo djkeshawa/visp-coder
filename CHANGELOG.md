@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **`visp ui` polls less while its live connection is up.** With the event stream open the page re-reads the open feature every 30 s (and once a second after each change) instead of every 10 s, so edits to your product's own files still show. If the connection drops, the page polls every 10 s and reconnects with a growing delay (1 s up to 30 s), and stops reconnecting when the dashboard no longer accepts its link.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed

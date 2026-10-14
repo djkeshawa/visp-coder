@@ -8,7 +8,7 @@ import type {
   UiOverview,
   UiRequests,
 } from "../../src/ui/contract.js";
-import type { LiveState } from "./api.js";
+import type { LiveState } from "./live.js";
 
 export interface Resource<T> {
   readonly data?: T;
