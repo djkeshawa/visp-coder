@@ -13,7 +13,7 @@ import {
   loadWorkspaceForMutation,
 } from "../../../src/workflow/state.js";
 import { legacyStore } from "../support/legacy-store.js";
-import { TestWorkspace, task } from "../support/workspace.js";
+import { TestWorkspace } from "../support/workspace.js";
 
 const FEATURE = "001-state";
 
