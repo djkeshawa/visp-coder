@@ -81,7 +81,20 @@ it("CLI and MCP return identical editable inputs without mutation", async () => 
   });
   expect(await state.files.readText(path)).toEqual(before);
   const compactWork = await work({});
-  const detailedWork = await work({ detail: true });
+  // Another server, as in another session: a repeat in one session leaves unchanged context out.
+  const restarted = new Map<string, (args: unknown) => Promise<CallToolResult>>();
+  registerWorkflowTools(
+    {
+      registerTool: (
+        name: string,
+        _config: unknown,
+        handler: (args: unknown) => Promise<CallToolResult>,
+      ) => restarted.set(name, handler),
+    } as unknown as McpServer,
+    workspace.root,
+  );
+  const detailedWork = await restarted.get("visp_work")?.({ detail: true });
+  if (!detailedWork) throw new Error("Missing work tool");
   expect(compactWork.isError).not.toBe(true);
   expect(compactWork.structuredContent).toEqual(detailedWork.structuredContent);
   expect(compactWork.structuredContent).toMatchObject({

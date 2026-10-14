@@ -66,6 +66,8 @@ export interface ProductContextContent {
     current: boolean;
     truncated?: boolean;
   }[];
+  /** Reference sections left out: unchanged since this session's last `work` reply. */
+  readonly delivery?: { readonly unchanged: readonly string[] };
 }
 
 export interface ProductWorkContext extends ProductContextContent {

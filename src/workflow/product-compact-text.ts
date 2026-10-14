@@ -113,7 +113,7 @@ export function compactProductText(
   addPlanSummary(data, summary);
   for (const key of FEEDBACK_FIELDS) if (data[key] !== undefined) summary[key] = bounded(data[key]);
   addObservationSummary(data, summary);
-  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}${skillText(data.skills)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
+  return `${name}: ${JSON.stringify(summary)}${ambiguityText(data.independentTests)}${rulesText(data.projectRules)}${memoryText(data.projectMemory, data.projectMemoryLaterChanges)}${skillText(data.skills)}${deliveryText(data.delivery)}${detailCommand(name, data, channel)}\n${WORDING[channel].full} Tool success does not imply product acceptance.`;
 }
 
 function ambiguityText(tests: unknown): string {
@@ -215,6 +215,13 @@ function addObservationSummary(data: Record<string, unknown>, summary: Record<st
   if (data.observationPlan && usesBrowser(data)) summary.observationPlan = data.observationPlan;
   if (data.reviewer) summary.reviewer = data.reviewer;
   if (data.images) summary.images = Array.isArray(data.images) ? data.images.length : undefined;
+}
+
+/** Sections a re-authorization left out, so the worker knows they still apply and where they are. */
+function deliveryText(delivery: unknown): string {
+  const unchanged = object(delivery).unchanged;
+  if (!Array.isArray(unchanged) || unchanged.length === 0) return "";
+  return `\nNot repeated (unchanged since this session's last work reply): ${unchanged.join(", ")}. They still apply; the read-only details below show them.`;
 }
 
 function detailCommand(name: string, data: Record<string, unknown>, channel: ReplyChannel): string {

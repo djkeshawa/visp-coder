@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Re-authorizing an unchanged slice in the same host session no longer repeats the whole context pack. Source excerpts, graph neighbors, memory notes, skills, examples, decisions, the acceptance baseline and project memory that have not changed since that session's last `work` reply are left out, and the reply lists them with the `visp work --inspect` command that shows them. The request, outcomes, scope, checks, findings and next step are always sent, and a new session (or one VISP cannot identify) always gets the full context.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed
