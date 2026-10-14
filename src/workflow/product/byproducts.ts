@@ -107,11 +107,18 @@ function hostFile(
  * A desktop app importing a Claude Code project wrote AGENTS.md, .codex/ and .agents/ into
  * projects mid-run; as product files they made an acceptance stale and failed `visp done`
  * with a scope violation the worker could not resolve. Only untracked files are skipped,
- * and never the configured host's own files, which are VISP's enforcement surface.
+ * never the configured host's own files, which are VISP's enforcement surface, and never a
+ * protected path: one a slice scope names (a request to write an AGENTS.md), forbids or the
+ * configuration blocks, so the scope check still sees it.
  */
-export function foreignHostFile(path: string, tracked: boolean, harness: string): boolean {
+export function foreignHostFile(
+  path: string,
+  tracked: boolean,
+  harness: string,
+  protection: readonly string[],
+): boolean {
   const own = HOST_FILES[harness];
-  if (tracked || !own) return false;
+  if (tracked || !own || matchesAny(path, protection)) return false;
   const normalized = normalizePath(path);
   return (
     !hostFile(normalized, own) &&

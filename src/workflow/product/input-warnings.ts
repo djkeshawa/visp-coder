@@ -23,7 +23,7 @@ export async function productInputWarnings(
       !matchesAny(file.path, patterns) &&
       // Untracked tool output (caches, logs) is not part of the evidence, so it is not a warning.
       !skippedByproduct(file.path, false, protection) &&
-      !foreignHostFile(file.path, false, workspace.config.harness),
+      !foreignHostFile(file.path, false, workspace.config.harness, protection),
   );
   const first = outside[0];
   return first

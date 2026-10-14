@@ -76,7 +76,12 @@ export async function productSourceSnapshot(
       path !== ".visp" &&
       !path.startsWith(".visp/") &&
       !output(path) &&
-      !foreignHostFile(path, objects.value.entries.has(path), workspace.config.harness) &&
+      !foreignHostFile(
+        path,
+        objects.value.entries.has(path),
+        workspace.config.harness,
+        protection,
+      ) &&
       !skippedByproduct(path, objects.value.entries.has(path), protection),
   );
   return workspace.files.withReadPass(() =>

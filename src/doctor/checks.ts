@@ -13,7 +13,7 @@ import { skillCatalog } from "../skills/catalog.js";
 import { SKILL_STATES } from "../skills/schema.js";
 import { readIndex } from "../skills/store.js";
 import { findTask, type TaskGraph } from "../workflow/artifacts/tasks.js";
-import { foreignHostFile } from "../workflow/product/byproducts.js";
+import { byproductProtection, foreignHostFile } from "../workflow/product/byproducts.js";
 import { describeProductCheck } from "../workflow/product/check-command.js";
 import { readProductRecord } from "../workflow/product/store.js";
 import type { WorkspaceState } from "../workflow/state.js";
@@ -436,10 +436,12 @@ async function checkForeignHostFiles(state: WorkspaceState): Promise<Check> {
     return { name, status: "unknown", detail: "Not a git repository" };
   const changes = await workingTreeChanges(state.paths.root);
   if (!changes.ok) return { name, status: "unknown", detail: changes.error.message };
+  const record = state.status?.activeFeature ? await readProductRecord(state) : undefined;
+  const protection = byproductProtection(state, record?.ok ? record.value.brief : undefined);
   const foreign = changes.value.files
     .filter((file) => file.status === "untracked")
     .map((file) => file.path)
-    .filter((path) => foreignHostFile(path, false, state.config.harness));
+    .filter((path) => foreignHostFile(path, false, state.config.harness, protection));
   if (!foreign.length)
     return { name, status: "ok", detail: "No untracked files of another coding host" };
   const shown = foreign.slice(0, 5).join(", ");

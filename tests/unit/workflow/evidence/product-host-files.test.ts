@@ -27,13 +27,15 @@ async function paths(workspace: TestWorkspace, brief: ProductBrief) {
 describe("another coding host's files", () => {
   it("are recognized only when untracked and not the configured host's own", () => {
     for (const path of ["AGENTS.md", ".codex/hooks.json", ".agents/skills/x/SKILL.md", "GEMINI.md"])
-      expect(foreignHostFile(path, false, "claude-code"), path).toBe(true);
+      expect(foreignHostFile(path, false, "claude-code", []), path).toBe(true);
     for (const path of ["CLAUDE.md", ".claude/settings.json", "src/AGENTS.md", "docs/agents.md"])
-      expect(foreignHostFile(path, false, "claude-code"), path).toBe(false);
-    expect(foreignHostFile("AGENTS.md", true, "claude-code")).toBe(false);
-    expect(foreignHostFile("AGENTS.md", false, "codex")).toBe(false);
-    expect(foreignHostFile(".claude/settings.json", false, "codex")).toBe(true);
-    expect(foreignHostFile("AGENTS.md", false, "generic")).toBe(false);
+      expect(foreignHostFile(path, false, "claude-code", []), path).toBe(false);
+    expect(foreignHostFile("AGENTS.md", true, "claude-code", [])).toBe(false);
+    expect(foreignHostFile("AGENTS.md", false, "codex", [])).toBe(false);
+    expect(foreignHostFile(".claude/settings.json", false, "codex", [])).toBe(true);
+    expect(foreignHostFile("AGENTS.md", false, "generic", [])).toBe(false);
+    expect(foreignHostFile("AGENTS.md", false, "claude-code", ["AGENTS.md"])).toBe(false);
+    expect(foreignHostFile(".codex/hooks.json", false, "claude-code", [".codex/**"])).toBe(false);
   });
 
   // A desktop app importing the project wrote these mid-run; `visp done` then failed with a
@@ -52,6 +54,41 @@ describe("another coding host's files", () => {
     expect(await paths(workspace, brief)).toEqual(before);
     const verified = await runProductVerify(await claudeCode(workspace));
     expect(verified).toMatchObject({ ok: true, value: { passed: true } });
+  });
+
+  // A request to write an AGENTS.md puts it in the slice scope; a forbidden or blocked one
+  // must reach the scope check.
+  it("stay product when a slice scope names them or the configuration blocks them", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    await workspace.write("AGENTS.md", "# Requested instructions\n");
+    await workspace.write(".codex/config.toml", "model = 'x'\n");
+    await workspace.write("GEMINI.md", "# Imported\n");
+    expect(await paths(workspace, brief)).not.toContain("AGENTS.md");
+    const scoped = (scope: Partial<ProductBrief["slices"][number]["scope"]>) => ({
+      ...brief,
+      slices: brief.slices.map((slice) => ({ ...slice, scope: { ...slice.scope, ...scope } })),
+    });
+    const allowed = await paths(workspace, scoped({ allowed: ["src/value.mjs", "AGENTS.md"] }));
+    expect(allowed).toContain("AGENTS.md");
+    expect(allowed).not.toContain("GEMINI.md");
+    expect(await paths(workspace, scoped({ expected: ["AGENTS.md"] }))).toContain("AGENTS.md");
+    expect(await paths(workspace, scoped({ forbidden: [".codex/**"] }))).toContain(
+      ".codex/config.toml",
+    );
+    const state = await claudeCode(workspace);
+    const blocked = await productSourceSnapshot(
+      {
+        ...state,
+        config: {
+          ...state.config,
+          workflow: { ...state.config.workflow, blockedPaths: ["GEMINI.md"] },
+        },
+      },
+      brief,
+    );
+    if (!blocked.ok) throw new Error(blocked.error.message);
+    expect(Object.keys(blocked.value)).toContain("GEMINI.md");
   });
 
   it("stay product once committed", async () => {

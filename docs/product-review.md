@@ -117,7 +117,7 @@ The product's pictures reach the reviewer even when no check declares them. Afte
 
 ### Files of another coding host
 
-Untracked instruction and settings files of a coding host other than the configured `harness` (for example `AGENTS.md`, `.codex/` and `.agents/` in a Claude Code project, or `CLAUDE.md` and `.claude/` in a Codex project) are not part of the product: they do not change its version, count against a slice's scope or raise input warnings. Tracked files and the configured host's own files are unaffected. `visp doctor` lists them as `other host files`.
+Untracked instruction and settings files of a coding host other than the configured `harness` (for example `AGENTS.md`, `.codex/` and `.agents/` in a Claude Code project, or `CLAUDE.md` and `.claude/` in a Codex project) are not part of the product: they do not change its version, count against a slice's scope or raise input warnings. Tracked files, the configured host's own files and any file a slice scope names (allowed or expected, for a request to write an `AGENTS.md`), forbids or `workflow.blockedPaths` blocks stay part of the product. `visp doctor` lists the ignored ones as `other host files`.
 
 ## Ad hoc capture
 

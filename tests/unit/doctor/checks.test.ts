@@ -73,6 +73,30 @@ it("warns when an active browser journey has no available browser", async () => 
   });
 });
 
+it("lists only the other host's files VISP leaves out of the product", async () => {
+  await workspace.destroy();
+  const product = await productWorkspace();
+  workspace = product.workspace;
+  await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+  workspace.commit("configure Claude Code");
+  const revised = await updateProductBrief(await workspace.state(), {
+    brief: {
+      ...product.brief,
+      slices: product.brief.slices.map((slice) => ({
+        ...slice,
+        scope: { ...slice.scope, allowed: [...slice.scope.allowed, "AGENTS.md"] },
+      })),
+    },
+    reason: "The request asks for an AGENTS.md",
+  });
+  expect(revised.ok).toBe(true);
+  await workspace.write("AGENTS.md", "# Requested\n");
+  await workspace.write("GEMINI.md", "# Imported\n");
+  const found = await check("other host files");
+  expect(found.detail).toContain("GEMINI.md");
+  expect(found.detail).not.toContain("AGENTS.md");
+});
+
 it("reports Codex hook trust as unknown until the project and hooks are trusted", async () => {
   await setConfigScalar((await workspace.state()).paths, "harness", "codex");
   const codexHome = join(workspace.root, "codex-home");
