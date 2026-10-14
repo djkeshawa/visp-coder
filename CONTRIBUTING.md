@@ -27,7 +27,9 @@ pnpm build
 | `pnpm check` | typecheck, lint, knip, build and test |
 | `pnpm release:check` | `check` plus browser, qualification, trust coverage and package tests |
 
-`pnpm release:check` is the release gate and runs before publishing (`prepublishOnly`).
+`pnpm release:check` is the release gate and runs before publishing (`prepublishOnly`). CI
+(`.github/workflows/ci.yml`) runs the same scripts as parallel jobs, with `pnpm test` in four
+shards; keep the two in step when a script changes.
 
 ## Releasing
 
