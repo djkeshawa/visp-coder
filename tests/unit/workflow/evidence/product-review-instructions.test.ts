@@ -195,6 +195,16 @@ it("requires what the request names to be recognizable in the images, unlike fin
     "missing, hidden behind something else, cut off, or reads as something different is a departure from the request",
   );
   expect(visual).toContain("do not mark an outcome that covers it satisfied");
+  // A named real thing is recognized by its parts: in six benchmark runs reviewers who saw a
+  // controller with no two-tone shell, shoulder buttons or logo called it "generic" as an optional
+  // finding, and the blind judge marked each missing part down.
+  expect(visual).toContain(
+    "A named real thing (a product, vehicle, animal, building, landmark) is recognized by its identifying parts and colouring",
+  );
+  expect(visual).toContain(
+    "An identifying part that is missing or unrecognizable, so the thing could pass for a generic or different one, is that departure: report it required, naming the parts",
+  );
+  expect(visual).toContain("A part that is simplified but recognizable stays finish");
   // Ordinary apps name no visual subjects: the rule adds nothing for their controls.
   expect(visual).toContain(
     "an app's controls, forms and data tables fall under the criteria above, and polish beyond what the request names stays finish.",
