@@ -10,9 +10,11 @@ Include the VISP version (`visp --version`), your operating system and Node.js v
 
 What to expect:
 
+<!-- owner: confirm these response windows; they are a proposal -->
+
 - An acknowledgement within 5 working days.
 - A first assessment (accepted, needs more information, or not a vulnerability) within 14 days.
-- A fix or a mitigation, and a changelog entry that credits you if you want it, once the report is confirmed. VISP is maintained by one person, so timing depends on severity and effort; the report will say so if it will take longer than 90 days.
+- A fix or a mitigation, and a changelog entry that credits you if you want it, once the report is confirmed. Timing depends on severity and effort; the report will say so if it will take longer than 90 days.
 
 Please give us time to ship a fix before you disclose the issue publicly.
 
