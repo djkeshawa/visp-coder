@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   runProductUserFeedback,
   type UserFeedbackHost,
+  userFeedbackOperationWrites,
 } from "../../workflow/product/user-feedback.js";
 import { userFeedbackRequestSchema } from "../../workflow/product/user-feedback-model.js";
 import { mutatingWorkspaceFor, workspaceFor } from "../context.js";
@@ -56,9 +57,9 @@ export function registerUserFeedbackTool(
       inputSchema: userFeedbackRequestSchema,
     },
     async (args, extra) => {
-      const state = await (args.operation === "status"
-        ? workspaceFor(root)
-        : mutatingWorkspaceFor(root));
+      const state = await (userFeedbackOperationWrites(args.operation)
+        ? mutatingWorkspaceFor(root)
+        : workspaceFor(root));
       return state.ok
         ? productReply(
             "visp_user_feedback",

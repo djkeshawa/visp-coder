@@ -5,10 +5,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { failedCheckOwners } from "../../../../src/workflow/product/corrections.js";
 import { runProductDoneReviewed } from "../../../../src/workflow/product/done-review.js";
-import {
-  type IndependentTester,
-  inlineTests,
-} from "../../../../src/workflow/product/independent-tests.js";
+import type { IndependentTester } from "../../../../src/workflow/product/independent-tests-model.js";
+import { inlineTests } from "../../../../src/workflow/product/independent-tests-starters.js";
 import { runProductNext } from "../../../../src/workflow/product/index.js";
 import {
   crashLine,

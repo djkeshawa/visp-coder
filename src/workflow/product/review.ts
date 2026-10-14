@@ -14,7 +14,7 @@ import type { experimentReviewContext } from "./experiments.js";
 import type { productFeedbackPlan } from "./feedback.js";
 import { productReviewImageGroups } from "./image-groups.js";
 import type { DeliveredProductImageGroup } from "./images.js";
-import { readTestsRecord } from "./independent-tests.js";
+import { readTestsRecord } from "./independent-tests-record.js";
 import {
   type PRODUCT_REVIEW_POLICY,
   type ProductAssessment,

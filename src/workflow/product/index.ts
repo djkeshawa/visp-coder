@@ -61,8 +61,9 @@ export {
   reviewerContextSchema,
 } from "./model.js";
 export { reproductionRequestSchema, runProductReproduction } from "./reproduction.js";
-export { productReviewSubmissionSchema, runProductReviewRequest } from "./review-request.js";
+export { runProductReviewRequest } from "./review-request.js";
 export { reviewJudgmentsSchema } from "./review-session.js";
+export { productReviewSubmissionSchema } from "./review-submission-model.js";
 export { runProductReviewerHandoff } from "./reviewer-handoff.js";
 export { productScopes } from "./scopes.js";
 export {

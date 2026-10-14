@@ -11,11 +11,9 @@ import {
   runProductDoneReviewed,
 } from "../../../../src/workflow/product/done-review.js";
 import { independentReviewJsonSchema } from "../../../../src/workflow/product/independent-review.js";
-import {
-  type IndependentTester,
-  inlineTests,
-  readTestsRecord,
-} from "../../../../src/workflow/product/independent-tests.js";
+import type { IndependentTester } from "../../../../src/workflow/product/independent-tests-model.js";
+import { readTestsRecord } from "../../../../src/workflow/product/independent-tests-record.js";
+import { inlineTests } from "../../../../src/workflow/product/independent-tests-starters.js";
 import {
   runProductNext,
   runProductReport,

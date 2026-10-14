@@ -17,7 +17,8 @@ import { criticUnderstanding } from "./critic-understanding.js";
 import { prepareWorkEnvironment } from "./environment.js";
 import { firstDoneAdvice, withFirstDoneAdvice } from "./first-done-advice.js";
 import { currentHostSession } from "./host-prompts.js";
-import { independentTestsBeforeWork, type TestsStarter } from "./independent-tests.js";
+import { independentTestsBeforeWork } from "./independent-tests.js";
+import type { TestsStarter } from "./independent-tests-model.js";
 import {
   checksFor,
   closedSlice,

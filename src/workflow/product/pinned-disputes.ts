@@ -4,11 +4,8 @@ import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import type { ReviewerCapacity } from "./critic-capacity.js";
 import type { DisputeRuling } from "./independent-review.js";
-import {
-  type IndependentTestsRecord,
-  readTestsRecord,
-  saveTestsRecord,
-} from "./independent-tests.js";
+import type { IndependentTestsRecord } from "./independent-tests-model.js";
+import { readTestsRecord, saveTestsRecord } from "./independent-tests-record.js";
 import type { ProductExecution } from "./model.js";
 import {
   allFailuresIn,

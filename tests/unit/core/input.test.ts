@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseFeatureId,
+  parseFeatureStart,
   parseHarness,
   parseHookKind,
   parseProfile,
@@ -30,6 +31,15 @@ describe("typed command inputs", () => {
     const result = parse(value);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("ARTIFACT_INVALID");
+  });
+
+  it("checks the feature risk before the deprecated workflow mode", () => {
+    expect(parseFeatureStart(undefined, undefined)).toEqual({ ok: true, value: "low" });
+    expect(parseFeatureStart("high", "compact")).toEqual({ ok: true, value: "high" });
+    const risk = parseFeatureStart("extreme", "bogus");
+    expect(!risk.ok && risk.error.message).toContain("risk level");
+    const mode = parseFeatureStart("medium", "bogus");
+    expect(!mode.ok && mode.error.message).toContain("workflow mode");
   });
 
   it("returns narrowed values for valid inputs", () => {

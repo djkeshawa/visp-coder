@@ -6,15 +6,14 @@ import { withStateMutation } from "../../../src/core/file-transaction.js";
 import { installHarness } from "../../../src/harness/install.js";
 import { planFor } from "../../../src/harness/targets.js";
 import { now } from "../../../src/workflow/artifacts/common.js";
+import { resolveFeature } from "../../../src/workflow/feature-selection.js";
 import {
-  authorizedScopes,
   buildFoundationContext,
   loadWorkspace,
   loadWorkspaceForMutation,
-  resolveFeature,
 } from "../../../src/workflow/state.js";
 import { legacyStore } from "../support/legacy-store.js";
-import { TestWorkspace, task } from "../support/workspace.js";
+import { TestWorkspace } from "../support/workspace.js";
 
 const FEATURE = "001-state";
 
@@ -240,66 +239,6 @@ describe("feature artifact failures", () => {
     expect(context.ok).toBe(false);
     expect(!context.ok && context.error.code).toBe("ARTIFACT_INVALID");
     expect(await readFile(`${workspace.root}/${path}`, "utf8")).toBe("{}\n");
-  });
-});
-
-describe("authorization and status adapters", () => {
-  it("derives CI authorization from a feature task graph", async () => {
-    await workspace.withFeature(FEATURE, [task({ id: "T001" }), task({ id: "T002" })]);
-
-    const scopes = await authorizedScopes(await workspace.state(), {
-      source: "tasks",
-      feature: FEATURE,
-    });
-
-    expect(scopes.ok).toBe(true);
-    if (scopes.ok) expect(scopes.value.map((marker) => marker.task)).toEqual(["T001", "T002"]);
-  });
-
-  it("returns no task-derived authorization without a selected feature or graph", async () => {
-    const state = await workspace.state();
-    const absent = await authorizedScopes(state, { source: "tasks" });
-    const missingGraph = await authorizedScopes(state, {
-      source: "tasks",
-      feature: "999-missing",
-    });
-
-    expect(absent).toEqual({ ok: true, value: [] });
-    expect(missingGraph).toEqual({ ok: true, value: [] });
-  });
-
-  it("propagates malformed task graphs and active authorization markers", async () => {
-    await workspace.withFeature(FEATURE);
-    await workspace.write(`.visp/features/${FEATURE}/tasks.json`, "{}\n");
-    const taskScopes = await authorizedScopes(await workspace.state(), {
-      source: "tasks",
-      feature: FEATURE,
-    });
-    expect(taskScopes.ok).toBe(false);
-
-    await workspace.withFeature(FEATURE);
-    await workspace.write(".visp/state/implement-allowed/T999.json", "{}\n");
-    const markerScopes = await authorizedScopes(await workspace.state());
-    expect(markerScopes.ok).toBe(false);
-  });
-
-  it("returns open markers directly when completed-task expansion is disabled", async () => {
-    await workspace.withFeature(FEATURE);
-    const state = await workspace.state();
-    await legacyStore(state).writeImplementMarker({
-      kind: "implement-marker",
-      createdAt: now(),
-      feature: FEATURE,
-      task: "T001",
-      allowedFiles: ["src/**/*.ts"],
-      expectedFiles: ["src/app.ts"],
-      forbiddenFiles: [],
-    });
-
-    const scopes = await authorizedScopes(await workspace.state(), { includeDone: false });
-
-    expect(scopes.ok).toBe(true);
-    if (scopes.ok) expect(scopes.value.map((marker) => marker.task)).toEqual(["T001"]);
   });
 });
 

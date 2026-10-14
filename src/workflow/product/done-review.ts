@@ -15,7 +15,7 @@ import { configuredCriticLauncher } from "./critic-exec.js";
 import { hasPendingCriticReview } from "./critic-policy.js";
 import { type ProductVerification, runProductAccept, runProductDone } from "./evidence.js";
 import { openRequiredFindings, outstandingFeedback } from "./findings.js";
-import { type AcceptanceProgress, acceptanceProgress } from "./independent-tests.js";
+import { type AcceptanceProgress, acceptanceProgress } from "./independent-tests-progress.js";
 import { checksFor, latestExecutionsByOwner } from "./model.js";
 import type { PinnedDispute } from "./pinned-dispute-model.js";
 import {

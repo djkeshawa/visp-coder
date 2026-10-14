@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { pruneProductTrail } from "../../workflow/product/trail.js";
+import { pruneProductTrail } from "../../workflow/product/trail-prune.js";
 import { isJson, mutatingWorkspace, options } from "../context.js";
 import { emit, emitError } from "../output.js";
 

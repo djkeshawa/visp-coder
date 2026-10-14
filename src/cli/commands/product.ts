@@ -1,6 +1,6 @@
 import { Command, Option } from "commander";
 import { fromUnknown, vispError } from "../../core/errors.js";
-import { parseRiskLevel, parseWorkflowMode } from "../../core/input.js";
+import { parseFeatureStart } from "../../core/input.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { BRIEF_INPUT_HELP } from "../../harness/command-guide.js";
 import { productCheckTemplate } from "../../workflow/product/check-guidance.js";
@@ -13,11 +13,10 @@ import {
 } from "../../workflow/product/done-review.js";
 import {
   beginFeatureTester,
-  configuredTestsStarter,
   createProductFeatureChecked,
-  testsWaitMs,
   writeConfiguredTests,
 } from "../../workflow/product/independent-tests.js";
+import { configuredTestsStarter } from "../../workflow/product/independent-tests-starters.js";
 import {
   readProductBrief,
   runProductContext,
@@ -34,6 +33,7 @@ import {
   runProductReviewRequest,
   validateProductReviewRequest,
 } from "../../workflow/product/review-request.js";
+import { testsWaitMs } from "../../workflow/product/tester-session.js";
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {
@@ -270,16 +270,9 @@ export function featureCommand(): Command {
           workflow?: string;
         }
       >(cmd);
-      const risk = parseRiskLevel(opts.risk ?? "low");
-      const mode = opts.workflow ? parseWorkflowMode(opts.workflow) : undefined;
-      if (!risk.ok || (mode && !mode.ok)) {
-        process.exitCode = emitError(
-          "feature",
-          !risk.ok
-            ? risk.error
-            : (mode as { ok: false; error: import("../../core/errors.js").VispError }).error,
-          { json: isJson(opts) },
-        );
+      const risk = parseFeatureStart(opts.risk, opts.workflow);
+      if (!risk.ok) {
+        process.exitCode = emitError("feature", risk.error, { json: isJson(opts) });
         return;
       }
       // The tester runs after the result is printed; `execute` awaits it in this process.

@@ -1,35 +1,15 @@
-import { z } from "zod";
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { productInputTemplate } from "../product-inputs.js";
 import { productReviewReceipt } from "../product-presentation.js";
 import type { WorkspaceState } from "../state.js";
-import { experimentResolutionsSchema } from "./experiment-model.js";
-import { productFeedbackSchema } from "./feedback-model.js";
 import type { ProductFeedbackHost } from "./host-feedback.js";
 import { independentJudgments, independentReviewSchema } from "./independent-review.js";
-import { assessmentSchema, coverageAssessmentSchema, reviewerContextSchema } from "./model.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
 import { type ProductReviewOptions, runProductReview } from "./review.js";
 import type { DeliveredReviewEvidence } from "./review-delivery-validation.js";
-import { reviewSelectionSchema } from "./review-selection.js";
+import { productReviewSubmissionSchema, reviewJudgmentsSchema } from "./review-submission-model.js";
 import { runProductReviewerHandoff } from "./reviewer-handoff.js";
-
-export const reviewJudgmentsSchema = z
-  .object({
-    assessments: z.array(assessmentSchema),
-    coverage: z.array(coverageAssessmentSchema).optional(),
-    reviewer: reviewerContextSchema.optional(),
-    feedback: productFeedbackSchema.optional(),
-    experimentResolutions: experimentResolutionsSchema.optional(),
-  })
-  .strict();
-
-export const productReviewSubmissionSchema = reviewJudgmentsSchema.extend({
-  subjectDigest: z.string().min(1),
-  captures: z.unknown().optional(),
-  selection: reviewSelectionSchema.optional(),
-});
 
 /** File, stdin and native tool submissions share one judgment boundary and recovery. */
 export function parseReviewSubmission(input: unknown, session?: string) {

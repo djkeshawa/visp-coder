@@ -4,15 +4,19 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import {
-  claudeTester,
-  configuredTestsStarter,
   independentTestsBeforeWork,
+  writeConfiguredTests,
+} from "../../../../src/workflow/product/independent-tests.js";
+import { writeIndependentTests } from "../../../../src/workflow/product/independent-tests-run.js";
+import {
+  configuredTestsStarter,
   inlineTests,
+} from "../../../../src/workflow/product/independent-tests-starters.js";
+import {
+  claudeTester,
   testerCli,
   testsWaitMs,
-  writeConfiguredTests,
-  writeIndependentTests,
-} from "../../../../src/workflow/product/independent-tests.js";
+} from "../../../../src/workflow/product/tester-session.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 import { productWorkspace } from "../../support/product-workspace.js";

@@ -13,7 +13,7 @@ import {
   deliveredEvidenceIdsSchema,
   generatedSourceReferencesSchema,
 } from "./review-delivery-validation.js";
-import { productReviewSubmissionSchema } from "./review-request.js";
+import { productReviewSubmissionSchema } from "./review-submission-model.js";
 
 export { type CriticConfig, criticConfigSchema } from "../../config/critic.js";
 

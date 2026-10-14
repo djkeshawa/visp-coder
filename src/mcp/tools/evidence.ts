@@ -16,10 +16,10 @@ import { runProductVerify } from "../../workflow/product/index.js";
 import {
   type ProductReviewRequest,
   parseReviewSubmission,
-  productReviewSubmissionSchema,
   runProductReviewRequest,
   validateProductReviewRequest,
 } from "../../workflow/product/review-request.js";
+import { productReviewSubmissionSchema } from "../../workflow/product/review-submission-model.js";
 import type { ProductSelection } from "../../workflow/product/store.js";
 import type { WorkspaceState } from "../../workflow/state.js";
 import { TOOL } from "../constants.js";

@@ -5,7 +5,7 @@ import { BUILD_ID, VERSION } from "../core/version.js";
 import { runChecks } from "../doctor/checks.js";
 import { applicableExecutions } from "../workflow/product/assessment.js";
 import { outstandingFeedback } from "../workflow/product/findings.js";
-import { readTestsRecord } from "../workflow/product/independent-tests.js";
+import { readTestsRecord } from "../workflow/product/independent-tests-record.js";
 import {
   latestExecutionsByOwner,
   type ProductBrief,

@@ -4,16 +4,13 @@ import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import type { ProductOutcomeStatus } from "./assessment.js";
 import { REVIEWER_ACTIVITY_FILE } from "./critic-exec.js";
 import { outstandingFeedback } from "./findings.js";
-import {
-  type IndependentTestsRecord,
-  readTestsRecord,
-  TESTER_ACTIVITY_FILE,
-  testerNetworkCommands,
-} from "./independent-tests.js";
+import type { IndependentTestsRecord } from "./independent-tests-model.js";
+import { readTestsRecord } from "./independent-tests-record.js";
 import { unchangedInheritedPaths } from "./inherited-changes.js";
 import { checksFor, latestExecutionsByOwner, type ProductExecution } from "./model.js";
 import type { ProductNext } from "./status.js";
 import type { ProductRecord } from "./store.js";
+import { TESTER_ACTIVITY_FILE, testerNetworkCommands } from "./tester-activity.js";
 
 /**
  * One document a human reviewer can act on: the request, what was promised, what changed,
