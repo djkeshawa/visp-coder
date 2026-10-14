@@ -15,12 +15,14 @@ import { reserveStudyBudget, studyBudgetRequest, verifyStudyReservation } from "
 import { type RunnerResult, type RunnerSpec, runnerSpecSchema } from "./contracts.js";
 import { executeFeedbackLoop } from "./feedback-loop.js";
 import { runHostTurn } from "./host-turn.js";
+import { loopReviewSchema } from "./loop-contracts.js";
 import { git } from "./process.js";
 import {
   manifestFor,
   prepareRoot,
   type RunManifest,
   resumeIdentity,
+  runManifestSchema,
   verifyHarness,
 } from "./run-support.js";
 
@@ -180,45 +182,71 @@ async function performRun(
   return result;
 }
 
-const resultMinimumSchema = z
+const usageSchema = z
   .object({
+    model: z.string(),
+    inputTokens: z.number(),
+    cachedInputTokens: z.number(),
+    cacheWriteInputTokens: z.number(),
+    outputTokens: z.number(),
+    reasoningTokens: z.number().nullable(),
+  })
+  .strict();
+
+/** The result as `runExperiment` writes it, so a reader checks its shape, not only its hash. */
+const runnerResultSchema = z
+  .object({
+    feedbackLoop: z
+      .object({
+        decision: loopReviewSchema.shape.decision,
+        rounds: z.number().int().nonnegative(),
+        repairAttempts: z.number().int().nonnegative(),
+        evidenceRequests: z.number().int().nonnegative(),
+        firstHandoffMs: z.number().nullable(),
+        review: loopReviewSchema.optional(),
+        provenance: z.literal("host-reported-not-independent-acceptance"),
+      })
+      .strict()
+      .optional(),
     schemaVersion: z.literal(1),
     runId: z.string(),
     manifestHash: z.string(),
     status: z.enum(["completed", "failed", "cancelled", "timed-out", "budget-exceeded"]),
+    exitCode: z.number().int().nullable(),
     sessionId: z.string().nullable(),
+    startedAt: z.string().datetime(),
+    endedAt: z.string().datetime(),
     eventCount: z.number().int().nonnegative(),
     eventHead: z.string(),
     snapshotHash: z.string(),
-    startedAt: z.string().datetime(),
-    endedAt: z.string().datetime(),
+    usage: z.array(usageSchema),
+    estimatedUsd: z.number().nullable(),
+    actualBilledUsd: z.null(),
+    diagnostics: z.array(z.string()),
+    provenance: z.literal("local-runner"),
   })
-  .passthrough();
+  .strict();
 
 export async function inspectRun(directory: string) {
   const manifestEnvelope = object(
     JSON.parse(await readFile(join(directory, "manifest.json"), "utf8")),
     "manifest envelope",
   );
-  const manifest = object(manifestEnvelope.manifest, "manifest") as unknown as RunManifest;
-  runnerSpecSchema.parse(manifest.spec);
-  if (
-    manifest.schemaVersion !== 1 ||
-    typeof manifest.worktree !== "string" ||
-    typeof manifest.hostExecutableRealpath !== "string" ||
-    manifestEnvelope.hash !== hashValue(manifest)
-  )
+  // The hash covers the bytes as written; the parsed value is what the caller reads.
+  if (manifestEnvelope.hash !== hashValue(manifestEnvelope.manifest))
     throw new Error("Manifest integrity verification failed");
+  const manifest: RunManifest = runManifestSchema.parse(manifestEnvelope.manifest);
   await verifyStudyReservation(dirname(directory), manifest.spec, manifest.budgetReservation);
   const envelope = object(
     JSON.parse(await readFile(join(directory, "result.json"), "utf8")),
     "result envelope",
   );
-  const result = resultMinimumSchema.parse(envelope.result) as unknown as RunnerResult;
+  if (envelope.hash !== hashValue(envelope.result))
+    throw new Error("Result integrity verification failed");
+  const result: RunnerResult = runnerResultSchema.parse(envelope.result);
   if (
     result.runId !== manifest.spec.id ||
     result.manifestHash !== manifestEnvelope.hash ||
-    envelope.hash !== hashValue(result) ||
     Date.parse(result.endedAt) < Date.parse(result.startedAt)
   )
     throw new Error("Result integrity verification failed");
