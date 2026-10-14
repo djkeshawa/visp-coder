@@ -1,4 +1,5 @@
 import { ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { finalProductAssessmentGaps, productEvidenceGaps } from "./assessment.js";
 import { currentProductFailures } from "./corrections.js";
@@ -41,7 +42,7 @@ export async function nextFromRecord(
       ...base,
       action: "understand",
       objective: "Complete the brief: declare outcomes and set incomplete:false before working",
-      command: `visp brief --feature ${record.brief.feature}`,
+      command: cliCommand("brief", { feature: record.brief.feature }),
       evidence: record.brief.uncertainties,
       mayEdit: false,
     });
@@ -51,7 +52,10 @@ export async function nextFromRecord(
       action: "understand",
       objective:
         "Work the whole request as one slice with your test command, or, for several independently usable parts, describe outcomes and slices in the brief",
-      command: `visp work --feature ${record.brief.feature} --check "<command that runs your tests>"`,
+      command: cliCommand("work", {
+        feature: record.brief.feature,
+        check: { quoted: "<command that runs your tests>" },
+      }),
       evidence: record.brief.uncertainties,
       mayEdit: false,
     });
@@ -90,7 +94,7 @@ export async function nextFromRecord(
       ...base,
       action: "understand",
       objective: "Resolve the remaining slice dependencies",
-      command: `visp brief --feature ${record.brief.feature}`,
+      command: cliCommand("brief", { feature: record.brief.feature }),
       evidence: [],
       mayEdit: false,
     });

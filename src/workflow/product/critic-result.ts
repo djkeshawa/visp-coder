@@ -3,6 +3,7 @@ import { fromUnknown, vispError } from "../../core/errors.js";
 import type { FileMutation } from "../../core/file-transaction.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { finalProductAssessmentGaps, productEvidenceGaps } from "./assessment.js";
 import type { ProductCriticHost } from "./critic.js";
@@ -331,7 +332,10 @@ function resultNavigation(
     return {
       phase: current.phase,
       action: "worker",
-      command: `visp work --feature ${current.selection.feature} --task ${current.selection.task}`,
+      command: cliCommand("work", {
+        feature: current.selection.feature,
+        task: current.selection.task,
+      }),
       guidance:
         "Apply design findings or supply counterevidence, then implement. This consultation provides no product-quality credit; keep the remaining call for actual product review.",
     };

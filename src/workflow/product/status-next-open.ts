@@ -1,4 +1,5 @@
 import { ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import {
@@ -44,7 +45,7 @@ export async function nextOpenSlice(
       ...base,
       action: "implement",
       objective: slice.goal,
-      command: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
+      command: cliCommand("work", { feature: record.brief.feature, task: slice.id }),
       evidence: [],
       mayEdit: false,
     });
@@ -136,7 +137,7 @@ export async function nextOpenSlice(
         ...base,
         action: "implement",
         objective: slice.goal,
-        command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
+        command: cliCommand("done", { feature: record.brief.feature, task: slice.id }),
         evidence: await productEvidenceGaps(workspace, record, subject, slice),
         mayEdit: true,
       },
@@ -226,7 +227,7 @@ async function failedSliceNext(
     objective:
       route.objective ??
       "Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check",
-    command: `visp work --feature ${feature} --task ${slice.id}`,
+    command: cliCommand("work", { feature, task: slice.id }),
     evidence,
     mayEdit: true,
   };

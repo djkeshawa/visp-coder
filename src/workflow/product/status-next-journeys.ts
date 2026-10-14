@@ -4,6 +4,7 @@ import {
   replayBatchCommand,
   replayCommand,
 } from "../evidence/capture-replay.js";
+import { cliCommand } from "../next-action.js";
 import { browserFailureRecovery } from "./browser-recovery.js";
 import { currentFailedJourneys, currentJourneyFailures } from "./evidence-references.js";
 import type { ProductSlice } from "./model.js";
@@ -45,7 +46,7 @@ export function environmentJourneyNext(
       "Recover the browser execution environment, then rerun the same journey before judging product behavior",
     command: replay?.id
       ? replayCommand(record.brief.feature, replay.id, owner)
-      : `visp capture --feature ${record.brief.feature}${owner ? ` --task ${owner}` : ""} --from -`,
+      : cliCommand("capture", { feature: record.brief.feature, task: owner, from: "-" }),
     evidence: [
       ...currentJourneyFailures(record, subject, selectedTask),
       ...(replay ? [] : ["No intact saved replay is available; supply the original journey."]),
@@ -93,12 +94,16 @@ export function failedJourneyNext(
       ...(reviewer.runs
         ? {
             objective: `A recorded journey failed on the current code (the evidence gives its message). Fix the product; if your own journey was wrong, rerun a corrected one and keep the promised outcome. Then run visp done${reviewer.capacity.available ? "; VISP starts the reviewer." : "."}`,
-            command: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
+            command: cliCommand("work", { feature: record.brief.feature, task: slice.id }),
           }
         : {
             objective:
               "Inspect the failed journey and terminal state. Correct the behavior, or explicitly resolve a mistaken exploratory expectation with current replacement observations; preserve the promised outcome.",
-            command: `visp review --handoff --feature ${record.brief.feature} --task ${slice.id}`,
+            command: cliCommand("review", {
+              handoff: true,
+              feature: record.brief.feature,
+              task: slice.id,
+            }),
           }),
       evidence: currentJourneyFailures(record, subject, slice.id),
       mayEdit: true,

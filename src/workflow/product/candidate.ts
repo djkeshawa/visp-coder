@@ -14,6 +14,7 @@ import { isPortableAbsolute } from "../../core/paths.js";
 import { matchesAny } from "../../core/patterns.js";
 import { privatePath } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { type CriticSelection, recordGuards } from "./critic-store.js";
 import type { ProductSlice } from "./model.js";
@@ -267,7 +268,10 @@ export async function restoreCandidate(
         restored: id,
         changed: result.value.changed,
         acceptance: "unchanged; run applicable checks and review",
-        command: `visp verify --feature ${selected.selection.feature} --task ${selected.slice.id}`,
+        command: cliCommand("verify", {
+          feature: selected.selection.feature,
+          task: selected.slice.id,
+        }),
       })
     : result;
 }

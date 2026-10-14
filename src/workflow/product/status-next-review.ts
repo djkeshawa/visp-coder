@@ -1,4 +1,5 @@
 import { ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableReviews, type ProductOutcomeStatus } from "./assessment.js";
 import { type ReviewerCapacity, reviewerCapacity, reviewerHandoff } from "./critic-capacity.js";
@@ -30,7 +31,7 @@ export function repairRoute(
   }
   return {
     objective: repairObjective(record, slice, missingReproduction, reviewer.runs),
-    command: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
+    command: cliCommand("work", { feature: record.brief.feature, task: slice.id }),
     completion: "unresolved-product" as const,
   };
 }
@@ -166,7 +167,7 @@ export function reviewAfterSuccessfulRepair(
             action: "refine",
             objective:
               "Run visp done: VISP's independent reviewer reassesses the repaired product from the fresh replay before the retained finding is cleared.",
-            command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
+            command: cliCommand("done", { feature: record.brief.feature, task: slice.id }),
             completion: "unresolved-product",
           }
         : reviewerHandoff(record.brief.feature, reviewer.capacity, "findings")),
@@ -177,7 +178,7 @@ export function reviewAfterSuccessfulRepair(
     objective: rechecks.some(({ recheck }) => recheck?.environmentRepair)
       ? "Assess the observed environment change and successful recheck before deciding whether it repairs the retained finding"
       : "Reassess the repaired product from the fresh successful replay before clearing the retained finding",
-    command: `visp review --handoff --feature ${record.brief.feature} --task ${slice.id}`,
+    command: cliCommand("review", { handoff: true, feature: record.brief.feature, task: slice.id }),
     completion: "unresolved-product",
   };
 }
@@ -251,7 +252,7 @@ function launchedSliceReview(
       : completesFeature(record, slice.id)
         ? "Run visp done: VISP's independent reviewer assesses every feature outcome on the completing slice."
         : "Run visp done: VISP's independent reviewer assesses this slice's outcomes.",
-    command: `visp done --feature ${record.brief.feature} --task ${slice.id}`,
+    command: cliCommand("done", { feature: record.brief.feature, task: slice.id }),
     completion: "unresolved-product",
   };
 }
@@ -291,7 +292,7 @@ export function exhaustedNext(
     action: "fix",
     objective:
       "Refinement budget exhausted; required outcomes remain unresolved. Choose a focused new hypothesis; the review budget is unchanged.",
-    command: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
+    command: cliCommand("work", { feature: record.brief.feature, task: slice.id }),
     evidence,
     mayEdit: false,
   });
@@ -305,6 +306,6 @@ function hasRequiredSliceFeedback(record: ProductRecord, slice: ProductSlice) {
 
 function sliceReviewCommand(record: ProductRecord, slice: ProductSlice, exhausted: boolean) {
   return !exhausted && hasRequiredSliceFeedback(record, slice)
-    ? `visp work --feature ${record.brief.feature} --task ${slice.id}`
-    : `visp review --handoff --feature ${record.brief.feature} --task ${slice.id}`;
+    ? cliCommand("work", { feature: record.brief.feature, task: slice.id })
+    : cliCommand("review", { handoff: true, feature: record.brief.feature, task: slice.id });
 }

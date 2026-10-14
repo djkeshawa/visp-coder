@@ -1,3 +1,4 @@
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import { applicableExecutions } from "./assessment.js";
@@ -64,7 +65,7 @@ export function unavailableReviewerFindingsNext(
     ...base,
     action: "fix",
     completion: "unresolved-product",
-    command: `visp work --feature ${record.brief.feature} --task ${repair.slice.id}`,
+    command: cliCommand("work", { feature: record.brief.feature, task: repair.slice.id }),
     objective: `${capacity.reason ? `${capacity.reason} ` : ""}VISP's independent reviewer cannot run again. The listed required findings are still open. Fix each reported problem, extend your checks to exercise it, and rerun visp done.`,
   };
 }

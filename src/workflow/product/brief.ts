@@ -2,6 +2,7 @@ import { vispError } from "../../core/errors.js";
 import { applyFileTransaction } from "../../core/file-transaction.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
@@ -111,7 +112,7 @@ async function updateProductBriefLocked(
             ? {
                 authorizationRevoked: true,
                 mayEdit: false,
-                nextCommand: `visp work --feature ${brief.feature}`,
+                nextCommand: cliCommand("work", { feature: brief.feature }),
               }
             : {}),
           ...(resetSlices.length ? { resetSlices } : {}),

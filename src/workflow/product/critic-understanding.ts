@@ -1,4 +1,5 @@
 import { ok } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { featureCriticCapacity, readFeatureCriticBudget } from "./critic-budget.js";
 import type { CriticState } from "./critic-model.js";
@@ -50,7 +51,11 @@ export async function criticUnderstanding(workspace: WorkspaceState, input: Prod
     (entry) => entry.phase === "understanding" && (entry.intent ?? state.intent) === state.intent,
   );
   if (!attempt || !state) return ok(undefined);
-  const command = `visp critic --feature ${selected.value.selection.feature} --task ${selected.value.slice?.id} --phase understanding`;
+  const command = cliCommand("critic", {
+    feature: selected.value.selection.feature,
+    task: selected.value.slice?.id,
+    phase: "understanding",
+  });
   const disposition = consultationDisposition(state, attempt);
   const budget = await readFeatureCriticBudget(workspace, state.feature, state.config);
   if (!budget.ok) return budget;

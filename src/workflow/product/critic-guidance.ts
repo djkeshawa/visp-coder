@@ -1,4 +1,5 @@
 import { ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { criticStatus } from "./critic-status.js";
 import { reviewerRules } from "./pinned-dispute-model.js";
@@ -42,7 +43,7 @@ function withCriticAdvice(next: ProductNext, critic: Status, launched: boolean):
     (["implement", "fix"].includes(next.action) && critic.hasObservedProduct);
   // VISP starts the reviewer inside `visp done`; the worker has no review command to run.
   if (!reviewable || launched) return next;
-  const command = `visp critic --feature ${next.feature}${next.task ? ` --task ${next.task}` : ""}`;
+  const command = cliCommand("critic", { feature: next.feature, task: next.task });
   return {
     ...next,
     criticAdvice: {

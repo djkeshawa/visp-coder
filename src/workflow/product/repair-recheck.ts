@@ -1,4 +1,5 @@
 import { recordedReplayRuns, replayCommand } from "../evidence/capture-replay.js";
+import { cliCommand } from "../next-action.js";
 import { compareObservations } from "./behavior-changes.js";
 import { environmentRepairCandidate } from "./environment-repair.js";
 import { type FindingReference, selectRepairReproduction } from "./repair-reproduction.js";
@@ -109,7 +110,7 @@ export function repairRecheck(
     ...(after
       ? { comparison: comparisonReference(before, after) }
       : { before: observationReference(before) }),
-    command: `visp verify --feature ${record.brief.feature}${task ? ` --task ${task}` : ""}`,
+    command: cliCommand("verify", { feature: record.brief.feature, task }),
     guidance,
   };
 }

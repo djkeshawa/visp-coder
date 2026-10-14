@@ -1,5 +1,6 @@
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import {
   featureCriticBudgetGap,
@@ -172,7 +173,10 @@ async function recordEarlyGap(
     callsUsed: featureCriticCapacity(budget.value.budget, state.config.timeoutMs).callsUsed,
     reason: reason,
     category,
-    command: `visp work --feature ${selected.selection.feature}${selected.selection.task ? ` --task ${selected.selection.task}` : ""}`,
+    command: cliCommand("work", {
+      feature: selected.selection.feature,
+      task: selected.selection.task,
+    }),
     limitation:
       "Early consultation unavailable; no review credit and no call reserved. Implement the slice, then obtain the required product review.",
   });

@@ -1,4 +1,5 @@
 import { CRITIC_CALL_TIMEOUT_MS, CRITIC_MAX_CALLS } from "../../config/critic.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import {
   featureCriticBudgetGap,
@@ -101,7 +102,7 @@ export function reviewerHandoff(
   return {
     action: "fix" as const,
     completion: "handoff" as const,
-    command: `visp pr --feature ${feature}`,
+    command: cliCommand("pr", { feature }),
     objective: `${capacity.reason ?? "VISP's independent reviewer cannot run again."} Run visp pr; the remaining ${remaining} go to a human reviewer`,
   };
 }

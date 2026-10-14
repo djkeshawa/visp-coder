@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { err, ok } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { observedProduct } from "./critic-status.js";
 import type { ProductSlice } from "./model.js";
@@ -48,7 +49,18 @@ export function userFeedbackPlan(
       })),
     omittedFeedback: Math.max(0, entries.filter((entry) => entry.status === "answered").length - 3),
     command: due
-      ? `visp critic feedback --feature ${record.brief.feature}${slice ? ` --task ${slice.id}` : ""} --ask "Does this first usable version match what you wanted? What should I improve next?"`
+      ? cliCommand(
+          "critic",
+          {
+            feature: record.brief.feature,
+            task: slice?.id,
+            ask: {
+              quoted:
+                "Does this first usable version match what you wanted? What should I improve next?",
+            },
+          },
+          ["feedback"],
+        )
       : undefined,
     guidance:
       "At the first usable slice, ask through the coding tool's user-question interface before expanding. A consequential design uncertainty can be asked earlier. Show the relevant UI or behavior and use one focused, open question. Continue unrelated work while waiting; do not repeat a pending or deferred question. Apply useful feedback or clarify ambiguity, then observe the change. User feedback is advisory input, not a passing check or an automatic intent change. Older feedback remains context, not assessment of changed source.",
@@ -255,7 +267,11 @@ async function recordDeliveryIssue(
 }
 
 function handoff(record: ProductRecord, entry: UserFeedbackRecord, dispatch: boolean) {
-  const base = `visp critic feedback --feature ${record.brief.feature}${entry.task ? ` --task ${entry.task}` : ""} --id ${entry.id}`;
+  const base = cliCommand(
+    "critic",
+    { feature: record.brief.feature, task: entry.task, id: entry.id },
+    ["feedback"],
+  );
   return {
     feature: record.brief.feature,
     task: entry.task,

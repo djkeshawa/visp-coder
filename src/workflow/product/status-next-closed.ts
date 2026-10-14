@@ -1,4 +1,5 @@
 import { ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import {
   finalProductAssessmentGaps,
@@ -94,7 +95,7 @@ export async function nextClosedProduct(
       objective:
         route.objective ??
         "Reopen the implicated slice and correct the current product finding or failed assembled check",
-      command: `visp work --feature ${record.brief.feature} --task ${correction.id}`,
+      command: cliCommand("work", { feature: record.brief.feature, task: correction.id }),
       evidence: [...gaps, ...assessmentGaps],
       mayEdit: false,
     });
@@ -105,7 +106,7 @@ export async function nextClosedProduct(
       objective:
         route.objective ??
         "Resolve the current execution failure and select its focused correction scope. If no existing slice owns the failed check, link its outcome or code paths in the brief before reauthorizing.",
-      command: `visp brief --feature ${record.brief.feature}`,
+      command: cliCommand("brief", { feature: record.brief.feature }),
       evidence: [...gaps, ...assessmentGaps],
       mayEdit: false,
     });
@@ -155,7 +156,7 @@ function finalStep(record: ProductRecord, refine: boolean, reviewer: ReviewerSta
     return {
       action: "accept" as const,
       objective: "Run final checks against the assembled product and preserved expectations",
-      command: `visp accept --feature ${feature}`,
+      command: cliCommand("accept", { feature }),
     };
   if (reviewer.runs && !reviewer.capacity.available)
     return reviewerHandoff(feature, reviewer.capacity, "assessment");
@@ -164,12 +165,12 @@ function finalStep(record: ProductRecord, refine: boolean, reviewer: ReviewerSta
         action: "refine" as const,
         objective:
           "Run visp accept; VISP's independent reviewer assesses the assembled product first",
-        command: `visp accept --feature ${feature}`,
+        command: cliCommand("accept", { feature }),
       }
     : {
         action: "refine" as const,
         objective:
           "Review the assembled product against every mandatory outcome and retained expectation",
-        command: `visp review --handoff --feature ${feature}`,
+        command: cliCommand("review", { handoff: true, feature }),
       };
 }
