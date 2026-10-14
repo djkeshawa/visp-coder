@@ -21,7 +21,7 @@ import { run } from "../../core/exec.js";
 import { resolvedProductExecutionEnvironment } from "../../core/execution-environment.js";
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { hashValue, sha256 } from "../../core/hash.js";
-import { matchesPattern } from "../../core/patterns.js";
+import { matchesPattern, normalizePath } from "../../core/patterns.js";
 import { processAlive, processIdentity } from "../../core/process-identity.js";
 import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
@@ -1293,12 +1293,12 @@ async function repositoryCopy(
       recursive: true,
       verbatimSymlinks: true,
       filter: async (path) => {
-        const local = relative(sourceRoot, path).replaceAll("\\", "/");
+        const local = normalizePath(relative(sourceRoot, path));
         const link = await readlink(path).catch(() => undefined);
         const target =
           link === undefined
             ? local
-            : relative(sourceRoot, resolve(dirname(path), link)).replaceAll("\\", "/");
+            : normalizePath(relative(sourceRoot, resolve(dirname(path), link)));
         return ![local, target].some((entry) =>
           leftOut(entry, [".git", ".visp", "acceptance", ...SECRET_FILES, ...blockedPaths]),
         );

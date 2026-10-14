@@ -4,7 +4,7 @@ import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_BLOCKED_PATHS } from "../core/constants.js";
 import { ProjectFileSystem } from "../core/fs.js";
-import { matchesAny } from "../core/patterns.js";
+import { matchesAny, normalizePath } from "../core/patterns.js";
 import type { PageSend } from "./browser-session.js";
 import type { ChromeTransport } from "./chrome-transport.js";
 
@@ -21,7 +21,7 @@ export async function readBrowserFile(root: string, url: string, blocked: readon
   const metadata = await files.metadata(path);
   if (!metadata.ok) throw new BrowserSecurityError(metadata.error.message);
   const inside = projectRelative(files.root, resolve(root), path);
-  const projectPath = inside?.replaceAll("\\", "/");
+  const projectPath = inside && normalizePath(inside);
   if (!projectPath || matchesAny(projectPath, [...DEFAULT_BLOCKED_PATHS, ...blocked]))
     throw new BrowserSecurityError("Local browser file is outside allowed project content");
   if (!metadata.value) return { bytes: null, type: contentType(path) };

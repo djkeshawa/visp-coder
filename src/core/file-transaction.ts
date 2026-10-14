@@ -7,6 +7,7 @@ import { fromUnknown, vispError } from "./errors.js";
 import { ProjectFileSystem } from "./fs.js";
 import { sha256 } from "./hash.js";
 import { isInside, isPortableAbsolute } from "./paths.js";
+import { normalizePath } from "./patterns.js";
 import { err, ok, type Result } from "./result.js";
 import { withStateLock } from "./state-lock.js";
 
@@ -802,7 +803,7 @@ function relativePath(root: string, requestedRoot: string, path: string): Result
   const absolute = isAbsolute(path) ? resolve(path) : resolve(root, path);
   // ProjectFileSystem accepts the caller's root alias; journals retain one relative identity.
   const base = isInside(root, absolute) ? root : resolve(requestedRoot);
-  const rel = relative(base, absolute).replaceAll("\\", "/");
+  const rel = normalizePath(relative(base, absolute));
   if (rel === "" || rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
     return err(vispError("IO_ERROR", `Transaction target is outside the project: ${path}`));
   }
