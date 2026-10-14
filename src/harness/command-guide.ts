@@ -17,6 +17,7 @@ Use these field shapes, replacing the illustrative result and file path:
 ${JSON.stringify(BRIEF_FIELDS_EXAMPLE, null, 2)}
 Optional behavior examples use {title, given: [], when, expected: [], outcomes: []}.
 Executable checks use --check-template command or --check-template browser.
+A command check whose result is an image file (render, chart, SVG) adds \`images: [out.png]\`, a PNG it writes in every run, and lists an experience outcome naming what the picture must show.
 Prefer --patch - --reason "<decision>" for changed fields (arrays merge by ID); use --from - --reason "<decision>" for a full replacement. Status and execution records are generated, not brief inputs.`;
 
 /** One discoverability catalogue for generated host instructions and their examples. */

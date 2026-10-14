@@ -188,7 +188,9 @@ describe("the minimal profile", () => {
     // within 404 with the shorter preview rule.
     // 404 -> 423: the picture-result rule. With it, a Haiku worker rendering a voxel scene
     // declared its PNG; an undeclared picture reaches the reviewer only as source.
-    expect(guide.length / 4).toBeLessThanOrEqual(423);
+    // 423 -> 453: that rule also names the experience outcome an image check must cover (the
+    // brief is rejected without one) and keeps the requested format beside the PNG.
+    expect(guide.length / 4).toBeLessThanOrEqual(453);
     expect(guide).toContain("At its id, run visp work");
     expect(guide).toContain("Leave feature running; background it on blocking hosts");
     expect(guide).toContain(
@@ -204,6 +206,15 @@ describe("the minimal profile", () => {
     expect(guide).toContain("not only canvas/icons");
     expect(guide).toContain("function and start point");
     expect(guide).toContain("Do not delete or shrink requested content");
+    expect(guide).toContain(
+      "- Image-file result (render, chart, SVG): give its brief check `images: [out.png]` (a PNG the check writes; keep the requested format too) and an experience outcome naming what the picture must show.",
+    );
+  });
+
+  it("describes the images field where the command guide lists brief check fields", () => {
+    expect(commandGuide()).toContain(
+      "A command check whose result is an image file (render, chart, SVG) adds `images: [out.png]`, a PNG it writes in every run, and lists an experience outcome naming what the picture must show.",
+    );
   });
 
   it.each(["codex", "claude-code"] as const)(

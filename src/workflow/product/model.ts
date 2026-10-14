@@ -254,8 +254,19 @@ function validateImageChecks(brief: ProductBrief, context: z.RefinementCtx): voi
       context.addIssue({
         code: "custom",
         path: ["checks"],
-        message: `${check.id} declares images, so it must cover an experience outcome: add an outcome with kind: experience stating that each object, subject and look the request names is recognizable in the image, and list it in ${check.id}'s outcomes`,
+        message: `${check.id} declares images, so it must cover an experience outcome: add an outcome with kind: experience naming what the picture must show (each object, subject and look the request names, recognizable), and list its ID in the outcomes of ${check.id}${checkSlices(brief, check.id)}`,
       });
+}
+
+/** " and of slice T001" for the slices that run a check, so the outcome is reviewed with them. */
+function checkSlices(brief: ProductBrief, check: string): string {
+  const slices = brief.slices
+    .filter((slice) => slice.checks.includes(check))
+    .map((slice) => slice.id);
+  if (!slices.length) return "";
+  const listed =
+    slices.length === 1 ? slices[0] : `${slices.slice(0, -1).join(", ")} and ${slices.at(-1)}`;
+  return ` and of slice${slices.length === 1 ? "" : "s"} ${listed}`;
 }
 
 function validateSliceReferences(brief: ProductBrief, context: z.RefinementCtx): void {

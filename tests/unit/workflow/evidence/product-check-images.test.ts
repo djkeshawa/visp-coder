@@ -235,7 +235,7 @@ describe("images declared by a command check", () => {
       ok: false,
       error: {
         message: expect.stringContaining(
-          "C001 declares images, so it must cover an experience outcome",
+          "C001 declares images, so it must cover an experience outcome: add an outcome with kind: experience naming what the picture must show (each object, subject and look the request names, recognizable), and list its ID in the outcomes of C001 and of slice T001",
         ),
       },
     });
