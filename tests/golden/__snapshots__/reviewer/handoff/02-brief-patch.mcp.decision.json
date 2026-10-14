@@ -1,6 +1,5 @@
 {
   "isError": false,
-  "ok": true,
   "next": {
     "action": "implement",
     "command": "visp work --feature 001-return-two-from-the-public --task T001",

@@ -1,0 +1,19 @@
+{
+  "tool": "visp_next",
+  "ok": true,
+  "data": {
+    "action": "wait",
+    "feature": "001-return-two-from-the-public",
+    "objective": "Independent review is still running. Run the command again to wait for its findings; editing pauses until it returns.",
+    "command": "visp next --feature 001-return-two-from-the-public",
+    "evidence": [],
+    "mayEdit": false
+  },
+  "nextCommand": "visp_next {\"feature\":\"001-return-two-from-the-public\"}",
+  "nextAction": {
+    "tool": "visp_next",
+    "arguments": {
+      "feature": "001-return-two-from-the-public"
+    }
+  }
+}

@@ -74,18 +74,23 @@ function reviewer() {
   const packet = JSON.parse(lines[lines.length - 1]);
   const reviews = plan.reviews ?? ["satisfied"];
   const verdict = reviews[Math.min(earlier("reviewer"), reviews.length - 1)];
-  const executions = (packet.current?.evidence ?? [])
-    .filter((entry) => entry.kind === "execution" && entry.status === "available")
-    .map((entry) => entry.id)
-    .slice(0, 1);
+  const available = (packet.current?.evidence ?? []).filter(
+    (entry) => entry.kind === "execution" && entry.status === "available",
+  );
+  const executions = available.map((entry) => entry.id).slice(0, 1);
+  // Each outcome cites the run of a check declared for it, as the evidence mapping requires.
+  const evidenceFor = (outcome) => {
+    const own = available.find((entry) => (entry.outcomes ?? []).includes(outcome));
+    return own ? [own.id] : executions;
+  };
   const failed = verdict === "failed";
   return {
     summary: failed ? "The named export is two, but the default export is missing." : "Ran the check and observed the promised value two.",
     assessments: (packet.current?.outcomes ?? []).map((outcome) => ({
       outcome: outcome.id,
       status: failed ? "failed" : "satisfied",
-      summary: failed ? "Only the named export is two." : "The public value is two.",
-      evidence: executions,
+      summary: failed ? "Only the named export is two." : "The promised export is there.",
+      evidence: evidenceFor(outcome.id),
       expectations: [],
     })),
     findings: failed
@@ -224,7 +229,7 @@ function argument(value: string): string {
   return /^[\w./:=@,+-]+$/.test(value) ? value : `'${value}'`;
 }
 
-/** The tester's answer: a pinned suite with the named assertions on the fixture's value. */
+/** The tester's answer: a pinned suite with the named assertions on the fixture's exports. */
 export function testerSuite(tests: readonly (readonly [string, string])[]) {
   const checks = tests
     .map(([name, assertion]) => `check(${JSON.stringify(name)}, () => assert.ok(${assertion}));`)
@@ -233,7 +238,8 @@ export function testerSuite(tests: readonly (readonly [string, string])[]) {
     file: {
       name: "value.test.mjs",
       content: `import assert from "node:assert/strict";
-import { value } from "../../src/value.mjs";
+import * as product from "../../src/value.mjs";
+const { value } = product;
 const waived = new Set(JSON.parse(process.env.VISP_WAIVED_TESTS ?? "[]"));
 let failed = false;
 function check(name, run) {
