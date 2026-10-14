@@ -94,6 +94,9 @@ describe("workspace state loading", () => {
   });
 });
 
+/** This build's CLI entry, as the same build installed at another path has it. */
+const ownCli = () => readFile(runtimeIdentity().executable, "utf8");
+
 describe("feature and foundation context resolution", () => {
   it("validates explicit features and reports an absent active feature", async () => {
     const state = await workspace.state();
@@ -139,7 +142,7 @@ describe("feature and foundation context resolution", () => {
     const hook = join(workspace.root, ".git/hooks/pre-commit");
     const original = await readFile(hook, "utf8");
     const elsewhere = join(workspace.root, "elsewhere/node_modules/visp/dist/cli.js");
-    await workspace.write("elsewhere/node_modules/visp/dist/cli.js", "// another install\n");
+    await workspace.write("elsewhere/node_modules/visp/dist/cli.js", await ownCli());
     const rewrite = (content: string) =>
       writeFile(hook, content.replaceAll(runtimeIdentity().executable, elsewhere), {
         mode: 0o755,
@@ -156,6 +159,11 @@ describe("feature and foundation context resolution", () => {
     expect(await enforcement()).toBe(false);
 
     await rewrite(original.replace(/hook-version: \d+/, "hook-version: 1"));
+    expect(await enforcement()).toBe(false);
+
+    // Another build now installed at that path answers guard checks the hook refuses.
+    await workspace.write("elsewhere/node_modules/visp/dist/cli.js", "// another build\n");
+    await rewrite(original);
     expect(await enforcement()).toBe(false);
 
     await rm(elsewhere);
@@ -178,7 +186,7 @@ describe("feature and foundation context resolution", () => {
     if (!installed.ok) throw new Error(installed.error.message);
     const script = join(workspace.root, ".visp/hooks/claude-pretooluse.mjs");
     const original = await readFile(script, "utf8");
-    await workspace.write("elsewhere/cli.js", "// another install\n");
+    await workspace.write("elsewhere/cli.js", await ownCli());
     const elsewhere = JSON.stringify(join(workspace.root, "elsewhere/cli.js"));
     const enforcement = async (content: string) => {
       await writeFile(
@@ -211,7 +219,7 @@ describe("feature and foundation context resolution", () => {
     if (!installed.ok) throw new Error(installed.error.message);
     const script = join(workspace.root, ".visp/hooks/codex-hooks.mjs");
     const original = await readFile(script, "utf8");
-    await workspace.write("elsewhere/cli.js", "// another install\n");
+    await workspace.write("elsewhere/cli.js", await ownCli());
     const elsewhere = JSON.stringify(join(workspace.root, "elsewhere/cli.js"));
     const installedHarness = async (content: string) => {
       await writeFile(

@@ -153,7 +153,7 @@ describe("the enforcement check", () => {
   it("counts hooks the same build wrote from another install path as installed", async () => {
     await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
     await installEverything();
-    await workspace.write("elsewhere/cli.js", "// another install\n");
+    await workspace.write("elsewhere/cli.js", await readFile(runtimeIdentity().executable, "utf8"));
     const elsewhere = join(workspace.root, "elsewhere/cli.js");
     for (const hook of [CLAUDE_PRE_TOOL_USE_HOOK, ".git/hooks/pre-commit"]) {
       const path = join(workspace.root, hook);
@@ -164,6 +164,9 @@ describe("the enforcement check", () => {
       status: "ok",
       detail: expect.stringContaining("pre-commit"),
     });
+    // Another build replaced that install: its guard answers are refused, so not healthy.
+    await workspace.write("elsewhere/cli.js", "// another build\n");
+    expect(await check("enforcement")).toMatchObject({ status: "warn" });
   });
   it("detects and repairs a deleted Codex MCP registration", async () => {
     await setConfigScalar((await workspace.state()).paths, "harness", "codex");

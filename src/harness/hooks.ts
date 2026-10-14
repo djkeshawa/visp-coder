@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   EXIT,
   GUARD_PROTOCOL_VERSION,
@@ -680,15 +680,27 @@ function shellLiteral(value: string): string {
  * Whether `current` is the hook this build generates, wherever this build was installed.
  * Every hook embeds the path of the CLI that wrote it, so the same build installed at another
  * path (nvm, npx, a local node_modules) writes different bytes. The hook is re-rendered with
- * its own path: the build ID, version and template must still match exactly, and the CLI it
- * calls must still exist.
+ * its own path: the build ID, version and template must still match exactly. The CLI it calls
+ * must be this build too, since the hook refuses any other build's guard answer: another path
+ * must hold this build's entry file byte for byte (its chunk names are content hashes, so
+ * equal entry files mean the same build).
  */
 export function isCurrentGeneratedHook(
   current: string,
   render: (executable: string) => string,
 ): boolean {
   const executable = embeddedExecutable(current);
-  return executable !== undefined && current === render(executable) && existsSync(executable);
+  return executable !== undefined && current === render(executable) && isThisBuildEntry(executable);
+}
+
+function isThisBuildEntry(path: string): boolean {
+  const own = runtimeIdentity().executable;
+  if (path === own) return existsSync(path);
+  try {
+    return readFileSync(path).equals(readFileSync(own));
+  } catch {
+    return false;
+  }
 }
 
 /** The CLI path a generated hook calls: the Node hooks' `cli` constant or pre-commit's guard call. */
