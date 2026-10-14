@@ -1,0 +1,262 @@
+{
+  "tool": "visp_done",
+  "ok": true,
+  "data": {
+    "delivery": {
+      "status": "unresolved-product",
+      "summary": "Not complete: required product checks or assessments remain unresolved."
+    },
+    "nextCommand": "visp pr --feature 001-return-two-from-the-public",
+    "checkpoint": {
+      "candidate": "<CAN-1>",
+      "provenance": "First observed implementation; not a passing quality assessment. Preserve it when correcting behavior or visuals."
+    },
+    "warnings": [],
+    "committedChanges": [],
+    "feedbackPlan": {
+      "observationPlan": {
+        "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+        "sequence": [
+          "Real input → assert settled result → input again → assert settled result",
+          "If applicable: reset/cancel pending work → restart → outlive old completion; new state stays intact"
+        ],
+        "probes": [
+          {
+            "kind": "independent-result",
+            "status": "unassessed"
+          }
+        ],
+        "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+      },
+      "nextProbe": {
+        "kind": "independent-result",
+        "when": "The public value is two",
+        "expected": [
+          "The public value is two"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.",
+        "id": "PROBE-<HEX-1>"
+      },
+      "probeResponses": [],
+      "focus": "fix",
+      "research": {
+        "question": "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two",
+        "method": "Use the host's research capability for external facts, or a bounded local experiment for repository behavior. Choose whichever can resolve this question.",
+        "consume": "Update the existing brief decision with the conclusion, evidence, implementation implication and affected check; remove only the uncertainty actually resolved. Then build or correct the slice.",
+        "required": false
+      },
+      "trace": {
+        "question": "Which handler or state transition causes The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two?",
+        "command": "visp work --feature 001-return-two-from-the-public --task T001",
+        "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+      },
+      "findings": [
+        {
+          "dimension": "functional",
+          "problem": "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two",
+          "nextCheck": "Import the default export of src/value.mjs and compare it with two",
+          "outcomes": [
+            "O001"
+          ],
+          "required": true,
+          "evidence": [
+            "<UUID-1>"
+          ],
+          "phase": "product",
+          "subjectDigest": "<SHA256-1>",
+          "task": "T001",
+          "id": "FB-<HEX-2>",
+          "repeats": 1,
+          "reproductions": [],
+          "recheck": {
+            "advisory": true,
+            "kind": "check",
+            "check": "C001",
+            "status": "observed-unassessed",
+            "comparison": {
+              "change": "compare-observations",
+              "sameSubject": false,
+              "before": {
+                "runId": "<UUID-1>",
+                "subjectDigest": "<SHA256-1>",
+                "status": "passed",
+                "comparisonEnvironment": "<SHA256-2>",
+                "captureIds": []
+              },
+              "after": {
+                "runId": "<UUID-2>",
+                "subjectDigest": "<SHA256-3>",
+                "status": "passed",
+                "comparisonEnvironment": "<SHA256-2>",
+                "captureIds": []
+              }
+            },
+            "command": "visp verify --feature 001-return-two-from-the-public --task T001",
+            "guidance": "Replay the reported input and check a nearby affected behavior. Compare actual results; execution is not resolution. Historical IDs are references, not fresh evidence. This is advisory."
+          }
+        }
+      ],
+      "findingsRemaining": 0,
+      "gaps": [
+        "FB-<HEX-2>: functional: The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two. Next check: Import the default export of src/value.mjs and compare it with two"
+      ],
+      "gapsRemaining": 0,
+      "nextCheck": "Import the default export of src/value.mjs and compare it with two"
+    },
+    "next": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001",
+      "evidence": [
+        "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two. Next check: Import the default export of src/value.mjs and compare it with two"
+      ],
+      "mayEdit": true,
+      "action": "fix",
+      "completion": "handoff",
+      "command": "visp pr --feature 001-return-two-from-the-public",
+      "objective": "The independent review budget is spent. Run visp pr; the remaining findings go to a human reviewer",
+      "criticAdvice": {
+        "status": "unavailable",
+        "guidance": "Use the recorded findings to choose the next correction; delegate nothing and run no review command. VISP's reviewer cannot review a new version now: Feature critic call budget exhausted; unresolved. Follow `visp next`: it says when to run visp done again and when to hand off with visp pr.",
+        "findings": [
+          {
+            "dimension": "functional",
+            "problem": "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two",
+            "nextCheck": "Import the default export of src/value.mjs and compare it with two",
+            "outcomes": [
+              "O001"
+            ],
+            "required": true,
+            "evidence": [
+              "<UUID-1>"
+            ]
+          }
+        ],
+        "limitations": [],
+        "comparisons": []
+      }
+    },
+    "trace": {
+      "graph": [
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:expected",
+          "path": "checks/value.check.mjs",
+          "name": "expected",
+          "detail": "variable",
+          "startLine": 3,
+          "endLine": 3,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:name",
+          "path": "checks/value.check.mjs",
+          "name": "name",
+          "detail": "variable",
+          "startLine": 2,
+          "endLine": 2,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#file",
+          "path": "src/value.mjs",
+          "name": "value.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 3,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#file",
+          "path": "checks/value.check.mjs",
+          "name": "value.check.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 9,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#variable:value",
+          "path": "src/value.mjs",
+          "name": "value",
+          "detail": "variable",
+          "startLine": 1,
+          "endLine": 1,
+          "distance": 1
+        }
+      ],
+      "notes": []
+    },
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "subjectDigest": "<SHA256-3>",
+    "passed": false,
+    "closed": false,
+    "executions": [
+      {
+        "id": "<UUID-2>",
+        "comparisonEnvironment": "<SHA256-2>",
+        "check": "C001",
+        "task": "T001",
+        "subjectDigest": "<SHA256-3>",
+        "contractDigest": "<SHA256-4>",
+        "createdAt": "<TIME>",
+        "command": "node checks/value.check.mjs",
+        "provenance": "supervisor-executed",
+        "flip": {
+          "failsWithoutChange": "unchecked",
+          "reason": "baseline bytes unavailable for src/value.mjs",
+          "revertedFiles": [
+            "src/value.mjs"
+          ],
+          "preservedValidationFiles": [
+            "checks/value.check.mjs"
+          ],
+          "commands": []
+        },
+        "flipCacheKey": "<SHA256-5>",
+        "flipDurationMs": <N>,
+        "assertions": "agent-reported",
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": <N>,
+        "output": "value is 2"
+      }
+    ],
+    "outcomes": [
+      {
+        "id": "O001",
+        "statement": "The public value is two",
+        "priority": "must",
+        "behavior": "passed",
+        "review": "unassessed",
+        "requiredReview": false,
+        "satisfied": true
+      }
+    ],
+    "gaps": [
+      "FB-<HEX-2>: The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two. Import the default export of src/value.mjs and compare it with two"
+    ],
+    "journeyFeedback": {
+      "runs": [],
+      "omitted": 0
+    },
+    "behaviorChanges": {
+      "checks": [],
+      "omitted": 0
+    },
+    "flipDurationMs": <N>,
+    "critic": {
+      "reviewed": false,
+      "findings": [],
+      "callsRemaining": 0,
+      "reason": "Feature critic call budget exhausted; unresolved"
+    }
+  }
+}

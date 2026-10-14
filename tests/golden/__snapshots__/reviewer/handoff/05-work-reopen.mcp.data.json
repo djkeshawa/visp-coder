@@ -1,0 +1,276 @@
+{
+  "tool": "visp_work",
+  "ok": true,
+  "data": {
+    "skills": [],
+    "feedbackPlan": {
+      "observationPlan": {
+        "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+        "sequence": [
+          "Real input → assert settled result → input again → assert settled result",
+          "If applicable: reset/cancel pending work → restart → outlive old completion; new state stays intact"
+        ],
+        "probes": [
+          {
+            "kind": "independent-result",
+            "status": "unassessed"
+          }
+        ],
+        "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+      },
+      "nextProbe": {
+        "kind": "independent-result",
+        "when": "The public value is two",
+        "expected": [
+          "The public value is two"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.",
+        "id": "PROBE-<HEX-1>"
+      },
+      "probeResponses": [],
+      "focus": "fix",
+      "research": {
+        "question": "FB-<HEX-2>",
+        "method": "Use the host's research capability for external facts, or a bounded local experiment for repository behavior. Choose whichever can resolve this question.",
+        "consume": "Update the existing brief decision with the conclusion, evidence, implementation implication and affected check; remove only the uncertainty actually resolved. Then build or correct the slice.",
+        "required": false
+      },
+      "trace": {
+        "question": "Which handler or state transition causes FB-<HEX-2>?",
+        "command": "visp work --feature 001-return-two-from-the-public --task T001",
+        "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+      },
+      "findings": [
+        {
+          "dimension": "functional",
+          "problem": "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two",
+          "nextCheck": "Import the default export of src/value.mjs and compare it with two",
+          "outcomes": [
+            "O001"
+          ],
+          "required": true,
+          "evidence": [
+            "<UUID-1>"
+          ],
+          "phase": "product",
+          "subjectDigest": "<SHA256-1>",
+          "task": "T001",
+          "id": "FB-<HEX-2>",
+          "repeats": 1,
+          "reproductions": [],
+          "recheck": {
+            "advisory": true,
+            "kind": "check",
+            "check": "C001",
+            "status": "not-reobserved",
+            "before": {
+              "runId": "<UUID-1>",
+              "subjectDigest": "<SHA256-1>",
+              "status": "passed",
+              "comparisonEnvironment": "<SHA256-2>",
+              "captureIds": []
+            },
+            "command": "visp verify --feature 001-return-two-from-the-public --task T001",
+            "guidance": "Replay the reported input and check a nearby affected behavior. Compare actual results; execution is not resolution. Historical IDs are references, not fresh evidence. This is advisory."
+          }
+        }
+      ],
+      "findingsRemaining": 0,
+      "gaps": [],
+      "gapsRemaining": 0,
+      "nextCheck": "Import the default export of src/value.mjs and compare it with two"
+    },
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "originalRequest": "Make the public value module return two instead of one.",
+    "objective": "Return the promised value",
+    "outcomes": [
+      {
+        "id": "O001",
+        "kind": "functional",
+        "statement": "The public value is two",
+        "priority": "must",
+        "provenance": "user-stated",
+        "reviewRequired": false,
+        "expectations": []
+      }
+    ],
+    "examples": [],
+    "decisions": [],
+    "uncertainties": [],
+    "scope": {
+      "allowed": [
+        "src/value.mjs",
+        "checks/value.check.mjs"
+      ],
+      "expected": [
+        "src/value.mjs"
+      ],
+      "forbidden": []
+    },
+    "checks": [
+      {
+        "id": "C001",
+        "command": [
+          "node",
+          "checks/value.check.mjs"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "files": [
+          "src/value.mjs",
+          "checks/value.check.mjs"
+        ],
+        "environment": "node"
+      }
+    ],
+    "files": [
+      {
+        "path": "checks/value.check.mjs",
+        "content": "import * as product from \"../src/value.mjs\";\nconst name = process.argv[2] ?? \"value\";\nconst expected = name === \"label\" ? \"two\" : 2;\nif (product[name] === expected) console.log(name + \" is \" + expected);\nelse {\n  console.log(\"expected \" + expected + \", got \" + product[name]);\n  process.exitCode = 1;\n}\n",
+        "truncated": false
+      },
+      {
+        "path": "src/value.mjs",
+        "content": "export const value = 2;\n",
+        "truncated": false
+      }
+    ],
+    "graph": [
+      {
+        "kind": "entity",
+        "key": "checks/value.check.mjs#variable:expected",
+        "path": "checks/value.check.mjs",
+        "name": "expected",
+        "detail": "variable",
+        "startLine": 3,
+        "endLine": 3
+      },
+      {
+        "kind": "entity",
+        "key": "src/value.mjs#variable:value",
+        "path": "src/value.mjs",
+        "name": "value",
+        "detail": "variable",
+        "startLine": 1,
+        "endLine": 1
+      }
+    ],
+    "memory": [],
+    "notes": [],
+    "mayEdit": true,
+    "subjectDigest": "<SHA256-1>",
+    "reviewFeedback": [
+      {
+        "subjectDigest": "<SHA256-1>",
+        "current": true,
+        "assessments": [
+          {
+            "outcome": "O001",
+            "status": "failed",
+            "provenance": "agent-reported",
+            "expectations": [],
+            "summary": "Only the named export is two.",
+            "evidence": [
+              "<UUID-1>"
+            ]
+          }
+        ],
+        "summary": "The named export is two, but the default export is missing.",
+        "limitations": []
+      }
+    ],
+    "acceptanceBaseline": [],
+    "journeyFailures": [],
+    "journeyFeedback": {
+      "runs": [],
+      "omitted": 0
+    },
+    "feedback": [],
+    "budget": {
+      "tokenBudget": 12000,
+      "estimatedTokens": 2163,
+      "status": "within-budget",
+      "omitted": {
+        "files": 0,
+        "graphRows": 0,
+        "memory": 0,
+        "skills": 0,
+        "feedbackCharacters": 0
+      },
+      "sources": [
+        ".visp/features/001-return-two-from-the-public/brief.yaml",
+        ".visp/features/001-return-two-from-the-public/product-state.json",
+        ".visp/memory"
+      ]
+    },
+    "next": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001",
+      "evidence": [
+        "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two. Next check: Import the default export of src/value.mjs and compare it with two"
+      ],
+      "mayEdit": true,
+      "action": "fix",
+      "completion": "unresolved-product",
+      "command": "visp work --feature 001-return-two-from-the-public --task T001",
+      "objective": "The independent review budget is spent. VISP's independent reviewer cannot run again. The listed required findings are still open. Fix each reported problem, extend your checks to exercise it, and rerun visp done.",
+      "criticAdvice": {
+        "status": "unavailable",
+        "guidance": "Use the recorded findings to choose the next correction; delegate nothing and run no review command. VISP's reviewer cannot review a new version now: Feature critic call budget exhausted; unresolved. Follow `visp next`: it says when to run visp done again and when to hand off with visp pr.",
+        "findings": [
+          {
+            "dimension": "functional",
+            "problem": "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two",
+            "nextCheck": "Import the default export of src/value.mjs and compare it with two",
+            "outcomes": [
+              "O001"
+            ],
+            "required": true,
+            "evidence": [
+              "<UUID-1>"
+            ]
+          }
+        ],
+        "limitations": [],
+        "comparisons": []
+      }
+    },
+    "criticAdvice": {
+      "status": "unavailable",
+      "guidance": "Use the recorded findings to choose the next correction; delegate nothing and run no review command. VISP's reviewer cannot review a new version now: Feature critic call budget exhausted; unresolved. Follow `visp next`: it says when to run visp done again and when to hand off with visp pr.",
+      "findings": [
+        {
+          "dimension": "functional",
+          "problem": "The module has no default export\nConsequence: Callers that import the module's default value receive undefined, not two",
+          "nextCheck": "Import the default export of src/value.mjs and compare it with two",
+          "outcomes": [
+            "O001"
+          ],
+          "required": true,
+          "evidence": [
+            "<UUID-1>"
+          ]
+        }
+      ],
+      "limitations": [],
+      "comparisons": []
+    },
+    "independentTests": {
+      "status": "declined",
+      "reason": "The tester wrote no file: The request states one value; the worker's own check covers it."
+    }
+  },
+  "nextCommand": "visp_work {\"feature\":\"001-return-two-from-the-public\",\"task\":\"T001\"}",
+  "nextAction": {
+    "tool": "visp_work",
+    "arguments": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001"
+    }
+  }
+}
