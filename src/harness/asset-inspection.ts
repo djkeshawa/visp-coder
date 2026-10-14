@@ -9,13 +9,14 @@ import {
   CLAUDE_SETTINGS_FILE,
   inspectPreToolUseResidue,
 } from "./claude-settings.js";
+import { isCurrentGeneratedHook } from "./hooks.js";
 import type { AssetManifest } from "./install-types.js";
 import {
   mcpConfigFile as configFileForHarness,
   inspectMcpRegistrationResidue,
   MCP_CONFIG_FILE,
 } from "./mcp-registration.js";
-import { planFor } from "./targets.js";
+import { type Asset, planFor } from "./targets.js";
 
 export const CLAUDE_SETTINGS_REGISTRATION = `${CLAUDE_SETTINGS_FILE} (VISP PreToolUse registration)`;
 
@@ -210,6 +211,12 @@ export function sameAssetContent(
   return asset.executable
     ? current === asset.content
     : lineEndingsNormalized(current) === asset.content;
+}
+
+/** `sameAssetContent`, except that a generated hook may call the same build at another path. */
+export function isCurrentAsset(current: string, asset: Asset): boolean {
+  if (sameAssetContent(current, asset)) return true;
+  return asset.render !== undefined && isCurrentGeneratedHook(current, asset.render);
 }
 
 export async function readAssetManifest(

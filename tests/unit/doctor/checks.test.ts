@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { applyFileTransaction } from "../../../src/core/file-transaction.js";
 import { err, ok } from "../../../src/core/result.js";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import { type Check, type DoctorRuntime, runChecks } from "../../../src/doctor/checks.js";
 import { applyFixes } from "../../../src/doctor/fix.js";
 import { indexRepository } from "../../../src/graph/index.js";
@@ -147,6 +148,25 @@ describe("the enforcement check", () => {
     const state = await workspace.state();
     await applyFixes(state, [await check("enforcement")], { guardHandshake: healthyGuard });
     expect(await check("enforcement")).toMatchObject({ status: "ok" });
+  });
+  // nvm, npx or a local node_modules install the same build at another path.
+  it("counts hooks the same build wrote from another install path as installed", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    await workspace.write("elsewhere/cli.js", await readFile(runtimeIdentity().executable, "utf8"));
+    const elsewhere = join(workspace.root, "elsewhere/cli.js");
+    for (const hook of [CLAUDE_PRE_TOOL_USE_HOOK, ".git/hooks/pre-commit"]) {
+      const path = join(workspace.root, hook);
+      const content = await readFile(path, "utf8");
+      await writeFile(path, content.replaceAll(runtimeIdentity().executable, elsewhere));
+    }
+    expect(await check("enforcement")).toMatchObject({
+      status: "ok",
+      detail: expect.stringContaining("pre-commit"),
+    });
+    // Another build replaced that install: its guard answers are refused, so not healthy.
+    await workspace.write("elsewhere/cli.js", "// another build\n");
+    expect(await check("enforcement")).toMatchObject({ status: "warn" });
   });
   it("detects and repairs a deleted Codex MCP registration", async () => {
     await setConfigScalar((await workspace.state()).paths, "harness", "codex");

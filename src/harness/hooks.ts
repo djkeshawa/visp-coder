@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import {
   EXIT,
   GUARD_PROTOCOL_VERSION,
@@ -25,8 +26,8 @@ export const HOOK_TEMPLATE_VERSION = 16;
  * write before it happens, which is the only point where an out-of-scope edit
  * can still be prevented rather than merely reported.
  */
-export function renderPreToolUseHook(): string {
-  const cli = JSON.stringify(runtimeIdentity().executable);
+export function renderPreToolUseHook(executable = runtimeIdentity().executable): string {
+  const cli = JSON.stringify(executable);
   return `#!/usr/bin/env node
 // ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 // Refuses edits outside the active task's declared scope.
@@ -553,8 +554,11 @@ export function renderClaudeSettingsSnippet(hookPath: string): string {
 }
 
 /** Pre-commit hook: the last checkpoint before out-of-scope work is recorded. */
-export function renderPreCommitHook(chained = false): string {
-  const installedCli = shellLiteral(runtimeIdentity().executable);
+export function renderPreCommitHook(
+  chained = false,
+  executable = runtimeIdentity().executable,
+): string {
+  const installedCli = shellLiteral(executable);
   return `#!/bin/sh
 # ${HOOK_MARKER}; hook-version: ${HOOK_TEMPLATE_VERSION}
 # Refuses a commit whose staged files fall outside the active task's scope.
@@ -670,6 +674,48 @@ esac
 /** A generated shell hook must not let an interpreter path become shell syntax. */
 function shellLiteral(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+/**
+ * Whether `current` is the hook this build generates, wherever this build was installed.
+ * Every hook embeds the path of the CLI that wrote it, so the same build installed at another
+ * path (nvm, npx, a local node_modules) writes different bytes. The hook is re-rendered with
+ * its own path: the build ID, version and template must still match exactly. The CLI it calls
+ * must be this build too, since the hook refuses any other build's guard answer: another path
+ * must hold this build's entry file byte for byte (its chunk names are content hashes, so
+ * equal entry files mean the same build).
+ */
+export function isCurrentGeneratedHook(
+  current: string,
+  render: (executable: string) => string,
+): boolean {
+  const executable = embeddedExecutable(current);
+  return executable !== undefined && current === render(executable) && isThisBuildEntry(executable);
+}
+
+function isThisBuildEntry(path: string): boolean {
+  const own = runtimeIdentity().executable;
+  if (path === own) return existsSync(path);
+  try {
+    return readFileSync(path).equals(readFileSync(own));
+  } catch {
+    return false;
+  }
+}
+
+/** The CLI path a generated hook calls: the Node hooks' `cli` constant or pre-commit's guard call. */
+function embeddedExecutable(hook: string): string | undefined {
+  const node = /^const cli = (".*");$/m.exec(hook)?.[1];
+  if (node !== undefined) {
+    try {
+      const parsed: unknown = JSON.parse(node);
+      return typeof parsed === "string" ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const shell = /^output=\$\("\$node_runtime" '((?:[^']|'"'"')*)' guard /m.exec(hook)?.[1];
+  return shell?.replaceAll(`'"'"'`, "'");
 }
 
 /**

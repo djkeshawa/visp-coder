@@ -12,8 +12,8 @@ import {
   assetFingerprint,
   CLAUDE_SETTINGS_REGISTRATION,
   inspectForeignHarnessAssets,
+  isCurrentAsset,
   readAssetManifest,
-  sameAssetContent,
 } from "../harness/asset-inspection.js";
 import {
   CLAUDE_SETTINGS_FILE,
@@ -23,7 +23,12 @@ import {
 } from "../harness/claude-settings.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { verifyGuardHandshake } from "../harness/guard-handshake.js";
-import { HOOK_MARKER, renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
+import {
+  HOOK_MARKER,
+  isCurrentGeneratedHook,
+  renderPreCommitHook,
+  renderPreToolUseHook,
+} from "../harness/hooks.js";
 import { type InstallState, readInstallState } from "../harness/install-state.js";
 import { verifyRequestedMcp } from "../harness/install-verification.js";
 import { mcpConfigFile } from "../harness/mcp-registration.js";
@@ -139,7 +144,7 @@ async function inspectHarnessAssetFiles(
       result.missing.push(asset.path);
       continue;
     }
-    if (sameAssetContent(current.value, asset)) continue;
+    if (isCurrentAsset(current.value, asset)) continue;
 
     // Matching what we recorded means visp wrote it and the template has since
     // moved on. Anything else is the user's edit, which is theirs to keep.
@@ -389,7 +394,8 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
   const hookPath = `${STATE_DIR}/${DIR.hooks}/claude-pretooluse.mjs`;
   const script = await state.files.readTextIfExists(hookPath);
   if (!script.ok || script.value === undefined) return { inactive: "edit hook" };
-  if (script.value !== renderPreToolUseHook()) return { inactive: "edit hook (stale or edited)" };
+  if (!isCurrentGeneratedHook(script.value, renderPreToolUseHook))
+    return { inactive: "edit hook (stale or edited)" };
   const metadata = await state.files.metadata(hookPath);
   if (!metadata.ok || !isExecutableMode(metadata.value?.mode)) {
     return { inactive: "edit hook (not executable)" };
@@ -433,7 +439,10 @@ async function inspectPreCommitHook(state: WorkspaceState): Promise<SurfaceState
   if (!hook.ok) return { inactive: `pre-commit (${hook.error.message})` };
   const local = await state.files.readTextIfExists(`${resolved.value.absolute}.local`);
   if (!local.ok) return { inactive: `pre-commit (${local.error.message})` };
-  if (hook.value === renderPreCommitHook(local.value !== undefined)) {
+  if (
+    hook.value !== undefined &&
+    isCurrentGeneratedHook(hook.value, (cli) => renderPreCommitHook(local.value !== undefined, cli))
+  ) {
     const metadata = await state.files.metadata(resolved.value.absolute);
     if (metadata.ok && isExecutableMode(metadata.value?.mode)) return { active: "pre-commit" };
     return { inactive: "pre-commit (not executable)" };
