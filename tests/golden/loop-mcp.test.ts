@@ -18,6 +18,11 @@ it("walks the same loop through MCP tools", async () => {
   });
   await run.mcp("03-work-first", "visp_work");
   await run.mcp("04-work-again", "visp_work", { task: "T001" });
+  // What the worker is told before a write: the same decision the edit hook makes.
+  await run.mcp("04a-guard-in-scope", "visp_guard", { paths: ["src/value.mjs"] });
+  await run.mcp("04b-guard-out-of-scope", "visp_guard", {
+    paths: ["src/value.mjs", "src/other.mjs"],
+  });
   await run.mcp("05-done-failing", "visp_done");
   await project.setValue(2);
   await run.mcp("06-done-passing", "visp_done");
