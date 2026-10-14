@@ -9,7 +9,7 @@ import { afterAll, expect } from "vitest";
 import { parse, stringify } from "yaml";
 import { registerTools } from "../../../src/mcp/tools/index.js";
 import { outstandingFeedback } from "../../../src/workflow/product/findings.js";
-import { readTestsRecord } from "../../../src/workflow/product/independent-tests.js";
+import { readTestsRecord } from "../../../src/workflow/product/independent-tests-record.js";
 import { runProductNext } from "../../../src/workflow/product/status.js";
 import { type ProductRecord, readProductRecord } from "../../../src/workflow/product/store.js";
 import { type CliResult, runCli } from "../../unit/cli/support/cli.js";

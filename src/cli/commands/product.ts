@@ -13,11 +13,10 @@ import {
 } from "../../workflow/product/done-review.js";
 import {
   beginFeatureTester,
-  configuredTestsStarter,
   createProductFeatureChecked,
-  testsWaitMs,
   writeConfiguredTests,
 } from "../../workflow/product/independent-tests.js";
+import { configuredTestsStarter } from "../../workflow/product/independent-tests-starters.js";
 import {
   readProductBrief,
   runProductContext,
@@ -34,6 +33,7 @@ import {
   runProductReviewRequest,
   validateProductReviewRequest,
 } from "../../workflow/product/review-request.js";
+import { testsWaitMs } from "../../workflow/product/tester-session.js";
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {

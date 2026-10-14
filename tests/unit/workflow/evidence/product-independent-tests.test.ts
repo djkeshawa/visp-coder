@@ -14,24 +14,30 @@ import {
 } from "../../../../src/workflow/product/done-review.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import {
-  acceptanceProgress,
-  backgroundTests,
-  codexTester,
-  configuredTestsStarter,
   createProductFeatureWithTests,
-  type IndependentTester,
   independentTestsBeforeWork,
-  inlineTests,
+  startIndependentTests,
+  writeConfiguredTests,
+} from "../../../../src/workflow/product/independent-tests.js";
+import type {
+  IndependentTester,
+  TesterRequest,
+} from "../../../../src/workflow/product/independent-tests-model.js";
+import { acceptanceProgress } from "../../../../src/workflow/product/independent-tests-progress.js";
+import {
   readTestsRecord,
   saveTestsRecord,
-  startIndependentTests,
-  type TesterRequest,
-  writeConfiguredTests,
-  writeIndependentTests,
-} from "../../../../src/workflow/product/independent-tests.js";
+} from "../../../../src/workflow/product/independent-tests-record.js";
+import { writeIndependentTests } from "../../../../src/workflow/product/independent-tests-run.js";
+import {
+  backgroundTests,
+  configuredTestsStarter,
+  inlineTests,
+} from "../../../../src/workflow/product/independent-tests-starters.js";
 import { runProductReport } from "../../../../src/workflow/product/index.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { TESTER_BROWSER_KIT } from "../../../../src/workflow/product/tester-browser-kit.js";
+import { codexTester } from "../../../../src/workflow/product/tester-session.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { compactProductReply } from "../../../../src/workflow/product-compact-text.js";
 import { productWorkspace } from "../../support/product-workspace.js";
