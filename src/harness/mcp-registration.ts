@@ -80,6 +80,8 @@ export function mcpConfigFile(harness: Harness): string {
 export interface PlannedMcpRegistration {
   readonly status: RegistrationStatus;
   readonly content?: string;
+  /** Codex: a customized VISP entry VISP could not read. */
+  readonly unreadable?: true;
 }
 
 export type McpUnregistrationStatus = "absent" | "removed" | "customized" | "malformed";

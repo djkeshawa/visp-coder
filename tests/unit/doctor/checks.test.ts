@@ -186,6 +186,14 @@ describe("the enforcement check", () => {
     const detail = repairs.map((repair) => repair.detail).join(" ");
     expect(detail).not.toContain("add [mcp_servers.visp] manually");
     expect(detail).toContain(`args = [${cli}, "serve", "--mcp"]`);
+
+    // A table VISP cannot read is not said to start another build.
+    await writeFile(config, '[mcp_servers.visp]\ncommand = "node"\nenv.TOKEN = "x"\n');
+    const unreadable = await check("mcp registration");
+    expect(unreadable.detail).toContain("VISP could not read");
+    expect(unreadable.detail).not.toContain("does not start this VISP build");
+    const repaired = await applyFixes(await workspace.state(), [unreadable]);
+    expect(repaired.map((repair) => repair.detail).join(" ")).toContain("VISP could not read");
   });
 
   it("keeps a project or environment recovery instead of prescribing a global reinstall", async () => {

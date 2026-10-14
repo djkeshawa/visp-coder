@@ -10,6 +10,7 @@ import {
   MCP_SERVER_NAME,
   mcpConfigFile,
   OPENCODE_CONFIG_FILE,
+  planMcpRegistration,
   planMcpUnregistration,
 } from "../../../src/harness/mcp-registration.js";
 import { registerMcpServer } from "../support/writers.js";
@@ -322,6 +323,45 @@ describe("Codex MCP registration", () => {
     expect(result.ok && result.value).toBe("customized");
   });
 
+  // Codex users keep long instructions in multi-line strings; one anywhere in the file must
+  // neither hide a correct table nor stop VISP adding its own.
+  it("reads a hand-written table and appends its own past multi-line strings", async () => {
+    const cli = JSON.stringify(runtimeIdentity().executable);
+    const instructions =
+      "developer_instructions = \"\"\"\nNever edit [mcp_servers.visp] by hand.\n[mcp_servers.visp]\n\"\"\"\nnote = '''x'''\n";
+    const table = `[mcp_servers.visp]\ncommand = "node"\nargs = [${cli}, "serve", "--mcp"]\n`;
+    await writeFile(join(root, CODEX_CONFIG_FILE), `${instructions}\n${table}`);
+    expect((await registerMcpServer(root, false, "codex")).ok).toBe(true);
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(`${instructions}\n${table}`);
+    const planned = planMcpRegistration(`${instructions}\n${table}`, false, "codex");
+    expect(planned.ok && planned.value.status).toBe("current");
+
+    await writeFile(join(root, CODEX_CONFIG_FILE), instructions);
+    const added = await registerMcpServer(root, false, "codex");
+    expect(added.ok && added.value).toBe("added");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toContain(
+      `${instructions.trimEnd()}\n\n# visp: mcp:start`,
+    );
+  });
+
+  // A second [mcp_servers.visp] after `visp = {...}` under [mcp_servers] is a duplicate key.
+  it("does not append a table when [mcp_servers] already holds a visp key", async () => {
+    const current = '[mcp_servers]\nvisp = { command = "node", args = ["serve"] }\n';
+    await writeFile(join(root, CODEX_CONFIG_FILE), current);
+    const result = await registerMcpServer(root, false, "codex");
+    expect(result.ok && result.value).toBe("customized");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
+  });
+
+  it.each([
+    ["a dotted key", '[mcp_servers.visp]\ncommand = "node"\nenv.TOKEN = "x"\n'],
+    ["a \\U escape", '[mcp_servers.visp]\ncommand = "\\U0001F600"\n'],
+    ["an inline table under [mcp_servers]", '[mcp_servers]\nvisp = { command = "node" }\n'],
+  ])("marks a VISP entry it cannot read with %s as unreadable", (_name, current) => {
+    const planned = planMcpRegistration(current, false, "codex");
+    expect(planned.ok && planned.value).toMatchObject({ status: "customized", unreadable: true });
+  });
+
   it("leaves a customized Codex entry alone unless forced", async () => {
     const current = `[mcp_servers.visp]\ncommand = "/custom/visp"\nargs = ["serve", "--mcp"]\n`;
     await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
@@ -355,13 +395,23 @@ describe("Codex MCP registration", () => {
   it.each([
     '[mcp_servers."visp"]\ncommand = "/custom/visp"\n',
     '[mcp_servers.visp]\ncommand = "/custom/visp"\n\n[mcp_servers.visp.env]\nTOKEN = "set"\n',
-    'note = """[mcp_servers.visp]\ncommand = \\"hidden\\"""\n',
   ])("refuses ambiguous Codex TOML without forceful rewriting: %s", async (current) => {
     await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
 
     const result = await registerMcpServer(root, true, "codex");
 
     expect(result.ok && result.value).toBe("customized");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
+  });
+
+  // The closing quotes are escaped, so this string never ends: nothing is safe to append to.
+  it("leaves Codex TOML with an unterminated multi-line string alone", async () => {
+    const current = 'note = """[mcp_servers.visp]\ncommand = \\"hidden\\"""\n';
+    await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
+
+    const result = await registerMcpServer(root, true, "codex");
+
+    expect(result.ok && result.value).toBe("malformed");
     expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
   });
 });

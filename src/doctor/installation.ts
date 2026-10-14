@@ -21,7 +21,10 @@ import {
   hookCommand,
   preToolUseRegistration,
 } from "../harness/claude-settings.js";
-import { codexRegistrationAdvice } from "../harness/codex-mcp-registration.js";
+import {
+  codexRegistrationAdvice,
+  codexRegistrationProblem,
+} from "../harness/codex-mcp-registration.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { verifyGuardHandshake } from "../harness/guard-handshake.js";
 import { HOOK_MARKER, renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
@@ -125,12 +128,13 @@ export async function checkMcpRegistration(state: WorkspaceState): Promise<Check
   if (verified.ok)
     return { name: "mcp registration", status: "ok", detail: `${path} registers VISP` };
   // `doctor --fix` never rewrites a Codex table VISP did not write, so advising it would loop.
-  if (await isCustomizedCodexTable(state))
+  const customized = await customizedCodexEntry(state);
+  if (customized)
     return {
       name: "mcp registration",
       status: "warn",
-      detail: `${path} has an [mcp_servers.visp] table VISP did not write, and it does not start this VISP build`,
-      recovery: `In ${path}, ${codexRegistrationAdvice()}`,
+      detail: `${path} ${codexRegistrationProblem(customized.unreadable)}`,
+      recovery: `In ${path}, ${codexRegistrationAdvice(customized.unreadable)}`,
     };
   return {
     name: "mcp registration",
@@ -140,12 +144,16 @@ export async function checkMcpRegistration(state: WorkspaceState): Promise<Check
   };
 }
 
-async function isCustomizedCodexTable(state: WorkspaceState): Promise<boolean> {
-  if (state.config.harness !== "codex") return false;
+async function customizedCodexEntry(
+  state: WorkspaceState,
+): Promise<{ readonly unreadable: boolean } | undefined> {
+  if (state.config.harness !== "codex") return undefined;
   const current = await state.files.readTextIfExists(CODEX_CONFIG_FILE);
-  if (!current.ok) return false;
+  if (!current.ok) return undefined;
   const planned = planMcpRegistration(current.value, false, "codex");
-  return planned.ok && planned.value.status === "customized";
+  return planned.ok && planned.value.status === "customized"
+    ? { unreadable: planned.value.unreadable === true }
+    : undefined;
 }
 
 async function inspectHarnessAssetFiles(

@@ -19,6 +19,8 @@ export type CodexRegistrationStatus = "added" | "current" | "customized" | "repl
 export interface CodexRegistrationPlan {
   readonly status: CodexRegistrationStatus;
   readonly content?: string;
+  /** A customized VISP entry VISP could not read, rather than one that starts another build. */
+  readonly unreadable?: true;
 }
 
 export interface CodexRegistrationResidue {
@@ -43,17 +45,25 @@ export function planCodexMcpRegistration(
     return ok({ status: "added", content: CODEX_MCP_ENTRY });
   }
   const owned = current.match(OWNED_BLOCK)?.[0];
-  if (owned !== undefined) {
-    if (owned === CODEX_MCP_ENTRY) return ok({ status: "current" });
-    if (owned === LEGACY_CODEX_MCP_ENTRY || (force && MANAGED_CODEX_MCP_ENTRY.test(owned)))
-      return ok({ status: "replaced", content: current.replace(owned, CODEX_MCP_ENTRY) });
-    return ok({ status: "customized" });
+  if (owned !== undefined) return ok(planOwnedBlock(current, owned, force));
+  // A multi-line string that never ends leaves nothing safe to read or append to.
+  const masked = structure(current);
+  if (masked === undefined) return ok({ status: "malformed" });
+  if (referencesVisp(masked)) {
+    const state = registrationState(current, masked);
+    if (state === "current") return ok({ status: "current" });
+    return ok({ status: "customized", ...(state === "unreadable" ? { unreadable: true } : {}) });
   }
-  if (referencesVisp(current))
-    return ok({ status: startsThisBuild(current) ? "current" : "customized" });
-  if (/^\s*mcp_servers\s*=/mu.test(current) || current.includes('"""'))
-    return ok({ status: "malformed" });
+  if (/^\s*mcp_servers\s*=/mu.test(masked)) return ok({ status: "malformed" });
   return ok({ status: "added", content: `${current.trimEnd()}\n\n${CODEX_MCP_ENTRY}` });
+}
+
+/** VISP's own marked block: current, replaced when an earlier build wrote it, else edited. */
+function planOwnedBlock(current: string, owned: string, force: boolean): CodexRegistrationPlan {
+  if (owned === CODEX_MCP_ENTRY) return { status: "current" };
+  if (owned === LEGACY_CODEX_MCP_ENTRY || (force && MANAGED_CODEX_MCP_ENTRY.test(owned)))
+    return { status: "replaced", content: current.replace(owned, CODEX_MCP_ENTRY) };
+  return { status: "customized" };
 }
 
 /** Remove only the block VISP created; the rest of the Codex TOML is retained. */
@@ -67,7 +77,9 @@ export function planCodexMcpUnregistration(current: string | undefined): {
     const rest = current.replace(owned, "").replace(/\n{3,}/gu, "\n\n");
     return { status: "removed", content: rest.trim() === "" ? "" : `${rest.trimEnd()}\n` };
   }
-  return referencesVisp(current) ? { status: "customized" } : { status: "absent" };
+  return referencesVisp(structure(current) ?? current)
+    ? { status: "customized" }
+    : { status: "absent" };
 }
 
 export function inspectCodexMcpRegistrationResidue(
@@ -79,7 +91,7 @@ export function inspectCodexMcpRegistrationResidue(
   const owned = current.match(OWNED_BLOCK)?.[0];
   if (owned !== undefined && isGenerated(owned))
     return { exact: true, customized: false, malformed: false };
-  return referencesVisp(current)
+  return referencesVisp(structure(current) ?? current)
     ? { exact: false, customized: true, malformed: false }
     : { exact: false, customized: false, malformed: false };
 }
@@ -92,13 +104,101 @@ function isGenerated(block: string): boolean {
   );
 }
 
-function referencesVisp(source: string): boolean {
-  return source.includes("# visp: mcp:") || /mcp_servers\s*\.\s*["']?visp\b/u.test(source);
+/** A VISP server entry in any form: VISP's block, a `mcp_servers.visp` table or dotted key, or `visp = ...` under `[mcp_servers]`. */
+function referencesVisp(masked: string): boolean {
+  return (
+    masked.includes("# visp: mcp:") ||
+    /mcp_servers\s*\.\s*["']?visp\b/u.test(masked) ||
+    vispUnderServersTable(masked)
+  );
 }
 
-/** What to do about a `[mcp_servers.visp]` table VISP did not write and cannot use. */
-export function codexRegistrationAdvice(): string {
-  return `set command = "node" and args = ${CODEX_MCP_ARGS} in its [mcp_servers.visp] table, or delete that table and rerun visp install`;
+const SERVERS_TABLE = /^[ \t]*\[[ \t]*mcp_servers[ \t]*\][ \t]*(?:#.*)?$/gmu;
+
+function vispUnderServersTable(masked: string): boolean {
+  for (const header of masked.matchAll(SERVERS_TABLE)) {
+    const body = masked.slice((header.index ?? 0) + header[0].length);
+    const next = body.search(/^[ \t]*\[/mu);
+    if (/^[ \t]*(?:visp|"visp"|'visp')[ \t]*=/mu.test(next < 0 ? body : body.slice(0, next)))
+      return true;
+  }
+  return false;
+}
+
+const MULTI_LINE_DELIMITERS = ['"""', "'''"] as const;
+
+/**
+ * The source with the contents of multi-line strings blanked (lengths and line breaks kept),
+ * so headers and keys can be found by line without text inside a string counting. Undefined
+ * when a string never ends.
+ */
+function structure(source: string): string | undefined {
+  let out = "";
+  let at = 0;
+  while (at < source.length) {
+    const delimiter = MULTI_LINE_DELIMITERS.find((candidate) => source.startsWith(candidate, at));
+    if (delimiter) {
+      const end = multiLineEnd(source, at + 3, delimiter);
+      if (end === undefined) return undefined;
+      out += `${delimiter}${source.slice(at + 3, end - 3).replace(/[^\n]/gu, " ")}${delimiter}`;
+      at = end;
+      continue;
+    }
+    // A one-line string or a comment is copied as it is; only its end matters, so a `"""`
+    // inside it does not start a multi-line string.
+    const end = oneLineEnd(source, at);
+    out += source.slice(at, end);
+    at = end;
+  }
+  return out;
+}
+
+/** Past the closing delimiter, which may follow up to two quotes of the content. */
+function multiLineEnd(source: string, from: number, delimiter: string): number | undefined {
+  for (let at = from; at < source.length; at++) {
+    if (delimiter === '"""' && source[at] === "\\") {
+      at++;
+      continue;
+    }
+    if (!source.startsWith(delimiter, at)) continue;
+    let end = at + 3;
+    for (let extra = 0; extra < 2 && source[end] === delimiter[0]; extra++) end++;
+    return end;
+  }
+  return undefined;
+}
+
+/** The end of the token at `from`: a one-line string, a comment, or one character. */
+function oneLineEnd(source: string, from: number): number {
+  const char = source[from];
+  if (char === "#") {
+    const newline = source.indexOf("\n", from);
+    return newline < 0 ? source.length : newline;
+  }
+  if (char !== '"' && char !== "'") return from + 1;
+  for (let at = from + 1; at < source.length; at++) {
+    if (source[at] === "\n") return at;
+    if (char === '"' && source[at] === "\\") {
+      at++;
+      continue;
+    }
+    if (source[at] === char) return at + 1;
+  }
+  return source.length;
+}
+
+/** What to do about a VISP server entry VISP did not write and cannot use. */
+export function codexRegistrationAdvice(unreadable = false): string {
+  return unreadable
+    ? `write it as a [mcp_servers.visp] table with command = "node" and args = ${CODEX_MCP_ARGS}, without dotted keys or multi-line strings, or delete it and rerun visp install`
+    : `set command = "node" and args = ${CODEX_MCP_ARGS} in its [mcp_servers.visp] table, or delete that table and rerun visp install`;
+}
+
+/** The problem with a VISP server entry VISP did not write, as doctor and install say it. */
+export function codexRegistrationProblem(unreadable = false): string {
+  return unreadable
+    ? "has a VISP server entry VISP could not read"
+    : "has an [mcp_servers.visp] table VISP did not write, and it does not start this VISP build";
 }
 
 /**
@@ -106,12 +206,11 @@ export function codexRegistrationAdvice(): string {
  * from its command and arguments alone, so those decide: `node` (by name or path) running this
  * build's CLI (by path or a link to it) with `serve --mcp`. Other keys may differ.
  */
-function startsThisBuild(source: string): boolean {
-  const table = handWrittenTable(source);
-  if (!table) return false;
+function registrationState(source: string, masked: string): "current" | "different" | "unreadable" {
+  const table = handWrittenTable(source, masked);
+  if (!table) return "unreadable";
   const { command, args } = table;
-  return (
-    typeof command === "string" &&
+  return typeof command === "string" &&
     ["node", "node.exe"].includes(command.split(/[\\/]/u).pop() ?? "") &&
     Array.isArray(args) &&
     args.length === 3 &&
@@ -119,7 +218,8 @@ function startsThisBuild(source: string): boolean {
     sameExecutable(args[0]) &&
     args[1] === "serve" &&
     args[2] === "--mcp"
-  );
+    ? "current"
+    : "different";
 }
 
 function sameExecutable(path: string): boolean {
@@ -136,14 +236,12 @@ const VISP_TABLE =
   /^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:visp|"visp"|'visp')[ \t]*\][ \t]*(?:#.*)?$/gmu;
 
 /** The keys of the one `[mcp_servers.visp]` table, or undefined when it cannot be read safely. */
-function handWrittenTable(source: string): Record<string, unknown> | undefined {
-  // A multi-line string could hold text that looks like a table header.
-  if (source.includes('"""') || source.includes("'''")) return undefined;
-  const text = source.replaceAll("\r\n", "\n");
-  const headers = [...text.matchAll(VISP_TABLE)];
+function handWrittenTable(source: string, masked: string): Record<string, unknown> | undefined {
+  // Headers are found where no string can hide one; values are read from the source.
+  const headers = [...masked.matchAll(VISP_TABLE)];
   const header = headers[0];
   if (headers.length !== 1 || header?.index === undefined) return undefined;
-  return readTableBody(text.slice(header.index + header[0].length));
+  return readTableBody(source.slice(header.index + header[0].length).replaceAll("\r\n", "\n"));
 }
 
 /** Opaque stand-in for a value VISP does not need to understand, such as a number. */

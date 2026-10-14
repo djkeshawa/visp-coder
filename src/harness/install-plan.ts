@@ -37,7 +37,7 @@ import {
   planPreToolUseRegistration,
   planPreToolUseUnregistration,
 } from "./claude-settings.js";
-import { codexRegistrationAdvice } from "./codex-mcp-registration.js";
+import { codexRegistrationAdvice, codexRegistrationProblem } from "./codex-mcp-registration.js";
 import { preCommitHookPath } from "./git-hook.js";
 import {
   HOOK_MARKER,
@@ -751,7 +751,7 @@ async function planMcp(
     if (options.harness === "codex") {
       plan.manualSteps.push(
         registration.value.status === "customized"
-          ? `${path} has an [mcp_servers.visp] table VISP did not write, and it does not start this VISP build: ${codexRegistrationAdvice()}. Other installation assets will still be installed.`
+          ? `${path} ${codexRegistrationProblem(registration.value.unreadable)}: ${codexRegistrationAdvice(registration.value.unreadable)}. Other installation assets will still be installed.`
           : `${path} could not be merged; add [mcp_servers.visp] manually or rerun visp install --no-mcp. Other installation assets will still be installed.`,
       );
       return ok(undefined);
