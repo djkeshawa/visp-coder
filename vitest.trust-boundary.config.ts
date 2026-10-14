@@ -117,6 +117,7 @@ const trustBoundaryTests = [
   "tests/unit/harness/guard-handshake.test.ts",
   "tests/unit/harness/install-profiles.test.ts",
   "tests/unit/harness/install-preview.test.ts",
+  "tests/unit/harness/install-plan.test.ts",
   "tests/unit/harness/install-state.test.ts",
   "tests/unit/harness/install-transaction.test.ts",
   "tests/unit/harness/install-verification.test.ts",
