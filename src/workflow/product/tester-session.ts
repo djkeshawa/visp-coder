@@ -4,7 +4,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { run } from "../../core/exec.js";
 import { matchesPattern, normalizePath } from "../../core/patterns.js";
 import { SECRET_FILES } from "../../core/redaction.js";
-import { sweepStaleTempDirectories } from "../../core/stale-temp.js";
+import { sweepAbandonedCredentialHomes, sweepStaleTempDirectories } from "../../core/stale-temp.js";
 import type { WorkspaceState } from "../state.js";
 import {
   CLAUDE_HOSTS,
@@ -116,6 +116,7 @@ export const CLAUDE_EXISTING_CODE =
 /** One tester session in a fresh temporary directory, removed afterwards. */
 async function testerSession(session: (directory: string) => Promise<unknown>): Promise<unknown> {
   await sweepStaleTempDirectories(STALE_TESTER_NAMES, STALE_TESTER_MS);
+  await sweepAbandonedCredentialHomes();
   const directory = await mkdtemp(join(tmpdir(), "visp-tester-"));
   const started = Date.now();
   try {
