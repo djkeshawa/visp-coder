@@ -58,15 +58,34 @@ export function isDerivedByproduct(path: string): boolean {
  * whatever the configuration blocks. The scope check reads the same snapshot.
  */
 export function byproductProtection(workspace: WorkspaceState, brief?: ProductBrief): string[] {
-  return [
-    ...sourceInputPatterns(workspace, brief),
-    ...(brief?.slices.flatMap((slice) => slice.scope.forbidden) ?? []),
-    ...workspace.config.workflow.blockedPaths.flatMap((rule) => [
-      rule,
-      `${rule}/**`,
-      ...(rule.includes("/") ? [] : [`**/${rule}`, `**/${rule}/**`]),
-    ]),
-  ];
+  const protection = hostFileProtection(workspace, brief);
+  return [...protection.named, ...protection.guarded];
+}
+
+/**
+ * The same protection, split: `named` are the scope and check inputs, which protect another
+ * host's file only when they name it; `guarded` are forbidden and blocked paths, which always do.
+ */
+export function hostFileProtection(
+  workspace: WorkspaceState,
+  brief?: ProductBrief,
+): HostFileProtection {
+  return {
+    named: sourceInputPatterns(workspace, brief),
+    guarded: [
+      ...(brief?.slices.flatMap((slice) => slice.scope.forbidden) ?? []),
+      ...workspace.config.workflow.blockedPaths.flatMap((rule) => [
+        rule,
+        `${rule}/**`,
+        ...(rule.includes("/") ? [] : [`**/${rule}`, `**/${rule}/**`]),
+      ]),
+    ],
+  };
+}
+
+export interface HostFileProtection {
+  readonly named: readonly string[];
+  readonly guarded: readonly string[];
 }
 
 /** Only an untracked, undeclared, unprotected listed path is skipped; tracked files are hashed. */
@@ -108,22 +127,38 @@ function hostFile(
  * projects mid-run; as product files they made an acceptance stale and failed `visp done`
  * with a scope violation the worker could not resolve. Only untracked files are skipped,
  * never the configured host's own files, which are VISP's enforcement surface, and never a
- * protected path: one a slice scope names (a request to write an AGENTS.md), forbids or the
- * configuration blocks, so the scope check still sees it.
+ * protected path: one a slice scope or check names (a request to write an AGENTS.md), forbids
+ * or the configuration blocks, so the scope check still sees it. A catch-all or extension
+ * pattern (`**`, the light path's scope, or `*.md`) does not name it.
  */
 export function foreignHostFile(
   path: string,
   tracked: boolean,
   harness: string,
-  protection: readonly string[],
+  protection: HostFileProtection,
 ): boolean {
   const own = HOST_FILES[harness];
-  if (tracked || !own || matchesAny(path, protection)) return false;
+  if (tracked || !own || matchesAny(path, protection.guarded)) return false;
   const normalized = normalizePath(path);
+  if (protection.named.some((pattern) => namesPath(pattern, normalized))) return false;
   return (
     !hostFile(normalized, own) &&
     Object.entries(HOST_FILES).some(
       ([name, host]) => name !== harness && hostFile(normalized, host),
     )
+  );
+}
+
+/** The pattern matches the path through a literal leading part that is the path or a parent of it. */
+function namesPath(pattern: string, path: string): boolean {
+  const segments = normalizePath(pattern)
+    .replace(/^(?:\.\/)+/, "")
+    .split("/");
+  const glob = segments.findIndex((segment) => /[*?[\]{}!]/.test(segment));
+  const literal = (glob < 0 ? segments : segments.slice(0, glob)).join("/");
+  return (
+    literal !== "" &&
+    (path === literal || path.startsWith(`${literal}/`)) &&
+    matchesAny(path, [pattern])
   );
 }

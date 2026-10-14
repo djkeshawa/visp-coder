@@ -1,7 +1,12 @@
 import { workingTreeChanges } from "../../core/git.js";
 import { matchesAny } from "../../core/patterns.js";
 import type { WorkspaceState } from "../state.js";
-import { byproductProtection, foreignHostFile, skippedByproduct } from "./byproducts.js";
+import {
+  byproductProtection,
+  foreignHostFile,
+  hostFileProtection,
+  skippedByproduct,
+} from "./byproducts.js";
 import { unchangedInheritedPaths } from "./inherited-changes.js";
 import type { ProductBrief } from "./model.js";
 import { declaredSourcePatterns } from "./source-inputs.js";
@@ -14,6 +19,7 @@ export async function productInputWarnings(
   if (!changes.ok) return [`Could not inspect untracked product inputs: ${changes.error.message}`];
   const patterns = declaredSourcePatterns(brief);
   const protection = byproductProtection(workspace, brief);
+  const hostProtection = hostFileProtection(workspace, brief);
   const inherited = await unchangedInheritedPaths(workspace, brief.feature);
   const outside = changes.value.files.filter(
     (file) =>
@@ -23,7 +29,7 @@ export async function productInputWarnings(
       !matchesAny(file.path, patterns) &&
       // Untracked tool output (caches, logs) is not part of the evidence, so it is not a warning.
       !skippedByproduct(file.path, false, protection) &&
-      !foreignHostFile(file.path, false, workspace.config.harness, protection),
+      !foreignHostFile(file.path, false, workspace.config.harness, hostProtection),
   );
   const first = outside[0];
   return first

@@ -26,16 +26,34 @@ async function paths(workspace: TestWorkspace, brief: ProductBrief) {
 
 describe("another coding host's files", () => {
   it("are recognized only when untracked and not the configured host's own", () => {
+    const none = { named: [], guarded: [] };
     for (const path of ["AGENTS.md", ".codex/hooks.json", ".agents/skills/x/SKILL.md", "GEMINI.md"])
-      expect(foreignHostFile(path, false, "claude-code", []), path).toBe(true);
+      expect(foreignHostFile(path, false, "claude-code", none), path).toBe(true);
     for (const path of ["CLAUDE.md", ".claude/settings.json", "src/AGENTS.md", "docs/agents.md"])
-      expect(foreignHostFile(path, false, "claude-code", []), path).toBe(false);
-    expect(foreignHostFile("AGENTS.md", true, "claude-code", [])).toBe(false);
-    expect(foreignHostFile("AGENTS.md", false, "codex", [])).toBe(false);
-    expect(foreignHostFile(".claude/settings.json", false, "codex", [])).toBe(true);
-    expect(foreignHostFile("AGENTS.md", false, "generic", [])).toBe(false);
-    expect(foreignHostFile("AGENTS.md", false, "claude-code", ["AGENTS.md"])).toBe(false);
-    expect(foreignHostFile(".codex/hooks.json", false, "claude-code", [".codex/**"])).toBe(false);
+      expect(foreignHostFile(path, false, "claude-code", none), path).toBe(false);
+    expect(foreignHostFile("AGENTS.md", true, "claude-code", none)).toBe(false);
+    expect(foreignHostFile("AGENTS.md", false, "codex", none)).toBe(false);
+    expect(foreignHostFile(".claude/settings.json", false, "codex", none)).toBe(true);
+    expect(foreignHostFile("AGENTS.md", false, "generic", none)).toBe(false);
+    const named = (patterns: string[]) => ({ named: patterns, guarded: [] });
+    expect(foreignHostFile("AGENTS.md", false, "claude-code", named(["AGENTS.md"]))).toBe(false);
+    expect(foreignHostFile(".codex/hooks.json", false, "claude-code", named([".codex/**"]))).toBe(
+      false,
+    );
+    expect(
+      foreignHostFile(".codex/hooks.json", false, "claude-code", {
+        named: [],
+        guarded: ["**/.codex/**"],
+      }),
+    ).toBe(false);
+    // A catch-all or extension pattern does not name another host's file.
+    for (const pattern of ["**", "**/*", "*", "./**", "./**/*", "**/*.md", "*.md"])
+      expect(foreignHostFile("AGENTS.md", false, "claude-code", named([pattern])), pattern).toBe(
+        true,
+      );
+    expect(
+      foreignHostFile(".codex/sub/x.toml", false, "claude-code", named([".codex/*.json"])),
+    ).toBe(true);
   });
 
   // A desktop app importing the project wrote these mid-run; `visp done` then failed with a
@@ -89,6 +107,23 @@ describe("another coding host's files", () => {
     );
     if (!blocked.ok) throw new Error(blocked.error.message);
     expect(Object.keys(blocked.value)).toContain("GEMINI.md");
+  });
+
+  // The light path's catch-all scope says nothing about another host's files.
+  it("are skipped under a catch-all slice scope", async () => {
+    const { workspace, brief } = await productWorkspace();
+    workspaces.push(workspace);
+    await workspace.write("AGENTS.md", "# Imported\n");
+    await workspace.write(".codex/config.toml", "model = 'x'\n");
+    for (const allowed of [["**"], ["**/*"], ["./**"], ["*", "src/**", "test/**"]]) {
+      const listed = await paths(workspace, {
+        ...brief,
+        slices: brief.slices.map((slice) => ({ ...slice, scope: { ...slice.scope, allowed } })),
+      });
+      expect(listed, allowed.join()).not.toContain("AGENTS.md");
+      expect(listed, allowed.join()).not.toContain(".codex/config.toml");
+      expect(listed, allowed.join()).toContain("src/value.mjs");
+    }
   });
 
   it("stay product once committed", async () => {

@@ -100,6 +100,30 @@ it("lists only the other host's files VISP leaves out of the product", async () 
   });
 });
 
+it("lists another host's files under the light path's catch-all scope", async () => {
+  await workspace.destroy();
+  const product = await productWorkspace();
+  workspace = product.workspace;
+  await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+  workspace.commit("configure Claude Code");
+  const revised = await updateProductBrief(await workspace.state(), {
+    brief: {
+      ...product.brief,
+      slices: product.brief.slices.map((slice) => ({
+        ...slice,
+        scope: { ...slice.scope, allowed: ["**"] },
+      })),
+    },
+    reason: "Work the whole request as one slice",
+  });
+  expect(revised.ok).toBe(true);
+  await workspace.write("AGENTS.md", "# Imported\n");
+  expect(await check("other host files")).toMatchObject({
+    status: "ok",
+    detail: "VISP ignores these as product: AGENTS.md; no action needed",
+  });
+});
+
 it("reports Codex hook trust as unknown until the project and hooks are trusted", async () => {
   await setConfigScalar((await workspace.state()).paths, "harness", "codex");
   const codexHome = join(workspace.root, "codex-home");

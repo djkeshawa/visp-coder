@@ -18,7 +18,12 @@ import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
-import { byproductProtection, foreignHostFile, skippedByproduct } from "./byproducts.js";
+import {
+  byproductProtection,
+  foreignHostFile,
+  hostFileProtection,
+  skippedByproduct,
+} from "./byproducts.js";
 import { isBrowserCheckCommand } from "./check-command.js";
 import { declaredCheckImages } from "./check-image-paths.js";
 import { inheritedPaths } from "./inherited-record.js";
@@ -62,6 +67,7 @@ export async function productSourceSnapshot(
   const algorithm =
     [...objects.value.entries.values()][0]?.object.length === 64 ? "sha256" : "sha1";
   const protection = byproductProtection(workspace, selected.value);
+  const hostProtection = hostFileProtection(workspace, selected.value);
   // A declared check image the check writes is output. One that existed before the feature
   // started (committed, or uncommitted work it started from) stays product, so declaring an
   // existing file cannot hide later edits to it from freshness and scope checks.
@@ -80,7 +86,7 @@ export async function productSourceSnapshot(
         path,
         objects.value.entries.has(path),
         workspace.config.harness,
-        protection,
+        hostProtection,
       ) &&
       !skippedByproduct(path, objects.value.entries.has(path), protection),
   );
