@@ -2,13 +2,13 @@ import { sha256 } from "../../core/hash.js";
 import { productJourneyGaps } from "../evidence/product-journey.js";
 import type { ProductReviewCapture } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
+import { captureRunEntries } from "./capture-run-model.js";
 import { isBrowserCheckCommand, productCheckSupportsBehavior } from "./check-command.js";
 import { currentCoverage, productReviewChallenges } from "./coverage.js";
 import {
   currentJourneyFailures,
   evidenceApplies,
   evidenceSupportGaps,
-  productCaptureRunSchema,
   productEvidenceCatalogue,
 } from "./evidence-references.js";
 import { productFeedbackGaps } from "./feedback.js";
@@ -78,16 +78,15 @@ export function applicableProductCaptureRuns(
   subject: string,
   outcome: string,
 ): unknown[] {
-  return record.state.captureRuns.filter((candidate) => {
-    const run = productCaptureRunSchema.safeParse(candidate);
-    if (!run.success || !evidenceApplies(record, subject, run.data)) return false;
-    return (
-      !run.data.task ||
-      record.brief.slices
-        .find((slice) => slice.id === run.data.task)
-        ?.outcomes.includes(outcome) === true
-    );
-  });
+  return captureRunEntries(record)
+    .filter(
+      ({ run }) =>
+        evidenceApplies(record, subject, run) &&
+        (!run.task ||
+          record.brief.slices.find((slice) => slice.id === run.task)?.outcomes.includes(outcome) ===
+            true),
+    )
+    .map(({ stored }) => stored);
 }
 
 /**

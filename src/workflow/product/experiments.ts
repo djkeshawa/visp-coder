@@ -1,12 +1,12 @@
 import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { type ProductCaptureRun, validCaptureRuns } from "./capture-run-model.js";
 import {
   currentFailedJourneys,
   evidenceApplies,
   latestCurrentJourneys,
   type ProductEvidenceCatalogue,
-  productCaptureRunSchema,
   sameJourneyIntent,
 } from "./evidence-references.js";
 import { type ExperimentResolution, experimentResolutionsSchema } from "./experiment-model.js";
@@ -149,10 +149,8 @@ export function validateExperimentResolutions(
   const failed = latestCurrentJourneys(record, subject, slice?.id).filter(
     (run) => run.status && run.status !== "completed",
   );
-  const current = record.state.captureRuns.flatMap((entry) => {
-    const run = productCaptureRunSchema.safeParse(entry);
-    return run.success && evidenceApplies(record, subject, run.data) ? [run.data] : [];
-  });
+  const runs = validCaptureRuns(record);
+  const current = runs.filter((run) => evidenceApplies(record, subject, run));
   const seen = new Set<string>();
   for (const resolution of parsed.data) {
     const failure = failed.find((run) => run.id === resolution.runId);
@@ -180,12 +178,8 @@ export function validateExperimentResolutions(
       replacement.status !== "completed" ||
       replacement.task !== failure.task ||
       !sameJourneyIntent(failure, replacement) ||
-      record.state.captureRuns.findIndex(
-        (run) => productCaptureRunSchema.safeParse(run).data?.id === replacement.id,
-      ) <=
-        record.state.captureRuns.findIndex(
-          (run) => productCaptureRunSchema.safeParse(run).data?.id === failure.id,
-        ) ||
+      runs.findIndex((run) => run.id === replacement.id) <=
+        runs.findIndex((run) => run.id === failure.id) ||
       failed.some((run) => run.journeyKey === replacement.journeyKey)
     )
       return err(
@@ -233,7 +227,7 @@ export function validateExperimentResolutions(
   return ok(parsed.data);
 }
 
-type Journey = ReturnType<typeof productCaptureRunSchema.parse>;
+type Journey = ProductCaptureRun;
 
 function canDiagnoseAssertion(record: ProductRecord, failure: Journey, replacement?: Journey) {
   return (

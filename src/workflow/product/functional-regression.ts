@@ -1,4 +1,5 @@
-import { type ProductEvidenceCatalogue, productCaptureRunSchema } from "./evidence-references.js";
+import { validCaptureRuns } from "./capture-run-model.js";
+import type { ProductEvidenceCatalogue } from "./evidence-references.js";
 import type { ProductFeedback } from "./feedback-model.js";
 import {
   type FunctionalFinding,
@@ -44,12 +45,7 @@ export function functionalRegressionEvidenceGap(
 /** Compare actual command/journey identity, not a second label for the repair receipt. */
 function executionInputs(record: ProductRecord, executions: readonly ProductExecution[]) {
   const journeys = new Map(
-    record.state.captureRuns.flatMap((input) => {
-      const parsed = productCaptureRunSchema.safeParse(input);
-      return parsed.success && parsed.data.id
-        ? [[parsed.data.id, parsed.data.journeyKey] as const]
-        : [];
-    }),
+    validCaptureRuns(record).flatMap((run) => (run.id ? [[run.id, run.journeyKey] as const] : [])),
   );
   return executions.map((entry) => ({
     subject: entry.subjectDigest,

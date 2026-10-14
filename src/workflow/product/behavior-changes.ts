@@ -1,7 +1,7 @@
 import { hashValue } from "../../core/hash.js";
 import { type BrowserJourney, browserJourneySchema } from "../../testing/browser-journey.js";
+import { productCaptureRunSchema } from "./capture-run-model.js";
 import { comparableEnvironments } from "./comparison-environment.js";
-import { productCaptureRunSchema } from "./evidence-references.js";
 import type { ProductExecution } from "./model.js";
 import type { ProductRecord } from "./store.js";
 

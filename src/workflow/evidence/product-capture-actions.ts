@@ -1,6 +1,6 @@
 import { vispError } from "../../core/errors.js";
 import { err, ok } from "../../core/result.js";
-import { productCaptureRunSchema } from "../product/evidence-references.js";
+import { type ProductCaptureRun, validCaptureRuns } from "../product/capture-run-model.js";
 import { isExploratoryJourney, journeyRetirementSchema } from "../product/journey-ownership.js";
 import { withProductMutation } from "../product/runtime.js";
 import { selectProductSlice } from "../product/scopes.js";
@@ -126,11 +126,7 @@ async function replayBatch(workspace: WorkspaceState, options: ProductCaptureOpt
 }
 
 function exploratoryRetirementRun(record: ProductRecord, id?: string) {
-  const matches = record.state.captureRuns.flatMap((candidate) => {
-    const parsed = productCaptureRunSchema.safeParse(candidate);
-    return parsed.success && parsed.data.id === id ? [parsed.data] : [];
-  });
-  const run = matches[0];
+  const run = validCaptureRuns(record).find((entry) => entry.id === id);
   return run &&
     (run.status === "completed" || run.failure?.kind === "behavior") &&
     isExploratoryJourney(record, run)
@@ -146,7 +142,7 @@ function exploratoryRetirementRun(record: ProductRecord, id?: string) {
 async function commitRetirement(
   workspace: WorkspaceState,
   record: ProductRecord,
-  run: ReturnType<typeof productCaptureRunSchema.parse>,
+  run: ProductCaptureRun,
   reason?: string,
 ) {
   const retirement = journeyRetirementSchema.safeParse({
