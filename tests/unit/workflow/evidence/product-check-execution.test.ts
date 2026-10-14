@@ -300,6 +300,7 @@ describe("product command check execution boundary", () => {
   it.each([
     ["visp", "capture", "--from", "journey.json"],
     ["pnpm", "exec", "visp", "done"],
+    ["visp", "uninstall"],
     ["npm", "exec", "--", "visp", "review", "--from", "review.json"],
     ["npx", "visp", "verify"],
     [

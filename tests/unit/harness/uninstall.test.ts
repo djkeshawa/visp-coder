@@ -1,4 +1,4 @@
-import { chmod, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HARNESSES, type Harness } from "../../../src/core/constants.js";
@@ -215,17 +215,91 @@ describe("visp uninstall", () => {
     expect(await readFile(hook, "utf8")).toBe("#!/bin/sh\necho mine\n");
   });
 
-  it("refuses while a slice is authorized, unless forced", async () => {
-    await install("codex");
+  it("refuses while a slice is authorized, even with --force", async () => {
+    await install("codex", { hooks: ["git"] });
     await workspace.write(".visp/state/implement-allowed/T001.json", "{}\n");
 
+    for (const force of [false, true]) {
+      const refused = await uninstall("codex", { force });
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) {
+        expect(refused.error.message).toMatch(/authorized/);
+        expect(refused.error.recovery).toMatch(/visp done/);
+      }
+    }
+    await expect(stat(join(workspace.root, "AGENTS.visp.md"))).resolves.toBeDefined();
+    await expect(stat(join(workspace.root, ".git/hooks/pre-commit"))).resolves.toBeDefined();
+
+    await rm(join(workspace.root, ".visp/state/implement-allowed/T001.json"));
+    expect((await uninstall("codex")).ok).toBe(true);
+  });
+
+  it("refuses to uninstall a host other than the installed one", async () => {
+    await install("claude-code");
+    const before = await walk(workspace.root, "", [".git"]);
     const refused = await uninstall("codex");
     expect(refused.ok).toBe(false);
-    if (!refused.ok) expect(refused.error.message).toMatch(/authorized/);
-    await expect(stat(join(workspace.root, "AGENTS.visp.md"))).resolves.toBeDefined();
+    if (!refused.ok) {
+      expect(refused.error.message).toContain("installed for claude-code");
+      expect(refused.error.recovery).toContain("--harness claude-code");
+    }
+    expect(await walk(workspace.root, "", [".git"])).toEqual(before);
+  });
 
-    expect((await uninstall("codex", { force: true })).ok).toBe(true);
-    await expect(stat(join(workspace.root, "AGENTS.visp.md"))).rejects.toThrow();
+  it("keeps an edited VISP pre-commit hook, and removes it with --force after saving it", async () => {
+    await install("generic", { hooks: ["git"] });
+    const hook = join(workspace.root, ".git/hooks/pre-commit");
+    const edited = `${await readFile(hook, "utf8")}\necho extra\n`;
+    await writeFile(hook, edited);
+
+    const kept = await uninstall("generic");
+    expect(kept.ok && kept.value.kept.map((entry) => entry.path)).toContain(
+      ".git/hooks/pre-commit",
+    );
+    expect(await readFile(hook, "utf8")).toBe(edited);
+
+    expect((await uninstall("generic", { force: true })).ok).toBe(true);
+    await expect(stat(hook)).rejects.toThrow();
+    const saved = await walk(workspace.root, ".visp/state/backups/.git/hooks");
+    expect(Object.values(saved)).toEqual([edited]);
+  });
+
+  it("keeps a hook entry the user customized, and only removes the generated ones", async () => {
+    await install("claude-code");
+    const path = join(workspace.root, ".claude/settings.json");
+    const settings = JSON.parse(await readFile(path, "utf8"));
+    const generated = settings.hooks.Stop[0];
+    const custom = {
+      hooks: [
+        { type: "command", command: `echo before; ${generated.hooks[0].command}`, timeout: 5 },
+      ],
+    };
+    settings.hooks.Stop = [custom, generated];
+    await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`);
+
+    const outcome = await uninstall("claude-code");
+    expect(outcome.ok && outcome.value.kept.map((entry) => entry.path)).toContain(
+      ".claude/settings.json",
+    );
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ hooks: { Stop: [custom] } });
+  });
+
+  it("keeps a configuration file the project already had, even when it is left empty", async () => {
+    await workspace.write(".mcp.json", "{}\n");
+    await install("claude-code", { hooks: [] });
+    expect((await uninstall("claude-code")).ok).toBe(true);
+    expect(JSON.parse(await readFile(join(workspace.root, ".mcp.json"), "utf8"))).toEqual({
+      mcpServers: {},
+    });
+  });
+
+  it("restores CRLF instruction files and TOML exactly", async () => {
+    await workspace.write("AGENTS.md", "# Rules\r\n\r\nBe kind.\r\n");
+    await workspace.write(".codex/config.toml", 'model = "x"\n\n\n\n[a]\nb = 1\n');
+    const before = await tracked(workspace.root);
+    await install("codex", { hooks: [] });
+    expect((await uninstall("codex")).ok).toBe(true);
+    expect(await tracked(workspace.root)).toEqual(before);
   });
 
   it("makes doctor report the harness as not installed, and a second run is a no-op", async () => {

@@ -66,7 +66,12 @@ function planOwnedBlock(current: string, owned: string, force: boolean): CodexRe
   return { status: "customized" };
 }
 
-/** Remove only the block VISP created; the rest of the Codex TOML is retained. */
+/**
+ * Remove only the block VISP created; the rest of the Codex TOML is retained byte for byte.
+ * Install trims the file's trailing whitespace and appends the block after one blank line, so
+ * a block at the end takes that blank line with it and leaves the text ending in one newline
+ * (the file's own kind); a block elsewhere takes one of two blank lines around it.
+ */
 export function planCodexMcpUnregistration(current: string | undefined): {
   readonly status: "absent" | "removed" | "customized" | "malformed";
   readonly content?: string;
@@ -74,12 +79,23 @@ export function planCodexMcpUnregistration(current: string | undefined): {
   if (current === undefined || current.trim() === "") return { status: "absent" };
   const owned = current.match(OWNED_BLOCK)?.[0];
   if (owned !== undefined && isGenerated(owned)) {
-    const rest = current.replace(owned, "").replace(/\n{3,}/gu, "\n\n");
-    return { status: "removed", content: rest.trim() === "" ? "" : `${rest.trimEnd()}\n` };
+    const at = current.indexOf(owned);
+    const before = current.slice(0, at);
+    const after = current.slice(at + owned.length);
+    if (after.trim() === "") {
+      const text = before.trimEnd();
+      return { status: "removed", content: text === "" ? "" : `${text}${eolOf(before)}` };
+    }
+    const joined = before.endsWith("\n\n") && after.startsWith("\n") ? after.slice(1) : after;
+    return { status: "removed", content: `${before}${joined}` };
   }
   return referencesVisp(structure(current) ?? current)
     ? { status: "customized" }
     : { status: "absent" };
+}
+
+function eolOf(text: string): string {
+  return text.includes("\r\n") ? "\r\n" : "\n";
 }
 
 export function inspectCodexMcpRegistrationResidue(

@@ -95,6 +95,7 @@ export async function buildInstallPlan(
     assets: [],
     mutations: [],
     fingerprints: {},
+    created: {},
     removals: [],
     manualSteps: [...harnessPlan.manualSteps, ...criticSetupSteps(critic.value, options.harness)],
     expectedManifest: `${JSON.stringify(manifest.value, null, 2)}\n`,
@@ -453,7 +454,7 @@ async function planManifest(
   manifest: AssetManifest,
   plan: InstallPlan,
 ): Promise<Result<void>> {
-  const next: AssetManifest = { ...manifest, ...plan.fingerprints };
+  const next: AssetManifest = { ...manifest, ...plan.created, ...plan.fingerprints };
   for (const path of plan.removals) delete next[path];
   const current = await fs.readTextIfExists(paths.assetManifest);
   if (!current.ok) return current;
@@ -669,6 +670,7 @@ async function planClaudeHook(
   const backup = await planSettingsBackup(fs, registration.value, current.value, plan);
   if (!backup.ok) return backup;
   if (registration.value.content !== undefined) {
+    recordCreated(plan, CLAUDE_SETTINGS_FILE, current.value, registration.value.content);
     plan.mutations.push({
       kind: "write",
       path: CLAUDE_SETTINGS_FILE,
@@ -812,6 +814,7 @@ async function planMcp(
   if (status === "malformed" || status === "customized")
     return unmergedMcp(path, status, options.harness, plan, registration.value.unreadable);
   if (registration.value.content !== undefined) {
+    recordCreated(plan, path, current.value, registration.value.content);
     const written = await planConfigWrite(
       fs,
       path,
@@ -854,6 +857,20 @@ function unmergedMcp(
       },
     ),
   );
+}
+
+/**
+ * A shared file that install creates is recorded in the manifest, with the text it wrote, so
+ * `visp uninstall` may delete it once nothing else is left in it. A file the project already
+ * had is only ever edited back.
+ */
+function recordCreated(
+  plan: InstallPlan,
+  path: string,
+  before: string | undefined,
+  content: string,
+): void {
+  if (before === undefined || before.trim() === "") plan.created[path] = assetFingerprint(content);
 }
 
 /** Rewrites a host configuration after keeping its previous text. */

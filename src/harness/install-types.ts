@@ -75,6 +75,8 @@ export interface InstallPlan {
   readonly assets: InstalledAsset[];
   readonly mutations: FileMutation[];
   readonly fingerprints: AssetManifest;
+  /** Shared files this install creates, recorded in the manifest so uninstall may delete them. */
+  readonly created: AssetManifest;
   readonly removals: string[];
   readonly manualSteps: string[];
   expectedManifest: string;

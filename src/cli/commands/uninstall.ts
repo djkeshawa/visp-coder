@@ -10,10 +10,7 @@ export function uninstallCommand(): Command {
     .description("Remove what visp install wrote and still recognizes as its own")
     .option("--harness <name>", `Which coder (${HARNESSES.join(", ")}); defaults to visp.yml's`)
     .option("--dry-run", "Preview what would be removed or edited without changing anything")
-    .option(
-      "--force",
-      "Also remove files and hook entries you edited, and proceed while a slice is authorized",
-    )
+    .option("--force", "Also remove files and hook entries you edited (never an authorized slice)")
     .action(handleUninstallCommand);
 }
 

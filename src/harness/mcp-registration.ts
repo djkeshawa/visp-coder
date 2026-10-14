@@ -160,14 +160,18 @@ function registeredText(
   return verified(setJsoncMember(current, [shape.container, MCP_SERVER_NAME], shape.entry), next);
 }
 
-/** Removes only the exact generated VISP server entry and preserves every other setting. */
+/**
+ * Removes only the exact generated VISP server entry and preserves every other setting.
+ * `tidy` (uninstall) also undoes the layout install added: see `removeJsoncMember`.
+ */
 export function planMcpUnregistration(
   current: string | undefined,
   harness: Harness,
+  tidy = false,
 ): PlannedMcpUnregistration {
   if (harness === "codex") return planCodexMcpUnregistration(current);
   const { mark, text } = withoutMark(current);
-  const planned = planJsonUnregistration(text, harness);
+  const planned = planJsonUnregistration(text, harness, tidy);
   return planned.content === undefined
     ? planned
     : { ...planned, content: `${mark}${planned.content}` };
@@ -176,6 +180,7 @@ export function planMcpUnregistration(
 function planJsonUnregistration(
   current: string | undefined,
   harness: Harness,
+  tidy: boolean,
 ): PlannedMcpUnregistration {
   const shape = registrationShape(harness);
   const parsed = parseConfigText(current);
@@ -195,7 +200,7 @@ function planJsonUnregistration(
   const servers = { ...existingServers };
   delete servers[MCP_SERVER_NAME];
   const content = verified(
-    removeJsoncMember(current ?? "", [shape.container, MCP_SERVER_NAME], true),
+    removeJsoncMember(current ?? "", [shape.container, MCP_SERVER_NAME], tidy),
     {
       ...parsed,
       [shape.container]: servers,

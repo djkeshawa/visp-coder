@@ -25,7 +25,13 @@ import {
   planClaudeSettingsRemoval,
 } from "./claude-settings.js";
 import { preCommitHookPath } from "./git-hook.js";
-import { HOOK_MARKER, renderCiWorkflow, renderPreToolUseHook } from "./hooks.js";
+import {
+  HOOK_MARKER,
+  isCurrentGeneratedHook,
+  renderCiWorkflow,
+  renderPreCommitHook,
+  renderPreToolUseHook,
+} from "./hooks.js";
 import { planConfigBackup, removalOf } from "./install-plan.js";
 import { readInstallState } from "./install-state.js";
 import type { AssetManifest } from "./install-types.js";
@@ -37,7 +43,7 @@ const AUTHORIZATION_DIRECTORIES = ["product-authorizations", "implement-allowed"
 
 export interface UninstallOptions {
   readonly harness: Harness;
-  /** Also remove files and registrations the user edited, and proceed with a slice authorized. */
+  /** Also remove files and hook entries you edited. It never overrides an authorized slice. */
   readonly force?: boolean;
   /** Plan and report only; nothing is recovered, written or removed. */
   readonly dryRun?: boolean;
@@ -76,7 +82,7 @@ interface Plan {
 
 /**
  * The reverse of `visp install`. Removes only what VISP wrote and still recognizes as its own,
- * as one recoverable transaction. `.visp/` (feature history) and `visp.yml` are never touched.
+ * as one recoverable transaction. Feature history under `.visp/` and `visp.yml` are never touched.
  */
 export async function uninstallHarness(
   paths: ProjectPaths,
@@ -120,13 +126,24 @@ async function checkReady(
     const recovered = await recoverFileTransactions(paths.root);
     if (!recovered.ok) return recovered;
   }
-  const authorized = options.force ? ok<string[]>([]) : await authorizationMarkers(fs);
+  const recorded = await readInstallState(paths, fs);
+  if (!recorded.ok) return recorded;
+  if (recorded.value && recorded.value.harness !== options.harness) {
+    return err(
+      vispError(
+        "STAGE_BLOCKED",
+        `visp is installed for ${recorded.value.harness}, not ${options.harness}; uninstalling ${options.harness} would break that installation`,
+        { recovery: `Run visp uninstall --harness ${recorded.value.harness}` },
+      ),
+    );
+  }
+  // --force covers edited files only, never an authorized slice.
+  const authorized = await authorizationMarkers(fs);
   if (!authorized.ok) return authorized;
   if (authorized.value.length === 0) return ok(undefined);
   return err(
     vispError("STAGE_BLOCKED", "A slice is authorized; uninstalling now would drop its guard", {
-      recovery:
-        "Finish it with visp done, clear stale markers with visp doctor --fix, or rerun visp uninstall --force",
+      recovery: `Finish the slice with visp done. A person who wants to abandon it can delete the marker files by hand: ${authorized.value.join(", ")}`,
       details: { markers: authorized.value },
     }),
   );
@@ -141,7 +158,7 @@ function outcomeOf(options: UninstallOptions, plan: Plan): UninstallOutcome {
     remaining: [".visp/", "visp.yml"],
     manualSteps: [
       ...plan.manualSteps,
-      "Kept on purpose: .visp/ (feature history, state, backups of edited configuration), visp.yml and the .visp entries `visp init` added to .gitignore. Delete them by hand if you want them gone: rm -rf .visp visp.yml",
+      "Kept on purpose: feature history and project state under .visp/ (uninstall removes only .visp/hooks scripts, the install record and the asset manifest, and writes backups under .visp/state/backups/), visp.yml and the .visp entries `visp init` added to .gitignore. Delete them by hand if you want them gone: rm -rf .visp visp.yml",
     ],
   };
 }
@@ -177,9 +194,9 @@ async function planUninstall(
   }
   const steps = [
     () => planActivationRemoval(fs, options.harness, plan),
-    () => planClaudeSettings(fs, force, plan),
-    () => planMcpRemoval(fs, options.harness, plan),
-    () => planGitHookRemoval(paths, fs, plan),
+    () => planClaudeSettings(fs, manifest.value, force, plan),
+    () => planMcpRemoval(fs, options.harness, manifest.value, plan),
+    () => planGitHookRemoval(paths, fs, manifest.value, force, plan),
   ];
   for (const step of steps) {
     const planned = await step();
@@ -188,11 +205,6 @@ async function planUninstall(
 
   const bookkeeping = await planBookkeeping(paths, fs, options.harness, manifest.value, plan);
   if (!bookkeeping.ok) return bookkeeping;
-  if (recorded.value && recorded.value.harness !== options.harness) {
-    plan.manualSteps.push(
-      `The install record names ${recorded.value.harness}, not ${options.harness}. Run visp uninstall --harness ${recorded.value.harness} to remove that installation too.`,
-    );
-  }
   return ok(plan);
 }
 
@@ -284,6 +296,7 @@ async function planActivationRemoval(
 
 async function planClaudeSettings(
   fs: ProjectFileSystem,
+  manifest: AssetManifest,
   force: boolean,
   plan: Plan,
 ): Promise<Result<void>> {
@@ -310,7 +323,8 @@ async function planClaudeSettings(
     fs,
     CLAUDE_SETTINGS_FILE,
     current.value,
-    removal,
+    { content: removal.content ?? "", empty: removal.empty === true },
+    createdByInstall(manifest, CLAUDE_SETTINGS_FILE),
     plan,
     "removed VISP's hook entries",
   );
@@ -319,13 +333,14 @@ async function planClaudeSettings(
 async function planMcpRemoval(
   fs: ProjectFileSystem,
   harness: Harness,
+  manifest: AssetManifest,
   plan: Plan,
 ): Promise<Result<void>> {
   if (harness === "generic") return ok(undefined);
   const path = mcpConfigFile(harness);
   const current = await fs.readTextIfExists(path);
   if (!current.ok) return current;
-  const removal = planMcpUnregistration(current.value, harness);
+  const removal = planMcpUnregistration(current.value, harness, true);
   if (removal.status === "customized" || removal.status === "malformed") {
     plan.kept.push({
       path,
@@ -343,7 +358,8 @@ async function planMcpRemoval(
     fs,
     path,
     current.value,
-    empty ? { empty: true } : { content: removal.content },
+    { content: removal.content, empty },
+    createdByInstall(manifest, path),
     plan,
     "removed the visp MCP server",
   );
@@ -352,31 +368,53 @@ async function planMcpRemoval(
 /** What install writes into a new file, minus the entry: nothing else is in it. */
 const EMPTY_MCP_CONFIG = /^﻿?\{(?:"[A-Za-z]+":\{\})?\}$/u;
 
-/** A shared file loses VISP's part, after its previous text is saved; it goes if nothing is left. */
+/** The hook as install wrote it (its fingerprint), or as this build generates it anywhere. */
+function ownedHook(text: string, recorded: string | undefined): boolean {
+  return (
+    recorded === assetFingerprint(text) ||
+    [false, true].some((chained) =>
+      isCurrentGeneratedHook(text, (executable) => renderPreCommitHook(chained, executable)),
+    )
+  );
+}
+
+/** Install records a shared file it created, so an emptied one may go; one the project had stays. */
+function createdByInstall(manifest: AssetManifest, path: string): boolean {
+  return manifest[path] !== undefined;
+}
+
+/** A shared file loses VISP's part, after its previous text is saved. */
 async function rewriteShared(
   fs: ProjectFileSystem,
   path: string,
   before: string | undefined,
-  after: { readonly content?: string; readonly empty?: true },
+  after: { readonly content: string; readonly empty: boolean },
+  created: boolean,
   plan: Plan,
   detail: string,
 ): Promise<Result<void>> {
   const backup = await planConfigBackup(fs, path, before, plan);
   if (!backup.ok) return backup;
-  if (after.empty) {
+  if (after.empty && created) {
     const removal = await removalOf(fs, path);
     if (!removal.ok) return removal;
     plan.mutations.push(removal.value);
-    plan.changes.push({ operation: "remove", path, detail: `${detail}; nothing else was in it` });
+    plan.changes.push({
+      operation: "remove",
+      path,
+      detail: `${detail}; install created it and nothing else is in it`,
+    });
+    plan.forgotten.push(path);
     return ok(undefined);
   }
   plan.mutations.push({
     kind: "write",
     path,
-    content: after.content ?? "",
+    content: after.content,
     expectedBefore: filePrecondition(before),
   });
   plan.changes.push({ operation: "edit", path, detail });
+  plan.forgotten.push(path);
   return ok(undefined);
 }
 
@@ -384,22 +422,32 @@ async function rewriteShared(
 async function planGitHookRemoval(
   paths: ProjectPaths,
   fs: ProjectFileSystem,
+  manifest: AssetManifest,
+  force: boolean,
   plan: Plan,
 ): Promise<Result<void>> {
   const resolved = await preCommitHookPath(paths.root);
   if (!resolved.ok) return ok(undefined);
   const { absolute, display } = resolved.value;
   if (paths.relative(absolute) === undefined) {
-    if (existsSync(absolute) && readFileSync(absolute, "utf8").includes(HOOK_MARKER)) {
-      plan.manualSteps.push(
-        `Git's pre-commit hook is outside this project (${display}) and is VISP's; remove it by hand.`,
-      );
-    }
+    outsideHook(absolute, display, plan);
     return ok(undefined);
   }
   const current = await fs.readTextIfExists(absolute);
   if (!current.ok) return current;
   if (current.value === undefined || !current.value.includes(HOOK_MARKER)) return ok(undefined);
+  if (!ownedHook(current.value, manifest[display])) {
+    // An edited hook is the project's now: kept, or saved first when --force removes it.
+    if (!force) {
+      plan.kept.push({
+        path: display,
+        reason: "a VISP hook that was edited or comes from another build; use --force to remove it",
+      });
+      return ok(undefined);
+    }
+    const backup = await planConfigBackup(fs, display, current.value, plan);
+    if (!backup.ok) return backup;
+  }
 
   const localPath = `${absolute}.local`;
   const local = await fs.readTextIfExists(localPath);
@@ -415,6 +463,15 @@ async function planGitHookRemoval(
   }
 
   return restoreChainedHook(fs, { absolute, display, localPath }, current.value, local.value, plan);
+}
+
+/** A hook path outside the project cannot be part of its transaction. */
+function outsideHook(absolute: string, display: string, plan: Plan): void {
+  if (existsSync(absolute) && readFileSync(absolute, "utf8").includes(HOOK_MARKER)) {
+    plan.manualSteps.push(
+      `Git's pre-commit hook is outside this project (${display}) and is VISP's; remove it by hand.`,
+    );
+  }
 }
 
 async function restoreChainedHook(
