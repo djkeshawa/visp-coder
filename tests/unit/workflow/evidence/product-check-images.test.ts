@@ -156,6 +156,21 @@ describe("images declared by a command check", () => {
     });
   });
 
+  it("are not read when the check itself fails", async () => {
+    const workspace = await imageCheck(`${writeRandomImage};process.exit(3)`, ["out/scene.png"]);
+    const verified = await runProductVerify(await workspace.state());
+    expect(verified).toMatchObject({
+      ok: true,
+      value: { passed: false, executions: [{ status: "failed", exitCode: 3 }] },
+    });
+    if (!verified.ok) return;
+    expect(verified.value.executions[0]?.output).not.toContain("declared image");
+    expect(verified.value.executions[0]?.checkImages).toBeUndefined();
+    const record = await readProductRecord(await workspace.state());
+    if (!record.ok) throw new Error(record.error.message);
+    expect(record.value.state.captures).toEqual([]);
+  });
+
   it("fail the check when the declared image is left over from an earlier run", async () => {
     const workspace = await imageCheck("process.exit(0)", ["out/scene.png"]);
     await workspace.write("out/scene.png", png(255, 0, 0));
