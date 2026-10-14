@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
+import { sha256 } from "../core/hash.js";
+import { processAlive } from "../core/process-identity.js";
 
 /**
  * A running dashboard records where it listens so a second `visp ui` in the same
@@ -31,7 +32,7 @@ function safeUser(): string {
 }
 
 export function leasePath(root: string, dir = leaseDir()): string {
-  return join(dir, `${createHash("sha256").update(root).digest("hex").slice(0, 16)}.json`);
+  return join(dir, `${sha256(root).slice(0, 16)}.json`);
 }
 
 export async function writeLease(lease: Lease, dir = leaseDir()): Promise<void> {
@@ -72,15 +73,6 @@ export async function readLease(root: string, dir = leaseDir()): Promise<Lease |
 
 export async function removeLease(root: string, dir = leaseDir()): Promise<void> {
   await rm(leasePath(root, dir), { force: true });
-}
-
-export function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (cause) {
-    return (cause as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 /** A lease is reusable only if its server answers as the same build. */

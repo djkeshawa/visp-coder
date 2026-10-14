@@ -22,7 +22,7 @@ import { resolvedProductExecutionEnvironment } from "../../core/execution-enviro
 import { applyFileTransaction, filePrecondition } from "../../core/file-transaction.js";
 import { hashValue, sha256 } from "../../core/hash.js";
 import { matchesPattern } from "../../core/patterns.js";
-import { processIdentity } from "../../core/process-identity.js";
+import { processAlive, processIdentity } from "../../core/process-identity.js";
 import { outputRedactor, redactStrings, SECRET_FILES } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { removeTreeBestEffort, sweepStaleTempDirectories } from "../../core/stale-temp.js";
@@ -1660,15 +1660,6 @@ async function isStale(record: IndependentTestsRecord): Promise<boolean> {
   )
     return false;
   return !processAlive(record.pid);
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (cause) {
-    return (cause as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 function message(cause: unknown): string {

@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { VispError } from "../../core/errors.js";
+import { sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses, type ProductOutcomeStatus } from "./assessment.js";
@@ -93,9 +93,7 @@ export async function runProductNext(
     return identity.ok
       ? ok({
           ...result.value,
-          progress: createHash("sha256")
-            .update(`${loaded.value.stateText}\0${identity.value.subject}`)
-            .digest("hex"),
+          progress: sha256(`${loaded.value.stateText}\0${identity.value.subject}`),
         })
       : result;
   };
