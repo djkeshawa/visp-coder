@@ -2,9 +2,9 @@ import { Command } from "commander";
 import { PRODUCT_NAME, STRICTNESS_MODES, type StrictnessMode } from "../../core/constants.js";
 import { ok } from "../../core/result.js";
 import { now } from "../../workflow/artifacts/common.js";
+import { explainRules, type PolicyView } from "../../workflow/policy/explain.js";
 import { mutatePolicy } from "../../workflow/policy/mutations.js";
-import { resolveRule } from "../../workflow/policy/resolve.js";
-import { EVALUATED_RULE_IDS, RULES, type RuleId } from "../../workflow/policy/rules.js";
+import { RULES } from "../../workflow/policy/rules.js";
 import { isJson, options, projectRoot, workspace } from "../context.js";
 import { emit, emitError } from "../output.js";
 
@@ -19,17 +19,6 @@ export function policyCommand(): Command {
   return command;
 }
 
-interface RuleView {
-  readonly id: RuleId;
-  readonly title: string;
-  readonly reason: string;
-  readonly stage: string;
-  readonly active: boolean;
-  readonly why: string;
-  readonly overridable: boolean;
-  readonly evaluated: boolean;
-}
-
 function showCommand(): Command {
   return new Command("show")
     .description("List every rule and whether it applies right now")
@@ -41,40 +30,19 @@ function showCommand(): Command {
         return;
       }
 
-      const rules: RuleView[] = RULES.map((rule) => {
-        const resolved = resolveRule(rule.id, state.value.policy, state.value.overrides, {
-          feature: state.value.status?.activeFeature,
-          task: state.value.status?.activeTask,
-        });
-
-        return {
-          id: rule.id,
-          title: rule.title,
-          reason: rule.reason,
-          stage: rule.stage,
-          active: resolved.active,
-          overridable: rule.overridable,
-          evaluated: EVALUATED_RULE_IDS.includes(rule.id),
-          why: !EVALUATED_RULE_IDS.includes(rule.id)
-            ? "catalogued; not evaluated by this workflow"
-            : resolved.active
-              ? "on"
-              : resolved.reason === "overridden"
-                ? `overridden: ${resolved.override.reason}`
-                : state.value.policy.rules[rule.id] === false
-                  ? "off explicitly"
-                  : `off in ${state.value.policy.strictness} mode`,
-        };
+      const view = explainRules(state.value.policy, state.value.overrides, {
+        feature: state.value.status?.activeFeature,
+        task: state.value.status?.activeTask,
       });
 
-      process.exitCode = emit("policy", ok({ strictness: state.value.policy.strictness, rules }), {
+      process.exitCode = emit("policy", ok(view), {
         json: isJson(opts),
         text: renderRules,
       });
     });
 }
 
-function renderRules(data: { strictness: string; rules: readonly RuleView[] }): string {
+function renderRules(data: PolicyView): string {
   const lines = [`Strictness: ${data.strictness}`, ""];
 
   for (const rule of data.rules) {
