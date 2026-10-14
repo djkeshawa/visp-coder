@@ -15,7 +15,7 @@ vi.mock("../../../../src/workflow/product/rule-extraction.js", async (importOrig
   codexRuleExtractor: () => async () => [],
 }));
 
-const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+const { createProductFeature } = await import("../../../../src/workflow/product/feature-create.js");
 const { recordEarlierRequests } = await import("../../../../src/memory/memory-service.js");
 
 const NOTES = [

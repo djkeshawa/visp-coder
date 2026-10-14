@@ -1,0 +1,174 @@
+import { resolveCriticPolicy } from "../../config/critic-defaults.js";
+import type { FileMutation } from "../../core/file-transaction.js";
+import { ok, type Result } from "../../core/result.js";
+import { laterChanges } from "../../memory/later-changes.js";
+import {
+  type EarlierFeature,
+  memoryBriefFor,
+  notInRequest,
+  PROJECT_MEMORY_FILE,
+  recordEarlierRequests,
+} from "../../memory/memory-service.js";
+import { recordRequestHistory } from "../../memory/request-history.js";
+import type { WorkspaceState } from "../state.js";
+import { codexMemoryGate } from "./memory-gate.js";
+import { json } from "./store.js";
+
+/** The model of a VISP-launched Codex reviewer, which also reads rules and chooses memories. */
+export async function reviewerModel(workspace: WorkspaceState): Promise<string | undefined> {
+  if (workspace.config.critic?.launch !== "codex-exec") return undefined;
+  const critic = await resolveCriticPolicy(workspace.config.harness, workspace.config.critic);
+  return critic.ok ? critic.value.config?.model : undefined;
+}
+
+/** Candidates wide enough to hold every note of a store with about fifty. */
+const GATE_CANDIDATE_TOKENS = 6000;
+
+/**
+ * Visp Memory's keyword selection alone, or, with a reviewer model and `select: model`, that
+ * model choosing from a wide candidate set; keyword selection is the fallback.
+ */
+async function selectMemories(
+  workspace: WorkspaceState,
+  command: string,
+  request: string,
+  rules: readonly string[],
+  later: readonly string[],
+): Promise<string[]> {
+  const model =
+    workspace.config.memory.service?.select === "keyword"
+      ? undefined
+      : await reviewerModel(workspace);
+  if (!model) return memoryBriefFor(workspace, command, request);
+  const candidates = await memoryBriefFor(workspace, command, request, GATE_CANDIDATE_TOKENS);
+  try {
+    return await codexMemoryGate({ model })(request, candidates, rules, later);
+  } catch {
+    return memoryBriefFor(workspace, command, request);
+  }
+}
+
+/** Visp Memory's store: earlier requests are recorded there first. */
+async function serviceMemories(
+  workspace: WorkspaceState,
+  command: string,
+  earlier: readonly EarlierFeature[],
+  request: string,
+  rules: readonly string[],
+  later: readonly string[],
+): Promise<Result<{ memories: string[]; mutation?: FileMutation }>> {
+  const recorded = await recordEarlierRequests(workspace, command, earlier);
+  if (!recorded.ok) return recorded;
+  const memories = await selectMemories(workspace, command, request, rules, later);
+  return ok({ memories, ...(recorded.value ? { mutation: recorded.value } : {}) });
+}
+
+/** VISP's own store: every recorded note goes to the reviewer's model, which passes on only what applies. */
+async function recallMemories(
+  workspace: WorkspaceState,
+  model: string,
+  earlier: readonly EarlierFeature[],
+  request: string,
+  rules: readonly string[],
+  later: readonly string[],
+): Promise<Result<{ memories: string[]; mutation?: FileMutation }>> {
+  const history = await recordRequestHistory(workspace, earlier);
+  if (!history.ok) return history;
+  let memories: string[] = [];
+  try {
+    memories = await codexMemoryGate({ model })(
+      request,
+      notInRequest(request, history.value.notes),
+      rules,
+      later,
+    );
+  } catch {
+    // Without its model, nothing is selected: every note unfiltered would be noise.
+  }
+  return ok({
+    memories,
+    ...(history.value.mutation ? { mutation: history.value.mutation } : {}),
+  });
+}
+
+export interface FeatureMemory {
+  readonly memories: string[];
+  readonly laterChanges: string[];
+  readonly mutations: FileMutation[];
+  readonly reported: { projectMemory?: string[]; projectMemoryLaterChanges?: string[] };
+}
+
+/** The decisions a feature carries, and the code changes listed with them, for its `work` replies. */
+export function memoryFileMutations(
+  workspace: WorkspaceState,
+  feature: string,
+  memory: { memories: readonly string[]; laterChanges: readonly string[] },
+): FileMutation[] {
+  if (memory.memories.length === 0) return [];
+  const { memories, laterChanges: later } = memory;
+  return [
+    {
+      kind: "write",
+      path: workspace.paths.featureFile(feature, PROJECT_MEMORY_FILE),
+      content: json({ version: 1, memories, ...(later.length ? { laterChanges: later } : {}) }),
+      expectedBefore: { existed: false },
+    },
+  ];
+}
+
+/**
+ * Earlier features' requests are recorded and the decisions that constrain this request join
+ * it; the feature keeps them for `work` replies. With `memory.service` Visp Memory holds them;
+ * otherwise VISP does, and only with a reviewer model to choose.
+ */
+export async function featureMemory(
+  workspace: WorkspaceState,
+  request: string,
+  rules: readonly string[],
+): Promise<Result<FeatureMemory>> {
+  const none = ok({ memories: [], laterChanges: [], mutations: [], reported: {} });
+  // memory.enabled switches off every memory path, the long-term store included.
+  if (!workspace.config.memory.enabled) return none;
+  const command = workspace.config.memory.service?.command;
+  const model =
+    command || !workspace.config.memory.recall ? undefined : await reviewerModel(workspace);
+  if (!command && !model) return none;
+  const earlier = await earlierFeatures(workspace);
+  if (!earlier.ok) return earlier;
+  // Code can change after a decision was recorded; the gate, the worker and the reviewer are told.
+  const later = await laterChanges(workspace, earlier.value);
+  const chosen = command
+    ? await serviceMemories(workspace, command, earlier.value, request, rules, later)
+    : await recallMemories(workspace, model as string, earlier.value, request, rules, later);
+  if (!chosen.ok) return chosen;
+  const { memories } = chosen.value;
+  const mutations: FileMutation[] = chosen.value.mutation ? [chosen.value.mutation] : [];
+  // Nothing is listed without a note to weigh against it.
+  const listed = memories.length ? later : [];
+  return ok({
+    memories,
+    laterChanges: listed,
+    mutations,
+    reported: {
+      ...(memories.length ? { projectMemory: memories } : {}),
+      ...(listed.length ? { projectMemoryLaterChanges: listed } : {}),
+    },
+  });
+}
+
+async function earlierFeatures(workspace: WorkspaceState): Promise<Result<EarlierFeature[]>> {
+  const listed = await workspace.store.listFeatures();
+  if (!listed.ok) return listed;
+  const earlier: EarlierFeature[] = [];
+  for (const id of listed.value) {
+    const intent = await workspace.store.readIntent(id);
+    if (intent.ok && intent.value.sourceBrief)
+      earlier.push({
+        feature: id,
+        goal: intent.value.goal,
+        originalRequest: intent.value.sourceBrief,
+        createdAt: intent.value.createdAt,
+      });
+  }
+  return ok(earlier);
+}

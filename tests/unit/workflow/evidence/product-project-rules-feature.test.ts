@@ -12,7 +12,7 @@ vi.mock("../../../../src/workflow/product/rule-extraction.js", async (importOrig
   codexRuleExtractor: () => extractor,
 }));
 
-const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+const { createProductFeature } = await import("../../../../src/workflow/product/feature-create.js");
 
 let workspace: TestWorkspace | undefined;
 

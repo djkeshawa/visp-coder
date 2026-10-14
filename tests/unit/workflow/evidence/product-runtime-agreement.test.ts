@@ -10,16 +10,14 @@ import { collectMigrationHistory } from "../../../../src/migration/history-expor
 import { previewMigration } from "../../../../src/migration/operations.js";
 import { runProductCapture } from "../../../../src/workflow/evidence/product-capture.js";
 import { runProductControl } from "../../../../src/workflow/evidence/product-control.js";
-import {
-  createProductFeature,
-  updateProductBrief,
-} from "../../../../src/workflow/product/brief.js";
+import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductCritic } from "../../../../src/workflow/product/critic.js";
 import {
   runProductAccept,
   runProductDone,
   runProductVerify,
 } from "../../../../src/workflow/product/evidence.js";
+import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import { runProductReproduction } from "../../../../src/workflow/product/reproduction.js";
 import { runProductReview } from "../../../../src/workflow/product/review.js";
 import { prepareReviewSession } from "../../../../src/workflow/product/review-session.js";
