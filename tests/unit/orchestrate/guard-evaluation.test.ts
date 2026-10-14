@@ -117,6 +117,16 @@ describe("CLI and MCP guard parity", () => {
       },
     ],
     [
+      "the same path asked twice",
+      authorize,
+      ["src/other.mjs", "src/other.mjs"],
+      {
+        checked: 1,
+        allowed: false,
+        violations: [expect.objectContaining({ path: "src/other.mjs" })],
+      },
+    ],
+    [
       "a blocked path",
       authorize,
       [".env"],

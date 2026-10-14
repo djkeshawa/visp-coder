@@ -153,9 +153,12 @@ async function checkedPaths(
 ): Promise<Result<string[]>> {
   const paths = await resolveScopedPaths(state, request, feature);
   if (!paths.ok) return paths;
-  if (request.paths || request.scope === "tasks") return paths;
-  const protectedChanges = await activeProtectedEnvChanges(state);
+  const protectedChanges =
+    request.paths || request.scope === "tasks"
+      ? ok([] as string[])
+      : await activeProtectedEnvChanges(state);
   if (!protectedChanges.ok) return protectedChanges;
+  // A path asked twice is checked once, on every route.
   return ok([...new Set([...paths.value, ...protectedChanges.value])]);
 }
 
