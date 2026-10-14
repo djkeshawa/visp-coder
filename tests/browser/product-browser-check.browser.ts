@@ -159,6 +159,7 @@ it("refuses slice closure when real keyboard behavior fails despite passing stat
       expect(capture.provenance).toBe("runner-captured");
       expect(sha256(await readFile(join(workspace.root, capture.path)))).toBe(capture.sha256);
     }
+    // The product state is the one record of a run; no ignored captures/run-<id>.json copy.
     const runPath = join(
       workspace.root,
       ".visp/features",
@@ -166,7 +167,7 @@ it("refuses slice closure when real keyboard behavior fails despite passing stat
       "captures",
       `run-${run.id}.json`,
     );
-    expect(productCaptureRunSchema.parse(JSON.parse(await readFile(runPath, "utf8")))).toEqual(run);
+    await expect(readFile(runPath, "utf8")).rejects.toThrow();
     expect(await readFile(join(workspace.root, "index.html"))).toEqual(html);
     expect(sha256(await readFile(fixture))).toBe(sourceHash);
   } finally {

@@ -128,8 +128,9 @@ function referencedFile(
   name: string,
   references: Set<string>,
 ) {
-  // Earlier builds also wrote each capture run to captures/run-<id>.json; the product state
-  // holds the same record and is the only one read, so the copy is never needed.
+  // Earlier builds also wrote each capture run to captures/run-<id>.json. No command reads
+  // those copies, so they go even when something still names the run: a run in the trail is
+  // in the product state, and one rotated out of it was never read back from its copy.
   if (/^run-.*\.json$/u.test(name)) return false;
   const identity = name.replace(/\.(json|png)$/, "");
   return references.has(identity) || references.has(workspace.paths.relative(path) ?? path);
