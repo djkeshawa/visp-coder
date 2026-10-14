@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- `visp done`, `visp verify` and the Git pre-commit guard read the project's environment files faster on large trees: directories are read concurrently. With a 20,000-file ignored virtualenv the scan took 38 ms instead of 168 ms (median, loaded machine), and `visp guard --json` 721 ms instead of 877 ms. What is scanned is unchanged.
+
 ## 0.5.0-beta.3 - 2026-10-12
 
 ### Changed
