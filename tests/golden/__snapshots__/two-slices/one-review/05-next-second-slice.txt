@@ -1,0 +1,10 @@
+$ visp next
+--- stdout
+next: {"feature":"001-return-two-from-the-public","task":"T002","action":"implement","objective":"Export the label","command":"visp work --feature 001-return-two-from-the-public --task T002","mayEdit":false}
+Full result: add --json.
+
+Next: visp work --feature 001-return-two-from-the-public --task T002
+
+--- stderr
+
+--- exit 0

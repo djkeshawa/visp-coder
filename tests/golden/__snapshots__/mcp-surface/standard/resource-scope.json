@@ -1,0 +1,9 @@
+{
+  "contents": [
+    {
+      "uri": "visp://scope",
+      "mimeType": "application/json",
+      "text": "{\n  \"blockedPaths\": [\n    \".env\",\n    \".env.*\",\n    \"node_modules\",\n    \"dist\",\n    \"build\",\n    \".git\"\n  ],\n  \"authorized\": [\n    {\n      \"task\": \"T001\",\n      \"feature\": \"001-return-two-from-the-public\",\n      \"allowedFiles\": [\n        \"src/value.mjs\",\n        \"checks/value.check.mjs\"\n      ],\n      \"forbiddenFiles\": [],\n      \"expectedFiles\": [\n        \"src/value.mjs\"\n      ],\n      \"expiresAt\": null\n    }\n  ]\n}"
+    }
+  ]
+}

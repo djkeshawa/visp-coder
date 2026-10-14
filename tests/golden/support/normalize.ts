@@ -30,32 +30,64 @@ export function normalize(text: string, context: NormalizeContext = {}): string 
       /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})\b/g,
       "<TIME>",
     )
-    .replace(
-      /("(?:durationMs|flipDurationMs|flipExtraMs|elapsedMs|ms|pid|startedAtMs)"\s*:\s*)\d+/g,
-      "$1<N>",
-    )
+    // Check run times: an execution's and its flip check's (structured content and --json),
+    // and the flip check's extra time as a field and in the reviewer's evidence excerpt.
+    .replace(/("(?:durationMs|flipDurationMs|flipExtraMs)"\s*:\s*)\d+/g, "$1<N>")
     .replace(/(Flip check extra time: )\d+( ms)/g, "$1<N>$2")
-    // Clock values in milliseconds, and sizes of payloads that embed clock values.
-    .replace(/("[A-Za-z]*At"\s*:\s*)\d{12,}/g, "$1<EPOCH-MS>")
+    // A prepared critic attempt's deadline, and the size of a packet that embeds clock values.
+    .replace(/("expiresAt"\s*:\s*)\d{12,}/g, "$1<EPOCH-MS>")
     .replace(/("packetBytes"\s*:\s*)\d+/g, "$1<N>");
+  result = commitIds(result);
   result = numbered(result, /\bCAN-[a-f0-9]{32}\b/g, "CAN");
   result = numbered(
     result,
-    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g,
+    /(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/g,
     "UUID",
   );
-  // Abbreviated commit IDs where VISP lists commits as "<hash> <subject>"; an ID can be all digits.
-  result = numbered(result, /(?<=(?:^|\n|\\n)(?:- )?|")[0-9a-f]{7,12}(?= )/g, "COMMIT");
-  result = numbered(result, /\b[0-9a-f]{64}\b/g, "SHA256");
-  result = numbered(result, /\b[0-9a-f]{40}\b/g, "GIT");
+  result = numbered(result, /(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/g, "SHA256");
   // Hash-derived IDs (`FB-…`, `CODE-DIFF-…`) whatever their digits; elsewhere a hex run must
-  // hold a letter, so long decimal numbers are left alone.
+  // hold a letter, so long decimal numbers are left alone. Boundaries are "not hex" rather than
+  // \b, so a value right after an escaped newline (`\nd0b0…`) is still found.
   result = numbered(
     result,
-    /(?<=\b[A-Z]+(?:-[A-Z]+)*-)[0-9a-f]{12,39}\b|\b(?=[0-9]*[a-f])[0-9a-f]{12,39}\b/g,
+    /(?<=\b[A-Z]+(?:-[A-Z]+)*-)[0-9a-f]{12,39}(?![0-9a-f])|(?<![0-9a-f])(?=[0-9]*[a-f])[0-9a-f]{12,39}(?![0-9a-f])/g,
     "HEX",
   );
   return result;
+}
+
+/**
+ * Abbreviated commit IDs, only where VISP lists later commits as "<id> <subject>": after
+ * "(newest first):" as "- " lines, after "LATER CHANGES:" as plain lines (in text or inside
+ * a JSON string), and in the laterChanges JSON arrays. An ID can be all digits.
+ */
+function commitIds(text: string): string {
+  const seen = new Map<string, number>();
+  const id = (value: string) => token(seen, value, "COMMIT");
+  const NEWLINE = String.raw`(?:\n|\\n)`;
+  const list = (header: string, item: string) =>
+    new RegExp(`(${header})((?:${NEWLINE}${item}[0-9a-f]{7,12} (?:(?!${NEWLINE})[^"])*)+)`, "g");
+  const entries = (item: string) => new RegExp(`(${NEWLINE}${item})([0-9a-f]{7,12})(?= )`, "g");
+  return text
+    .replace(
+      list(String.raw`\(newest first\):`, "- "),
+      (_, header, items: string) =>
+        header + items.replace(entries("- "), (_m, lead, value) => lead + id(value)),
+    )
+    .replace(
+      list("LATER CHANGES:", ""),
+      (_, header, items: string) =>
+        header + items.replace(entries(""), (_m, lead, value) => lead + id(value)),
+    )
+    .replace(
+      /("(?:projectMemoryLaterChanges|laterChanges)"\s*:\s*\[)([^\]]*)/g,
+      (_, key, items) =>
+        key +
+        items.replace(
+          /(")([0-9a-f]{7,12})(?= )/g,
+          (_m: string, quote: string, value: string) => quote + id(value),
+        ),
+    );
 }
 
 function pathReplacements(context: NormalizeContext): (readonly [string, string])[] {
@@ -88,12 +120,14 @@ function versionPattern(): RegExp {
 /** The same value keeps one number within one snapshot, in order of first appearance. */
 function numbered(text: string, pattern: RegExp, kind: string): string {
   const seen = new Map<string, number>();
-  return text.replace(pattern, (value) => {
-    let index = seen.get(value);
-    if (index === undefined) {
-      index = seen.size + 1;
-      seen.set(value, index);
-    }
-    return `<${kind}-${index}>`;
-  });
+  return text.replace(pattern, (value) => token(seen, value, kind));
+}
+
+function token(seen: Map<string, number>, value: string, kind: string): string {
+  let index = seen.get(value);
+  if (index === undefined) {
+    index = seen.size + 1;
+    seen.set(value, index);
+  }
+  return `<${kind}-${index}>`;
 }
