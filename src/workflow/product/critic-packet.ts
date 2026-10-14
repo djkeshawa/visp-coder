@@ -52,7 +52,7 @@ export interface CriticPacket {
    */
   disputes?: readonly PacketDispute[];
   responseShape: ReturnType<typeof independentReviewTemplate>;
-  responseSchema: ReturnType<typeof independentReviewJsonSchema>;
+  responseSchema: Awaited<ReturnType<typeof independentReviewJsonSchema>>;
 }
 
 const OPEN_FINDINGS_INSTRUCTIONS =
@@ -158,7 +158,7 @@ export async function criticPacket(
         }
       : {}),
     responseShape: independentReviewTemplate(),
-    responseSchema: independentReviewJsonSchema(
+    responseSchema: await independentReviewJsonSchema(
       deliveredReviewEvidenceIds(
         evidence,
         independent.interactionEvidence,

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Every `visp` command starts faster, the edit hook's `visp guard` included: the MCP SDK and its schema converter now load only when serving MCP or preparing a review. `visp guard --path` took a median 389 ms instead of 573 ms (20 runs, loaded machine).
 - `visp done`, `visp verify` and the Git pre-commit guard read the project's environment files faster on large trees: directories are read concurrently. With a 20,000-file ignored virtualenv the scan took 38 ms instead of 168 ms (median, loaded machine), and `visp guard --json` 721 ms instead of 877 ms. What is scanned is unchanged.
 
 ## 0.5.0-beta.3 - 2026-10-12

@@ -1,4 +1,3 @@
-import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { z } from "zod";
 import { feedbackResolutionSchema, type ProductFeedback } from "./feedback-model.js";
 import type { ProductOutcome } from "./model.js";
@@ -62,12 +61,19 @@ export const independentReviewSchema = z
   })
   .strict();
 export type IndependentReview = z.infer<typeof independentReviewSchema>;
-/** Expand converter aliases: provider structured output rejects refs into nested properties. */
-export function independentReviewJsonSchema(
+/**
+ * Expand converter aliases: provider structured output rejects refs into nested properties.
+ * The converter is loaded on first use: it pulls in the MCP SDK's schema stack, which every
+ * other command, the edit hook's `visp guard` included, never needs at startup.
+ */
+export async function independentReviewJsonSchema(
   evidenceIds?: readonly string[],
   outcomeIds?: readonly string[],
   disputedTests: readonly string[] = [],
-) {
+): Promise<Record<string, unknown>> {
+  const { toJsonSchemaCompat } = await import(
+    "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js"
+  );
   const root = toJsonSchemaCompat(independentReviewSchema);
   function expand(value: unknown, ancestors = new Set<string>()): unknown {
     if (Array.isArray(value)) return value.map((entry) => expand(entry, ancestors));
