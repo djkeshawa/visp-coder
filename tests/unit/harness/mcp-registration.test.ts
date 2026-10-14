@@ -303,6 +303,21 @@ describe("JSONC MCP configuration edits", () => {
     );
   });
 
+  // Windows editors may save a byte order mark; it is kept, not a reason to refuse the file.
+  it("edits a file that starts with a byte order mark and keeps the mark", async () => {
+    const before = '\uFEFF{\n  // servers\n  "servers": {}\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    const result = await registerMcpServer(root, false, "copilot");
+
+    expect(result.ok && result.value).toBe("added");
+    const after = await readFile(join(root, ".vscode/mcp.json"), "utf8");
+    expect(after.startsWith('\uFEFF{\n  // servers\n  "servers": {\n    "visp": ')).toBe(true);
+    const removed = planMcpUnregistration(after, "copilot");
+    expect(removed.status).toBe("removed");
+    expect(removed.content?.startsWith("\uFEFF")).toBe(true);
+  });
+
   it("removes only the VISP entry on uninstall", async () => {
     const kept =
       '{\n  "servers": {\n    // the hosted one\n    "github": { "url": "x" } // hosted\n  }\n}\n';

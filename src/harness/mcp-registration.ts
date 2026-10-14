@@ -96,6 +96,15 @@ export interface McpRegistrationResidue {
   readonly malformed: boolean;
 }
 
+/** Windows editors may start a file with one; it is kept and set aside while editing. */
+const BYTE_ORDER_MARK = "\uFEFF";
+
+function withoutMark(current: string | undefined): { mark: string; text: string | undefined } {
+  return current?.startsWith(BYTE_ORDER_MARK)
+    ? { mark: BYTE_ORDER_MARK, text: current.slice(BYTE_ORDER_MARK.length) }
+    : { mark: "", text: current };
+}
+
 /** Pure registration merge for transactional installers. */
 export function planMcpRegistration(
   current: string | undefined,
@@ -103,6 +112,18 @@ export function planMcpRegistration(
   harness: Harness = "claude-code",
 ): Result<PlannedMcpRegistration> {
   if (harness === "codex") return planCodexMcpRegistration(current, force);
+  const { mark, text } = withoutMark(current);
+  const planned = planJsonRegistration(text, force, harness);
+  return planned.ok && planned.value.content !== undefined
+    ? ok({ ...planned.value, content: `${mark}${planned.value.content}` })
+    : planned;
+}
+
+function planJsonRegistration(
+  current: string | undefined,
+  force: boolean,
+  harness: Harness,
+): Result<PlannedMcpRegistration> {
   const shape = registrationShape(harness);
   const config = parseConfigText(current);
   if (config === "malformed") return ok({ status: "malformed" });
@@ -143,6 +164,17 @@ export function planMcpUnregistration(
   harness: Harness,
 ): PlannedMcpUnregistration {
   if (harness === "codex") return planCodexMcpUnregistration(current);
+  const { mark, text } = withoutMark(current);
+  const planned = planJsonUnregistration(text, harness);
+  return planned.content === undefined
+    ? planned
+    : { ...planned, content: `${mark}${planned.content}` };
+}
+
+function planJsonUnregistration(
+  current: string | undefined,
+  harness: Harness,
+): PlannedMcpUnregistration {
   const shape = registrationShape(harness);
   const parsed = parseConfigText(current);
   if (parsed === "malformed") return { status: "malformed" };
@@ -215,7 +247,9 @@ export function inspectMcpRegistrationResidue(
 
 function parseConfig(text: string): McpConfig | undefined {
   try {
-    return optionalObject(JSON.parse(stripJsonCommentsAndTrailingCommas(text)));
+    return optionalObject(
+      JSON.parse(stripJsonCommentsAndTrailingCommas(withoutMark(text).text ?? "")),
+    );
   } catch {
     // Rewriting a file we cannot parse would discard whatever it holds.
     return undefined;
