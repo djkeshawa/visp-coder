@@ -1,3 +1,4 @@
+import type { NextAction } from "../workflow/next-action.js";
 import { MINIMAL_TOOLS, TOOL, type ToolName } from "./constants.js";
 
 export interface McpAction {
@@ -28,7 +29,27 @@ export function mcpAction(command: string): McpAction | undefined {
   if (!match) return undefined;
   const tool = commandTools[match[1] ?? ""];
   if (!tool) return undefined;
-  const arguments_ = actionArguments(tool, command, parseOptions(command));
+  const goal = /^visp feature\s+("[^"]*"|'[^']*'|[^\s-]+)/.exec(command)?.[1];
+  return callFor(tool, goal?.replace(/^['"]|['"]$/g, ""), parseOptions(command));
+}
+
+/** The same call from a structured step, without reading a command line back. */
+export function mcpActionFor(action: NextAction): McpAction | undefined {
+  const tool = commandTools[action.command];
+  if (!tool) return undefined;
+  const options: Record<string, string | boolean> = {};
+  for (const arg of action.args)
+    if ("flag" in arg) options[camelCase(arg.flag)] = arg.value === undefined ? true : arg.value;
+  const goal = action.args.find((arg) => "word" in arg);
+  return callFor(tool, goal && "word" in goal ? goal.word : undefined, options);
+}
+
+function callFor(
+  tool: ToolName,
+  goal: string | undefined,
+  options: Record<string, string | boolean>,
+): McpAction {
+  const arguments_ = actionArguments(tool, goal, options);
   // The minimal profile has no status, index or verify tool. Re-query next rather than
   // sending a worker to an unavailable tool or an unrelated executable on PATH.
   if (!MINIMAL_TOOLS.has(tool))
@@ -39,6 +60,10 @@ export function mcpAction(command: string): McpAction | undefined {
   return { tool, arguments: arguments_ };
 }
 
+function camelCase(flag: string): string {
+  return flag.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
 function parseOptions(command: string): Record<string, string | boolean> {
   const arguments_: Record<string, string | boolean> = {};
   const tokens = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
@@ -46,7 +71,7 @@ function parseOptions(command: string): Record<string, string | boolean> {
     const token = tokens[index] ?? "";
     if (!token.startsWith("--")) continue;
     const [option, inline] = token.slice(2).split("=", 2);
-    const key = (option ?? "").replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+    const key = camelCase(option ?? "");
     if (!key) continue;
     const next = tokens[index + 1];
     const raw = inline ?? (next && (!next.startsWith("--") || next === "-") ? next : undefined);
@@ -58,13 +83,10 @@ function parseOptions(command: string): Record<string, string | boolean> {
 
 function actionArguments(
   tool: ToolName,
-  command: string,
+  goal: string | undefined,
   arguments_: Record<string, string | boolean>,
 ): Record<string, string | boolean> {
-  if (tool === TOOL.feature) {
-    const goal = /^visp feature\s+("[^"]*"|'[^']*'|[^\s-]+)/.exec(command)?.[1];
-    if (goal) arguments_.goal = goal.replace(/^['"]|['"]$/g, "");
-  }
+  if (tool === TOOL.feature && goal) arguments_.goal = goal;
   if (tool === TOOL.critic) {
     arguments_.operation =
       arguments_.preflight === true
