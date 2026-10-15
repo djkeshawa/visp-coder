@@ -39,9 +39,9 @@ export function unavailableReviewerFindingsNext(
   capacity: ReviewerCapacity,
 ): ProductNext | undefined {
   if (capacity.available) return undefined;
-  const scopes = requiredFindingScopes(workspace, record, subject);
+  const scopes = requiredFindingScopes(workspace, record);
   const repair =
-    scopes.find((scope) => !scope.ready) ??
+    scopes.find((scope) => !scope.repaired.size) ??
     scopes.find((scope) => scope.slice.id === slice.id) ??
     scopes[0];
   if (!repair) return undefined;
@@ -54,7 +54,8 @@ export function unavailableReviewerFindingsNext(
     mayEdit: true,
   };
   if (
-    scopes.every((scope) => scope.ready) &&
+    scopes.every((scope) => scope.repaired.size > 0) &&
+    scopes.some((scope) => scope.repaired.has(subject)) &&
     !currentProductFailures(record, subject).length &&
     !currentJourneyFailures(record, subject).length
   )
@@ -69,10 +70,11 @@ export function unavailableReviewerFindingsNext(
 }
 
 /**
- * A feature-level PR must not skip another slice's untouched findings or stale checks. Each
- * finding belongs to one slice, so a repair is never undone by its own check going stale.
+ * A feature-level PR must not skip another slice's untouched findings. Each finding belongs to
+ * one slice, and a repair round counts once it passed that slice's checks on a later version:
+ * slices that share files would otherwise stale each other's repairs and alternate forever.
  */
-function requiredFindingScopes(workspace: WorkspaceState, record: ProductRecord, subject: string) {
+function requiredFindingScopes(workspace: WorkspaceState, record: ProductRecord) {
   const required = outstandingFeedback(record).filter((finding) => finding.required);
   return record.brief.slices.flatMap((slice) => {
     const findings = required.filter(
@@ -86,18 +88,25 @@ function requiredFindingScopes(workspace: WorkspaceState, record: ProductRecord,
         (!productFindings || review.feedback?.phase !== "understanding") &&
         review.reviewer?.context !== "unavailable",
     );
-    // Repeated findings retain their original digest; compare the latest completed review too.
-    const changed =
-      latest !== undefined &&
-      latest.subjectDigest !== subject &&
-      findings.every((finding) => finding.subjectDigest !== subject);
-    return [
-      { slice, findings, ready: changed && currentChecksPass(workspace, record, slice, subject) },
-    ];
+    if (!latest) return [{ slice, findings, repaired: new Set<string>() }];
+    // Repeated findings retain their original digest; exclude the latest review's version too.
+    const reviewed = new Set([
+      latest.subjectDigest,
+      ...findings.map((entry) => entry.subjectDigest),
+    ]);
+    const later = record.state.executions.filter(
+      (execution) =>
+        execution.createdAt >= latest.createdAt && !reviewed.has(execution.subjectDigest),
+    );
+    const versions = new Set(later.map((execution) => execution.subjectDigest));
+    const repaired = new Set(
+      [...versions].filter((version) => checksPass(workspace, record, slice, version)),
+    );
+    return [{ slice, findings, repaired }];
   });
 }
 
-function currentChecksPass(
+function checksPass(
   workspace: WorkspaceState,
   record: ProductRecord,
   slice: ProductSlice,

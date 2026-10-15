@@ -93,8 +93,8 @@ const failing = () =>
 const working = (finding = false) =>
   attached(vi.fn(async (packet) => ({ model: config.model, response: answer(packet, finding) })));
 
-/** A clean assessment whose one required finding names the given outcomes. */
-const sharedFinding = (outcomes: string[]) =>
+/** A clean assessment with one required finding per list of outcomes it names. */
+const findingsOn = (...outcomeLists: string[][]) =>
   attached(
     vi.fn(async (packet: CriticPacket) => {
       const base = answer(packet, true);
@@ -103,7 +103,12 @@ const sharedFinding = (outcomes: string[]) =>
         ...entry,
         status: "satisfied",
       }));
-      const findings = feedback.findings.map((finding) => ({ ...finding, outcomes }));
+      const [template] = feedback.findings;
+      const findings = outcomeLists.map((outcomes, index) => ({
+        ...template,
+        problem: `${FINDING} (${index + 1})`,
+        outcomes,
+      }));
       return {
         model: config.model,
         response: {
@@ -380,7 +385,7 @@ describe("VISP's reviewer capacity", () => {
     });
 
     /** Two closed slices that share the module, each owning one outcome, as in the benchmark. */
-    async function sharedSlices(maxCalls: number) {
+    async function sharedSlices(maxCalls: number, reviewer: ProductCriticHost) {
       const [outcome] = setup.brief.outcomes;
       const [check] = setup.brief.checks;
       const [slice] = setup.brief.slices;
@@ -410,10 +415,10 @@ describe("VISP's reviewer capacity", () => {
       expect((await feature({ operation: "configure", config: { ...config, maxCalls } })).ok).toBe(
         true,
       );
-      // The feature review's required finding names T002's outcome first, then T001's.
-      expect(await feature({ operation: "review" }, sharedFinding(["O002", "O001"]))).toMatchObject(
-        { ok: true, value: { callsUsed: 1 } },
-      );
+      expect(await feature({ operation: "review" }, reviewer)).toMatchObject({
+        ok: true,
+        value: { callsUsed: 1 },
+      });
     }
     const done = async (task: string) => runProductDone(await setup.workspace.state(), { task });
     const nextStep = async () => {
@@ -422,13 +427,10 @@ describe("VISP's reviewer capacity", () => {
       return result.value;
     };
 
-    it("repairs a finding shared by two slices in one slice, then hands off", async () => {
-      // fin-slingshot-game-visp-final-1: each repair under one slice left the other slice's
-      // checks stale, so `next` alternated between the slices until the run timed out.
-      await launch("codex-exec");
-      await sharedSlices(1);
+    /** Follow `next` through repair rounds that each edit the shared module; stop at handoff. */
+    async function repairRounds() {
       const route: string[] = [];
-      for (let round = 0; round < 4; round += 1) {
+      for (let round = 0; round < 5; round += 1) {
         const step = await nextStep();
         if (step.completion === "handoff") break;
         expect(step).toMatchObject({ action: "fix", mayEdit: true });
@@ -438,16 +440,44 @@ describe("VISP's reviewer capacity", () => {
         await setup.workspace.write("src/value.mjs", `export const value = 2; // ${round}\n`);
         expect((await done(task)).ok).toBe(true);
       }
-      expect(route).toEqual(["T002"]);
       expect(await nextStep()).toMatchObject({
         completion: "handoff",
         command: `visp pr --feature ${setup.brief.feature}`,
       });
+      return route;
+    }
+
+    it("repairs a finding shared by two slices in one slice, then hands off", async () => {
+      // fin-slingshot-game-visp-final-1: each repair under one slice left the other slice's
+      // checks stale, so `next` alternated between the slices until the run timed out.
+      await launch("codex-exec");
+      // The feature review's required finding names T002's outcome first, then T001's.
+      await sharedSlices(1, findingsOn(["O002", "O001"]));
+      expect(await repairRounds()).toEqual(["T002"]);
+      // An edit after the repair round needs its checks again before the handoff.
+      await setup.workspace.write("src/value.mjs", "export const value = 2; // later\n");
+      expect(await nextStep()).toMatchObject({
+        action: "fix",
+        task: "T002",
+        completion: "unresolved-product",
+      });
+    });
+
+    it("repairs one finding per slice once each when the slices share a file", async () => {
+      await launch("codex-exec");
+      await sharedSlices(1, findingsOn(["O001"], ["O002"]));
+      expect(await repairRounds()).toEqual(["T001", "T002"]);
+    });
+
+    it("repairs a feature finding that names no outcome in the first slice", async () => {
+      await launch("codex-exec");
+      await sharedSlices(1, findingsOn([]));
+      expect(await repairRounds()).toEqual(["T001"]);
     });
 
     it("reopens the slice owning a shared finding's first outcome while the reviewer can run", async () => {
       await launch("codex-exec");
-      await sharedSlices(2);
+      await sharedSlices(2, findingsOn(["O002", "O001"]));
       expect(await nextStep()).toMatchObject({
         action: "fix",
         task: "T002",
