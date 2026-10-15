@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
 import { err, ok, type Result } from "../../core/result.js";
-import { browserInputIdentitySchema } from "../../testing/browser-input-identity.js";
-import { browserJourneySchema } from "../../testing/browser-journey.js";
 import { replayBatchCommand, replaySuggestions } from "../evidence/capture-replay.js";
 import {
   currentExactReplay,
@@ -15,14 +13,18 @@ import {
 import { imageDimensions } from "../evidence/observations/media.js";
 import type { ProductReviewImage } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
-import { productCheckSupportsBehavior } from "./check-command.js";
+import {
+  type captureOperationSchema,
+  type ProductCaptureRun,
+  validCaptureRuns,
+} from "./capture-run-model.js";
+import { productCheckSupportsBehavior } from "./check/check-command.js";
 import { reviewCodeSources } from "./code-context.js";
 import { exploratoryFailureHistory, historicalFailureReferences } from "./exploratory-history.js";
 import { captureSchema, type ProductImageAvailability } from "./images.js";
 import {
   hasExecutedDeclaredRevision,
   isDeclaredJourney,
-  journeyExpectationSchema,
   journeyOwnershipIndex,
 } from "./journey-ownership.js";
 import {
@@ -82,48 +84,6 @@ export function evidenceApplies(
 function evidenceInSlice(task: string | undefined, selectedSlice?: ProductSlice): boolean {
   return !selectedSlice || !task || task === selectedSlice.id;
 }
-
-const operation = z.object({
-  id: z.string(),
-  kind: z.enum([
-    "navigate",
-    "measure",
-    "pointer",
-    "touch",
-    "keyboard",
-    "capture",
-    "observe",
-    "scroll",
-  ]),
-  description: z.string().optional(),
-  measurement: z.object({ json: z.string(), truncated: z.boolean() }).optional(),
-});
-export const productCaptureRunSchema = z.object({
-  id: z.string().optional(),
-  version: z.union([z.literal(1), z.literal(2)]),
-  provenance: z.literal("runner-executed"),
-  subjectDigest: z.string(),
-  outcomeDigest: z.string().optional(),
-  contractDigest: z.string().optional(),
-  task: z.string().optional(),
-  journeyDigest: z.string().optional(),
-  comparisonEnvironment: z.string().optional(),
-  journey: browserJourneySchema.optional(),
-  journeyKey: z.string().optional(),
-  expectation: journeyExpectationSchema.optional(),
-  status: z.enum(["completed", "failed", "timed-out", "cancelled"]).optional(),
-  completedInputs: z.array(browserInputIdentitySchema).optional(),
-  failure: z
-    .object({
-      kind: z.string(),
-      message: z.string(),
-      operationId: z.string().optional(),
-      input: browserInputIdentitySchema.optional(),
-    })
-    .optional(),
-  captures: z.array(captureSchema),
-  operations: z.array(operation),
-});
 
 const control = z.object({
   id: z.string(),
@@ -254,10 +214,7 @@ function executionReferences(
       aliasesByCheck.set(execution.check, execution);
   }
   const runs = new Map(
-    record.state.captureRuns.flatMap((candidate) => {
-      const parsed = productCaptureRunSchema.safeParse(candidate);
-      return parsed.success && parsed.data.id ? [[parsed.data.id, parsed.data] as const] : [];
-    }),
+    validCaptureRuns(record).flatMap((run) => (run.id ? [[run.id, run] as const] : [])),
   );
   for (const execution of record.state.executions)
     entries.push(executionReference(record, subject, execution, latest, runs, selectedSlice));
@@ -275,7 +232,7 @@ function executionReference(
   subject: string,
   execution: ProductExecution,
   latest: ReadonlyMap<string, ProductExecution>,
-  runs: ReadonlyMap<string, z.infer<typeof productCaptureRunSchema>>,
+  runs: ReadonlyMap<string, ProductCaptureRun>,
   selectedSlice?: ProductSlice,
 ): ProductEvidenceReference {
   const current = evidenceApplies(record, subject, execution);
@@ -324,7 +281,7 @@ function executionInputKey(entry: ProductRecord["state"]["executions"][number]) 
 /** Summarize only a bound runner record; never parse agent-printed output as browser evidence. */
 export function executionSummary(
   execution: ProductRecord["state"]["executions"][number],
-  run?: z.infer<typeof productCaptureRunSchema>,
+  run?: ProductCaptureRun,
 ) {
   const prefix = `${execution.check}: ${execution.command}`;
   if (
@@ -396,21 +353,18 @@ function observedViewport(record: ProductRecord, subject: string, image?: Produc
   const dimensions = imageDimensions(Buffer.from(image.data, "base64"));
   if (dimensions?.width !== image.viewport.width || dimensions.height !== image.viewport.height)
     return undefined;
-  const recorded = record.state.captureRuns.some((candidate) => {
-    const run = productCaptureRunSchema.safeParse(candidate);
-    return (
-      run.success &&
-      evidenceApplies(record, subject, run.data) &&
-      (run.data.version === 1 || run.data.status === "completed") &&
-      run.data.captures.some(
+  const recorded = validCaptureRuns(record).some(
+    (run) =>
+      evidenceApplies(record, subject, run) &&
+      (run.version === 1 || run.status === "completed") &&
+      run.captures.some(
         (capture) =>
           capture.provenance === "runner-captured" &&
           capture.id === image.id &&
           capture.path === image.path &&
           capture.sha256 === image.sha256,
-      )
-    );
-  });
+      ),
+  );
   return recorded ? image.viewport : undefined;
 }
 
@@ -420,10 +374,7 @@ function operationReferences(
   entries: ProductEvidenceReference[],
   selectedSlice?: ProductSlice,
 ): void {
-  for (const candidate of record.state.captureRuns) {
-    const parsed = productCaptureRunSchema.safeParse(candidate);
-    if (!parsed.success) continue;
-    const run = parsed.data;
+  for (const run of validCaptureRuns(record)) {
     const current =
       evidenceApplies(record, subject, run) && evidenceInSlice(run.task, selectedSlice);
     for (const observed of run.operations) {
@@ -508,7 +459,7 @@ function controlReferences(
 }
 
 function observationStatus(
-  observed: z.infer<typeof operation>,
+  observed: z.infer<typeof captureOperationSchema>,
 ): ProductEvidenceReference["status"] {
   if (observed.kind !== "observe" && observed.kind !== "scroll") return "available";
   if (!observed.measurement || observed.measurement.truncated) return "unavailable";
@@ -551,6 +502,34 @@ export function resolveAssessmentEvidence(
     evidence: [...new Set([...evidence.value, ...expectations.flatMap((entry) => entry.evidence)])],
     expectations,
   });
+}
+
+/**
+ * Reviewers that opened an output VISP could not deliver as text (a rendered PNG listed as an
+ * unavailable core file, or the core-gaps note) cited it beside current evidence, and the
+ * whole review was discarded or its outcome left unassessed: about 30 reviews across the
+ * benchmarks, among them every voxel-scene run's. A citation of evidence VISP marked
+ * unavailable is dropped when the same list still cites other known evidence that VISP did
+ * not mark unavailable. Stale, unknown and ambiguous citations are never dropped: VISP marks
+ * an ambiguous ID unavailable too, but it stays cited, so the judgment that rests on it is
+ * still refused or left unavailable.
+ */
+export function withoutUnavailableCitations(
+  references: readonly string[],
+  catalogue: ProductEvidenceCatalogue,
+): { kept: string[]; dropped: string[] } {
+  const ambiguous = ambiguousEvidenceIds(catalogue.entries);
+  const status = (reference: string) => {
+    const id = catalogue.aliases.get(reference) ?? reference;
+    return ambiguous.has(id)
+      ? "ambiguous"
+      : catalogue.entries.find((entry) => entry.id === id)?.status;
+  };
+  const dropped = references.filter((id) => status(id) === "unavailable");
+  const kept = references.filter((id) => status(id) !== "unavailable");
+  const usable = (id: string) => status(id) !== undefined && status(id) !== "ambiguous";
+  if (!dropped.length || !kept.some(usable)) return { kept: [...references], dropped: [] };
+  return { kept, dropped };
 }
 
 export function evidenceSupportGaps(
@@ -610,15 +589,12 @@ export function currentJourneyFailures(
 /** A source edit makes old evidence stale; it does not demonstrate that a known defect was repaired. */
 export function pendingJourneyReplays(record: ProductRecord, subject: string, task?: string) {
   const ownership = journeyOwnershipIndex(record);
-  const failed = new Map<string, z.infer<typeof productCaptureRunSchema>>();
+  const failed = new Map<string, ProductCaptureRun>();
   const current = latestCurrentJourneys(record, subject, task);
   const unresolved = new Set(
     currentFailedJourneys(record, subject, task, ownership).map((run) => run.id),
   );
-  for (const candidate of record.state.captureRuns) {
-    const parsed = productCaptureRunSchema.safeParse(candidate);
-    if (!parsed.success) continue;
-    const run = parsed.data;
+  for (const run of validCaptureRuns(record)) {
     if (
       !run.id ||
       !run.journey ||
@@ -719,10 +695,7 @@ export function currentJourneyFeedback(
   };
 }
 
-function retainedJourneyFailure(
-  record: ProductRecord,
-  run: z.infer<typeof productCaptureRunSchema>,
-) {
+function retainedJourneyFailure(record: ProductRecord, run: ProductCaptureRun) {
   if (run.failure?.kind !== "behavior" || run.status === "completed") return false;
   if (evidenceApplies(record, run.subjectDigest, run)) return true;
   return (
@@ -733,29 +706,21 @@ function retainedJourneyFailure(
 }
 
 export function latestCurrentJourneys(record: ProductRecord, subject: string, task?: string) {
-  const latest = new Map<string, z.infer<typeof productCaptureRunSchema>>();
+  const latest = new Map<string, ProductCaptureRun>();
+  const runs = validCaptureRuns(record);
   const legacyReplays = new Set(
-    record.state.captureRuns.flatMap((candidate) => {
-      const parsed = productCaptureRunSchema.safeParse(candidate);
-      return parsed.success && legacyFailure(parsed.data) ? [exactReplayIdentity(parsed.data)] : [];
-    }),
+    runs.flatMap((run) => (legacyFailure(run) ? [exactReplayIdentity(run)] : [])),
   );
-  for (const candidate of record.state.captureRuns) {
-    const run = productCaptureRunSchema.safeParse(candidate);
+  for (const run of runs) {
     if (
-      !run.success ||
-      (!evidenceApplies(record, subject, run.data) && !retainedJourneyFailure(record, run.data)) ||
-      (task && run.data.task && run.data.task !== task)
+      (!evidenceApplies(record, subject, run) && !retainedJourneyFailure(record, run)) ||
+      (task && run.task && run.task !== task)
     )
       continue;
-    const identity = journeyHistoryGroup(run.data, legacyReplays);
-    const key = JSON.stringify([
-      run.data.task,
-      run.data.outcomeDigest ?? run.data.contractDigest,
-      identity,
-    ]);
+    const identity = journeyHistoryGroup(run, legacyReplays);
+    const key = JSON.stringify([run.task, run.outcomeDigest ?? run.contractDigest, identity]);
     latest.delete(key);
-    latest.set(key, run.data);
+    latest.set(key, run);
   }
   return [...latest.values()];
 }
@@ -768,14 +733,11 @@ export function currentFailedJourneys(
 ) {
   const runs = latestCurrentJourneys(record, subject, task);
   const completed = new Map(
-    record.state.captureRuns.flatMap((candidate) => {
-      const parsed = productCaptureRunSchema.safeParse(candidate);
-      return parsed.success &&
-        parsed.data.status === "completed" &&
-        evidenceApplies(record, subject, parsed.data)
-        ? [[parsed.data.id, parsed.data] as const]
-        : [];
-    }),
+    validCaptureRuns(record).flatMap((run) =>
+      run.status === "completed" && evidenceApplies(record, subject, run)
+        ? [[run.id, run] as const]
+        : [],
+    ),
   );
   const resolutions = record.state.reviews
     .filter((review) => evidenceApplies(record, subject, review))

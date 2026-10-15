@@ -18,8 +18,15 @@ import { err, ok, type Result } from "../../core/result.js";
 import { runtimeIdentity } from "../../core/version.js";
 import type { WorkspaceState } from "../state.js";
 import { acceptanceEnvironment } from "./acceptance-environment.js";
-import { byproductProtection, skippedByproduct } from "./byproducts.js";
-import { isBrowserCheckCommand } from "./check-command.js";
+import {
+  byproductProtection,
+  foreignHostFile,
+  hostFileProtection,
+  skippedByproduct,
+} from "./byproducts.js";
+import { isBrowserCheckCommand } from "./check/check-command.js";
+import { declaredCheckImages } from "./check/check-image-paths.js";
+import { inheritedPaths } from "./inherited-record.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
 import { workingSourceIdentity } from "./source-git.js";
 import { sourceInputPatterns } from "./source-inputs.js";
@@ -60,16 +67,33 @@ export async function productSourceSnapshot(
   const algorithm =
     [...objects.value.entries.values()][0]?.object.length === 64 ? "sha256" : "sha1";
   const protection = byproductProtection(workspace, selected.value);
+  const hostProtection = hostFileProtection(workspace, selected.value);
+  // A declared check image the check writes is output. One that existed before the feature
+  // started (committed, or uncommitted work it started from) stays product, so declaring an
+  // existing file cannot hide later edits to it from freshness and scope checks.
+  const images = declaredCheckImages(selected.value?.checks);
+  const inherited = images.size
+    ? await inheritedPaths(workspace, selected.value?.feature)
+    : new Set<string>();
+  const output = (path: string) =>
+    images.has(path) && !objects.value.entries.has(path) && !inherited.has(path);
   const paths = listed.value.filter(
     (path) =>
       path !== ".visp" &&
       !path.startsWith(".visp/") &&
+      !output(path) &&
+      !foreignHostFile(
+        path,
+        objects.value.entries.has(path),
+        workspace.config.harness,
+        hostProtection,
+      ) &&
       !skippedByproduct(path, objects.value.entries.has(path), protection),
   );
   return workspace.files.withReadPass(() =>
     snapshotSourceFiles(
       workspace,
-      [...new Set([...paths, ...declared.value])].sort(),
+      [...new Set([...paths, ...declared.value.filter((path) => !output(path))])].sort(),
       patterns,
       objects.value,
       algorithm,

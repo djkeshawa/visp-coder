@@ -1,0 +1,7 @@
+> visp_next {}
+--- text
+visp_next: {"feature":"001-return-two-from-the-public","action":"wait","objective":"Independent review is still running. Run the command again to wait for its findings; editing pauses until it returns.","command":"visp_next {\"feature\":\"001-return-two-from-the-public\"}","mayEdit":false}
+Full data is already in structuredContent.data.
+
+Next: visp_next {"feature":"001-return-two-from-the-public"}
+--- isError false

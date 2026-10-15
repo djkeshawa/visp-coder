@@ -9,7 +9,7 @@ import {
   validateProductFeedback,
 } from "../../../../src/workflow/product/feedback.js";
 import { initialProductState, parseProductBrief } from "../../../../src/workflow/product/model.js";
-import { reviewExcerpt } from "../../../../src/workflow/product/review-excerpts.js";
+import { reviewExcerpt } from "../../../../src/workflow/product/review/review-excerpts.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 
@@ -671,4 +671,56 @@ it("recognizes modern outcome assessments without requiring legacy category decl
   expect(productFeedbackPlan(subject, "current", slice).visualCheckpoint?.status).toBe(
     "review-rendered-slice",
   );
+});
+
+// Reviewers that opened a rendered PNG VISP listed as an unavailable core file cited it beside
+// current evidence, and every review of that run was discarded.
+describe("citations VISP cannot use", () => {
+  const withUnavailable: ProductEvidenceCatalogue = {
+    ...catalogue,
+    entries: [
+      ...catalogue.entries,
+      { id: "CODE-png", kind: "source", status: "unavailable", outcomes: [], summary: "Binary" },
+    ],
+  };
+  const finding = (evidence: string[]) => {
+    const feedback = feedbackTemplate();
+    feedback.dimensions = [];
+    feedback.findings = [
+      {
+        dimension: "code",
+        problem: "The handler ignores the second input",
+        nextCheck: "Exercise the second input",
+        outcomes: ["O001"],
+        required: false,
+        evidence,
+      },
+    ];
+    return feedback;
+  };
+
+  it("are dropped, and recorded, when the entry still cites usable evidence", () => {
+    const validated = validateProductFeedback(
+      finding(["CODE-new", "CODE-png"]),
+      record(),
+      withUnavailable,
+      { context: "current" },
+    );
+    expect(validated.ok).toBe(true);
+    if (!validated.ok || !validated.value) return;
+    expect(validated.value.findings[0]?.evidence).toEqual(["CODE-new"]);
+    expect(validated.value.limitations).toContain(
+      "VISP dropped citations of evidence it could not deliver: CODE-png",
+    );
+  });
+
+  it("still reject an entry with nothing usable left, or with a stale or unknown citation", () => {
+    for (const evidence of [["CODE-png"], ["STALE"], ["MISSING"], ["CODE-new", "STALE"]])
+      expect(
+        validateProductFeedback(finding(evidence), record(), withUnavailable, {
+          context: "current",
+        }).ok,
+        evidence.join(),
+      ).toBe(false);
+  });
 });

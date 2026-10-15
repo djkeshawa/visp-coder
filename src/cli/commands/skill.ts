@@ -5,7 +5,8 @@ import { parseProjectFilePath, parseTaskId } from "../../core/input.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { verificationCommand } from "../../skills/admit.js";
 import { couldFireAnywhere } from "../../skills/applies.js";
-import { transitionSkill } from "../../skills/lifecycle.js";
+import { type ExportOptions, exportSkill } from "../../skills/export.js";
+import { findSkill, transitionSkill } from "../../skills/lifecycle.js";
 import { reconcileLineage } from "../../skills/lineage.js";
 import { createProposalFromContent, type ProposalInput } from "../../skills/proposal.js";
 import { rollbackSkill } from "../../skills/rollback.js";
@@ -16,6 +17,7 @@ import {
   readIndex,
   readSkillBody,
   readSkillHistory,
+  skillRecord,
 } from "../../skills/store.js";
 import type { WorkspaceState } from "../../workflow/state.js";
 import {
@@ -208,7 +210,7 @@ function showCommand(): Command {
         return;
       }
 
-      const found = await lookup(state.value, id);
+      const found = await findSkill(state.value, id);
       if (!found.ok) {
         process.exitCode = emitError("skill", found.error, { json: isJson(opts) });
         return;
@@ -345,7 +347,7 @@ function diffCommand(): Command {
         return;
       }
 
-      const found = await lookup(state.value, id);
+      const found = await findSkill(state.value, id);
       if (!found.ok) {
         process.exitCode = emitError("skill", found.error, { json: isJson(opts) });
         return;
@@ -406,53 +408,6 @@ function exportCommand(): Command {
     });
 }
 
-interface ExportOptions {
-  readonly file: string;
-  readonly force?: boolean;
-}
-
-async function exportSkill(
-  state: WorkspaceState,
-  id: string,
-  input: ExportOptions,
-): Promise<Result<{ readonly id: string; readonly file: string }>> {
-  const found = await lookup(state, id);
-  if (!found.ok) return found;
-  if (found.value.state !== "admitted") {
-    return err(vispError("UNSUPPORTED", `${id} is ${found.value.state}, not admitted`));
-  }
-
-  const body = await readSkillBody(state, id);
-  if (!body.ok) return body;
-  if (body.value === undefined) {
-    return err(vispError("ARTIFACT_MISSING", `${id} has no SKILL.md on disk`));
-  }
-  if (fingerprint(body.value) !== found.value.contentHash) {
-    return err(
-      vispError("ARTIFACT_INVALID", `${id} was edited since it was admitted`, {
-        recovery: `${PRODUCT_NAME} skill diff ${id}`,
-      }),
-    );
-  }
-
-  const parsedDestination = parseProjectFilePath(input.file);
-  if (!parsedDestination.ok) return parsedDestination;
-  const destination = parsedDestination.value;
-  const existing = await state.files.readTextIfExists(destination);
-  if (!existing.ok) return existing;
-  if (existing.value !== undefined && existing.value !== body.value && !input.force) {
-    return err(
-      vispError("ARTIFACT_INVALID", `${input.file} already exists with different content`),
-    );
-  }
-
-  if (existing.value !== body.value) {
-    const written = await state.files.writeTextAtomic(destination, body.value);
-    if (!written.ok) return written;
-  }
-  return ok({ id, file: state.paths.absolute(destination) });
-}
-
 function importCommand(): Command {
   return new Command("import")
     .description("Bring in a SKILL.md as an inert seeded proposal")
@@ -484,7 +439,7 @@ function importCommand(): Command {
         process.exitCode = emitError("skill", index.error, { json: isJson(opts) });
         return;
       }
-      if (index.value.skills.some((skill) => skill.id === id)) {
+      if (skillRecord(index.value, id) !== undefined) {
         process.exitCode = emitError(
           "skill",
           vispError("UNSUPPORTED", `A skill named ${id} already exists`),
@@ -572,22 +527,4 @@ async function transition(
     json: isJson(opts),
     text: (data) => `${data.id} is now ${data.state}.`,
   });
-}
-
-async function lookup(state: WorkspaceState, id: string) {
-  const checkedId = validateSkillId(id);
-  if (!checkedId.ok) return checkedId;
-
-  const index = await readIndex(state);
-  if (!index.ok) return index;
-
-  const found = index.value.skills.find((skill) => skill.id === checkedId.value);
-  return found
-    ? ok(found)
-    : {
-        ok: false as const,
-        error: vispError("ARTIFACT_MISSING", `No skill named ${id}`, {
-          recovery: `${PRODUCT_NAME} skill list`,
-        }),
-      };
 }

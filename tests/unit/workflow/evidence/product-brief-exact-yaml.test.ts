@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
-import { createProductFeature } from "../../../../src/workflow/product/brief.js";
+import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import { exactYaml, readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { TestWorkspace } from "../../support/workspace.js";

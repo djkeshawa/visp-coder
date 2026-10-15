@@ -10,6 +10,7 @@ import {
   MCP_SERVER_NAME,
   mcpConfigFile,
   OPENCODE_CONFIG_FILE,
+  planMcpRegistration,
   planMcpUnregistration,
 } from "../../../src/harness/mcp-registration.js";
 import { registerMcpServer } from "../support/writers.js";
@@ -207,12 +208,130 @@ describe("OpenCode MCP registration", () => {
       join(root, OPENCODE_CONFIG_FILE),
       '{\n // project settings\n "model": "my-model",\n "permission": {"edit": "ask",},\n "mcp": {"github": {"type": "remote", "url": "https://example.test"},},\n}\n',
     );
+    const before = await readFile(join(root, OPENCODE_CONFIG_FILE), "utf8");
     const result = await registerMcpServer(root, true, "opencode");
     expect(result.ok && result.value).toBe("added");
-    const config = await readConfig(OPENCODE_CONFIG_FILE);
-    expect(config.model).toBe("my-model");
-    expect(config.permission).toEqual({ edit: "ask" });
-    expect(config.mcp?.github).toEqual({ type: "remote", url: "https://example.test" });
+    const visp = {
+      type: "local",
+      command: ["node", runtimeIdentity().executable, "serve", "--mcp"],
+    };
+    // A server map written on one line gets the entry on that line too; the comment stays.
+    expect(await readFile(join(root, OPENCODE_CONFIG_FILE), "utf8")).toBe(
+      before.replace(
+        '"https://example.test"},},',
+        `"https://example.test"}, "visp": ${JSON.stringify(visp)},},`,
+      ),
+    );
+  });
+});
+
+/**
+ * VS Code, Cursor and OpenCode read these files as JSONC, and people comment them. The merge
+ * used to parse and re-serialize the whole file, so every comment and the file's own layout
+ * were lost. Only the VISP entry may change.
+ */
+describe("JSONC MCP configuration edits", () => {
+  const entry = (indent: string, base: string) =>
+    JSON.stringify(
+      { type: "stdio", command: "node", args: [runtimeIdentity().executable, "serve", "--mcp"] },
+      null,
+      indent,
+    ).replaceAll("\n", `\n${base}`);
+
+  beforeEach(async () => {
+    await mkdir(join(root, ".vscode"), { recursive: true });
+  });
+
+  it("adds the entry after the last server and keeps every other byte", async () => {
+    const before = [
+      "// Project MCP servers",
+      "{",
+      '    "servers": {',
+      "        // GitHub's hosted server",
+      '        "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" }, // hosted',
+      "    },",
+      "    /* inputs are prompted */",
+      '    "inputs": [],',
+      "}",
+      "",
+    ].join("\n");
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    const result = await registerMcpServer(root, false, "copilot");
+
+    expect(result.ok && result.value).toBe("added");
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      before.replace("// hosted\n", `// hosted\n        "visp": ${entry("    ", "        ")},\n`),
+    );
+  });
+
+  it("adds a comma after a last server that has none, and keeps CRLF line ends", async () => {
+    const before =
+      '{\r\n  // servers\r\n  "servers": {\r\n    "github": { "url": "x" } // hosted\r\n  }\r\n}\r\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    await registerMcpServer(root, false, "copilot");
+
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      before.replace(
+        '"github": { "url": "x" } // hosted\r\n',
+        `"github": { "url": "x" }, // hosted\r\n    "visp": ${entry("  ", "    ").replaceAll("\n", "\r\n")}\r\n`,
+      ),
+    );
+  });
+
+  it("adds the servers object when the file has none", async () => {
+    const before = '{\n\t// no servers yet\n\t"inputs": []\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    await registerMcpServer(root, false, "copilot");
+
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      `{\n\t// no servers yet\n\t"inputs": [],\n\t"servers": {\n\t\t"visp": ${entry("\t", "\t\t")}\n\t}\n}\n`,
+    );
+  });
+
+  it("replaces only an older VISP entry when upgrading", async () => {
+    const before =
+      '{\n  "servers": {\n    // VISP\n    "visp": { "command": "visp", "args": ["serve", "--mcp"] }, // old\n    "other": {}\n  }\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    const result = await registerMcpServer(root, false, "copilot");
+
+    expect(result.ok && result.value).toBe("replaced");
+    expect(await readFile(join(root, ".vscode/mcp.json"), "utf8")).toBe(
+      before.replace('{ "command": "visp", "args": ["serve", "--mcp"] }', entry("  ", "    ")),
+    );
+  });
+
+  // Windows editors may save a byte order mark; it is kept, not a reason to refuse the file.
+  it("edits a file that starts with a byte order mark and keeps the mark", async () => {
+    const before = '\uFEFF{\n  // servers\n  "servers": {}\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), before);
+
+    const result = await registerMcpServer(root, false, "copilot");
+
+    expect(result.ok && result.value).toBe("added");
+    const after = await readFile(join(root, ".vscode/mcp.json"), "utf8");
+    expect(after.startsWith('\uFEFF{\n  // servers\n  "servers": {\n    "visp": ')).toBe(true);
+    const removed = planMcpUnregistration(after, "copilot");
+    expect(removed.status).toBe("removed");
+    expect(removed.content?.startsWith("\uFEFF")).toBe(true);
+  });
+
+  it("removes only the VISP entry on uninstall", async () => {
+    const kept =
+      '{\n  "servers": {\n    // the hosted one\n    "github": { "url": "x" } // hosted\n  }\n}\n';
+    await writeFile(join(root, ".vscode/mcp.json"), kept);
+    await registerMcpServer(root, false, "copilot");
+    const installed = await readFile(join(root, ".vscode/mcp.json"), "utf8");
+
+    const removed = planMcpUnregistration(installed, "copilot");
+
+    expect(removed).toEqual({
+      status: "removed",
+      content: kept.replace("}, // hosted", "} // hosted"),
+    });
   });
 });
 
@@ -275,6 +394,92 @@ describe("Codex MCP registration", () => {
     expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
   });
 
+  /**
+   * Doctor used to call a hand-written table that starts this build "customized" and send the
+   * user to `doctor --fix`, which answered "add it manually": a loop. Only the command and its
+   * arguments decide what Codex runs, so an equivalent table is installed as it stands.
+   */
+  it.each([
+    (cli: string) =>
+      `[mcp_servers.visp]\ncommand = "node"\nargs = [${JSON.stringify(cli)}, "serve", "--mcp"]\n`,
+    (cli: string) =>
+      `model = "gpt-6"\n\n[mcp_servers."visp"]  # added by hand\ncommand = '${process.execPath}'\nstartup_timeout_sec = 20\nargs = [\n  '${cli}', # the CLI\n  "serve",\n  "--mcp",\n]\n\n[mcp_servers.other]\ncommand = "other"\n`,
+  ])("accepts a hand-written Codex table that starts this build (%#)", async (render) => {
+    const current = render(runtimeIdentity().executable);
+    await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
+
+    const result = await registerMcpServer(root, false, "codex");
+
+    expect(result.ok && result.value).toBe("current");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
+  });
+
+  it.each([
+    [
+      "another CLI",
+      '[mcp_servers.visp]\ncommand = "node"\nargs = ["/elsewhere/cli.js", "serve", "--mcp"]\n',
+    ],
+    [
+      "another subcommand",
+      (cli: string) =>
+        `[mcp_servers.visp]\ncommand = "node"\nargs = [${JSON.stringify(cli)}, "serve"]\n`,
+    ],
+    [
+      "a second table",
+      (cli: string) =>
+        `[mcp_servers.visp]\ncommand = "node"\nargs = [${JSON.stringify(cli)}, "serve", "--mcp"]\n[mcp_servers.visp]\ncommand = "visp"\n`,
+    ],
+    [
+      "an unparseable value",
+      (cli: string) =>
+        `[mcp_servers.visp]\ncommand = node\nargs = [${JSON.stringify(cli)}, "serve", "--mcp"]\n`,
+    ],
+  ])("keeps a hand-written Codex table with %s customized", async (_name, render) => {
+    const current = typeof render === "string" ? render : render(runtimeIdentity().executable);
+    await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
+    const result = await registerMcpServer(root, false, "codex");
+    expect(result.ok && result.value).toBe("customized");
+  });
+
+  // Codex users keep long instructions in multi-line strings; one anywhere in the file must
+  // neither hide a correct table nor stop VISP adding its own.
+  it("reads a hand-written table and appends its own past multi-line strings", async () => {
+    const cli = JSON.stringify(runtimeIdentity().executable);
+    const instructions =
+      "developer_instructions = \"\"\"\nNever edit [mcp_servers.visp] by hand.\n[mcp_servers.visp]\n\"\"\"\nnote = '''x'''\n";
+    const table = `[mcp_servers.visp]\ncommand = "node"\nargs = [${cli}, "serve", "--mcp"]\n`;
+    await writeFile(join(root, CODEX_CONFIG_FILE), `${instructions}\n${table}`);
+    expect((await registerMcpServer(root, false, "codex")).ok).toBe(true);
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(`${instructions}\n${table}`);
+    const planned = planMcpRegistration(`${instructions}\n${table}`, false, "codex");
+    expect(planned.ok && planned.value.status).toBe("current");
+
+    await writeFile(join(root, CODEX_CONFIG_FILE), instructions);
+    const added = await registerMcpServer(root, false, "codex");
+    expect(added.ok && added.value).toBe("added");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toContain(
+      `${instructions.trimEnd()}\n\n# visp: mcp:start`,
+    );
+  });
+
+  // A second [mcp_servers.visp] after `visp = {...}` under [mcp_servers] is a duplicate key.
+  it("does not append a table when [mcp_servers] already holds a visp key", async () => {
+    const current = '[mcp_servers]\nvisp = { command = "node", args = ["serve"] }\n';
+    await writeFile(join(root, CODEX_CONFIG_FILE), current);
+    const result = await registerMcpServer(root, false, "codex");
+    expect(result.ok && result.value).toBe("customized");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
+  });
+
+  it.each([
+    ["a dotted key", '[mcp_servers.visp]\ncommand = "node"\nenv.TOKEN = "x"\n'],
+    ["a \\U escape", '[mcp_servers.visp]\ncommand = "\\U0001F600"\n'],
+    ["an inline table under [mcp_servers]", '[mcp_servers]\nvisp = { command = "node" }\n'],
+  ])("marks a VISP entry it cannot read with %s as unreadable", (_name, current) => {
+    const planned = planMcpRegistration(current, false, "codex");
+    expect(planned.ok && planned.value).toMatchObject({ status: "customized", unreadable: true });
+  });
+
   it("leaves a customized Codex entry alone unless forced", async () => {
     const current = `[mcp_servers.visp]\ncommand = "/custom/visp"\nargs = ["serve", "--mcp"]\n`;
     await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
@@ -308,13 +513,23 @@ describe("Codex MCP registration", () => {
   it.each([
     '[mcp_servers."visp"]\ncommand = "/custom/visp"\n',
     '[mcp_servers.visp]\ncommand = "/custom/visp"\n\n[mcp_servers.visp.env]\nTOKEN = "set"\n',
-    'note = """[mcp_servers.visp]\ncommand = \\"hidden\\"""\n',
   ])("refuses ambiguous Codex TOML without forceful rewriting: %s", async (current) => {
     await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
 
     const result = await registerMcpServer(root, true, "codex");
 
     expect(result.ok && result.value).toBe("customized");
+    expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
+  });
+
+  // The closing quotes are escaped, so this string never ends: nothing is safe to append to.
+  it("leaves Codex TOML with an unterminated multi-line string alone", async () => {
+    const current = 'note = """[mcp_servers.visp]\ncommand = \\"hidden\\"""\n';
+    await writeFile(join(root, CODEX_CONFIG_FILE), current, "utf8");
+
+    const result = await registerMcpServer(root, true, "codex");
+
+    expect(result.ok && result.value).toBe("malformed");
     expect(await readFile(join(root, CODEX_CONFIG_FILE), "utf8")).toBe(current);
   });
 });

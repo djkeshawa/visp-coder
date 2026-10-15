@@ -1,12 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { discoverProjectRoot } from "../../core/project-root.js";
 import { ok } from "../../core/result.js";
-import { runtimeIdentity } from "../../core/version.js";
-import { requireInstalledRuntime } from "../../harness/runtime.js";
 import {
-  evaluateGuardPaths,
-  pendingTransactionViolations,
+  evaluateGuardRequest,
+  type GuardPayload,
+  pendingTransactionRefusal,
 } from "../../orchestrate/guard-evaluation.js";
-import { productScopes as authorizedScopes } from "../../workflow/product/scopes.js";
+import { PENDING_REVIEW_MESSAGE } from "../../workflow/product/critic/critic-policy.js";
 import { TOOL } from "../constants.js";
 import { workspaceFor } from "../context.js";
 import { failure, reply } from "../reply.js";
@@ -14,8 +14,8 @@ import { guardInput } from "./schemas.js";
 
 /**
  * The question an agent should ask before writing: may I touch this file? It
- * calls the same decision the hooks and CI call, so a refusal here is the same
- * refusal it would hit later.
+ * runs the same decision `visp guard --path` runs for the hooks and CI, so a
+ * refusal here is the same refusal it would hit later.
  */
 export function registerScopeTools(server: McpServer, root: string): void {
   server.registerTool(
@@ -27,59 +27,39 @@ export function registerScopeTools(server: McpServer, root: string): void {
       annotations: { readOnlyHint: true },
     },
     async (args) => {
-      const transactions = await pendingTransactionViolations(root);
+      const transactions = await pendingTransactionRefusal(discoverProjectRoot(root));
       if (!transactions.ok) return failure(TOOL.guard, transactions.error);
-      if (transactions.value.length) return guardReply(args.paths, transactions.value, []);
+      if (transactions.value) {
+        const { saving, payload } = transactions.value;
+        const message = payload.violations[0]?.message ?? "";
+        return reply(TOOL.guard, ok(payload), {
+          text: () => (saving ? message : `${message}. Run \`visp doctor --fix\` in a shell.`),
+        });
+      }
       const state = await workspaceFor(root);
       if (!state.ok) return failure(TOOL.guard, state.error);
-
-      const markers = await authorizedScopes(state.value);
-      if (!markers.ok) return failure(TOOL.guard, markers.error);
-      if (markers.value.length > 0) {
-        const agreed = await requireInstalledRuntime(state.value.paths, state.value.files);
-        if (!agreed.ok) return failure(TOOL.guard, agreed.error);
-      }
-
-      const guarded = await evaluateGuardPaths(state.value, args.paths, markers.value, {
-        writeTime: true,
+      const evaluated = await evaluateGuardRequest(state.value, { paths: args.paths });
+      if (!evaluated.ok) return failure(TOOL.guard, evaluated.error);
+      return reply(TOOL.guard, ok(evaluated.value.payload), {
+        text: (data) =>
+          data.allowed ? `All ${data.checked} paths are in scope.` : refusalText(data),
       });
-      if (!guarded.ok) return failure(TOOL.guard, guarded.error);
-      return guardReply(
-        args.paths,
-        guarded.value,
-        markers.value.map((marker) => marker.task),
-      );
     },
   );
 }
 
-function guardReply(
-  paths: readonly string[],
-  violations: readonly {
-    readonly path: string;
-    readonly reason: string;
-    readonly message: string;
-  }[],
-  authorizedTasks: readonly string[],
-) {
-  const payload = {
-    runtime: runtimeIdentity(),
-    checked: paths.length,
-    allowed: violations.length === 0,
-    violations,
-    authorizedTasks,
-  };
-  return reply(TOOL.guard, ok(payload), {
-    text: (data) =>
-      data.allowed
-        ? `All ${data.checked} paths are in scope.`
-        : [
-            `Refused: ${data.violations.length} of ${data.checked} paths are out of scope.`,
-            ...data.violations.map((violation) => `  - ${violation.message}`),
-            "",
-            authorizedTasks.length === 0
-              ? "No task is authorized. Run: visp_next {}"
-              : `Authorized tasks: ${authorizedTasks.join(", ")}`,
-          ].join("\n"),
-  });
+function refusalText(data: GuardPayload): string {
+  const closing = data.violations.some((violation) => violation.reason === "review-pending")
+    ? `${PENDING_REVIEW_MESSAGE}.`
+    : data.committable?.length
+      ? `${data.committable.length} of these belong to a task that is already closed; editing them needs a new authorized task.`
+      : data.authorizedTasks.length === 0
+        ? "No task is authorized. Run: visp_next {}"
+        : `Authorized tasks: ${data.authorizedTasks.join(", ")}`;
+  return [
+    `Refused: ${data.violations.length} of ${data.checked} paths are out of scope.`,
+    ...data.violations.map((violation) => `  - ${violation.message}`),
+    "",
+    closing,
+  ].join("\n");
 }

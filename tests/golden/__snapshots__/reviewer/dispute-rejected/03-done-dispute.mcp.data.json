@@ -1,0 +1,300 @@
+{
+  "tool": "visp_done",
+  "ok": true,
+  "data": {
+    "delivery": {
+      "status": "unresolved-product",
+      "summary": "Not complete: required product checks or assessments remain unresolved."
+    },
+    "nextCommand": "visp work --feature 001-return-two-from-the-public --task T001",
+    "checkpoint": {
+      "candidate": "<CAN-1>",
+      "provenance": "First observed implementation; not a passing quality assessment. Preserve it when correcting behavior or visuals."
+    },
+    "warnings": [],
+    "committedChanges": [],
+    "feedbackPlan": {
+      "observationPlan": {
+        "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+        "sequence": [
+          "Real input → assert settled result → input again → assert settled result",
+          "If applicable: reset/cancel pending work → restart → outlive old completion; new state stays intact"
+        ],
+        "probes": [
+          {
+            "kind": "independent-result",
+            "status": "unassessed"
+          }
+        ],
+        "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+      },
+      "nextProbe": {
+        "kind": "independent-result",
+        "when": "The public value is two",
+        "expected": [
+          "The public value is two"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.",
+        "id": "PROBE-<HEX-1>"
+      },
+      "probeResponses": [],
+      "focus": "implement",
+      "trace": {
+        "question": "Which code owns Return the promised value, and which callers and tests will change?",
+        "command": "visp work --feature 001-return-two-from-the-public --task T001",
+        "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+      },
+      "findings": [],
+      "findingsRemaining": 0,
+      "gaps": [],
+      "gapsRemaining": 0,
+      "nextCheck": "Exercise the next complete behavior, then inspect whether the result fulfills the original request across relevant quality dimensions."
+    },
+    "next": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001",
+      "action": "fix",
+      "objective": "Trace the failing handler or state transition, change the hypothesis when repeated, then rerun the affected check",
+      "command": "visp work --feature 001-return-two-from-the-public --task T001",
+      "evidence": [
+        "A failing pinned test that contradicts the request: do not edit it or bend the product. Run visp done --dispute \"<test name>\" --reason \"<request sentence + why>\". VISP itself launches the reviewer during that command (about 1-2 minutes), so you delegate nothing. Then run visp next until it rules; upheld tests are waived.",
+        "Pinned test \"value is odd\" dispute rejected: The request does not say the value is odd or even; the product must satisfy the test. The product must satisfy this test; change the product, then dispute again only with a new reason.",
+        "PINNED_1: failed: PASS: value is two\nFAIL: value is odd: The expression evaluated to a falsy value:\n\n  assert.ok(value % 2 === 1)"
+      ],
+      "mayEdit": true
+    },
+    "trace": {
+      "graph": [
+        {
+          "kind": "entity",
+          "key": "acceptance/001-return-two-from-the-public/value.acceptance.mjs#function:check",
+          "path": "acceptance/001-return-two-from-the-public/value.acceptance.mjs",
+          "name": "check",
+          "detail": "function",
+          "startLine": 6,
+          "endLine": 9,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "acceptance/001-return-two-from-the-public/value.acceptance.mjs#variable:failed",
+          "path": "acceptance/001-return-two-from-the-public/value.acceptance.mjs",
+          "name": "failed",
+          "detail": "variable",
+          "startLine": 5,
+          "endLine": 5,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "acceptance/001-return-two-from-the-public/value.acceptance.mjs#variable:waived",
+          "path": "acceptance/001-return-two-from-the-public/value.acceptance.mjs",
+          "name": "waived",
+          "detail": "variable",
+          "startLine": 4,
+          "endLine": 4,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "acceptance/001-return-two-from-the-public/value.acceptance.mjs#variable:{ value }",
+          "path": "acceptance/001-return-two-from-the-public/value.acceptance.mjs",
+          "name": "{ value }",
+          "detail": "variable",
+          "startLine": 3,
+          "endLine": 3,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#file",
+          "path": "src/value.mjs",
+          "name": "value.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 2,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:expected",
+          "path": "checks/value.check.mjs",
+          "name": "expected",
+          "detail": "variable",
+          "startLine": 3,
+          "endLine": 3,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#variable:name",
+          "path": "checks/value.check.mjs",
+          "name": "name",
+          "detail": "variable",
+          "startLine": 2,
+          "endLine": 2,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "acceptance/001-return-two-from-the-public/value.acceptance.mjs#file",
+          "path": "acceptance/001-return-two-from-the-public/value.acceptance.mjs",
+          "name": "value.acceptance.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 13,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "checks/value.check.mjs#file",
+          "path": "checks/value.check.mjs",
+          "name": "value.check.mjs",
+          "detail": "file",
+          "startLine": 1,
+          "endLine": 9,
+          "distance": 1
+        },
+        {
+          "kind": "entity",
+          "key": "src/value.mjs#variable:value",
+          "path": "src/value.mjs",
+          "name": "value",
+          "detail": "variable",
+          "startLine": 1,
+          "endLine": 1,
+          "distance": 1
+        }
+      ],
+      "notes": [
+        "Graph uncertainty: run",
+        "Graph uncertainty: waived.has"
+      ]
+    },
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "subjectDigest": "<SHA256-1>",
+    "passed": false,
+    "closed": false,
+    "executions": [
+      {
+        "id": "<UUID-1>",
+        "comparisonEnvironment": "<SHA256-2>",
+        "check": "C001",
+        "task": "T001",
+        "subjectDigest": "<SHA256-1>",
+        "contractDigest": "<SHA256-3>",
+        "createdAt": "<TIME>",
+        "command": "node checks/value.check.mjs",
+        "provenance": "supervisor-executed",
+        "flip": {
+          "revertedFiles": [
+            "src/value.mjs"
+          ],
+          "preservedValidationFiles": [
+            "checks/value.check.mjs"
+          ],
+          "commands": [
+            {
+              "command": "node checks/value.check.mjs",
+              "exitCode": 1,
+              "passed": false,
+              "durationMs": <N>,
+              "output": "expected 2, got 1\n\n"
+            }
+          ],
+          "failsWithoutChange": "unchecked",
+          "reason": "expected 2, got 1"
+        },
+        "flipCacheKey": "<SHA256-4>",
+        "flipDurationMs": <N>,
+        "assertions": "agent-reported",
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": <N>,
+        "output": "value is 2"
+      },
+      {
+        "id": "<UUID-2>",
+        "comparisonEnvironment": "<SHA256-5>",
+        "check": "PINNED_1",
+        "subjectDigest": "<SHA256-1>",
+        "contractDigest": "<SHA256-6>",
+        "createdAt": "<TIME>",
+        "command": "node acceptance/001-return-two-from-the-public/value.acceptance.mjs",
+        "provenance": "supervisor-executed",
+        "assertions": "agent-reported",
+        "status": "failed",
+        "exitCode": 1,
+        "durationMs": <N>,
+        "output": "PASS: value is two\nFAIL: value is odd: The expression evaluated to a falsy value:\n\n  assert.ok(value % 2 === 1)",
+        "pinnedFailures": {
+          "names": [
+            "value is odd"
+          ],
+          "unattributed": 0,
+          "unreported": []
+        }
+      }
+    ],
+    "outcomes": [
+      {
+        "id": "O001",
+        "statement": "The public value is two",
+        "priority": "must",
+        "behavior": "passed",
+        "review": "satisfied",
+        "requiredReview": false,
+        "satisfied": true
+      }
+    ],
+    "gaps": [
+      "PINNED_1: failed: PASS: value is two\nFAIL: value is odd: The expression evaluated to a falsy value:\n\n  assert.ok(value % 2 === 1)",
+      "PINNED_1: no current passing execution"
+    ],
+    "journeyFeedback": {
+      "runs": [],
+      "omitted": 0
+    },
+    "behaviorChanges": {
+      "checks": [],
+      "omitted": 0
+    },
+    "flipDurationMs": <N>,
+    "pinnedTests": {
+      "filed": [
+        {
+          "test": "value is odd",
+          "status": "filed",
+          "detail": "Dispute filed; the pinned test stays required until the independent reviewer rules."
+        }
+      ],
+      "disputes": [
+        {
+          "test": "value is odd",
+          "status": "rejected",
+          "note": "The request does not say the value is odd or even; the product must satisfy the test. The product must satisfy this test; change the product, then dispute again only with a new reason."
+        }
+      ],
+      "hint": "A failing pinned test that contradicts the request: do not edit it or bend the product. Run visp done --dispute \"<test name>\" --reason \"<request sentence + why>\". VISP itself launches the reviewer during that command (about 1-2 minutes), so you delegate nothing. Then run visp next until it rules; upheld tests are waived."
+    },
+    "recommendation": "The same product failure recurred. Test a different hypothesis; metadata edits do not constitute progress.",
+    "critic": {
+      "reviewed": true,
+      "summary": "Ran the check and observed the promised value two.",
+      "findings": [],
+      "callsRemaining": 2
+    }
+  },
+  "nextCommand": "visp_work {\"feature\":\"001-return-two-from-the-public\",\"task\":\"T001\"}",
+  "nextAction": {
+    "tool": "visp_work",
+    "arguments": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001"
+    }
+  }
+}

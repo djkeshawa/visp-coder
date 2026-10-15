@@ -6,26 +6,20 @@ export {
   saveCriticDefaults,
   saveCriticEnabled,
 } from "../../config/critic-defaults.js";
-export {
-  createProductFeature,
-  type ProductBriefUpdate,
-  type ProductFeatureOptions,
-  type ProductFeatureOutcome,
-  updateProductBrief,
-} from "./brief.js";
+export { type ProductBriefUpdate, updateProductBrief } from "./brief.js";
 export { type ProductReviewChallenge, productReviewChallenges } from "./coverage.js";
 export {
   type CriticAdapter,
   type CriticPacket,
   type ProductCriticHost,
   runProductCritic,
-} from "./critic.js";
+} from "./critic/critic.js";
 export {
   type CriticConfig,
   criticConfigSchema,
   criticRequestSchema,
   criticResponseSchema,
-} from "./critic-model.js";
+} from "./critic/critic-model.js";
 export {
   type ProductOutcomeStatus,
   type ProductReviewBundle,
@@ -36,6 +30,8 @@ export {
   runProductReview,
   runProductVerify,
 } from "./evidence.js";
+export { createProductFeature } from "./feature-create.js";
+export type { ProductFeatureOptions, ProductFeatureOutcome } from "./feature-model.js";
 export { productFeedbackPlan } from "./feedback.js";
 export {
   type ProductFeedback,
@@ -61,9 +57,10 @@ export {
   reviewerContextSchema,
 } from "./model.js";
 export { reproductionRequestSchema, runProductReproduction } from "./reproduction.js";
-export { productReviewSubmissionSchema, runProductReviewRequest } from "./review-request.js";
-export { reviewJudgmentsSchema } from "./review-session.js";
-export { runProductReviewerHandoff } from "./reviewer-handoff.js";
+export { runProductReviewRequest } from "./review/review-request.js";
+export { reviewJudgmentsSchema } from "./review/review-session.js";
+export { productReviewSubmissionSchema } from "./review/review-submission-model.js";
+export { runProductReviewerHandoff } from "./review/reviewer-handoff.js";
 export { productScopes } from "./scopes.js";
 export {
   hasProductFeature,

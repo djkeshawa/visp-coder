@@ -4,8 +4,8 @@ import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
 import { sha256 } from "../../src/core/hash.js";
 import { updateProductBrief } from "../../src/workflow/product/brief.js";
+import { productCaptureRunSchema } from "../../src/workflow/product/capture-run-model.js";
 import { runProductDone } from "../../src/workflow/product/evidence.js";
-import { productCaptureRunSchema } from "../../src/workflow/product/evidence-references.js";
 import { createProductFeature } from "../../src/workflow/product/index.js";
 import { readProductRecord } from "../../src/workflow/product/store.js";
 import { runProductWork } from "../../src/workflow/product/work.js";
@@ -159,6 +159,7 @@ it("refuses slice closure when real keyboard behavior fails despite passing stat
       expect(capture.provenance).toBe("runner-captured");
       expect(sha256(await readFile(join(workspace.root, capture.path)))).toBe(capture.sha256);
     }
+    // The product state is the one record of a run; no ignored captures/run-<id>.json copy.
     const runPath = join(
       workspace.root,
       ".visp/features",
@@ -166,7 +167,7 @@ it("refuses slice closure when real keyboard behavior fails despite passing stat
       "captures",
       `run-${run.id}.json`,
     );
-    expect(productCaptureRunSchema.parse(JSON.parse(await readFile(runPath, "utf8")))).toEqual(run);
+    await expect(readFile(runPath, "utf8")).rejects.toThrow();
     expect(await readFile(join(workspace.root, "index.html"))).toEqual(html);
     expect(sha256(await readFile(fixture))).toBe(sourceHash);
   } finally {

@@ -4,8 +4,8 @@ import { parse } from "yaml";
 import { buildProgram } from "../../../src/cli/main.js";
 import { commandGuide, VISP_COMMANDS } from "../../../src/harness/command-guide.js";
 import { browserJourneySchema } from "../../../src/testing/browser-journey.js";
-import { independentReviewSchema } from "../../../src/workflow/product/independent-review.js";
 import { productCheckSchema } from "../../../src/workflow/product/model.js";
+import { independentReviewSchema } from "../../../src/workflow/product/review/independent-review.js";
 
 describe("documented browser check inputs", () => {
   it.each(["README.md", "docs/product-review.md"])(

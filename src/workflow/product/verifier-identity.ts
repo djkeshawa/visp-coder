@@ -2,7 +2,7 @@ import { basename, isAbsolute, posix } from "node:path";
 import { resolveCommand } from "../../core/exec.js";
 import { hashValue } from "../../core/hash.js";
 import { matchesAny, matchesPattern } from "../../core/patterns.js";
-import { isBrowserCheckCommand } from "./check-command.js";
+import { isBrowserCheckCommand } from "./check/check-command.js";
 import type { ProductCheck } from "./model.js";
 
 const NODE_PRELOAD_FLAGS = new Set([

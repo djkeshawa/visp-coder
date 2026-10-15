@@ -3,7 +3,6 @@ import type { FileMutation } from "../../core/file-transaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { CHECK_OUTPUT_GUIDANCE } from "../product-output-guidance.js";
 import type { WorkspaceState } from "../state.js";
-import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import {
   applicableExecutions,
   finalProductAssessmentGaps,
@@ -12,17 +11,18 @@ import {
   productEvidenceGaps,
 } from "./assessment.js";
 import { checkBehaviorChanges } from "./behavior-changes.js";
+import { pinnedAcceptanceChecks } from "./check/acceptance-checks.js";
 import {
   cancelledExecution,
   executeChecks,
   executionOwnerKey,
   requireExecutionContract,
-} from "./check-lifecycle.js";
+} from "./check/check-lifecycle.js";
 import { ensureProductCheckpoint } from "./checkpoint.js";
 import { productNeighborhood } from "./context.js";
 import { correctionChecks } from "./corrections.js";
-import { reviewerPointer } from "./critic-capacity.js";
-import { requireNoPendingCriticReview } from "./critic-policy.js";
+import { reviewerPointer } from "./critic/critic-capacity.js";
+import { requireNoPendingCriticReview } from "./critic/critic-policy.js";
 import { environmentNext } from "./environment.js";
 import { currentJourneyFeedback } from "./evidence-references.js";
 import { productFailureSignature } from "./failures.js";
@@ -37,8 +37,12 @@ import {
   type ProductSlice,
   type ProductState,
 } from "./model.js";
-import { reviewerRules } from "./pinned-dispute-model.js";
-import { reviewBaselineMutations } from "./review-baseline.js";
+import {
+  type PreparedResultImages,
+  prepareResultImages,
+  publishResultImages,
+} from "./result-images.js";
+import { reviewBaselineMutations } from "./review/review-baseline.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
 import { type ProductNext, runProductNext } from "./status.js";
@@ -50,9 +54,14 @@ import {
   statusMutation,
 } from "./store.js";
 import { productContractDigest, productSourceDigest, productSourceSnapshot } from "./subject.js";
+import { reviewerRules } from "./tester/pinned-dispute-model.js";
 
 export type { ProductOutcomeStatus } from "./assessment.js";
-export { type ProductReviewBundle, type ProductReviewOptions, runProductReview } from "./review.js";
+export {
+  type ProductReviewBundle,
+  type ProductReviewOptions,
+  runProductReview,
+} from "./review/review.js";
 
 export interface ProductVerification {
   readonly warnings?: readonly string[];
@@ -115,6 +124,13 @@ async function execute(
     snapshot,
   );
   if (!checked.ok) return checked;
+  // Rendering an SVG starts a browser; it happens before the lock, published only if current.
+  const pictures = await prepareResultImages(
+    workspace,
+    record,
+    options.signal?.aborted ? [] : checked.value,
+    { digest: source, snapshot },
+  );
   return withProductMutation(workspace, async () => {
     if (options.signal?.aborted) return cancelledExecution();
     const loaded = await readProductRecord(workspace, { feature: record.brief.feature });
@@ -134,6 +150,7 @@ async function execute(
       close,
       accept,
       prepared.value.committedChanges,
+      pictures,
       options.signal,
     );
     return finished.ok
@@ -163,6 +180,7 @@ async function finishExecution(
   close: boolean,
   accept: boolean,
   committedChanges: string[],
+  prepared: PreparedResultImages,
   signal?: AbortSignal,
 ): Promise<Result<ProductVerification>> {
   const afterSnapshot = await productSourceSnapshot(workspace, record.brief);
@@ -170,15 +188,19 @@ async function finishExecution(
   const after = await productSourceDigest(workspace, record.brief, afterSnapshot.value);
   if (!after.ok) return after;
   const timestamp = new Date().toISOString();
+  // Pictures the product made reach the reviewer as images of the version the checks passed.
+  const pictures = await publishResultImages(workspace, record, prepared, after.value);
   const next = {
     ...record.state,
     pendingVerification: undefined,
     updatedAt: timestamp,
     executions: record.state.executions,
+    captures: [...record.state.captures, ...pictures.captures],
   };
   const current: ProductRecord = { ...record, state: next };
   const gaps = await executionGaps(workspace, current, slice, after.value, commands, executions);
-  if (source !== after.value) gaps.push(changedProductGap(snapshot, afterSnapshot.value));
+  if (source !== after.value)
+    gaps.push(changedProductGap(snapshot, afterSnapshot.value, record.brief.checks));
   if (close)
     gaps.push(
       ...outstandingFeedback(current)
@@ -200,6 +222,7 @@ async function finishExecution(
   if (!completion.ok) return completion;
   if (signal?.aborted) return cancelledExecution();
   const saved = await saveProductState(workspace, record, completion.value.state, [
+    ...pictures.mutations,
     ...completion.value.mutations,
   ]);
   if (!saved.ok) return saved;
@@ -481,7 +504,11 @@ async function executionGaps(
   return gaps;
 }
 
-function changedProductGap(before: Record<string, string>, after: Record<string, string>): string {
+function changedProductGap(
+  before: Record<string, string>,
+  after: Record<string, string>,
+  checks: readonly ProductCheck[],
+): string {
   const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
     .filter((path) => before[path] !== after[path])
     .sort();
@@ -490,7 +517,26 @@ function changedProductGap(before: Record<string, string>, after: Record<string,
   if (!changed.length) return `${prefix} Control, runtime or environment inputs changed.`;
   const paths = changed.slice(0, 12).map((path) => JSON.stringify(path.slice(0, 200)));
   const omitted = changed.length > paths.length ? ` (+${changed.length - paths.length} more)` : "";
-  return `${prefix} Changed input paths: ${paths.join(", ")}${omitted}. ${CHECK_OUTPUT_GUIDANCE}`;
+  return [
+    `${prefix} Changed input paths: ${paths.join(", ")}${omitted}. ${CHECK_OUTPUT_GUIDANCE}`,
+    ...productImageNotes(changed, checks),
+  ].join(" ");
+}
+
+/**
+ * A declared image that existed before the feature started stays product, so a check that
+ * rewrites it, differently each run, changes the product every run; "make the check write it"
+ * cannot fix that, a new output path can.
+ */
+function productImageNotes(changed: readonly string[], checks: readonly ProductCheck[]) {
+  return checks.flatMap((check) =>
+    (check.images ?? [])
+      .filter((image) => changed.includes(image.replace(/\\/g, "/").replace(/^\.\//, "")))
+      .map(
+        (image) =>
+          `${check.id}'s declared image ${image} existed before the feature started, so it is product and writing it changes the product; write the image to a new untracked path, e.g. out/<name>.png, and declare that path.`,
+      ),
+  );
 }
 
 async function completionState(

@@ -3,24 +3,29 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { balancedCritic } from "../../../../src/config/critic.js";
-import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
-import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
 import {
-  inlineReview,
-  runProductAcceptReviewed,
-  runProductDoneReviewed,
-} from "../../../../src/workflow/product/done-review.js";
-import { independentReviewJsonSchema } from "../../../../src/workflow/product/independent-review.js";
+  type CriticPacket,
+  runProductCritic,
+} from "../../../../src/workflow/product/critic/critic.js";
 import {
-  type IndependentTester,
-  inlineTests,
-  readTestsRecord,
-} from "../../../../src/workflow/product/independent-tests.js";
+  criticSelection,
+  readCriticState,
+} from "../../../../src/workflow/product/critic/critic-store.js";
 import {
   runProductNext,
   runProductReport,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
+import {
+  inlineReview,
+  runProductAcceptReviewed,
+  runProductDoneReviewed,
+} from "../../../../src/workflow/product/review/done-review.js";
+import { independentReviewJsonSchema } from "../../../../src/workflow/product/review/independent-review.js";
+import { readProductRecord } from "../../../../src/workflow/product/store.js";
+import type { IndependentTester } from "../../../../src/workflow/product/tester/independent-tests-model.js";
+import { readTestsRecord } from "../../../../src/workflow/product/tester/independent-tests-record.js";
+import { inlineTests } from "../../../../src/workflow/product/tester/independent-tests-starters.js";
 import {
   allFailuresIn,
   environmentErrorLine,
@@ -29,13 +34,12 @@ import {
   failLineStats,
   unreportedTests,
   waivedFailure,
-} from "../../../../src/workflow/product/pinned-dispute-model.js";
+} from "../../../../src/workflow/product/tester/pinned-dispute-model.js";
 import {
   disputeInput,
   fileDisputes,
   sourceExcerpt,
-} from "../../../../src/workflow/product/pinned-disputes.js";
-import { readProductRecord } from "../../../../src/workflow/product/store.js";
+} from "../../../../src/workflow/product/tester/pinned-disputes.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { compactProductReply } from "../../../../src/workflow/product-compact-text.js";
 import { productWorkspace } from "../../support/product-workspace.js";
@@ -239,7 +243,7 @@ it("launches the reviewer when the only failure is a disputed pinned test", asyn
     testSource: expect.stringContaining("value % 2"),
   });
   expect(packets[0]?.instructions).toContain("disputes lists pinned acceptance tests");
-  const schema = independentReviewJsonSchema([], [], [ODD]) as {
+  const schema = (await independentReviewJsonSchema([], [], [ODD])) as {
     properties: { disputes: { items: { properties: { test: { enum: string[] } } } } };
   };
   expect(schema.properties.disputes.items.properties.test.enum).toEqual([ODD]);

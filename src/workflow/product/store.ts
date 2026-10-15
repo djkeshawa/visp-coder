@@ -11,8 +11,8 @@ import {
 import { currentBranch } from "../../core/git.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { resolveFeature } from "../feature-selection.js";
 import type { WorkspaceState } from "../state.js";
-import { resolveFeature } from "../state.js";
 import {
   type ProductBrief,
   type ProductState,

@@ -1,9 +1,15 @@
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { removeTreeBestEffort, sweepStaleTempDirectories } from "../../../src/core/stale-temp.js";
+import {
+  markOwner,
+  removeTreeBestEffort,
+  sweepAbandonedCredentialHomes,
+  sweepStaleTempDirectories,
+} from "../../../src/core/stale-temp.js";
 
 const HOUR = 60 * 60_000;
 let dir: string;
@@ -115,4 +121,55 @@ it("sweeps an abandoned baseline home even when it holds read-only directories",
   await age(path, 3);
   await sweepStaleTempDirectories([/^visp-baseline-[A-Za-z0-9]{6}$/], HOUR, dir);
   expect(existsSync(path)).toBe(false);
+});
+
+/**
+ * A SIGKILLed reviewer or tester leaves its private copy of the Codex sign-in on disk, which
+ * the age-based sweep removed only after an hour. The copy names the process that made it, so
+ * any later launch (or doctor) removes it as soon as that process is gone.
+ */
+it("removes a sign-in copy whose owner process has ended, at any age", async () => {
+  const dead = spawnSync(process.execPath, ["-e", "console.log(process.pid)"], {
+    encoding: "utf8",
+  });
+  const deadPid = Number(dead.stdout.trim());
+  const abandoned = await withAuth("visp-tester-aBc123", 0);
+  const live = await withAuth("visp-critic-dEf456", 0);
+  const unmarked = await withAuth("visp-critic-gHi789", 0);
+  await markOwner(join(abandoned, "codex-home"), deadPid);
+  await markOwner(join(live, "codex-home"));
+
+  await sweepAbandonedCredentialHomes(dir);
+
+  expect(existsSync(join(abandoned, "codex-home"))).toBe(false);
+  // Only the credential home goes; the run directory is left to the age-based sweep.
+  expect(existsSync(abandoned)).toBe(true);
+  expect(existsSync(join(live, "codex-home", "auth.json"))).toBe(true);
+  expect(existsSync(join(unmarked, "codex-home", "auth.json"))).toBe(true);
+});
+
+// A PID means nothing across PID namespaces or hosts (a shared /tmp in a container or over
+// NFS): the owner may be alive there, so its copy is kept, as the state lock does.
+it("keeps a sign-in copy whose owner is in another PID namespace or on another host", async () => {
+  const dead = spawnSync(process.execPath, ["-e", "console.log(process.pid)"], {
+    encoding: "utf8",
+  });
+  const deadPid = Number(dead.stdout.trim());
+  const namespaced = await withAuth("visp-tester-nSp123", 0);
+  const remote = await withAuth("visp-tester-hSt456", 0);
+  await markOwner(join(namespaced, "codex-home"), deadPid);
+  await markOwner(join(remote, "codex-home"), deadPid);
+  const marker = (path: string) => join(path, "codex-home", ".visp-owner.json");
+  const rewrite = async (path: string, change: Record<string, unknown>) =>
+    writeFile(
+      marker(path),
+      JSON.stringify({ ...JSON.parse(await readFile(marker(path), "utf8")), ...change }),
+    );
+  await rewrite(namespaced, { pidNamespace: "pid:[4026599999]" });
+  await rewrite(remote, { host: "another-host.example" });
+
+  await sweepAbandonedCredentialHomes(dir);
+
+  expect(existsSync(join(namespaced, "codex-home", "auth.json"))).toBe(true);
+  expect(existsSync(join(remote, "codex-home", "auth.json"))).toBe(true);
 });

@@ -9,7 +9,7 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
-import { productReviewerHandoff } from "../../../../src/workflow/product/reviewer-handoff.js";
+import { productReviewerHandoff } from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { productInputTemplate } from "../../../../src/workflow/product-inputs.js";
 import { productReviewReceipt } from "../../../../src/workflow/product-presentation.js";

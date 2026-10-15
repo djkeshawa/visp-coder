@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CreateMessageRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 import { mcpProductFeedbackHost } from "../../../src/mcp/product-feedback-host.js";
-import { productReviewInstructions } from "../../../src/workflow/product/review-instructions.js";
+import { productReviewInstructions } from "../../../src/workflow/product/review/review-instructions.js";
 
 describe("MCP configured host feedback", () => {
   it.each([

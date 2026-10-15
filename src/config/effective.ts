@@ -2,7 +2,7 @@ import { parse } from "yaml";
 import { vispError } from "../core/errors.js";
 import { hashValue } from "../core/hash.js";
 import { err, ok } from "../core/result.js";
-import { criticStatus } from "../workflow/product/critic-status.js";
+import { criticStatus } from "../workflow/product/critic/critic-status.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import { resolveCriticPolicyDetails } from "./critic-defaults.js";
 import { parseConfig } from "./load.js";

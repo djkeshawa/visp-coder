@@ -1,6 +1,8 @@
-import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { computeBuildId } from "../src/build/build-id.js";
 
 const PREFIX = "visp-run-";
 const STALE_MS = 2 * 60 * 60_000;
@@ -11,7 +13,7 @@ const STALE_MS = 2 * 60 * 60_000;
  * subprocess left behind used to pile up in the shared /tmp, about 60 per run.
  */
 export default async function setup() {
-  await warnIfDistIsStale();
+  await requireCurrentDist();
   const shared = tmpdir();
   // A run that was interrupted never reached teardown. Age keeps concurrent runs safe.
   for (const entry of await readdir(shared).catch(() => [] as string[])) {
@@ -35,29 +37,29 @@ export default async function setup() {
 
 /**
  * Tests that run the built CLI compare its build id (a hash of the sources) with the running
- * code, so a dist older than src fails them with "runtime mismatch". `pnpm test` does not build.
+ * code, so a dist built from other sources fails ~220 test files with "runtime mismatch". Fail the
+ * run at once with one line instead. `pnpm test` does not build; `pnpm build:fast` takes ~1 s.
  */
-async function warnIfDistIsStale(): Promise<void> {
-  const built = await stat("dist/cli.js").then(
-    (details) => details.mtimeMs,
-    () => undefined,
+async function requireCurrentDist(): Promise<void> {
+  const current = computeBuildId(fileURLToPath(new URL("../", import.meta.url)));
+  const baked = await bakedBuildId("dist");
+  if (baked === current) return;
+  // Exit rather than throw: vitest would add a stack trace and a source excerpt to the one line.
+  console.error(
+    `dist is ${baked ? `stale (build ${baked} != sources ${current})` : "missing"}: run pnpm build:fast`,
   );
-  if (built === undefined) {
-    console.warn("dist/cli.js is missing: run `pnpm build` before tests that execute the CLI.");
-    return;
+  process.exit(1);
+}
+
+/** The id tsup baked into the bundle: `var BUILD_ID = true ? "<id>" : "dev"` (a minifier may fold the ternary). */
+async function bakedBuildId(dist: string): Promise<string | undefined> {
+  const files = (await readdir(dist).catch(() => [] as string[])).filter((name) =>
+    name.endsWith(".js"),
+  );
+  for (const name of files) {
+    const text = await readFile(join(dist, name), "utf8").catch(() => "");
+    const id = /\bBUILD_ID = (?:true \? )?"([0-9a-f]{16})"/.exec(text)?.[1];
+    if (id) return id;
   }
-  const sources = await readdir("src", { recursive: true }).catch(() => [] as string[]);
-  for (const name of sources) {
-    if (!name.endsWith(".ts")) continue;
-    const changed = await stat(join("src", name)).then(
-      (details) => details.mtimeMs,
-      () => 0,
-    );
-    if (changed > built) {
-      console.warn(
-        `dist/cli.js is older than src/${name}: run \`pnpm build\` first, or CLI-based tests fail with "runtime mismatch".`,
-      );
-      return;
-    }
-  }
+  return undefined;
 }

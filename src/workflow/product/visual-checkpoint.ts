@@ -1,5 +1,7 @@
+import { cliCommand } from "../next-action.js";
+import { validCaptureRuns } from "./capture-run-model.js";
 import { needsBrowser } from "./environment.js";
-import { evidenceApplies, productCaptureRunSchema } from "./evidence-references.js";
+import { evidenceApplies } from "./evidence-references.js";
 import type { ProductSlice } from "./model.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS, observationSequence } from "./observation-preview.js";
 import type { ProductRecord } from "./store.js";
@@ -18,14 +20,10 @@ export function visualCheckpoint(
     (outcome) => outcome.kind === "experience" && (!slice || slice.outcomes.includes(outcome.id)),
   );
   if (!outcomes.length) return undefined;
-  const runs = record.state.captureRuns.flatMap((candidate) => {
-    const parsed = productCaptureRunSchema.safeParse(candidate);
-    return parsed.success &&
-      evidenceApplies(record, subject, parsed.data) &&
-      (!slice || !parsed.data.task || parsed.data.task === slice.id)
-      ? [parsed.data]
-      : [];
-  });
+  const runs = validCaptureRuns(record).filter(
+    (run) =>
+      evidenceApplies(record, subject, run) && (!slice || !run.task || run.task === slice.id),
+  );
   const review = record.state.reviews.findLast(
     (entry) =>
       entry.subjectDigest === subject &&
@@ -107,22 +105,22 @@ function reviewPointer(
   slice: ProductSlice | undefined,
   reviewer: ReviewerPointer,
 ) {
-  const task = slice ? ` --task ${slice.id}` : "";
+  const task = slice?.id;
   if (reviewer === "visp")
     return {
       imageStatus:
         "Recorded references only; VISP's independent reviewer receives the actual image bytes when you run visp done. Missing, stale or unviewed images cannot establish quality.",
-      command: `visp done --feature ${feature}${task}`,
+      command: cliCommand("done", { feature, task }),
     };
   if (reviewer === "gone")
     return {
       imageStatus:
         "Recorded references only; VISP's independent reviewer cannot run again (its review budget is spent or it is unavailable), so the human reviewer receives the images: run visp pr. Missing, stale or unviewed images cannot establish quality.",
-      command: `visp pr --feature ${feature}`,
+      command: cliCommand("pr", { feature }),
     };
   return {
     imageStatus:
       "Recorded references only; review handoff verifies and delivers the actual image bytes. Missing, stale or unviewed images cannot establish quality.",
-    command: `visp review --feature ${feature}${task} --handoff`,
+    command: cliCommand("review", { feature, task, handoff: true }),
   };
 }

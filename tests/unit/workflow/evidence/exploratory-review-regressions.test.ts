@@ -7,10 +7,10 @@ import { browserJourneySchema } from "../../../../src/testing/browser-journey.js
 import { BrowserUnavailableError } from "../../../../src/testing/chrome-transport.js";
 import { runProductCapture } from "../../../../src/workflow/evidence/product-capture.js";
 import { productJourneyKey } from "../../../../src/workflow/evidence/product-journey.js";
-import { describeProductCheck } from "../../../../src/workflow/product/check-command.js";
-import { criticStateSchema } from "../../../../src/workflow/product/critic-model.js";
-import { criticPacket } from "../../../../src/workflow/product/critic-packet.js";
-import { criticSelection } from "../../../../src/workflow/product/critic-store.js";
+import { describeProductCheck } from "../../../../src/workflow/product/check/check-command.js";
+import { criticStateSchema } from "../../../../src/workflow/product/critic/critic-model.js";
+import { criticPacket } from "../../../../src/workflow/product/critic/critic-packet.js";
+import { criticSelection } from "../../../../src/workflow/product/critic/critic-store.js";
 import {
   currentFailedJourneys,
   pendingJourneyReplays,
@@ -24,11 +24,11 @@ import { journeyOwnershipIndex } from "../../../../src/workflow/product/journey-
 import type { ProductBrief } from "../../../../src/workflow/product/model.js";
 import { initialProductState, productBriefSchema } from "../../../../src/workflow/product/model.js";
 import { repairRecheck } from "../../../../src/workflow/product/repair-recheck.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
 import {
   independentReviewerContext,
   runProductReviewerHandoff,
-} from "../../../../src/workflow/product/reviewer-handoff.js";
+} from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import {
   type ProductRecord,
   readProductRecord,

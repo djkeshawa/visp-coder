@@ -1,4 +1,5 @@
 import type { ExecutionStatus, NextAction, UiNext } from "../../src/ui/contract.js";
+import { FAILURE, stripAnsi, ZERO_FAILURES } from "../../src/ui/output-patterns.js";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -150,11 +151,7 @@ export function withQuotedAnswer(prefix: string, answer: string): string {
   return `${prefix} ${shellQuote(answer)}`;
 }
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences start with ESC.
-const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
-export const stripAnsi = (text: string) => text.replace(ANSI, "");
-const FAILURE_LINE = /\b(?:not ok|fail(?:ed|ure|ing)?|error|assert(?:ion)?(?:error)?)\b|✖|×/i;
-const ZERO_FAILURES = /\bfail(?:ed|ures?)?\s*[:=]?\s*0\b|\b0\s+fail(?:ed|ures?)?\b/i;
+export { stripAnsi };
 
 /** A line worth highlighting in output: it reads like a failure and isn't a "0 failed" summary. */
-export const isFailureLine = (line: string) => FAILURE_LINE.test(line) && !ZERO_FAILURES.test(line);
+export const isFailureLine = (line: string) => FAILURE.test(line) && !ZERO_FAILURES.test(line);

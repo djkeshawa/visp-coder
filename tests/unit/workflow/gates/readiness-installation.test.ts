@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ok } from "../../../../src/core/result.js";
 import { installHarness } from "../../../../src/harness/install.js";
-import { createProductFeature as runFeature } from "../../../../src/workflow/product/brief.js";
+import { createProductFeature as runFeature } from "../../../../src/workflow/product/feature-create.js";
 import { buildFoundationContext } from "../../../../src/workflow/state.js";
 import { TestWorkspace } from "../../support/workspace.js";
 

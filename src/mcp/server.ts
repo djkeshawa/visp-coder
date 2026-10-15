@@ -5,7 +5,7 @@ import { DEFAULT_PROFILE, type Profile } from "../core/constants.js";
 import { fromUnknown } from "../core/errors.js";
 import { ProjectPaths } from "../core/paths.js";
 import { err, ok, type Result } from "../core/result.js";
-import type { CriticAdapter } from "../workflow/product/critic.js";
+import type { CriticAdapter } from "../workflow/product/critic/critic.js";
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "./constants.js";
 import { registerResources } from "./resources/index.js";
 import { registerTools } from "./tools/index.js";

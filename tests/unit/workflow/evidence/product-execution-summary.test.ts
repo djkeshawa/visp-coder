@@ -1,8 +1,6 @@
 import { expect, it } from "vitest";
-import {
-  executionSummary,
-  productCaptureRunSchema,
-} from "../../../../src/workflow/product/evidence-references.js";
+import { productCaptureRunSchema } from "../../../../src/workflow/product/capture-run-model.js";
+import { executionSummary } from "../../../../src/workflow/product/evidence-references.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 
 const execution = {

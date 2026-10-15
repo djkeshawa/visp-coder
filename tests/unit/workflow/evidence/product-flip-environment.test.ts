@@ -20,7 +20,7 @@ import {
   provideFlipEnvironment,
   sweepStaleFlipTemporary,
   unsnapshottedFlipState,
-} from "../../../../src/workflow/product/flip-environment.js";
+} from "../../../../src/workflow/product/flip/flip-environment.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
 let workspace: TestWorkspace | undefined;

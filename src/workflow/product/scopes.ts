@@ -5,6 +5,7 @@ import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { checkPaths } from "../../orchestrate/guard.js";
 import type { ImplementMarker } from "../artifacts/evidence.js";
+import { cliCommand } from "../next-action.js";
 import { resolveRule, ruleContextFor } from "../policy/resolve.js";
 import type { ScopeOptions, WorkspaceState } from "../state.js";
 import { currentHostSession } from "./host-prompts.js";
@@ -204,7 +205,7 @@ export async function activeProtectedEnvChanges(
   if (!auth.value.envBaseline)
     return err(
       vispError("STAGE_BLOCKED", "Re-authorize this slice to protect ignored environment files", {
-        recovery: `visp work --task ${auth.value.task}`,
+        recovery: cliCommand("work", { task: auth.value.task }),
       }),
     );
   return changedProtectedEnvFiles(workspace.paths.root, auth.value.envBaseline);
@@ -260,7 +261,7 @@ export async function checkProductScope(
   if (!auth.value || auth.value.task !== slice.id)
     return err(
       vispError("STAGE_BLOCKED", `No current authorization for ${slice.id}`, {
-        recovery: `visp work --feature ${record.brief.feature} --task ${slice.id}`,
+        recovery: cliCommand("work", { feature: record.brief.feature, task: slice.id }),
       }),
     );
   const current = await productSourceSnapshot(workspace, record.brief);
@@ -268,7 +269,7 @@ export async function checkProductScope(
   if (!auth.value.envBaseline)
     return err(
       vispError("STAGE_BLOCKED", "Re-authorize this slice to protect ignored environment files", {
-        recovery: `visp work --task ${slice.id}`,
+        recovery: cliCommand("work", { task: slice.id }),
       }),
     );
   const changedEnv = await changedProtectedEnvFiles(workspace.paths.root, auth.value.envBaseline);

@@ -177,7 +177,7 @@ it("reports declared viewports without available current captures", async () => 
     "../../../../src/workflow/product/model.js"
   );
   const { inspectSelectedImages } = await import(
-    "../../../../src/workflow/product/review-selection.js"
+    "../../../../src/workflow/product/review/review-selection.js"
   );
   const brief = productBriefSchema.parse({
     version: 2,
@@ -221,7 +221,7 @@ it("keeps declared viewport gaps in packets for functional browser checks", asyn
     "../../../../src/workflow/product/model.js"
   );
   const { inspectSelectedImages, reviewImageGaps } = await import(
-    "../../../../src/workflow/product/review-selection.js"
+    "../../../../src/workflow/product/review/review-selection.js"
   );
   const brief = productBriefSchema.parse({
     version: 2,

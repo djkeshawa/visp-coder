@@ -25,6 +25,8 @@ export interface Asset {
   readonly content: string;
   /** Written with the executable bit. */
   readonly executable?: boolean;
+  /** A generated hook: renders it for the CLI at another path, so the same build matches. */
+  readonly render?: (executable: string) => string;
 }
 
 export interface HarnessPlan {
@@ -62,7 +64,12 @@ export function planFor(
 function codexHookAssets(harness: Harness): Asset[] {
   if (harness !== "codex") return [];
   return [
-    { path: CODEX_HOOK_SCRIPT, content: renderPreToolUseHook(), executable: true },
+    {
+      path: CODEX_HOOK_SCRIPT,
+      content: renderPreToolUseHook(),
+      executable: true,
+      render: renderPreToolUseHook,
+    },
     { path: ".codex/hooks.json", content: renderCodexHooks() },
   ];
 }

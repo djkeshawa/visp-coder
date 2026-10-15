@@ -1,6 +1,6 @@
 """Run a two-session task: one first session, then the second request under several memory modes.
 
-Usage: run_carryover.py <run_name> [--modes wiped,fresh,oracle] [--model ...] [--timeout 2700]
+Usage: run_carryover.py <run_name> [--modes wiped,fresh,oracle] [--model ...] [--effort ...] [--timeout 2700]
 
 The run must be prepared by setup_arm.py with a two-session task. The first session runs once;
 its project is snapshotted, and every mode restores that snapshot at the same path before its
@@ -45,7 +45,7 @@ import sys
 import tarfile
 
 from common import RUNS
-from run_claude import MODEL, run_session
+from run_claude import run_session
 
 BENCH = pathlib.Path(__file__).resolve().parent
 MODES = ("wiped", "fresh", "oracle", "resume", "memory", "noisy", "gated",
@@ -250,7 +250,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("run")
     parser.add_argument("--modes", default="wiped,fresh,oracle")
-    parser.add_argument("--model", default=MODEL)
+    parser.add_argument("--model", help="default: the worker of the arm's preset")
+    parser.add_argument("--effort", help="default: the worker effort of the arm's preset")
     parser.add_argument("--timeout", type=int, default=2700)
     parser.add_argument("--reuse", metavar="LABEL",
                         help="reuse the run's first session and write each mode to <mode>-LABEL")
@@ -281,7 +282,8 @@ def main():
     if (project / ".visp").is_dir():
         with tarfile.open(workflow_state, "w") as archive:
             archive.add(project / ".visp", arcname=".visp")
-    result = run_session(project, arm, (run / "prompt.txt").read_text(), args.model, args.timeout)
+    result = run_session(project, arm, (run / "prompt.txt").read_text(), args.model, args.timeout,
+                         effort=args.effort)
     (first / "result.json").write_text(json.dumps({"run": args.run, "session": 1, **result}, indent=2))
     carried = carriers(before, mentions(project))
     carried["committed VISP records"] = sorted(set(
@@ -338,7 +340,7 @@ def run_modes(args, run, project, arm, first, result, modes):
                 project.mkdir()
                 continue
         prompt = second_prompt(run, mode, arm)
-        second = run_session(project, arm, prompt, args.model, args.timeout, resume)
+        second = run_session(project, arm, prompt, args.model, args.timeout, resume, args.effort)
         out = run / (f"{mode}-{args.reuse}" if args.reuse else mode)
         out.mkdir()
         (out / "result.json").write_text(json.dumps({"run": args.run, "mode": mode, **second}, indent=2))

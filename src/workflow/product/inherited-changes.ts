@@ -1,24 +1,17 @@
-import { z } from "zod";
 import { ok, type Result } from "../../core/result.js";
 import { isStatePath, type WorkspaceState } from "../state.js";
+import { inheritedFiles } from "./inherited-record.js";
 import { readSourceEntry, sourceEntryHash } from "./source-entry.js";
 
 /**
- * Uncommitted work a feature starts from because Git could not be written to commit it,
- * as in Codex's workspace-write sandbox. Scope and evidence are judged on content, so the
- * files themselves need no special treatment; this record lets the tools that read Git's
- * working-tree changes (guard, the review document, input warnings) tell the earlier work
- * from what the feature changed further. It is machine-local, like the authorization.
+ * Uncommitted work a feature starts from because Git could not be written to commit it.
+ * Scope and evidence are judged on content, so the files themselves need no special
+ * treatment; the record (inherited-record.ts) lets the tools that read Git's working-tree
+ * changes (guard, the review document, input warnings) tell the earlier work from what the
+ * feature changed further.
  */
-const inheritedChangesSchema = z
-  .object({ version: z.literal(1), files: z.record(z.string()) })
-  .strict();
-
 const FILE_BYTES = 64 * 1024 * 1024;
 const TOTAL_BYTES = 512 * 1024 * 1024;
-
-export const inheritedChangesPath = (workspace: WorkspaceState, feature: string): string =>
-  workspace.paths.stateFile(`state/inherited-changes/${feature}.json`);
 
 /** Identity of the file's current content, or undefined when it cannot be identified. */
 async function contentIdentity(
@@ -54,10 +47,6 @@ export async function captureInheritedChanges(
   return ok(files);
 }
 
-export function inheritedChangesContent(files: Record<string, string>): string {
-  return `${JSON.stringify({ version: 1, files }, null, 2)}\n`;
-}
-
 /**
  * Inherited files whose content is still what the feature started from. An unreadable or
  * malformed record inherits nothing, which attributes every change to the feature.
@@ -66,19 +55,10 @@ export async function unchangedInheritedPaths(
   workspace: WorkspaceState,
   feature: string | undefined,
 ): Promise<Set<string>> {
-  if (!feature) return new Set();
-  const text = await workspace.files.readTextIfExists(inheritedChangesPath(workspace, feature));
-  if (!text.ok || text.value === undefined) return new Set();
-  let parsed: ReturnType<typeof inheritedChangesSchema.safeParse>;
-  try {
-    parsed = inheritedChangesSchema.safeParse(JSON.parse(text.value));
-  } catch {
-    return new Set();
-  }
-  if (!parsed.success) return new Set();
+  const files = await inheritedFiles(workspace, feature);
   const budget = { bytes: 0 };
   const unchanged = new Set<string>();
-  for (const [path, recorded] of Object.entries(parsed.data.files))
+  for (const [path, recorded] of Object.entries(files))
     if ((await contentIdentity(workspace, path, budget)) === recorded) unchanged.add(path);
   return unchanged;
 }

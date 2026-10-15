@@ -1,8 +1,6 @@
 import { afterEach, expect, it } from "vitest";
-import {
-  createProductFeature,
-  updateProductBrief,
-} from "../../../../src/workflow/product/brief.js";
+import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
+import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import { runProductNext } from "../../../../src/workflow/product/status.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";

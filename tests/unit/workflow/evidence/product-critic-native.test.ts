@@ -6,20 +6,26 @@ import * as commandInput from "../../../../src/cli/input.js";
 import { balancedCritic, CRITIC_HARNESSES } from "../../../../src/config/critic.js";
 import { hashValue } from "../../../../src/core/hash.js";
 import { applicableExecutions } from "../../../../src/workflow/product/assessment.js";
-import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
+import {
+  type CriticPacket,
+  runProductCritic,
+} from "../../../../src/workflow/product/critic/critic.js";
 import {
   nativeCapabilityGaps,
   nativePacket,
-} from "../../../../src/workflow/product/critic-native.js";
-import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
+} from "../../../../src/workflow/product/critic/critic-native.js";
+import {
+  criticSelection,
+  readCriticState,
+} from "../../../../src/workflow/product/critic/critic-store.js";
 import { productFailureSignature } from "../../../../src/workflow/product/failures.js";
 import {
   runProductNext,
   runProductVerify,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
-import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
-import { runProductReviewerHandoff } from "../../../../src/workflow/product/reviewer-handoff.js";
+import type { ProductReviewBundle } from "../../../../src/workflow/product/review/review.js";
+import { runProductReviewerHandoff } from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import * as productSubject from "../../../../src/workflow/product/subject.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
@@ -253,7 +259,7 @@ it("inspects an attached adapter, invokes once and records observed lifecycle wi
   const inspect = vi.fn(
     async () =>
       capabilities as NonNullable<
-        import("../../../../src/workflow/product/critic-model.js").CriticRequest["capabilities"]
+        import("../../../../src/workflow/product/critic/critic-model.js").CriticRequest["capabilities"]
       >,
   );
   const review = vi.fn(async (packet: CriticPacket) => ({
@@ -330,7 +336,7 @@ it("records a synchronous adapter throw once without an unhandled timeout reject
   const host = {
     inspect: async () =>
       capabilities as NonNullable<
-        import("../../../../src/workflow/product/critic-model.js").CriticRequest["capabilities"]
+        import("../../../../src/workflow/product/critic/critic-model.js").CriticRequest["capabilities"]
       >,
     review: vi.fn(() => {
       throw new Error("Adapter startup failed before returning a promise");
@@ -984,7 +990,7 @@ it("accepts an adapter response received before the deadline despite slow local 
     {
       inspect: async () =>
         capabilities as NonNullable<
-          import("../../../../src/workflow/product/critic-model.js").CriticRequest["capabilities"]
+          import("../../../../src/workflow/product/critic/critic-model.js").CriticRequest["capabilities"]
         >,
       review: async (packet) => {
         returned = true;
@@ -1046,7 +1052,7 @@ it("preserves an adapter's rejected response object for diagnosis without accept
     {
       inspect: async () =>
         capabilities as NonNullable<
-          import("../../../../src/workflow/product/critic-model.js").CriticRequest["capabilities"]
+          import("../../../../src/workflow/product/critic/critic-model.js").CriticRequest["capabilities"]
         >,
       review: async () => ({
         model: config.model,
@@ -1243,7 +1249,7 @@ it("propagates cancellation after one invocation and never retries the interrupt
   const host = {
     inspect: async () =>
       capabilities as NonNullable<
-        import("../../../../src/workflow/product/critic-model.js").CriticRequest["capabilities"]
+        import("../../../../src/workflow/product/critic/critic-model.js").CriticRequest["capabilities"]
       >,
     review: vi.fn(
       async (_packet: CriticPacket, options: { signal: AbortSignal }): Promise<never> => {
@@ -1319,7 +1325,7 @@ it.each(["cli", "mcp"])(
     const host = {
       inspect: async () =>
         capabilities as NonNullable<
-          import("../../../../src/workflow/product/critic-model.js").CriticRequest["capabilities"]
+          import("../../../../src/workflow/product/critic/critic-model.js").CriticRequest["capabilities"]
         >,
       review: vi.fn(async (packet: CriticPacket) => ({
         model: config.model,

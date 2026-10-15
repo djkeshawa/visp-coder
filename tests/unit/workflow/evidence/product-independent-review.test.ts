@@ -5,15 +5,13 @@ import {
   productExecutionEnvironment,
   resolvedProductExecutionEnvironment,
 } from "../../../../src/core/execution-environment.js";
-import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
-import { currentReviewGap } from "../../../../src/workflow/product/critic-packet.js";
-import { criticSelection } from "../../../../src/workflow/product/critic-store.js";
-import { browserEnvironmentIdentity } from "../../../../src/workflow/product/environment.js";
 import {
-  independentJudgments,
-  independentReviewJsonSchema,
-  independentReviewSchema,
-} from "../../../../src/workflow/product/independent-review.js";
+  type CriticPacket,
+  runProductCritic,
+} from "../../../../src/workflow/product/critic/critic.js";
+import { currentReviewGap } from "../../../../src/workflow/product/critic/critic-packet.js";
+import { criticSelection } from "../../../../src/workflow/product/critic/critic-store.js";
+import { browserEnvironmentIdentity } from "../../../../src/workflow/product/environment.js";
 import {
   runProductContext,
   runProductDone,
@@ -24,10 +22,15 @@ import {
 } from "../../../../src/workflow/product/index.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS } from "../../../../src/workflow/product/observation-preview.js";
 import {
+  independentJudgments,
+  independentReviewJsonSchema,
+  independentReviewSchema,
+} from "../../../../src/workflow/product/review/independent-review.js";
+import {
   parseReviewSubmission,
   runProductReviewRequest,
-} from "../../../../src/workflow/product/review-request.js";
-import { independentReviewGaps } from "../../../../src/workflow/product/reviewer-handoff.js";
+} from "../../../../src/workflow/product/review/review-request.js";
+import { independentReviewGaps } from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
 const projects: Awaited<ReturnType<typeof productWorkspace>>[] = [];
@@ -491,7 +494,7 @@ it("limits native provider citations to delivered evidence without inventing fal
   }
   expect(packet.current.evidence.some((entry) => entry.status === "not-delivered")).toBe(false);
   fields.length = 0;
-  collect(independentReviewJsonSchema([]));
+  collect(await independentReviewJsonSchema([]));
   for (const field of fields) {
     expect(field.maxItems).toBe(0);
     expect(field.items).not.toHaveProperty("enum");
@@ -526,7 +529,9 @@ it("recovers after renewed permission without replaying history or requiring sou
   };
   const state = await criticSelection(await p.workspace.state(), { task: "T001" });
   if (!state.ok) throw new Error(state.error.message);
-  const { readCriticState } = await import("../../../../src/workflow/product/critic-store.js");
+  const { readCriticState } = await import(
+    "../../../../src/workflow/product/critic/critic-store.js"
+  );
   const before = await readCriticState(await p.workspace.state(), state.value);
   expect(await run({ operation: "preflight", ...retry })).toMatchObject({
     ok: true,
@@ -908,7 +913,7 @@ it("reports the independent response's actual malformed field without suggesting
 it("delivers scoped stylesheet bytes alongside implementation without changing graph extraction", async () => {
   const { reviewCodeSources } = await import("../../../../src/workflow/product/code-context.js");
   const { independentSources } = await import(
-    "../../../../src/workflow/product/independent-sources.js"
+    "../../../../src/workflow/product/review/independent-sources.js"
   );
   const { readProductRecord } = await import("../../../../src/workflow/product/store.js");
   const p = await productWorkspace();

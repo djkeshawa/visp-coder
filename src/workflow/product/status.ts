@@ -1,15 +1,15 @@
-import { createHash } from "node:crypto";
 import type { VispError } from "../../core/errors.js";
+import { sha256 } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { outcomeStatuses, type ProductOutcomeStatus } from "./assessment.js";
-import { criticNext } from "./critic-guidance.js";
+import { criticNext } from "./critic/critic-guidance.js";
 import { isStopHookObserver } from "./environment-model.js";
-import { withFlipAdvice } from "./flip-advice.js";
+import { withFlipAdvice } from "./flip/flip-advice.js";
 import { featureStartingAge, hasUntakenPrompts } from "./host-prompts.js";
 import { productInputWarnings } from "./input-warnings.js";
 import type { ProductBrief, ProductState } from "./model.js";
-import { productReviewDocument } from "./review-document.js";
+import { productReviewDocument } from "./review/review-document.js";
 import { earlierSessionGrant, staleTaskNote } from "./scopes.js";
 import type { ProductIdentity } from "./status-history.js";
 import { nextFromRecord } from "./status-next.js";
@@ -93,9 +93,7 @@ export async function runProductNext(
     return identity.ok
       ? ok({
           ...result.value,
-          progress: createHash("sha256")
-            .update(`${loaded.value.stateText}\0${identity.value.subject}`)
-            .digest("hex"),
+          progress: sha256(`${loaded.value.stateText}\0${identity.value.subject}`),
         })
       : result;
   };

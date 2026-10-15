@@ -1,5 +1,5 @@
 import type { ProductFeedback } from "../../../src/workflow/product/feedback-model.js";
-import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../src/workflow/product/review/review.js";
 
 /** Explicit reviewer fixture for small non-UI modules; never used by production code. */
 export function moduleFeedback(bundle: ProductReviewBundle): ProductFeedback {

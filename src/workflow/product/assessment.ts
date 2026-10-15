@@ -1,19 +1,21 @@
 import { sha256 } from "../../core/hash.js";
 import { productJourneyGaps } from "../evidence/product-journey.js";
+import type { ProductReviewCapture } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
-import { productCheckSupportsBehavior } from "./check-command.js";
+import { captureRunEntries } from "./capture-run-model.js";
+import { isBrowserCheckCommand, productCheckSupportsBehavior } from "./check/check-command.js";
 import { currentCoverage, productReviewChallenges } from "./coverage.js";
 import {
   currentJourneyFailures,
   evidenceApplies,
   evidenceSupportGaps,
-  productCaptureRunSchema,
   productEvidenceCatalogue,
 } from "./evidence-references.js";
 import { productFeedbackGaps } from "./feedback.js";
 import { inspectProductImages } from "./images.js";
 import {
   checksFor,
+  hasWebUiScope,
   latestExecutionsByOwner,
   PRODUCT_REVIEW_POLICY,
   type ProductAssessment,
@@ -76,16 +78,62 @@ export function applicableProductCaptureRuns(
   subject: string,
   outcome: string,
 ): unknown[] {
-  return record.state.captureRuns.filter((candidate) => {
-    const run = productCaptureRunSchema.safeParse(candidate);
-    if (!run.success || !evidenceApplies(record, subject, run.data)) return false;
-    return (
-      !run.data.task ||
-      record.brief.slices
-        .find((slice) => slice.id === run.data.task)
-        ?.outcomes.includes(outcome) === true
-    );
-  });
+  return captureRunEntries(record)
+    .filter(
+      ({ run }) =>
+        evidenceApplies(record, subject, run) &&
+        (!run.task ||
+          record.brief.slices.find((slice) => slice.id === run.task)?.outcomes.includes(outcome) ===
+            true),
+    )
+    .map(({ stored }) => stored);
+}
+
+/**
+ * Images that current passing checks declaring images wrote for this outcome. A static
+ * picture (a Python render, an SVG) has no browser journey; reviewers marked such an outcome
+ * satisfied from the check's image and VISP stored it unavailable, so acceptance could never
+ * pass. When no browser-journey check covers the outcome and no slice that owns it (any
+ * slice, for an outcome none owns) builds a web UI, a linked image from this set stands in for the before/input/after journey. A web
+ * game observes play through captured journeys, so one still frame of it never does: the set
+ * is empty then.
+ */
+export function checkImageCaptures(
+  record: ProductRecord,
+  subject: string,
+  outcome: string,
+): ReadonlySet<string> {
+  const checks = record.brief.checks.filter((check) => check.outcomes.includes(outcome));
+  const owners = record.brief.slices.filter((slice) => slice.outcomes.includes(outcome));
+  // An outcome no slice owns is judged on the whole feature.
+  const scope = owners.length ? owners : record.brief.slices;
+  if (checks.some((check) => isBrowserCheckCommand(check.command)) || hasWebUiScope(scope))
+    return new Set();
+  const imaged = new Set(checks.filter((check) => check.images?.length).map((check) => check.id));
+  return new Set(
+    applicableExecutions(record, subject).flatMap((execution) =>
+      execution.status === "passed" && imaged.has(execution.check)
+        ? (execution.checkImages ?? [])
+        : [],
+    ),
+  );
+}
+
+/** A must experience outcome needs an observed journey, or the picture its image check wrote. */
+export function experienceObservationGaps(options: {
+  readonly subjectDigest: string;
+  readonly captureRuns: readonly unknown[];
+  readonly checkImages: ReadonlySet<string>;
+  readonly images: readonly ProductReviewCapture[];
+  readonly linkedEvidence: readonly string[];
+}): string[] {
+  const linkedCheckImage = options.images.some(
+    (image) =>
+      options.checkImages.has(image.id) &&
+      image.subjectDigest === options.subjectDigest &&
+      (options.linkedEvidence.includes(image.id) || options.linkedEvidence.includes(image.path)),
+  );
+  return linkedCheckImage ? [] : productJourneyGaps(options);
 }
 
 export function outcomeStatuses(
@@ -240,9 +288,10 @@ export async function productImageEvidenceGaps(
       continue;
     const images = await inspectProductImages(workspace, subject, currentReview.review.captures);
     gaps.push(
-      ...productJourneyGaps({
+      ...experienceObservationGaps({
         subjectDigest: subject,
         captureRuns: applicableProductCaptureRuns(record, subject, outcome.id),
+        checkImages: checkImageCaptures(record, subject, outcome.id),
         images: images.images,
         linkedEvidence: currentReview.assessment.evidence,
       }).map((gap) => `${outcome.id}: ${gap}`),

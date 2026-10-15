@@ -3,13 +3,13 @@ import { probeBrowserCapability } from "../../testing/browser-capability.js";
 import { BrowserUnavailableError } from "../../testing/chrome-transport.js";
 import type { WorkspaceState } from "../state.js";
 import { executionRecovery } from "./browser-recovery.js";
-import { isBrowserCheckCommand } from "./check-command.js";
+import { isBrowserCheckCommand } from "./check/check-command.js";
 import {
   type BrowserCapability,
   browserExecutionEnvironmentIdentity,
   environmentRecovery,
 } from "./environment-model.js";
-import { checksFor, type ProductBrief, type ProductSlice } from "./model.js";
+import { checksFor, hasWebUiScope, type ProductBrief, type ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
 
 export function needsBrowser(brief: ProductBrief, slice?: ProductSlice) {
@@ -23,10 +23,7 @@ export function needsBrowser(brief: ProductBrief, slice?: ProductSlice) {
   const webIntent = /\b(?:browser|website|web\s+(?:app|game|page|site|interface))\b/i.test(
     [brief.originalRequest, brief.goal, slice?.goal].join("\n"),
   );
-  const webScope = (slice ? [slice] : brief.slices).some((entry) =>
-    entry.scope.allowed.some((path) => /\.(?:html?|jsx|tsx|vue|svelte)$/.test(path)),
-  );
-  return visual && (webIntent || webScope);
+  return visual && (webIntent || hasWebUiScope(slice ? [slice] : brief.slices));
 }
 
 /** Hash environment inputs without exposing values. Source/brief edits are deliberately excluded. */

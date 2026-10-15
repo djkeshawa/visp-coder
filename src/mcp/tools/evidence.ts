@@ -2,24 +2,24 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { vispError } from "../../core/errors.js";
 import { err, ok } from "../../core/result.js";
+import { runProductVerify } from "../../workflow/product/index.js";
 import {
   configuredReviewStarter,
   reviewWaitMs,
   runProductAcceptReviewed,
   runProductDoneReviewed,
-} from "../../workflow/product/done-review.js";
+} from "../../workflow/product/review/done-review.js";
 import {
   type IndependentReview,
   independentReviewSchema,
-} from "../../workflow/product/independent-review.js";
-import { runProductVerify } from "../../workflow/product/index.js";
+} from "../../workflow/product/review/independent-review.js";
 import {
   type ProductReviewRequest,
   parseReviewSubmission,
-  productReviewSubmissionSchema,
   runProductReviewRequest,
   validateProductReviewRequest,
-} from "../../workflow/product/review-request.js";
+} from "../../workflow/product/review/review-request.js";
+import { productReviewSubmissionSchema } from "../../workflow/product/review/review-submission-model.js";
 import type { ProductSelection } from "../../workflow/product/store.js";
 import type { WorkspaceState } from "../../workflow/state.js";
 import { TOOL } from "../constants.js";

@@ -6,17 +6,20 @@ import {
   type CriticPacket,
   type ProductCriticHost,
   runProductCritic,
-} from "../../../../src/workflow/product/critic.js";
-import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
+} from "../../../../src/workflow/product/critic/critic.js";
+import {
+  criticSelection,
+  readCriticState,
+} from "../../../../src/workflow/product/critic/critic-store.js";
+import { runProductAccept, runProductVerify } from "../../../../src/workflow/product/evidence.js";
+import { outstandingFeedback } from "../../../../src/workflow/product/findings.js";
+import { updateProductBrief } from "../../../../src/workflow/product/index.js";
+import { runProductReproduction } from "../../../../src/workflow/product/reproduction.js";
 import {
   inlineReview,
   runProductDoneReviewed,
-} from "../../../../src/workflow/product/done-review.js";
-import { runProductAccept, runProductVerify } from "../../../../src/workflow/product/evidence.js";
-import { outstandingFeedback } from "../../../../src/workflow/product/findings.js";
-import type { IndependentReview } from "../../../../src/workflow/product/independent-review.js";
-import { updateProductBrief } from "../../../../src/workflow/product/index.js";
-import { runProductReproduction } from "../../../../src/workflow/product/reproduction.js";
+} from "../../../../src/workflow/product/review/done-review.js";
+import type { IndependentReview } from "../../../../src/workflow/product/review/independent-review.js";
 import { readProductRecord, saveProductState } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";

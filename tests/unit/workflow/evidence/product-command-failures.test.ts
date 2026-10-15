@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { executeProductCheck } from "../../../../src/workflow/product/check-execution.js";
+import { executeProductCheck } from "../../../../src/workflow/product/check/check-execution.js";
 import { productCheckSchema } from "../../../../src/workflow/product/model.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { productWorkspace } from "../../support/product-workspace.js";

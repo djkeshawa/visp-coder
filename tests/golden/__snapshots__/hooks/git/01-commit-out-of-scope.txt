@@ -1,0 +1,9 @@
+$ git commit (staged README.md)
+--- stdout
+
+--- stderr
+
+Commit refused: README.md is outside the allowed files of T001
+Adjust the task's allowedFiles, or unstage the extra files.
+
+--- exit 1

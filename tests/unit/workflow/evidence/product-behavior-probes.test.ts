@@ -9,7 +9,7 @@ import {
 import {
   productReviewAgenda,
   reviewInteractionEvidence,
-} from "../../../../src/workflow/product/review-context.js";
+} from "../../../../src/workflow/product/review/review-context.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 
 const brief = productBriefSchema.parse({

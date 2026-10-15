@@ -8,7 +8,7 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../../src/workflow/product/index.js";
-import { runProductReviewRequest } from "../../../src/workflow/product/review-request.js";
+import { runProductReviewRequest } from "../../../src/workflow/product/review/review-request.js";
 import { runProductNext } from "../../../src/workflow/product/status.js";
 import { readProductRecord } from "../../../src/workflow/product/store.js";
 import { productWorkspace } from "../../unit/support/product-workspace.js";
@@ -35,7 +35,7 @@ async function setup(
     files?: string[];
   } = {},
 ) {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   if (options.greenfield) await rm(join(w.root, "src/value.mjs"));
@@ -369,7 +369,7 @@ it.runIf(!!developRuntime)(
     const subject = await import("../../../src/workflow/product/subject.js");
     const digest = await subject.productSourceDigest(workspace, record.brief);
     if (!digest.ok) throw new Error(digest.error.message);
-    const current = await import("../../../src/workflow/product/check-execution.js");
+    const current = await import("../../../src/workflow/product/check/check-execution.js");
     const legacy = (await import(/* @vite-ignore */ developRuntime as string)) as typeof current & {
       runProductReviewRequest: typeof runProductReviewRequest;
       saveProductState: typeof import("../../../src/workflow/product/store.js").saveProductState;
@@ -565,7 +565,7 @@ async function changeAfterBaseline(
 }
 
 it("reports git-ignored local state the check reads as unchecked, without a comparison", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\nlocal/\n");
@@ -591,7 +591,7 @@ it("reports git-ignored local state the check reads as unchecked, without a comp
 });
 
 it("does not let a reverted run reach a .env that points into the user's project", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", ".env\nlocal/\nnode_modules/\n");
@@ -613,7 +613,7 @@ it("does not let a reverted run reach a .env that points into the user's project
 });
 
 it("removes a read-only directory from the comparison tree without leaving a temporary tree", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   const privateTemp = await mkdtemp(join(tmpdir(), "visp-flip-temp-"));
@@ -657,7 +657,7 @@ it("removes a read-only directory from the comparison tree without leaving a tem
 it.each([false, true])(
   "keeps a recorded flip when unrelated environment drifts, without rerunning the reverted check (node_modules=%s)",
   async (withNodeModules) => {
-    const p = await productWorkspace();
+    const p = await productWorkspace({ flip: true });
     projects.push(p);
     const w = p.workspace;
     const scratch = await mkdtemp(join(tmpdir(), "visp-flip-drift-"));
@@ -739,7 +739,7 @@ it("does not fail done when a recorded flip cannot be refreshed", async () => {
 });
 
 it("does not report a missing regenerable build artifact as a regression", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "dist/\nnode_modules/\n");
@@ -760,7 +760,7 @@ it("does not report a missing regenerable build artifact as a regression", async
 });
 
 it("copies regenerable nested state under a tracked directory into the comparison", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", ".cache/\nnode_modules/\n");
@@ -782,7 +782,7 @@ it("copies regenerable nested state under a tracked directory into the compariso
 });
 
 it("blocks a comparison on nested state under a wholly ignored directory that is not regenerable", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "local/.cache/\nnode_modules/\n");
@@ -805,7 +805,7 @@ it("blocks a comparison on nested state under a wholly ignored directory that is
 });
 
 it("runs no comparison when a tracked file names the project by absolute path", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\n");
@@ -836,7 +836,7 @@ const COUNT_ONLY_REVERTED = (variable: string) =>
   `if (value === 1) writeFileSync(${variable}, String(Number(readFileSync(${variable}, 'utf8')) + 1));`;
 
 it("rebases a copied regenerable file that names the project, so the comparison runs without the user's file", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "dist/\nnode_modules/\n");
@@ -866,7 +866,7 @@ it("rebases a copied regenerable file that names the project, so the comparison 
 });
 
 it("reports a tracked file over 1 MiB that names the project as unchecked, without the comparison", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\n");
@@ -895,7 +895,7 @@ it("reports a tracked file over 1 MiB that names the project as unchecked, witho
 });
 
 it("rebases an environment module that names the project, so the comparison runs", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\n");
@@ -920,7 +920,7 @@ it("rebases an environment module that names the project, so the comparison runs
 });
 
 it("rebases a pnpm-style node_modules/.modules.yaml that names the project, so the comparison runs", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\n");
@@ -943,7 +943,7 @@ it("rebases a pnpm-style node_modules/.modules.yaml that names the project, so t
 });
 
 it("rebases a Python virtualenv whose pyvenv.cfg and activate script name the project, so the comparison runs", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", ".venv/\n");
@@ -964,7 +964,7 @@ it("rebases a Python virtualenv whose pyvenv.cfg and activate script name the pr
 });
 
 it("refuses a comparison when an environment binary names the project, and leaves it untouched", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\n");
@@ -990,7 +990,7 @@ it("refuses a comparison when an environment binary names the project, and leave
 });
 
 it("rebases the baseline bytes the comparison restores, so a baseline reference to the project never reaches the user's file", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\n");
@@ -1016,7 +1016,7 @@ it("rebases the baseline bytes the comparison restores, so a baseline reference 
 });
 
 it("reports a UTF-16 file that names the project as unchecked, without the comparison", async () => {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   await w.write(".gitignore", "node_modules/\n");

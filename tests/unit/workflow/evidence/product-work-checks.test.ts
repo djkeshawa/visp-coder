@@ -32,7 +32,9 @@ it("refuses to authorize a slice without a runnable check and says how to add on
 
 // Weak workers spent about six minutes on planning before a first check on small changes.
 it("works the whole request as one slice when given a check on a feature without slices", async () => {
-  const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+  const { createProductFeature } = await import(
+    "../../../../src/workflow/product/feature-create.js"
+  );
   const { TestWorkspace } = await import("../../support/workspace.js");
   workspace = await TestWorkspace.create({
     "src/value.mjs": "export const value = 1;\n",
@@ -88,7 +90,9 @@ it("leaves slices that already have checks unchanged", async () => {
 
 // Checks run without a shell, so shell syntax is refused before anything is authorized.
 it("refuses a light-path check the brief cannot hold, and a feature that does not exist", async () => {
-  const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+  const { createProductFeature } = await import(
+    "../../../../src/workflow/product/feature-create.js"
+  );
   const { TestWorkspace } = await import("../../support/workspace.js");
   workspace = await TestWorkspace.create({ "src/value.mjs": "export const value = 1;\n" });
   await workspace.installFoundation();

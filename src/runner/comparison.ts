@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { z } from "zod";
 import { canonicalJson, hashValue, sha256 } from "../core/hash.js";
 import { canonicalProjectRoot, isInside } from "../core/paths.js";
+import { normalizePath } from "../core/patterns.js";
 import {
   type Assignment,
   type armSchema,
@@ -200,7 +201,7 @@ async function pinTree(
     total += pinned.pin.bytes;
     if (total > 256 * 1024 * 1024 || files.size >= 25_000)
       throw new Error("Pinned tree exceeds 256 MiB or 25,000 files");
-    const key = relative(root, path).replace(/\\/g, "/");
+    const key = normalizePath(relative(root, path));
     files.set(key, { ...pinned.pin, path: key });
   };
   for (const path of selected) {

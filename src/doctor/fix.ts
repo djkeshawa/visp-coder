@@ -6,6 +6,7 @@ import {
   recoverFileTransactions,
 } from "../core/file-transaction.js";
 import type { Result } from "../core/result.js";
+import { sweepAbandonedCredentialHomes } from "../core/stale-temp.js";
 import { indexRepository, refreshRepository } from "../graph/index.js";
 import { CLAUDE_SETTINGS_FILE } from "../harness/claude-settings.js";
 import {
@@ -38,6 +39,8 @@ export async function applyFixes(
   runtime: InstallRuntime = {},
 ): Promise<Repair[]> {
   const repairs: Repair[] = [];
+  // A killed reviewer or tester's sign-in copy goes now, not at the next review.
+  await sweepAbandonedCredentialHomes();
   const failing = new Set(
     checks.filter((check) => check.status !== "ok").map((check) => check.name),
   );

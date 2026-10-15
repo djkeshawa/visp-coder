@@ -1,3 +1,4 @@
+import { cliCommand } from "../next-action.js";
 import { applicableReviews } from "./assessment.js";
 import { currentProductFailures } from "./corrections.js";
 import { currentJourneyFailures } from "./evidence-references.js";
@@ -53,8 +54,8 @@ export function historicalAcceptanceNext(
         objective:
           "Resolve the retained review mismatch against the current product before relying on historical acceptance",
         command: launched
-          ? `visp accept --feature ${record.brief.feature}`
-          : `visp review --handoff --feature ${record.brief.feature}`,
+          ? cliCommand("accept", { feature: record.brief.feature })
+          : cliCommand("review", { handoff: true, feature: record.brief.feature }),
         evidence: historicalGaps,
         mayEdit: false,
       };
@@ -74,8 +75,8 @@ export function historicalAcceptanceNext(
       objective:
         "Historical acceptance is preserved; current implementation freshness is unknown under the upgraded runtime",
       command: launched
-        ? `visp accept --feature ${record.brief.feature}`
-        : `visp review --handoff --feature ${record.brief.feature}`,
+        ? cliCommand("accept", { feature: record.brief.feature })
+        : cliCommand("review", { handoff: true, feature: record.brief.feature }),
       evidence: [
         "The old acceptance has no implementation-only identity. Explicit new acceptance requires current evidence.",
       ],

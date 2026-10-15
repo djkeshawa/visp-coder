@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CriticAdapter } from "../workflow/product/critic.js";
+import type { CriticAdapter } from "../workflow/product/critic/critic.js";
 
 /** Standard MCP requires maxTokens. Do not invent a ceiling or silently request a capped review. */
 export function mcpCriticHost(server: McpServer): CriticAdapter | undefined {

@@ -7,7 +7,7 @@ import { err } from "../../../../src/core/result.js";
 import { capabilityUtilization } from "../../../../src/telemetry/capabilities.js";
 import * as probe from "../../../../src/testing/browser-capability.js";
 import * as capture from "../../../../src/workflow/evidence/product-capture-execution.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
 import { validateProductFeedback } from "../../../../src/workflow/product/feedback.js";
 import {
   runProductNext,

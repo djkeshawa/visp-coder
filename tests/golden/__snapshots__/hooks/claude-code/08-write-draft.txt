@@ -1,0 +1,6 @@
+> .visp/hooks/claude-pretooluse.mjs {"session_id":"golden-session","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"<PROJECT>/.visp/drafts/brief.json","content":"x"}}
+--- stdout
+
+--- stderr
+
+--- exit 0

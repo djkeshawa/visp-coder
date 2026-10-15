@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { ProjectFileSystem } from "../../core/fs.js";
+import { sha256 } from "../../core/hash.js";
 import { BINARY_SNIFF_BYTES } from "../constants.js";
 import { languageForPath } from "../paths.js";
 import type { FileEntry, SkipReason } from "../types.js";
@@ -28,7 +28,7 @@ export async function inspectFile(
     entry: {
       path: repoPath,
       bytes: contents.byteLength,
-      hash: hashBytes(contents),
+      hash: sha256(contents),
       language: languageForPath(repoPath),
     },
   };
@@ -37,8 +37,4 @@ export async function inspectFile(
 /** A NUL in the first block is the same signal `git` uses to call a file binary. */
 export function looksBinary(contents: Buffer): boolean {
   return contents.subarray(0, BINARY_SNIFF_BYTES).includes(0);
-}
-
-export function hashBytes(contents: Buffer): string {
-  return createHash("sha256").update(contents).digest("hex");
 }

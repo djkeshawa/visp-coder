@@ -12,11 +12,10 @@ import json
 import os
 import pathlib
 import shutil
-import subprocess
 import tempfile
 import time
 
-from common import RUNS, isolate
+from common import RUNS, isolate, run_worker
 
 parser = argparse.ArgumentParser()
 parser.add_argument("run")
@@ -56,19 +55,13 @@ argv = [
     "--config", 'approval_policy="never"', "-",
 ]
 started, report = time.time(), ""
-try:
-    # Own session, so a worker's process-group signal cannot reach sibling runs.
-    completed = subprocess.run(argv, input=(run / "prompt.txt").read_text(), env=env,
-                               capture_output=True, text=True, timeout=args.timeout,
-                               start_new_session=True)
-    output, timed_out = completed.stdout, False
-    # codex (or the namespace wrapper) failed without emitting a single event.
-    failed = completed.returncode != 0 and not output.strip()
-    if failed:
-        report = f"exit {completed.returncode}: {completed.stderr[-1500:]}"
-except subprocess.TimeoutExpired as expired:
-    output = expired.stdout.decode() if isinstance(expired.stdout, bytes) else (expired.stdout or "")
-    timed_out, failed = True, False
+# Own session, so a worker's process-group signal cannot reach sibling runs.
+code, output, stderr, timed_out = run_worker(argv, None, env, args.timeout, run / "worker.pid",
+                                             stdin=(run / "prompt.txt").read_text())
+# codex (or the namespace wrapper) failed without emitting a single event.
+failed = not timed_out and code != 0 and not output.strip()
+if failed:
+    report = f"exit {code}: {stderr[-1500:]}"
 elapsed = round(time.time() - started)
 usage, commands = {}, 0
 for line in output.splitlines():
@@ -85,9 +78,14 @@ for line in output.splitlines():
         report = item.get("text", "")
     if event.get("type") == "item.completed" and item.get("type") == "command_execution":
         commands += 1
+    # The CLI's own failure (an API error, a usage limit). An error event alone can be a retry
+    # the CLI recovered from; it ends the session in error only with a failed turn or exit.
+    if event.get("type") == "turn.failed" or (event.get("type") == "error" and code != 0 and not timed_out):
+        failed = True
+        report = str(event.get("message") or (event.get("error") or {}).get("message") or event)
 shutil.rmtree(home, ignore_errors=True)
 result = {
-    "run": args.run, "arm": arm["arm"], "model": f"{args.model}:{args.effort}", "seconds": elapsed,
+    "run": args.run, "arm": arm["arm"], "preset": arm.get("preset"), "model": f"{args.model}:{args.effort}", "seconds": elapsed,
     "timedOut": timed_out, "turns": commands, "isError": failed, "usage": usage, "report": report[-1500:],
 }
 (run / "result.json").write_text(json.dumps(result, indent=2))

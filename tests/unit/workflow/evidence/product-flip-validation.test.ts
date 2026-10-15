@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "vitest";
-import { flipValidationPaths } from "../../../../src/workflow/product/flip-validation.js";
+import { flipValidationPaths } from "../../../../src/workflow/product/flip/flip-validation.js";
 import { TestWorkspace } from "../../support/workspace.js";
 
 let workspace: TestWorkspace | undefined;

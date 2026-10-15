@@ -1,4 +1,4 @@
-import { hashValue } from "../../core/hash.js";
+import { hashValue, sha256 } from "../../core/hash.js";
 import { ok, type Result } from "../../core/result.js";
 import type { Spec } from "../artifacts/feature.js";
 import type {
@@ -13,7 +13,6 @@ import { currentContextSourceHash } from "../stages/context/freshness.js";
 import type { WorkspaceState } from "../state.js";
 import { staleReasonsFor } from "./observations/freshness.js";
 import { observationReproductionState } from "./observations/identity.js";
-import { digestBytes } from "./observations/media.js";
 
 export interface RecordObservationOptions {
   readonly feature: string;
@@ -160,7 +159,7 @@ async function attachmentIssue(
     if (metadata.value.type !== "file") return "changed";
     const bytes = await state.files.readBytes(path);
     if (!bytes.ok) return bytes.error.code === "ARTIFACT_MISSING" ? "missing" : "changed";
-    return digestBytes(Buffer.from(bytes.value)) === attachment.sha256 ? undefined : "changed";
+    return sha256(Buffer.from(bytes.value)) === attachment.sha256 ? undefined : "changed";
   } catch {
     return "changed";
   }

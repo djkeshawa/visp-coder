@@ -5,7 +5,7 @@ import { parse } from "yaml";
 import { applyFileTransaction, type FileMutation } from "../../../src/core/file-transaction.js";
 import { ok } from "../../../src/core/result.js";
 import { installHarness, previewHarnessInstall } from "../../../src/harness/install.js";
-import { createProductFeature } from "../../../src/workflow/product/brief.js";
+import { createProductFeature } from "../../../src/workflow/product/feature-create.js";
 import { TestWorkspace } from "../support/workspace.js";
 
 let workspace: TestWorkspace;

@@ -6,12 +6,12 @@ import * as transactions from "../../../../src/core/file-transaction.js";
 import {
   type ProductCriticHost,
   runProductCritic,
-} from "../../../../src/workflow/product/critic.js";
+} from "../../../../src/workflow/product/critic/critic.js";
+import { runProductVerify, updateProductBrief } from "../../../../src/workflow/product/index.js";
 import {
   inlineReview,
   runProductDoneReviewed,
-} from "../../../../src/workflow/product/done-review.js";
-import { runProductVerify, updateProductBrief } from "../../../../src/workflow/product/index.js";
+} from "../../../../src/workflow/product/review/done-review.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";

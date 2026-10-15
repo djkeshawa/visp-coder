@@ -3,7 +3,7 @@ import {
   DEFAULT_HOST_FEEDBACK_TIMEOUT_MS,
   type ProductFeedbackHost,
 } from "../workflow/product/host-feedback.js";
-import { productReviewInstructions } from "../workflow/product/review-instructions.js";
+import { productReviewInstructions } from "../workflow/product/review/review-instructions.js";
 import { productWithoutImageBytes } from "../workflow/product-presentation.js";
 
 /** Sampling is an explicit host capability. No provider calls or model preference override. */

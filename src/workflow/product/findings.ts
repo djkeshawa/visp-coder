@@ -234,3 +234,28 @@ export function findingAppliesToSlice(
   if (finding.task) return finding.task === slice.id;
   return !finding.outcomes.length || finding.outcomes.some((id) => slice.outcomes.includes(id));
 }
+
+/**
+ * The one slice that repairs a finding: the reviewed slice, else the slice of the first outcome it
+ * names, else the first slice it applies to. A finding routed to every slice it names alternates
+ * between slices that share files, since each repair leaves the other slice's checks stale.
+ */
+export function findingOwner(
+  finding: { task?: string; outcomes: readonly string[] },
+  slices: readonly ProductSlice[],
+): ProductSlice | undefined {
+  if (finding.task) return slices.find((slice) => slice.id === finding.task);
+  for (const outcome of finding.outcomes) {
+    const owner = slices.find((slice) => slice.outcomes.includes(outcome));
+    if (owner) return owner;
+  }
+  return slices.find((slice) => findingAppliesToSlice(finding, slice));
+}
+
+/** Where the first open required finding is repaired. */
+export function requiredFindingOwner(record: ProductRecord): ProductSlice | undefined {
+  return outstandingFeedback(record)
+    .filter((finding) => finding.required)
+    .map((finding) => findingOwner(finding, record.brief.slices))
+    .find((owner) => owner !== undefined);
+}

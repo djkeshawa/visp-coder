@@ -3,14 +3,14 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { MEMORY_HEADING } from "../../../../src/memory/memory-service.js";
+import { productStatePath, readProductRecord } from "../../../../src/workflow/product/store.js";
+import { createProductFeatureWithTests } from "../../../../src/workflow/product/tester/independent-tests.js";
+import type { IndependentTester } from "../../../../src/workflow/product/tester/independent-tests-model.js";
 import {
-  createProductFeatureWithTests,
-  type IndependentTester,
-  inlineTests,
   readTestsRecord,
   saveTestsRecord,
-} from "../../../../src/workflow/product/independent-tests.js";
-import { productStatePath, readProductRecord } from "../../../../src/workflow/product/store.js";
+} from "../../../../src/workflow/product/tester/independent-tests-record.js";
+import { inlineTests } from "../../../../src/workflow/product/tester/independent-tests-starters.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { compactProductReply } from "../../../../src/workflow/product-compact-text.js";
 import { productWorkspace } from "../../support/product-workspace.js";

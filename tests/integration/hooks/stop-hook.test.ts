@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { renderPreToolUseHook } from "../../../src/harness/hooks.js";
-import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../src/workflow/product/review/review.js";
 import { succeeded, VALUE_SOURCE, VALUE_TEST } from "../../functional/support/product.js";
 import { TestProject } from "../../functional/support/project.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";

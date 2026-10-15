@@ -186,7 +186,13 @@ describe("the minimal profile", () => {
     // A goal-replay rule (ceiling 432) was reverted after it sent a game worker into building
     // per-level win replays for the whole hour; the per-kind count example (`Stone: 2`) fits
     // within 404 with the shorter preview rule.
-    expect(guide.length / 4).toBeLessThanOrEqual(404);
+    // 404 -> 423: the picture-result rule. With it, a Haiku worker rendering a voxel scene
+    // declared its PNG; an undeclared picture reaches the reviewer only as source.
+    // 423 -> 453: that rule also names the experience outcome an image check must cover (the
+    // brief is rejected without one) and keeps the requested format beside the PNG.
+    // 453 -> 452: "never rerun feature" replaced "Poll; never duplicate", which invited shell
+    // loops around visp status.
+    expect(guide.length / 4).toBeLessThanOrEqual(452);
     expect(guide).toContain("At its id, run visp work");
     expect(guide).toContain("Leave feature running; background it on blocking hosts");
     expect(guide).toContain(
@@ -202,6 +208,15 @@ describe("the minimal profile", () => {
     expect(guide).toContain("not only canvas/icons");
     expect(guide).toContain("function and start point");
     expect(guide).toContain("Do not delete or shrink requested content");
+    expect(guide).toContain(
+      "- Image-file result (render, chart, SVG): give its brief check `images: [out.png]` (a PNG or SVG it writes; keep the requested format too) and an experience outcome naming what the picture must show.",
+    );
+  });
+
+  it("describes the images field where the command guide lists brief check fields", () => {
+    expect(commandGuide()).toContain(
+      "A command check whose result is an image file (render, chart, SVG) adds `images: [out.png]`, a PNG or SVG it writes in every run, and lists an experience outcome naming what the picture must show.",
+    );
   });
 
   it.each(["codex", "claude-code"] as const)(
@@ -235,7 +250,7 @@ describe("generated workflow routing", () => {
       expect(guide).toContain("Browser journeys must not mutate VISP state");
       expect(guide).toContain("only when visp next prints it");
       expect(guide).toContain("run or delegate no review");
-      expect(guide).toContain("Poll; never duplicate");
+      expect(guide).toContain("never rerun feature");
       expect(guide).toContain("At its id, run visp work");
       expect(guide).not.toContain("visp review --prepare");
       expect(commandGuide()).toContain("No category declarations, example-coverage ledger");

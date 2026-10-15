@@ -2,6 +2,7 @@ import { z } from "zod";
 import { fromUnknown, vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
+import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { updateProductBrief } from "./brief.js";
 import {
@@ -9,13 +10,20 @@ import {
   independentReviewJsonSchema,
   independentReviewSchema,
   independentReviewTemplate,
-} from "./independent-review.js";
-import { independentSources } from "./independent-sources.js";
-import { deliveredReviewEvidenceIds } from "./review-context.js";
-import { generatedSourceReferences, reviewCitationGap } from "./review-delivery-validation.js";
-import { productReviewSubmissionSchema, runProductReviewRequest } from "./review-request.js";
-import { deliveredSourceEvidence, reviewPacketBudgetGap } from "./review-source-delivery.js";
-import { independentReviewerContext, reviewerHandoffCandidates } from "./reviewer-handoff.js";
+} from "./review/independent-review.js";
+import { independentSources } from "./review/independent-sources.js";
+import { deliveredReviewEvidenceIds } from "./review/review-context.js";
+import {
+  generatedSourceReferences,
+  reviewCitationGap,
+} from "./review/review-delivery-validation.js";
+import { runProductReviewRequest } from "./review/review-request.js";
+import { deliveredSourceEvidence, reviewPacketBudgetGap } from "./review/review-source-delivery.js";
+import { productReviewSubmissionSchema } from "./review/review-submission-model.js";
+import {
+  independentReviewerContext,
+  reviewerHandoffCandidates,
+} from "./review/reviewer-handoff.js";
 import { type ProductSelection, readProductRecord } from "./store.js";
 
 type ReviewRequest = Extract<
@@ -30,7 +38,7 @@ export interface ProductFeedbackHost {
   readonly review?: (
     request: ReturnType<typeof independentReviewerContext> & {
       submission: ReturnType<typeof independentReviewTemplate>;
-      responseSchema: ReturnType<typeof independentReviewJsonSchema>;
+      responseSchema: Awaited<ReturnType<typeof independentReviewJsonSchema>>;
     },
     options: { model: string; signal: AbortSignal; context: "fresh-preferred"; timeoutMs?: number },
   ) => Promise<unknown>;
@@ -91,7 +99,7 @@ export async function runProductHostFeedback(
     sources: sources.value,
     evidence,
     submission: independentReviewTemplate(),
-    responseSchema: independentReviewJsonSchema(ids),
+    responseSchema: await independentReviewJsonSchema(ids),
   };
   const deliveredEvidence = {
     ids,
@@ -271,7 +279,7 @@ async function consumeResearch(
     question,
     implication: conclusion.data.implication,
     check: check.id,
-    command: `visp work --feature ${brief.feature}${selection.task ? ` --task ${selection.task}` : ""}`,
+    command: cliCommand("work", { feature: brief.feature, task: selection.task }),
   });
 }
 

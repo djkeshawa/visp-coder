@@ -3,17 +3,17 @@ import {
   type CriticPacket,
   type ProductCriticHost,
   runProductCritic,
-} from "../../../../src/workflow/product/critic.js";
+} from "../../../../src/workflow/product/critic/critic.js";
+import { runProductDone } from "../../../../src/workflow/product/evidence.js";
+import { updateProductBrief } from "../../../../src/workflow/product/index.js";
 import {
   inlineReview,
   type ReviewStarter,
   reviewOwed,
   runProductDoneReviewed,
   skippableReview,
-} from "../../../../src/workflow/product/done-review.js";
-import { runProductDone } from "../../../../src/workflow/product/evidence.js";
-import { updateProductBrief } from "../../../../src/workflow/product/index.js";
-import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
+} from "../../../../src/workflow/product/review/done-review.js";
+import type { ProductReviewBundle } from "../../../../src/workflow/product/review/review.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { legacyReview } from "../../support/legacy-critic.js";

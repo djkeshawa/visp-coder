@@ -2,20 +2,24 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
+import type {
+  IndependentTester,
+  TestsStarter,
+} from "../../../src/workflow/product/tester/independent-tests-model.js";
 import {
-  type IndependentTester,
-  inlineTests,
   readTestsRecord,
   saveTestsRecord,
-  type TestsStarter,
-} from "../../../src/workflow/product/independent-tests.js";
+} from "../../../src/workflow/product/tester/independent-tests-record.js";
+import { inlineTests } from "../../../src/workflow/product/tester/independent-tests-starters.js";
 import { TestWorkspace } from "../support/workspace.js";
 import { runCli, runJson, watchStdout } from "./support/cli.js";
 
 // The real starter runs Codex; the command's own flow is what is under test.
 const fake = vi.hoisted(() => ({ starter: undefined as TestsStarter | undefined }));
-vi.mock("../../../src/workflow/product/independent-tests.js", async (original) => ({
-  ...(await original<typeof import("../../../src/workflow/product/independent-tests.js")>()),
+vi.mock("../../../src/workflow/product/tester/independent-tests-starters.js", async (original) => ({
+  ...(await original<
+    typeof import("../../../src/workflow/product/tester/independent-tests-starters.js")
+  >()),
   configuredTestsStarter: () => fake.starter,
 }));
 

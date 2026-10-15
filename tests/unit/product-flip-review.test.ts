@@ -2,14 +2,14 @@ import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { err, ok } from "../../src/core/result.js";
-import { classifyFlip } from "../../src/workflow/product/flip-check.js";
-import { inFlipTree, recoverFlipBaseline } from "../../src/workflow/product/flip-tree.js";
+import { classifyFlip } from "../../src/workflow/product/flip/flip-check.js";
+import { inFlipTree, recoverFlipBaseline } from "../../src/workflow/product/flip/flip-tree.js";
 import {
   runProductVerify,
   runProductWork,
   updateProductBrief,
 } from "../../src/workflow/product/index.js";
-import { reviewCheckResult } from "../../src/workflow/product/review-check-context.js";
+import { reviewCheckResult } from "../../src/workflow/product/review/review-check-context.js";
 import { readProductAuthorizationBaseline } from "../../src/workflow/product/scopes.js";
 import { readProductRecord } from "../../src/workflow/product/store.js";
 import { productSourceSnapshot } from "../../src/workflow/product/subject.js";
@@ -29,7 +29,7 @@ async function fixture(
     workspace: Awaited<ReturnType<typeof productWorkspace>>["workspace"],
   ) => Promise<void>,
 ) {
-  const p = await productWorkspace();
+  const p = await productWorkspace({ flip: true });
   projects.push(p);
   const w = p.workspace;
   for (const [path, content] of Object.entries(files)) await w.write(path, content);

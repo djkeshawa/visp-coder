@@ -9,17 +9,19 @@ const COMPACT_RULES = `- Keep request with --source-brief; preserve outcomes, ex
 - Before editing run visp work; build runnable behavior. Functional outcomes need tests or kind:"browser-journey" with real input. Browser journeys must not mutate VISP state. Source strings and screenshots alone do not prove behavior.
 - Stateful: act, settle, repeat; test failure/restart.
 - If the request has a UI, show status, counts, errors as word-labeled text (\`Score: 1500\`, \`Stone: 2\`), not only canvas/icons.
+- Image-file result (render, chart, SVG): give its brief check \`images: [out.png]\` (a PNG or SVG it writes; keep the requested format too) and an experience outcome naming what the picture must show.
 - UI previews (aim line, predicted path): use the real action's function and start point; check with real input. Do not delete or shrink requested content to pass a check.
 - If visp done runs VISP's reviewer, run or delegate no review; visp next waits. Fix findings, rerun done. Run visp critic/review only when visp next prints it.
-- Run feature/done/verify/accept/next with the host's maximum shell timeout. Leave feature running; background it on blocking hosts. At its id, run visp work. Poll; never duplicate; after kill/error recover by id.
+- Run feature/done/verify/accept/next with the host's maximum shell timeout. Leave feature running; background it on blocking hosts. At its id, run visp work; never rerun feature; after kill/error recover by id.
 - Sandbox denied? Rerun with escalation.
 - Missing product evidence stays unresolved. Report reviewer.context honestly. Do not force extra review rounds.
 - Before the final answer, run \`visp next\`; respect execution refusals.`;
 
 const RULES_FOR_AGENTS = `- The original request and independent acceptance expectations cannot be weakened by a method revision.
   An explicit intent change records the reason and provenance; it is not proof of human authorization.
-- Use at least 10 minutes for feature/done/verify/accept/next when the host supports it. Poll done/verify/accept handles;
-  completed checks are saved for retry after interruption. Inspect sandbox denials before using supported escalation.
+- Use at least 10 minutes for feature/done/verify/accept/next when the host supports it.
+  Wait on done/verify/accept handles until they return; completed checks are saved for retry after interruption.
+  Inspect sandbox denials before using supported escalation.
 - Write Given/When/Then examples and counterexamples for stateful behavior. Check downstream results,
   boundaries, failure, and recovery. Preview and runtime should share a model or a consistency check,
   and both must satisfy an expectation that does not come from the implementation.

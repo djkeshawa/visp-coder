@@ -19,8 +19,9 @@ import { renderConfigTemplate } from "../../../src/config/template.js";
 import { HARNESSES } from "../../../src/core/constants.js";
 import { criticAgentAssets } from "../../../src/harness/critic-agent.js";
 import { planFor } from "../../../src/harness/targets.js";
-import { createProductFeature, updateProductBrief } from "../../../src/workflow/product/brief.js";
-import { criticStatus } from "../../../src/workflow/product/critic-status.js";
+import { updateProductBrief } from "../../../src/workflow/product/brief.js";
+import { criticStatus } from "../../../src/workflow/product/critic/critic-status.js";
+import { createProductFeature } from "../../../src/workflow/product/feature-create.js";
 import { TestWorkspace } from "../support/workspace.js";
 
 let home: string;

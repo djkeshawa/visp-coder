@@ -5,5 +5,5 @@
     "types": [],
     "declaration": false
   },
-  "include": ["src/**/*.ts", "../src/ui/contract.ts"]
+  "include": ["src/**/*.ts", "../src/ui/contract.ts", "../src/ui/output-patterns.ts"]
 }

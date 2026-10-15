@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Profile } from "../../core/constants.js";
-import type { CriticAdapter } from "../../workflow/product/critic.js";
-import { MINIMAL_TOOLS, type ToolName } from "../constants.js";
+import type { CriticAdapter } from "../../workflow/product/critic/critic.js";
+import { MINIMAL_TOOLS } from "../constants.js";
 import { registerCaptureTools } from "./capture.js";
 import { registerCriticTool } from "./critic.js";
 import { registerDiagnoseTools, registerSkillTools } from "./diagnose.js";
@@ -37,17 +37,18 @@ export function registerTools(
 }
 
 /**
- * A registration front that drops every tool outside the minimal set, so the
- * registration functions stay untouched. Review dispatch also needs the real
- * protocol server to inspect and invoke the client's sampling capability.
+ * The server, except that every tool outside the minimal set is removed as soon as it is
+ * registered, so the registration functions stay untouched. Review dispatch also needs the
+ * real protocol server to inspect and invoke the client's sampling capability.
  */
 function minimalHost(server: McpServer): McpServer {
-  const host = {
-    server: server.server,
-    registerTool: (name: string, ...rest: unknown[]) => {
-      if (!MINIMAL_TOOLS.has(name as ToolName)) return undefined;
-      return (server.registerTool as (...args: unknown[]) => unknown).call(server, name, ...rest);
-    },
+  const minimal: ReadonlySet<string> = MINIMAL_TOOLS;
+  const registerTool: McpServer["registerTool"] = (name, config, callback) => {
+    const registered = server.registerTool(name, config, callback);
+    if (!minimal.has(name)) registered.remove();
+    return registered;
   };
-  return host as unknown as McpServer;
+  return new Proxy(server, {
+    get: (target, key) => (key === "registerTool" ? registerTool : Reflect.get(target, key)),
+  });
 }

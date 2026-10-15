@@ -23,6 +23,7 @@ import {
 } from "../../../src/core/file-transaction.js";
 import type { Result } from "../../../src/core/result.js";
 import { installHarness } from "../../../src/harness/install.js";
+import { uninstallHarness } from "../../../src/harness/uninstall.js";
 import { runProductDone } from "../../../src/workflow/product/evidence.js";
 import {
   authorizationPath,
@@ -142,6 +143,56 @@ describe("workflow transaction fault injection", () => {
     expect(kinds?.get(".visp/state/install.json")).toBe("write");
     expect(kinds?.get(".visp/state/asset-manifest.json")).toBe("write");
     expect(kinds?.get("visp.yml")).toBe("write");
+  }, 120_000);
+
+  it("restores every uninstall surface after each planned mutation, and a rerun succeeds", async () => {
+    let mutationCount = 1;
+    let expectedPlan: readonly string[] | undefined;
+
+    for (let failAt = 1; failAt <= mutationCount; failAt += 1) {
+      const workspace = await TestWorkspace.create();
+      try {
+        const state = await workspace.state();
+        const installed = await installHarness(
+          state.paths,
+          {
+            harness: "claude-code",
+            profile: "standard",
+            hooks: ["claude", "git", "ci"],
+            mcp: true,
+          },
+          { guardHandshake: async () => ({ ok: true, value: undefined }) },
+        );
+        expect(installed.ok).toBe(true);
+        const observed: FaultObservation = {};
+        const result = await uninstallHarness(
+          state.paths,
+          { harness: "claude-code" },
+          { applyTransaction: faultRunner(failAt, observed) },
+        );
+
+        expect(result.ok).toBe(false);
+        const paths = requireObservation(workspace.root, observed, "harness-uninstall");
+        mutationCount = paths.length;
+        expectedPlan ??= paths;
+        expect(paths).toEqual(expectedPlan);
+        await expectRollback(workspace.root, observed);
+
+        const rerun = await uninstallHarness(await workspace.state().then((s) => s.paths), {
+          harness: "claude-code",
+        });
+        expect(rerun.ok).toBe(true);
+      } finally {
+        await workspace.destroy();
+      }
+    }
+
+    expect(mutationCount).toBeGreaterThan(12);
+    expect(expectedPlan).toContain(".git/hooks/pre-commit");
+    expect(expectedPlan?.slice(-2)).toEqual([
+      ".visp/state/install.json",
+      ".visp/state/asset-manifest.json",
+    ]);
   }, 120_000);
 
   it.each(["check publication", "slice closure"])(
