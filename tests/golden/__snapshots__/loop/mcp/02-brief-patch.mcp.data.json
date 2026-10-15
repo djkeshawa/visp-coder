@@ -1,0 +1,67 @@
+{
+  "tool": "visp_brief",
+  "ok": true,
+  "data": {
+    "version": 2,
+    "feature": "001-return-two-from-the-public",
+    "incomplete": false,
+    "originalRequest": "Make the public value module return two instead of one.",
+    "goal": "Return two from the public value module",
+    "outcomes": [
+      {
+        "id": "O001",
+        "kind": "functional",
+        "statement": "The public value is two",
+        "priority": "must",
+        "provenance": "user-stated",
+        "reviewRequired": false,
+        "expectations": []
+      }
+    ],
+    "examples": [],
+    "decisions": [],
+    "uncertainties": [],
+    "checks": [
+      {
+        "id": "C001",
+        "command": [
+          "node",
+          "checks/value.check.mjs"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "files": [
+          "src/value.mjs",
+          "checks/value.check.mjs"
+        ],
+        "environment": "node"
+      }
+    ],
+    "slices": [
+      {
+        "id": "T001",
+        "goal": "Return the promised value",
+        "outcomes": [
+          "O001"
+        ],
+        "dependsOn": [],
+        "scope": {
+          "allowed": [
+            "src/value.mjs",
+            "checks/value.check.mjs"
+          ],
+          "expected": [
+            "src/value.mjs"
+          ],
+          "forbidden": []
+        },
+        "checks": [
+          "C001"
+        ],
+        "approach": ""
+      }
+    ],
+    "acceptanceBaseline": []
+  }
+}

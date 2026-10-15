@@ -1,0 +1,25 @@
+{
+  "tool": "visp_guard",
+  "ok": true,
+  "data": {
+    "runtime": {
+      "version": "<VERSION>",
+      "buildId": "<BUILD-ID>",
+      "executable": "<REPO>/dist/cli.js"
+    },
+    "protocolVersion": 2,
+    "checked": 2,
+    "allowed": false,
+    "violations": [
+      {
+        "path": "src/other.mjs",
+        "reason": "outside-allowed-files",
+        "message": "src/other.mjs is outside the allowed files of T001"
+      }
+    ],
+    "authorizedTasks": [
+      "T001"
+    ],
+    "committable": []
+  }
+}

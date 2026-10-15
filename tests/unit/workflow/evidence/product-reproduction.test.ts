@@ -3,7 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, expect, it } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import { createServer } from "../../../../src/mcp/server.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
 import { outstandingFeedback } from "../../../../src/workflow/product/findings.js";
 import { findFunctionalRepair } from "../../../../src/workflow/product/functional-resolution.js";
 import {
@@ -12,11 +12,11 @@ import {
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
 import { runProductReproduction } from "../../../../src/workflow/product/reproduction.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
 import {
   independentReviewerContext,
   runProductReviewerHandoff,
-} from "../../../../src/workflow/product/reviewer-handoff.js";
+} from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import {
   type ProductRecord,
   readProductRecord,

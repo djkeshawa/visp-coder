@@ -1,0 +1,8 @@
+$ visp work --inspect
+--- stdout
+
+--- stderr
+Error: Start the request as one slice with a check
+Try: visp work --check "<command that runs your tests>"
+
+--- exit 3

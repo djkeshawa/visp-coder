@@ -3,18 +3,18 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { withStateMutation } from "../../../src/core/file-transaction.js";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import { installHarness } from "../../../src/harness/install.js";
 import { planFor } from "../../../src/harness/targets.js";
 import { now } from "../../../src/workflow/artifacts/common.js";
+import { resolveFeature } from "../../../src/workflow/feature-selection.js";
 import {
-  authorizedScopes,
   buildFoundationContext,
   loadWorkspace,
   loadWorkspaceForMutation,
-  resolveFeature,
 } from "../../../src/workflow/state.js";
 import { legacyStore } from "../support/legacy-store.js";
-import { TestWorkspace, task } from "../support/workspace.js";
+import { TestWorkspace } from "../support/workspace.js";
 
 const FEATURE = "001-state";
 
@@ -93,6 +93,9 @@ describe("workspace state loading", () => {
   });
 });
 
+/** This build's CLI entry, as the same build installed at another path has it. */
+const ownCli = () => readFile(runtimeIdentity().executable, "utf8");
+
 describe("feature and foundation context resolution", () => {
   it("validates explicit features and reports an absent active feature", async () => {
     const state = await workspace.state();
@@ -126,6 +129,111 @@ describe("feature and foundation context resolution", () => {
       expect(context.value.harnessInstalled).toBe(true);
       expect(context.value.enforcementInstalled).toBe(true);
     }
+  });
+
+  /**
+   * The same build installed at another path (nvm, npx, a local node_modules) renders the
+   * same hooks except for the CLI path they call. Only a different build, an older template,
+   * or a CLI that is no longer there makes a hook missing.
+   */
+  it("accepts hooks the same build wrote from another install path", async () => {
+    await workspace.installFoundation();
+    const hook = join(workspace.root, ".git/hooks/pre-commit");
+    const original = await readFile(hook, "utf8");
+    const elsewhere = join(workspace.root, "elsewhere/node_modules/visp/dist/cli.js");
+    await workspace.write("elsewhere/node_modules/visp/dist/cli.js", await ownCli());
+    const rewrite = (content: string) =>
+      writeFile(hook, content.replaceAll(runtimeIdentity().executable, elsewhere), {
+        mode: 0o755,
+      });
+    const enforcement = async () => {
+      const context = await buildFoundationContext(await workspace.state());
+      return context.ok && context.value.enforcementInstalled;
+    };
+
+    await rewrite(original);
+    expect(await enforcement()).toBe(true);
+
+    await rewrite(original.replaceAll(runtimeIdentity().buildId, "0123456789abcdef"));
+    expect(await enforcement()).toBe(false);
+
+    await rewrite(original.replace(/hook-version: \d+/, "hook-version: 1"));
+    expect(await enforcement()).toBe(false);
+
+    // Another build now installed at that path answers guard checks the hook refuses.
+    await workspace.write("elsewhere/node_modules/visp/dist/cli.js", "// another build\n");
+    await rewrite(original);
+    expect(await enforcement()).toBe(false);
+
+    await rm(elsewhere);
+    await rewrite(original);
+    expect(await enforcement()).toBe(false);
+  });
+
+  it("accepts a Claude edit hook the same build wrote from another install path", async () => {
+    const initial = await workspace.state();
+    const config = parse(await readFile(initial.paths.config, "utf8"));
+    config.harness = "claude-code";
+    await writeFile(initial.paths.config, stringify(config), "utf8");
+    const configured = await workspace.state();
+    const installed = await installHarness(configured.paths, {
+      harness: "claude-code",
+      profile: configured.config.profile,
+      hooks: ["claude"],
+      mcp: false,
+    });
+    if (!installed.ok) throw new Error(installed.error.message);
+    const script = join(workspace.root, ".visp/hooks/claude-pretooluse.mjs");
+    const original = await readFile(script, "utf8");
+    await workspace.write("elsewhere/cli.js", await ownCli());
+    const elsewhere = JSON.stringify(join(workspace.root, "elsewhere/cli.js"));
+    const enforcement = async (content: string) => {
+      await writeFile(
+        script,
+        content.replace(JSON.stringify(runtimeIdentity().executable), elsewhere),
+        { mode: 0o755 },
+      );
+      const context = await buildFoundationContext(await workspace.state());
+      return context.ok && context.value.enforcementInstalled;
+    };
+
+    expect(await enforcement(original)).toBe(true);
+    expect(
+      await enforcement(original.replaceAll(runtimeIdentity().buildId, "0123456789abcdef")),
+    ).toBe(false);
+  });
+
+  it("accepts a Codex hook script the same build wrote from another install path", async () => {
+    const initial = await workspace.state();
+    const config = parse(await readFile(initial.paths.config, "utf8"));
+    config.harness = "codex";
+    await writeFile(initial.paths.config, stringify(config), "utf8");
+    const configured = await workspace.state();
+    const installed = await installHarness(configured.paths, {
+      harness: "codex",
+      profile: configured.config.profile,
+      hooks: [],
+      mcp: false,
+    });
+    if (!installed.ok) throw new Error(installed.error.message);
+    const script = join(workspace.root, ".visp/hooks/codex-hooks.mjs");
+    const original = await readFile(script, "utf8");
+    await workspace.write("elsewhere/cli.js", await ownCli());
+    const elsewhere = JSON.stringify(join(workspace.root, "elsewhere/cli.js"));
+    const installedHarness = async (content: string) => {
+      await writeFile(
+        script,
+        content.replace(JSON.stringify(runtimeIdentity().executable), elsewhere),
+        { mode: 0o755 },
+      );
+      const context = await buildFoundationContext(await workspace.state());
+      return context.ok && context.value.harnessInstalled;
+    };
+
+    expect(await installedHarness(original)).toBe(true);
+    expect(
+      await installedHarness(original.replaceAll(runtimeIdentity().buildId, "0123456789abcdef")),
+    ).toBe(false);
   });
 
   it("recognizes exact custom Codex critic assets in foundation context", async () => {
@@ -240,66 +348,6 @@ describe("feature artifact failures", () => {
     expect(context.ok).toBe(false);
     expect(!context.ok && context.error.code).toBe("ARTIFACT_INVALID");
     expect(await readFile(`${workspace.root}/${path}`, "utf8")).toBe("{}\n");
-  });
-});
-
-describe("authorization and status adapters", () => {
-  it("derives CI authorization from a feature task graph", async () => {
-    await workspace.withFeature(FEATURE, [task({ id: "T001" }), task({ id: "T002" })]);
-
-    const scopes = await authorizedScopes(await workspace.state(), {
-      source: "tasks",
-      feature: FEATURE,
-    });
-
-    expect(scopes.ok).toBe(true);
-    if (scopes.ok) expect(scopes.value.map((marker) => marker.task)).toEqual(["T001", "T002"]);
-  });
-
-  it("returns no task-derived authorization without a selected feature or graph", async () => {
-    const state = await workspace.state();
-    const absent = await authorizedScopes(state, { source: "tasks" });
-    const missingGraph = await authorizedScopes(state, {
-      source: "tasks",
-      feature: "999-missing",
-    });
-
-    expect(absent).toEqual({ ok: true, value: [] });
-    expect(missingGraph).toEqual({ ok: true, value: [] });
-  });
-
-  it("propagates malformed task graphs and active authorization markers", async () => {
-    await workspace.withFeature(FEATURE);
-    await workspace.write(`.visp/features/${FEATURE}/tasks.json`, "{}\n");
-    const taskScopes = await authorizedScopes(await workspace.state(), {
-      source: "tasks",
-      feature: FEATURE,
-    });
-    expect(taskScopes.ok).toBe(false);
-
-    await workspace.withFeature(FEATURE);
-    await workspace.write(".visp/state/implement-allowed/T999.json", "{}\n");
-    const markerScopes = await authorizedScopes(await workspace.state());
-    expect(markerScopes.ok).toBe(false);
-  });
-
-  it("returns open markers directly when completed-task expansion is disabled", async () => {
-    await workspace.withFeature(FEATURE);
-    const state = await workspace.state();
-    await legacyStore(state).writeImplementMarker({
-      kind: "implement-marker",
-      createdAt: now(),
-      feature: FEATURE,
-      task: "T001",
-      allowedFiles: ["src/**/*.ts"],
-      expectedFiles: ["src/app.ts"],
-      forbiddenFiles: [],
-    });
-
-    const scopes = await authorizedScopes(await workspace.state(), { includeDone: false });
-
-    expect(scopes.ok).toBe(true);
-    if (scopes.ok) expect(scopes.value.map((marker) => marker.task)).toEqual(["T001"]);
   });
 });
 

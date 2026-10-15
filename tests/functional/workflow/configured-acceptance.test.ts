@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import type { ProductBrief, ProductExecution } from "../../../src/workflow/product/model.js";
-import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../src/workflow/product/review/review.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";
 import { succeeded } from "../support/product.js";
 import { TestProject } from "../support/project.js";

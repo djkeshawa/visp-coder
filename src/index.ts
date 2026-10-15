@@ -3,10 +3,8 @@ export { buildProgram } from "./cli/program.js";
 export { createServer } from "./mcp/server.js";
 
 import { RecoveringProjectFileSystem } from "./core/file-transaction.js";
-import {
-  type WorkspaceState as InternalWorkspaceState,
-  resolveFeature as resolveFeatureInternal,
-} from "./workflow/state.js";
+import { resolveFeature as resolveFeatureInternal } from "./workflow/feature-selection.js";
+import type { WorkspaceState as InternalWorkspaceState } from "./workflow/state.js";
 
 export { loadConfig } from "./config/load.js";
 export { configSchema, defaultConfig, type VispConfig } from "./config/schema.js";

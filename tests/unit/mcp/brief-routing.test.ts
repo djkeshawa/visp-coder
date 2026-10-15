@@ -32,7 +32,7 @@ vi.mock("../../../src/workflow/product/index.js", () => ({
   runProductWork: vi.fn(),
   updateProductBrief: calls.updateProductBrief,
 }));
-vi.mock("../../../src/workflow/product/check-guidance.js", () => ({
+vi.mock("../../../src/workflow/product/check/check-guidance.js", () => ({
   productCheckTemplate: calls.productCheckTemplate,
 }));
 vi.mock("../../../src/workflow/product-inputs.js", () => ({

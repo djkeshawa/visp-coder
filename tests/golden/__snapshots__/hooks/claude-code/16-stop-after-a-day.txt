@@ -1,0 +1,6 @@
+> .visp/hooks/claude-pretooluse.mjs {"session_id":"golden-session","hook_event_name":"Stop"}
+--- stdout
+{"decision":"block","reason":"VISP's next step for 001-return-two-from-the-public: Return the promised value. Run: visp done --feature 001-return-two-from-the-public --task T001. If your own `visp next` shows a different step, follow that one. If you cannot finish, say in your final message what is left and why."}
+--- stderr
+
+--- exit 0

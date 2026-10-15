@@ -5,7 +5,7 @@ import { err, ok, type Result } from "../../core/result.js";
 import { bundledSkill, skillCatalog } from "../../skills/catalog.js";
 import { createProposalFromContent } from "../../skills/proposal.js";
 import type { SkillRecord } from "../../skills/schema.js";
-import { readIndex, readSkillBody } from "../../skills/store.js";
+import { readIndex, readSkillBody, skillRecord } from "../../skills/store.js";
 import type { WorkspaceState } from "../../workflow/state.js";
 import { isJson, mutatingWorkspace, options } from "../context.js";
 import { bullet, emit, emitError } from "../output.js";
@@ -99,7 +99,7 @@ async function seedCatalogSkill(
   const index = await readIndex(state);
   if (!index.ok) return index;
 
-  const existingRecord = index.value.skills.find((skill) => skill.id === id);
+  const existingRecord = skillRecord(index.value, id);
   const existingBody = await readSkillBody(state, id);
   if (!existingBody.ok) return existingBody;
 

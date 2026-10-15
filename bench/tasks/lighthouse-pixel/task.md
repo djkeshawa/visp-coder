@@ -1,0 +1,1 @@
+Side-view pixel art of a red-and-white striped lighthouse on a rocky cliff at sunset, with three seagulls in the sky and waves breaking against the rocks below. 64×64 pixel canvas scaled up without smoothing, a limited palette of at most 16 colours, a dithered orange-to-purple sky, the lighthouse lamp glowing, chunky retro look, no anti-aliasing.

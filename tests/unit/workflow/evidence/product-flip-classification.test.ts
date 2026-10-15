@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { ok } from "../../../../src/core/result.js";
-import { classifyFlip } from "../../../../src/workflow/product/flip-check.js";
+import { classifyFlip } from "../../../../src/workflow/product/flip/flip-check.js";
 
 const check: import("../../../../src/workflow/product/model.js").ProductCheck = {
   id: "C001",

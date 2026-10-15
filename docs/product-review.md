@@ -95,6 +95,30 @@ Every journey is one fresh browser session. To test repeated use, reset or recov
 
 The `@visporg/visp-coder/testing` export offers the same building blocks to a project's own test suite: `runBrowserJourney` and `browserJourneySchema`; `activateControl` (real pointer, touch or keyboard input) and `assertControlReachable` (size, visibility, clipping and hit testing) for a page you supply; and `assertRecovery`, `assertFiniteState` and `assertTrajectoryClose` for simulation state. They check that input reaches a control, not that the application handled it; always assert the resulting state.
 
+## Images from command checks
+
+A result that is a picture rather than a page, such as a rendered scene, a chart or a generated image, is judged by looking at it. A command check that writes such a file declares it under `images` (up to four PNG, JPEG, WebP, GIF or SVG paths inside the project, not under `.visp/`):
+
+```yaml
+checks:
+  - id: C002
+    command: [python3, render.py, --out, output/scene.png]
+    outcomes: [O002]
+    images: [output/scene.png]
+```
+
+A check that declares images must cover an `experience` outcome that says how the picture must look, for example that each object, subject and concrete look (named colours, art style or viewpoint) the request names is recognizable in it; the brief is rejected otherwise. Technical outcomes alone (the file is written, the grid has a size) cannot fail on a picture that does not show what was asked for. With images delivered, the reviewer treats an object, subject or concrete look the request names that is missing, hidden, cut off or reads as something else as a departure from the request (a required finding), unlike polish beyond the request, which stays an optional finish finding. A real thing the request asks the picture to depict (a product or model, vehicle, animal, building, landmark) is recognized by its identifying parts and colouring, so the reviewer lists those parts, checks each in the image, and reports missing or unrecognizable ones that make it read as a different thing (or, for a named brand or model, a generic one) as one required finding per thing; a part that is simplified, or left out by a style the request names (a minimalist logo, an icon, a silhouette), stays finish, and colours or a style the request names override the real thing's. The rule covers only what the request names for a picture or screen to show; evaluative words such as modern, clean or polished stay finish, and an ordinary app's controls, forms and data tables are judged as before.
+
+When the check passes, VISP copies each declared image into the feature's captures as an image of the current product version, and the review packet delivers it to the independent reviewer. The check must write each declared image every time it runs: an image that is missing afterwards, or left unchanged from before the run (a file from an earlier run, or an existing product file), fails the check, as does one that is a symbolic link, larger than 4 MiB, more than 8000 pixels on a side (the largest image the model API accepts) or not in one of those formats; the failure names the check and what to change. Only command checks declare images: a browser journey's captures already reach the reviewer, so a journey with `images` is rejected. Declared images are outputs: writing them does not change the product version, so rerunning the check does not make earlier evidence stale. A declared image that existed before the feature started (committed, or uncommitted work the feature started from) stays part of the product, so a check that rewrites it changes the product; the "Product changed while checks ran" gap then says to write the image to a new untracked path and declare that path. A declared SVG is rendered to PNG in a browser, one per check run: an SVG that does not render fails the check, and one VISP cannot render for want of a browser is an environment failure. An HTML result needs a check that rasterizes it to PNG first.
+
+### Pictures without a declaration
+
+The product's pictures reach the reviewer even when no check declares them. After the checks pass on an unchanged product, VISP captures up to four PNG, JPEG, WebP, GIF or SVG files in the product that were written since the feature started (newest first, each once per product version, and not the declared images above). An SVG is rendered in a browser, since reviewers can view PNG files but not SVG ones: one browser per run, started before VISP takes its state lock, so other VISP commands are not kept waiting. An SVG over 1 MiB and an image over 8000 pixels on a side are skipped, the run's remaining SVGs are skipped once the browser fails, the next hour's runs skip SVGs too unless the browser executable changes, and an SVG that does not render is not tried again until its content changes. These captures never fail a check. Declaring the image on a check remains the reliable way, because it also makes the picture's look an outcome the reviewer can fail.
+
+### Files of another coding host
+
+Untracked instruction and settings files of a coding host other than the configured `harness` (for example `AGENTS.md`, `.codex/` and `.agents/` in a Claude Code project, or `CLAUDE.md` and `.claude/` in a Codex project) are not part of the product: they do not change its version, count against a slice's scope or raise input warnings. Tracked files, the configured host's own files, any file a slice scope or check names (allowed or expected, for a request to write an `AGENTS.md`) or forbids, and any file `workflow.blockedPaths` blocks stay part of the product. Naming means a pattern whose literal part is the file or a directory containing it (`AGENTS.md`, `**/AGENTS.md`, `.codex/**`, `.codex/`); a catch-all such as the `**` scope `visp work --check` writes, or an extension pattern such as `*.md`, names nothing, whether allowed or forbidden. `visp doctor` lists the ignored ones under `other host files` as information; no action is needed.
+
 ## Ad hoc capture
 
 For an exploratory observation, pass a journey on stdin:
@@ -165,7 +189,7 @@ Report `reviewer.context` honestly (`fresh`, `current`, `unavailable` or `unspec
 - Every mandatory outcome and each of its expectations needs a current assessment before `accept`.
 - A satisfied judgment must cite current, successful, related evidence. Failed, stale or unknown executions, and references to the original request, cannot support it.
 - An expectation with a `viewport` needs an image captured at that viewport.
-- A required experience outcome needs before, input and after images from an executed journey. VISP derives these links from the runner record when the reviewer cites the check's evidence ID.
+- A required experience outcome needs before, input and after images from an executed journey. VISP derives these links from the runner record when the reviewer cites the check's evidence ID. A static picture has no journey: when no browser-journey check covers the outcome and no slice that owns it writes a web page or component (`.html`, `.jsx`, `.tsx`, `.vue`, `.svelte`), a cited current image from a passing check that declares `images` and covers the outcome is enough. A web game still needs its journey; one still frame does not show play.
 - Nonvisual outcomes do not need screenshots.
 
 ## Resolving findings
@@ -177,6 +201,8 @@ Specific findings stay open until addressed with current counterevidence. Submit
 - A functional repair also needs `regression`: either `{kind: checked, explanation, evidence}` citing a distinct passing behavior in the finding's scope on the repaired version, or `{kind: not-applicable, explanation}`.
 
 If a known finding lacks sufficient repair evidence, VISP records the rest of the review and leaves that finding open with the reason in `limitations`.
+
+Evidence that VISP lists as unavailable (a core file it could not deliver as text, a rendered image it did not capture) cannot support a judgment. When an assessment, finding, resolution or probe cites it beside evidence VISP delivered, VISP drops the unavailable citation instead of discarding the review, and records `VISP dropped citations of evidence it could not deliver: ...` in the summary (assessments) or `limitations`. A judgment marked `unclear` or `unavailable` keeps its citations, and citations of stale, unknown or ambiguous evidence are never dropped, so a review citing an ambiguous evidence ID is still refused.
 
 For a finding with recorded execution evidence, `work`, critic packets and review sessions include a `recheck` that names the journey or check to rerun and its replay or verify command. A matching later execution is labeled `observed-unassessed` until a reviewer judges it.
 

@@ -32,11 +32,12 @@ import { initCommand } from "./commands/setup.js";
 import { skillCommand } from "./commands/skill.js";
 import { trailCommand } from "./commands/trail.js";
 import { uiCommand } from "./commands/ui.js";
+import { uninstallCommand } from "./commands/uninstall.js";
 import { usageCommand } from "./commands/usage.js";
 
 export function buildProgram(
   options: {
-    criticHost?: import("../workflow/product/critic.js").CriticAdapter;
+    criticHost?: import("../workflow/product/critic/critic.js").CriticAdapter;
     signal?: AbortSignal;
     userFeedbackHost?: import("../workflow/product/user-feedback.js").UserFeedbackHost;
   } = {},
@@ -52,6 +53,7 @@ export function buildProgram(
 
   program.addCommand(initCommand());
   program.addCommand(installCommand());
+  program.addCommand(uninstallCommand());
   program.addCommand(indexCommand());
   program.addCommand(queryCommand());
   program.addCommand(featureCommand());

@@ -2,7 +2,7 @@ import { vispError } from "../../core/errors.js";
 import { parseFeatureId, parseTaskId } from "../../core/input.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { criterionIdSchema } from "../artifacts/common.js";
-import { type ProductReviewBundle, runProductReview } from "../product/review.js";
+import { type ProductReviewBundle, runProductReview } from "../product/review/review.js";
 import { hasProductFeature } from "../product/status.js";
 import type { ProductSelection } from "../product/store.js";
 import type { WorkspaceState } from "../state.js";

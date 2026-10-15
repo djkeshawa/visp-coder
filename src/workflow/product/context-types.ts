@@ -1,6 +1,6 @@
 import type { QueryRow } from "../../graph/index.js";
 import type { RelevantMemoryNote } from "../../memory/store.js";
-import type { criticUnderstanding } from "./critic-understanding.js";
+import type { criticUnderstanding } from "./critic/critic-understanding.js";
 import type { currentJourneyFeedback } from "./evidence-references.js";
 import type { productFeedbackPlan } from "./feedback.js";
 import type { ProductAssessment, ProductBrief, ProductSlice } from "./model.js";
@@ -15,7 +15,7 @@ export interface ProductContextContent {
     { ok: true }
   >["value"];
   /** Acceptance tests an independent tester wrote from the original request. */
-  readonly independentTests?: import("./independent-tests.js").IndependentTestsSummary;
+  readonly independentTests?: import("./tester/independent-tests-model.js").IndependentTestsSummary;
   readonly userFeedback?: ReturnType<typeof import("./user-feedback.js").userFeedbackPlan>;
   readonly feedbackPlan?: ReturnType<typeof productFeedbackPlan>;
   readonly feature: string;
@@ -66,6 +66,10 @@ export interface ProductContextContent {
     current: boolean;
     truncated?: boolean;
   }[];
+  /** Names this pack, so a later `work --known <contextId>` can leave out what is unchanged. */
+  readonly contextId?: string;
+  /** Reference sections left out: unchanged since the reply the worker named with `--known`. */
+  readonly delivery?: { readonly known: string; readonly unchanged: readonly string[] };
 }
 
 export interface ProductWorkContext extends ProductContextContent {

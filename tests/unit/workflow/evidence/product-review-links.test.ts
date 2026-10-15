@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProductReviewImage } from "../../../../src/workflow/evidence/product-review.js";
 import type { ProductEvidenceCatalogue } from "../../../../src/workflow/product/evidence-references.js";
 import type { ProductOutcome } from "../../../../src/workflow/product/model.js";
-import { validateAssessments } from "../../../../src/workflow/product/review-validation.js";
+import { validateAssessments } from "../../../../src/workflow/product/review/review-validation.js";
 
 const subject = "a".repeat(64);
 const images: ProductReviewImage[] = ["before", "after"].map((id) => ({
@@ -87,7 +87,7 @@ function assess(
     subject,
     [outcome],
     options.selected ?? images,
-    () => options.runs ?? [run],
+    () => ({ captureRuns: options.runs ?? [run], checkImages: new Set<string>() }),
     { ...catalogue, entries: options.entries ?? catalogue.entries },
   );
 }
@@ -219,7 +219,7 @@ describe("tool-owned review image links", () => {
         subject,
         [{ ...outcome, expectations: [expected] }],
         [...images, ...mobileImages],
-        () => [run, mobileRun],
+        () => ({ captureRuns: [run, mobileRun], checkImages: new Set<string>() }),
         { ...catalogue, entries },
       );
       expect(result).toMatchObject({

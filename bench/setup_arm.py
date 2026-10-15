@@ -1,9 +1,10 @@
 """Prepare one benchmark project and write the actor prompt for it.
 
-Usage: setup_arm.py <task> <arm> <run_name> [--skill <id>]...
+Usage: setup_arm.py <task> <arm> <run_name> [--skill <id>]... [--preset default]
 arm: bare | speckit | bmad | visp:<build> (Claude Code worker) | visp-codex:<build> (Codex worker)
 <build> is a name given to build_visp.sh. --skill seeds and admits a bundled VISP skill, so an
-arm with it differs from one without only by that skill.
+arm with it differs from one without only by that skill. --preset (presets.py) sets VISP's
+reviewer and tester and is recorded in arm.json, where the runners read the worker model.
 
 The prompt is host-neutral; run_claude.py or run_codex.py gives it to a headless worker that
 works only inside the project. Every arm receives the same task and constraints.
@@ -20,6 +21,7 @@ import shutil
 import subprocess
 
 from common import RUNS
+from presets import critic_yaml, preset
 
 BENCH = pathlib.Path(__file__).resolve().parent
 parser = argparse.ArgumentParser()
@@ -27,7 +29,9 @@ parser.add_argument("task")
 parser.add_argument("arm")
 parser.add_argument("run")
 parser.add_argument("--skill", action="append", default=[])
+parser.add_argument("--preset", default="default")
 args = parser.parse_args()
+settings = preset(args.preset)
 task_name, arm, name = args.task, args.arm, args.run
 if args.skill and not arm.startswith("visp"):
     raise SystemExit("--skill applies only to VISP arms")
@@ -95,8 +99,11 @@ elif arm.startswith("visp:") or arm.startswith("visp-codex:"):
     env["PATH"] = f"{shim}:{env['PATH']}"
     sh(["visp", "init", "--harness", host, "--json"])
     config = (root / "visp.yml").read_text()
-    # The reviewer is a stronger model than the worker.
-    config = config.replace("critic:\n  harness: claude-code", "critic:\n  harness: codex\n  launch: codex-exec\n  reasoningEffort: medium\n  webSearch: true")
+    # The reviewer (and tester) is a stronger model than the worker, as the preset sets it.
+    critic = critic_yaml(settings["critic"])
+    config = config.replace("critic:\n  harness: claude-code", critic)
+    if args.preset != "default" and critic not in config:
+        raise SystemExit(f"setup failed: visp.yml has no critic block to replace for preset {args.preset}")
     (root / "visp.yml").write_text(config)
     sh(["visp", "install", "--harness", host, "--json"])
     for skill in args.skill:
@@ -121,5 +128,6 @@ if sessions:
     (root.parent / "prompt2-oracle.txt").write_text(
         f"{workflow}\n\n{COMMON}\n\nTask:\n\n{second}\n{conventions}\n")
 # The headless runner puts the arm's VISP build on PATH so installed hooks find it.
-(root.parent / "arm.json").write_text(json.dumps({"task": task_name, "arm": arm, "shim": shim_dir, "skills": args.skill}))
+(root.parent / "arm.json").write_text(json.dumps({"task": task_name, "arm": arm, "shim": shim_dir, "skills": args.skill,
+                                                 "preset": args.preset, "settings": settings}))
 print(json.dumps({"root": str(root), "prompt": str(root.parent / "prompt.txt")}))

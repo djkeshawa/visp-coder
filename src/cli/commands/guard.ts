@@ -1,25 +1,18 @@
 import { Command } from "commander";
-import { BLOCK, GUARD_PROTOCOL_VERSION, STATE_DIR } from "../../core/constants.js";
+import { BLOCK, GUARD_PROTOCOL_VERSION } from "../../core/constants.js";
 import { type VispError, vispError } from "../../core/errors.js";
-import { changesSince, stagedChanges, trackedFiles, workingTreeChanges } from "../../core/git.js";
-import { ok, type Result } from "../../core/result.js";
-import { inspectSettledTransactions } from "../../core/transaction-inspection.js";
-import { type RuntimeIdentity, runtimeIdentity } from "../../core/version.js";
-import { requireInstalledRuntime } from "../../harness/runtime.js";
-import { checkPaths } from "../../orchestrate/guard.js";
-import { evaluateGuardPaths, type GuardViolation } from "../../orchestrate/guard-evaluation.js";
-import type { ImplementMarker } from "../../workflow/artifacts/evidence.js";
-import { branchFeatures, branchScopes } from "../../workflow/product/branch-scope.js";
+import { ok } from "../../core/result.js";
+import { runtimeIdentity } from "../../core/version.js";
 import {
-  hasPendingCriticReview,
-  PENDING_REVIEW_MESSAGE,
-} from "../../workflow/product/critic-policy.js";
-import { unchangedInheritedPaths } from "../../workflow/product/inherited-changes.js";
-import {
-  activeProtectedEnvChanges,
-  productScopes as authorizedScopes,
-} from "../../workflow/product/scopes.js";
-import { isStatePath, type WorkspaceState } from "../../workflow/state.js";
+  evaluateGuardRequest,
+  type GuardEvaluation,
+  type GuardPayload,
+  type GuardRequest,
+  pendingTransactionRefusal,
+} from "../../orchestrate/guard-evaluation.js";
+import { PENDING_REVIEW_MESSAGE } from "../../workflow/product/critic/critic-policy.js";
+import { productScopes as authorizedScopes } from "../../workflow/product/scopes.js";
+import type { WorkspaceState } from "../../workflow/state.js";
 import {
   type GlobalOptions,
   isJson,
@@ -79,25 +72,6 @@ interface GuardCliOptions extends GlobalOptions {
   readonly branch?: string;
 }
 
-interface GuardPayload {
-  readonly runtime: RuntimeIdentity;
-  readonly protocolVersion: typeof GUARD_PROTOCOL_VERSION;
-  readonly checked: number;
-  readonly allowed: boolean;
-  readonly violations: GuardViolation[];
-  readonly authorizedTasks: string[];
-}
-
-type GuardEvaluation =
-  | { readonly kind: "unscoped" }
-  | {
-      readonly kind: "checked";
-      readonly paths: string[];
-      readonly markers: ImplementMarker[];
-      readonly committable: string[];
-      readonly payload: GuardPayload;
-    };
-
 async function handleGuardCommand(_flags: unknown, command: Command): Promise<void> {
   const opts = options<GuardCliOptions>(command);
   process.exitCode = await executeGuardCommand(opts);
@@ -108,42 +82,38 @@ async function executeGuardCommand(opts: GuardCliOptions): Promise<number> {
   if (sourceError) return emitError("guard", sourceError, { json: isJson(opts) });
   const identifiers = validateArtifactSelection(opts);
   if (!identifiers.ok) return emitError("guard", identifiers.error, { json: isJson(opts) });
-  const transactions = await inspectSettledTransactions(projectRoot(opts));
+  const transactions = await pendingTransactionRefusal(projectRoot(opts));
   if (!transactions.ok) return emitError("guard", transactions.error, { json: isJson(opts) });
-  if (transactions.value.pending.length > 0) {
-    const { saving } = transactions.value;
-    const message = saving
-      ? "VISP is saving an update; retry this edit shortly"
-      : "An interrupted VISP update is pending, so scope cannot be checked safely";
-    return emitRefusal(
-      "guard",
-      {
-        runtime: runtimeIdentity(),
-        protocolVersion: GUARD_PROTOCOL_VERSION,
-        checked: 0,
-        allowed: false,
-        violations: [
-          {
-            path: `${STATE_DIR}/state/transactions`,
-            reason: "transaction-pending",
-            message,
-          },
-        ],
-        authorizedTasks: [],
-        transactions: transactions.value.pending,
-      },
-      saving ? message : `${message}. Run: visp doctor --fix`,
-      { json: isJson(opts) },
-    );
+  if (transactions.value) {
+    const { saving, payload } = transactions.value;
+    const message = payload.violations[0]?.message ?? "";
+    return emitRefusal("guard", payload, saving ? message : `${message}. Run: visp doctor --fix`, {
+      json: isJson(opts),
+    });
   }
   const state = await workspace(opts);
   if (!state.ok) return emitError("guard", state.error, { json: isJson(opts) });
   if (opts.handshake) return emitGuardHandshake(opts, state.value);
-  const feature = await resolveGuardFeature(state.value, opts);
-  if (!feature.ok) return emitError("guard", feature.error, { json: isJson(opts) });
-  const evaluated = await evaluateGuard(state.value, opts, feature.value);
+  const evaluated = await evaluateGuardRequest(state.value, guardRequest(opts));
   if (!evaluated.ok) return emitError("guard", evaluated.error, { json: isJson(opts) });
   return emitGuardEvaluation(opts, evaluated.value);
+}
+
+/** The CLI flags as the shared guard request. */
+function guardRequest(opts: GuardCliOptions): GuardRequest {
+  return {
+    ...(opts.path ? { paths: opts.path } : {}),
+    ...(opts.staged ? { staged: true } : {}),
+    ...(opts.all ? { all: true } : {}),
+    ...(opts.base ? { base: opts.base } : {}),
+    ...(opts.task ? { task: opts.task } : {}),
+    ...(opts.scope ? { scope: opts.scope as "markers" | "tasks" } : {}),
+    ...(opts.feature ? { feature: opts.feature } : {}),
+    ...(opts.session ? { session: opts.session } : {}),
+    ...(opts.branch ? { branch: opts.branch } : {}),
+    ...(opts.ifAuthorized ? { ifAuthorized: true } : {}),
+    ...(opts.includeDone ? { includeDone: true } : {}),
+  };
 }
 
 async function emitGuardHandshake(opts: GuardCliOptions, state: WorkspaceState): Promise<number> {
@@ -178,153 +148,12 @@ function guardScopeSourceError(scope: string | undefined): VispError | undefined
   });
 }
 
-async function resolveGuardFeature(
-  state: WorkspaceState,
-  opts: GuardCliOptions,
-): Promise<Result<string | undefined>> {
-  if (opts.scope !== "tasks") return ok(opts.feature);
-  const features = await branchFeatures(state, opts);
-  return features.ok ? ok(features.value[0]) : features;
-}
-
-async function evaluateGuard(
-  state: WorkspaceState,
-  opts: GuardCliOptions,
-  feature: string | undefined,
-): Promise<Result<GuardEvaluation>> {
-  const selected = await selectGuardMarkers(state, opts, feature);
-  if (!selected.ok) return selected;
-  if (selected.value.kind === "unscoped") return evaluateUnscopedGuard(state, opts, feature);
-  // Committed task scope is a CI comparison, not local permission to edit.
-  if (opts.scope !== "tasks" && selected.value.markers.length > 0) {
-    const agreed = await requireInstalledRuntime(state.paths, state.files);
-    if (!agreed.ok) return agreed;
-  }
-
-  const paths = await resolveScopedPaths(state, opts, feature);
-  if (!paths.ok) return paths;
-  const protectedChanges =
-    opts.path || opts.scope === "tasks"
-      ? ok([] as string[])
-      : await activeProtectedEnvChanges(state);
-  if (!protectedChanges.ok) return protectedChanges;
-  const checkedPaths = [...new Set([...paths.value, ...protectedChanges.value])];
-  const markers = selected.value.markers;
-  const guarded = await evaluateGuardPaths(state, checkedPaths, markers, {
-    ...(feature ? { feature } : {}),
-    ...(opts.task ? { task: opts.task } : {}),
-    ...(opts.session ? { hostSession: opts.session } : {}),
-    ...(opts.scope ? { source: opts.scope as "markers" | "tasks" } : {}),
-    writeTime: opts.path !== undefined,
-  });
-  if (!guarded.ok) return guarded;
-  const checkedViolations = guarded.value;
-  const committable = opts.includeDone ? [] : await closedTaskPaths(state, checkedViolations);
-  return ok({
-    kind: "checked",
-    paths: checkedPaths,
-    markers,
-    committable,
-    payload: {
-      runtime: runtimeIdentity(),
-      protocolVersion: GUARD_PROTOCOL_VERSION,
-      checked: checkedPaths.length,
-      allowed: checkedViolations.length === 0,
-      violations: checkedViolations,
-      authorizedTasks: markers.map((marker) => marker.task),
-    },
-  });
-}
-
-async function evaluateUnscopedGuard(
-  state: WorkspaceState,
-  opts: GuardCliOptions,
-  feature: string | undefined,
-): Promise<Result<GuardEvaluation>> {
-  const reviewFeature = feature ?? state.status?.activeFeature;
-  if (!reviewFeature) return ok({ kind: "unscoped" });
-  const pending = await hasPendingCriticReview(state, reviewFeature);
-  if (!pending.ok) return pending;
-  if (!pending.value) return ok({ kind: "unscoped" });
-  const paths = await resolvePaths(state.paths.root, opts);
-  if (!paths.ok) return paths;
-  const violations: GuardViolation[] = paths.value
-    .filter((path) => !isStatePath(path))
-    .map((path) => ({
-      path,
-      reason: "review-pending" as const,
-      message: PENDING_REVIEW_MESSAGE,
-    }));
-  if (violations.length === 0) return ok({ kind: "unscoped" });
-  return ok({
-    kind: "checked",
-    paths: paths.value,
-    markers: [],
-    committable: [],
-    payload: {
-      runtime: runtimeIdentity(),
-      protocolVersion: GUARD_PROTOCOL_VERSION,
-      checked: paths.value.length,
-      allowed: false,
-      violations,
-      authorizedTasks: [],
-    },
-  });
-}
-
-type GuardMarkerSelection =
-  | { readonly kind: "unscoped" }
-  | { readonly kind: "markers"; readonly markers: ImplementMarker[] };
-
-/** The feature and asking session every scope lookup of one guard call shares. */
-function scopeFilter(opts: GuardCliOptions, feature: string | undefined) {
-  return {
-    ...(feature ? { feature } : {}),
-    ...(opts.session ? { hostSession: opts.session } : {}),
-  };
-}
-
-async function selectGuardMarkers(
-  state: WorkspaceState,
-  opts: GuardCliOptions,
-  feature: string | undefined,
-): Promise<Result<GuardMarkerSelection>> {
-  if (opts.scope === "tasks") {
-    const markers = await branchScopes(state, opts);
-    return markers.ok ? ok({ kind: "markers", markers: markers.value }) : markers;
-  }
-  if (opts.ifAuthorized) {
-    const active = await authorizedScopes(state, scopeFilter(opts, feature));
-    if (!active.ok) return active;
-    if (active.value.length === 0) return ok({ kind: "unscoped" });
-  }
-  const markers = await authorizedScopes(state, {
-    includeDone: opts.includeDone === true,
-    ...(opts.scope ? { source: opts.scope as "markers" | "tasks" } : {}),
-    ...scopeFilter(opts, feature),
-  });
-  if (!markers.ok) return markers;
-  if (opts.ifAuthorized && markers.value.length === 0) return ok({ kind: "unscoped" });
-  return ok({ kind: "markers", markers: markers.value });
-}
-
 function emitGuardEvaluation(opts: GuardCliOptions, evaluation: GuardEvaluation): number {
   if (evaluation.kind === "unscoped") {
-    return emit(
-      "guard",
-      ok({
-        runtime: runtimeIdentity(),
-        protocolVersion: GUARD_PROTOCOL_VERSION,
-        checked: 0,
-        allowed: true,
-        violations: [],
-        authorizedTasks: [],
-      }),
-      {
-        json: isJson(opts),
-        text: () => "No task is authorized, so there is no scope to check.",
-      },
-    );
+    return emit("guard", ok(evaluation.payload), {
+      json: isJson(opts),
+      text: () => "No task is authorized, so there is no scope to check.",
+    });
   }
   if (evaluation.payload.allowed) {
     return emit("guard", ok(evaluation.payload), {
@@ -332,12 +161,9 @@ function emitGuardEvaluation(opts: GuardCliOptions, evaluation: GuardEvaluation)
       text: () => guardAllowedText(evaluation.paths.length),
     });
   }
-  return emitRefusal(
-    "guard",
-    { ...evaluation.payload, committable: evaluation.committable },
-    guardRefusalText(opts, evaluation),
-    { json: isJson(opts) },
-  );
+  return emitRefusal("guard", evaluation.payload, guardRefusalText(opts, evaluation), {
+    json: isJson(opts),
+  });
 }
 
 function guardAllowedText(count: number): string {
@@ -376,80 +202,6 @@ function guardClosing(evaluation: Extract<GuardEvaluation, { kind: "checked" }>)
   return evaluation.markers.length === 0
     ? "No task is authorized. Run: visp work --task <id>"
     : `Authorized tasks: ${evaluation.markers.map((marker) => marker.task).join(", ")}`;
-}
-
-/** Paths a closed task in this feature declared, so the refusal can say so. */
-async function closedTaskPaths(
-  state: WorkspaceState,
-  violations: readonly { path: string }[],
-): Promise<string[]> {
-  if (violations.length === 0) return [];
-
-  const withDone = await authorizedScopes(state, { includeDone: true });
-  if (!withDone.ok) return [];
-
-  const stillRefused = new Set(
-    checkPaths(
-      violations.map((violation) => violation.path),
-      { markers: withDone.value, blockedPaths: state.config.workflow.blockedPaths },
-    ).map((violation) => violation.path),
-  );
-
-  return violations.map((violation) => violation.path).filter((path) => !stillRefused.has(path));
-}
-
-/**
- * The working-tree diff leaves out uncommitted work the feature inherited because Git
- * cannot be written, while it is unchanged: it is earlier work, not this feature's change.
- * A staged diff is not filtered: the index may hold content that differs from the file.
- */
-async function resolveScopedPaths(
-  state: WorkspaceState,
-  opts: GuardCliOptions,
-  feature: string | undefined,
-) {
-  const paths = await resolvePaths(state.paths.root, opts);
-  const localDiff =
-    !opts.path?.length && !opts.all && !opts.base && !opts.staged && opts.scope !== "tasks";
-  if (!paths.ok || !localDiff) return paths;
-  const inherited = await unchangedInheritedPaths(state, feature ?? state.status?.activeFeature);
-  return inherited.size
-    ? { ok: true as const, value: paths.value.filter((path) => !inherited.has(path)) }
-    : paths;
-}
-
-async function resolvePaths(
-  root: string,
-  opts: { path?: string[]; staged?: boolean; base?: string; all?: boolean },
-) {
-  if (opts.path && opts.path.length > 0) {
-    return { ok: true as const, value: opts.path };
-  }
-
-  // A different question from the others: not "is this change in scope" but
-  // "what in this repository is outside every task's scope". On a real project
-  // the answer is most of it, which is correct and not very actionable — it is
-  // for auditing what a feature has authorized, not for a pre-commit check.
-  if (opts.all) {
-    const tracked = await trackedFiles(root);
-    if (!tracked.ok) return tracked;
-    return { ok: true as const, value: tracked.value.filter((path) => !isStatePath(path)) };
-  }
-
-  const diff = opts.base
-    ? await changesSince(root, opts.base)
-    : opts.staged
-      ? await stagedChanges(root)
-      : await workingTreeChanges(root);
-
-  if (!diff.ok) return diff;
-
-  // visp's own artifacts change on every command and are never a violation.
-  // An explicit --path is answered as asked; a diff is not padded with them.
-  return {
-    ok: true as const,
-    value: diff.value.files.map((file) => file.path).filter((path) => !isStatePath(path)),
-  };
 }
 
 /** Enough to see the shape of a refusal without scrolling past it. */

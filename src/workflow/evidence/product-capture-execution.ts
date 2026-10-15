@@ -169,11 +169,6 @@ async function prepareCaptures(
     });
   }
   const id = `CAPRUN-${randomUUID()}`;
-  const runPath = join(
-    workspace.paths.featureDir(record.brief.feature),
-    "captures",
-    `run-${id}.json`,
-  );
   const expectation = {
     basis:
       outcomes.length ||
@@ -216,12 +211,8 @@ async function prepareCaptures(
     operations: result.operations,
     captures,
   };
-  mutations.push({
-    kind: "write",
-    path: runPath,
-    content: JSON.stringify(run, null, 2),
-    expectedBefore: { existed: false },
-  });
+  // The run is recorded once, in the product state that every reader uses and that is
+  // committed with the trail; captures/ holds only the images.
   const environment = await browserExecutionEnvironmentIdentity(workspace.paths.root, binary);
   return {
     subjectDigest,

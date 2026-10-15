@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { resolveCriticDefault } from "../config/critic-defaults.js";
 import { DIR, PRODUCT_NAME, STATE_DIR } from "../core/constants.js";
 import { isExecutableMode } from "../core/mode.js";
@@ -12,21 +13,35 @@ import {
   assetFingerprint,
   CLAUDE_SETTINGS_REGISTRATION,
   inspectForeignHarnessAssets,
+  isCurrentAsset,
   readAssetManifest,
-  sameAssetContent,
 } from "../harness/asset-inspection.js";
 import {
   CLAUDE_SETTINGS_FILE,
   hasClaudeSessionHooks,
   hookCommand,
+  inspectPreToolUseResidue,
   preToolUseRegistration,
 } from "../harness/claude-settings.js";
+import {
+  codexRegistrationAdvice,
+  codexRegistrationProblem,
+} from "../harness/codex-mcp-registration.js";
 import { preCommitHookPath } from "../harness/git-hook.js";
 import { verifyGuardHandshake } from "../harness/guard-handshake.js";
-import { HOOK_MARKER, renderPreCommitHook, renderPreToolUseHook } from "../harness/hooks.js";
+import {
+  HOOK_MARKER,
+  isCurrentGeneratedHook,
+  renderPreCommitHook,
+  renderPreToolUseHook,
+} from "../harness/hooks.js";
 import { type InstallState, readInstallState } from "../harness/install-state.js";
 import { verifyRequestedMcp } from "../harness/install-verification.js";
-import { mcpConfigFile } from "../harness/mcp-registration.js";
+import {
+  CODEX_CONFIG_FILE,
+  mcpConfigFile,
+  planMcpRegistration,
+} from "../harness/mcp-registration.js";
 import { type Asset, planFor } from "../harness/targets.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import type { Check, DoctorRuntime } from "./checks.js";
@@ -117,14 +132,35 @@ export async function checkMcpRegistration(state: WorkspaceState): Promise<Check
     harness: state.config.harness,
     mcp: true,
   });
-  return verified.ok
-    ? { name: "mcp registration", status: "ok", detail: `${path} registers VISP` }
-    : {
-        name: "mcp registration",
-        status: "warn",
-        detail: `${path} does not contain a usable VISP MCP registration`,
-        recovery: `${PRODUCT_NAME} doctor --fix`,
-      };
+  if (verified.ok)
+    return { name: "mcp registration", status: "ok", detail: `${path} registers VISP` };
+  // `doctor --fix` never rewrites a Codex table VISP did not write, so advising it would loop.
+  const customized = await customizedCodexEntry(state);
+  if (customized)
+    return {
+      name: "mcp registration",
+      status: "warn",
+      detail: `${path} ${codexRegistrationProblem(customized.unreadable)}`,
+      recovery: `In ${path}, ${codexRegistrationAdvice(customized.unreadable)}`,
+    };
+  return {
+    name: "mcp registration",
+    status: "warn",
+    detail: `${path} does not contain a usable VISP MCP registration`,
+    recovery: `${PRODUCT_NAME} doctor --fix`,
+  };
+}
+
+async function customizedCodexEntry(
+  state: WorkspaceState,
+): Promise<{ readonly unreadable: boolean } | undefined> {
+  if (state.config.harness !== "codex") return undefined;
+  const current = await state.files.readTextIfExists(CODEX_CONFIG_FILE);
+  if (!current.ok) return undefined;
+  const planned = planMcpRegistration(current.value, false, "codex");
+  return planned.ok && planned.value.status === "customized"
+    ? { unreadable: planned.value.unreadable === true }
+    : undefined;
 }
 
 async function inspectHarnessAssetFiles(
@@ -139,7 +175,7 @@ async function inspectHarnessAssetFiles(
       result.missing.push(asset.path);
       continue;
     }
-    if (sameAssetContent(current.value, asset)) continue;
+    if (isCurrentAsset(current.value, asset)) continue;
 
     // Matching what we recorded means visp wrote it and the template has since
     // moved on. Anything else is the user's edit, which is theirs to keep.
@@ -388,8 +424,9 @@ function addSurface(surfaces: EnforcementSurfaces, state: SurfaceState): void {
 async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceState> {
   const hookPath = `${STATE_DIR}/${DIR.hooks}/claude-pretooluse.mjs`;
   const script = await state.files.readTextIfExists(hookPath);
-  if (!script.ok || script.value === undefined) return { inactive: "edit hook" };
-  if (script.value !== renderPreToolUseHook()) return { inactive: "edit hook (stale or edited)" };
+  if (!script.ok || script.value === undefined) return missingEditHook(state, hookPath);
+  if (!isCurrentGeneratedHook(script.value, renderPreToolUseHook))
+    return { inactive: "edit hook (stale or edited)" };
   const metadata = await state.files.metadata(hookPath);
   if (!metadata.ok || !isExecutableMode(metadata.value?.mode)) {
     return { inactive: "edit hook (not executable)" };
@@ -401,10 +438,13 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
     const settings = await state.files.readTextIfExists(CLAUDE_SETTINGS_FILE);
     if (!settings.ok || !hasClaudeSessionHooks(settings.value, hookPath))
       return { inactive: "prompt, Stop or Bash hook (settings registration is missing)" };
-    const command = hookCommand(hookPath, true);
+    // Claude Code runs the command with Git Bash on Windows, which doctor cannot locate
+    // reliably (a `bash` on PATH may be WSL's), so there it checks that node runs the script.
     const check = spawnSync(
-      process.platform === "win32" ? "cmd.exe" : "/bin/sh",
-      process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command],
+      process.platform === "win32" ? "node" : "/bin/sh",
+      process.platform === "win32"
+        ? [join(state.paths.root, hookPath)]
+        : ["-c", hookCommand(hookPath, true)],
       {
         cwd: state.paths.root,
         env: { ...process.env, CLAUDE_PROJECT_DIR: state.paths.root },
@@ -426,6 +466,25 @@ async function inspectClaudeEditHook(state: WorkspaceState): Promise<SurfaceStat
   return { inactive: "edit hook (script written, not wired into settings)" };
 }
 
+/** Settings are committed, the script is not: what the settings still run without it. */
+async function missingEditHook(state: WorkspaceState, hookPath: string): Promise<SurfaceState> {
+  const settings = await state.files.readTextIfExists(CLAUDE_SETTINGS_FILE);
+  if (!settings.ok) return { inactive: "edit hook" };
+  const residue = inspectPreToolUseResidue(settings.value, hookPath);
+  if (residue.current)
+    return {
+      inactive: `edit hook (script missing; Claude Code refuses writes while a slice is authorized, until ${PRODUCT_NAME} install restores it)`,
+    };
+  // An earlier build ran the script directly, with no fallback for a missing one.
+  if (residue.exact)
+    return {
+      inactive: `edit hook (script missing; settings run an earlier VISP command, which fails every edit until ${PRODUCT_NAME} install)`,
+    };
+  return residue.customized
+    ? { inactive: "edit hook (script missing; settings registration is stale or edited)" }
+    : { inactive: "edit hook" };
+}
+
 async function inspectPreCommitHook(state: WorkspaceState): Promise<SurfaceState> {
   const resolved = await preCommitHookPath(state.paths.root);
   if (!resolved.ok) return { inactive: "pre-commit (configured path could not be resolved)" };
@@ -433,7 +492,10 @@ async function inspectPreCommitHook(state: WorkspaceState): Promise<SurfaceState
   if (!hook.ok) return { inactive: `pre-commit (${hook.error.message})` };
   const local = await state.files.readTextIfExists(`${resolved.value.absolute}.local`);
   if (!local.ok) return { inactive: `pre-commit (${local.error.message})` };
-  if (hook.value === renderPreCommitHook(local.value !== undefined)) {
+  if (
+    hook.value !== undefined &&
+    isCurrentGeneratedHook(hook.value, (cli) => renderPreCommitHook(local.value !== undefined, cli))
+  ) {
     const metadata = await state.files.metadata(resolved.value.absolute);
     if (metadata.ok && isExecutableMode(metadata.value?.mode)) return { active: "pre-commit" };
     return { inactive: "pre-commit (not executable)" };

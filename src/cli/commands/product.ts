@@ -1,23 +1,9 @@
 import { Command, Option } from "commander";
 import { fromUnknown, vispError } from "../../core/errors.js";
-import { parseRiskLevel, parseWorkflowMode } from "../../core/input.js";
+import { parseFeatureStart } from "../../core/input.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { BRIEF_INPUT_HELP } from "../../harness/command-guide.js";
-import { productCheckTemplate } from "../../workflow/product/check-guidance.js";
-import {
-  configuredReviewStarter,
-  reviewWaitMs,
-  runProductAcceptReviewed,
-  runProductDoneReviewed,
-  runProductNextAfterReview,
-} from "../../workflow/product/done-review.js";
-import {
-  beginFeatureTester,
-  configuredTestsStarter,
-  createProductFeatureChecked,
-  testsWaitMs,
-  writeConfiguredTests,
-} from "../../workflow/product/independent-tests.js";
+import { productCheckTemplate } from "../../workflow/product/check/check-guidance.js";
 import {
   readProductBrief,
   runProductContext,
@@ -30,10 +16,24 @@ import {
   updateProductBrief,
 } from "../../workflow/product/index.js";
 import {
+  configuredReviewStarter,
+  reviewWaitMs,
+  runProductAcceptReviewed,
+  runProductDoneReviewed,
+  runProductNextAfterReview,
+} from "../../workflow/product/review/done-review.js";
+import {
   parseReviewSubmission,
   runProductReviewRequest,
   validateProductReviewRequest,
-} from "../../workflow/product/review-request.js";
+} from "../../workflow/product/review/review-request.js";
+import {
+  beginFeatureTester,
+  createProductFeatureChecked,
+  writeConfiguredTests,
+} from "../../workflow/product/tester/independent-tests.js";
+import { configuredTestsStarter } from "../../workflow/product/tester/independent-tests-starters.js";
+import { testsWaitMs } from "../../workflow/product/tester/tester-session.js";
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {
@@ -56,6 +56,7 @@ import { readCommandInput, readStandardInput } from "../input.js";
 import { emit, emitError } from "../output.js";
 
 interface ProductOptions extends GlobalOptions {
+  known?: string;
   finding?: string;
   execution?: string;
   feature?: string;
@@ -270,16 +271,9 @@ export function featureCommand(): Command {
           workflow?: string;
         }
       >(cmd);
-      const risk = parseRiskLevel(opts.risk ?? "low");
-      const mode = opts.workflow ? parseWorkflowMode(opts.workflow) : undefined;
-      if (!risk.ok || (mode && !mode.ok)) {
-        process.exitCode = emitError(
-          "feature",
-          !risk.ok
-            ? risk.error
-            : (mode as { ok: false; error: import("../../core/errors.js").VispError }).error,
-          { json: isJson(opts) },
-        );
+      const risk = parseFeatureStart(opts.risk, opts.workflow);
+      if (!risk.ok) {
+        process.exitCode = emitError("feature", risk.error, { json: isJson(opts) });
         return;
       }
       // The tester runs after the result is printed; `execute` awaits it in this process.
@@ -382,6 +376,10 @@ export const workCommand = () =>
           : runProductWork(state, opts, configuredTestsStarter(state), testsWaitMs(state, "cli")),
   )
     .option("--inspect", "Read context without authorization, environment probing or graph refresh")
+    .option(
+      "--known <contextId>",
+      "contextId of an earlier work reply still in view: its unchanged excerpts are not repeated",
+    )
     .option(
       "--retry-tests",
       "Retry an independent tester that failed for an environment reason (requires --feature)",

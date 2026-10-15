@@ -1,6 +1,9 @@
 import { Command } from "commander";
 import type { UserFeedbackHost } from "../../workflow/product/user-feedback.js";
-import { runProductUserFeedback } from "../../workflow/product/user-feedback.js";
+import {
+  runProductUserFeedback,
+  userFeedbackOperationWrites,
+} from "../../workflow/product/user-feedback.js";
 import { type GlobalOptions, isJson, mutatingWorkspace, options, workspace } from "../context.js";
 import { emit } from "../output.js";
 
@@ -41,7 +44,9 @@ export function userFeedbackCommand(host?: UserFeedbackHost, signal?: AbortSigna
             : opts.defer
               ? "defer"
               : "status";
-      const state = await (operation === "status" ? workspace(opts) : mutatingWorkspace(opts));
+      const state = await (userFeedbackOperationWrites(operation)
+        ? mutatingWorkspace(opts)
+        : workspace(opts));
       const result = state.ok
         ? await runProductUserFeedback(
             state.value,

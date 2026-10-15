@@ -13,7 +13,8 @@ pnpm build
 
 | Command | What it runs |
 | --- | --- |
-| `pnpm build` | Bundle `dist/` with tsup |
+| `pnpm build` | Bundle `dist/` with tsup, including type declarations and the dashboard |
+| `pnpm build:fast` | Bundle the CLI only, without `.d.ts` (about 1 s); wipes `dist/ui` |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | Biome over `src` and `tests`; `pnpm format` applies fixes |
 | `pnpm knip` | Knip: unused files, exports, types and dependencies, then runtime import cycles |
@@ -26,7 +27,9 @@ pnpm build
 | `pnpm check` | typecheck, lint, knip, build and test |
 | `pnpm release:check` | `check` plus browser, qualification, trust coverage and package tests |
 
-`pnpm release:check` is the release gate and runs before publishing (`prepublishOnly`).
+`pnpm release:check` is the release gate and runs before publishing (`prepublishOnly`). CI
+(`.github/workflows/ci.yml`) runs the same scripts as parallel jobs, with `pnpm test` in four
+shards; keep the two in step when a script changes.
 
 ## Releasing
 
@@ -41,9 +44,9 @@ pnpm build
 
 The job summary of the release run repeats steps 4 and 5.
 
-**When `pnpm knip` fails**, delete what nothing uses rather than ignoring it; an export that only its own file uses is fine. Code that only tests call is not reported, so check that a function you replace loses its tests too. The import cycles that predate the check are listed in `knip.json` under `cycles.allow`; a new cycle fails, so break it, or, if it cannot be avoided, add its exact path there with the reason in the commit.
+**When `pnpm knip` fails**, delete what nothing uses rather than ignoring it; an export that only its own file uses is fine. Code that only tests call is not reported, so check that a function you replace loses its tests too. No import cycles are allowed. If one cannot be avoided, add `cycles.allow` with its exact path and give the reason in the commit.
 
-**Rebuild before running tests.** Several tests run the compiled CLI from `dist/`, and hook and installation tests compare the build ID of the running code with the build that generated the hooks. A stale `dist/` makes them fail. Run `pnpm build` after changing `src/`.
+**Rebuild before running tests.** Several tests run the compiled CLI from `dist/`, and hook and installation tests compare the build ID of the running code with the build that generated the hooks. A stale `dist/` makes them fail, so the test run checks the build ID before it starts and stops at once with one line (`dist is stale (build … != sources …): run pnpm build:fast`). Run `pnpm build:fast` after changing `src/`, `package.json`, `pnpm-lock.yaml`, `tsconfig.json` or `tsup.config.ts`. It wipes `dist/ui`; run `pnpm exec tsup --config tsup.ui.config.ts` when a test needs the dashboard. `pnpm build` is the full build. To run just the tests that cover a change: `pnpm exec vitest run $(node scripts/direct-tests.mjs src/core/exec.ts)`. `AGENTS.md` has the working rules for agents developing this repository.
 
 Browser tests need an installed Chrome or Chromium; VISP never downloads one.
 
@@ -73,3 +76,7 @@ CLI and MCP are thin adapters: decisions and data shapes live in `src/workflow/p
 ## Documentation
 
 User documentation lives in `README.md` and `docs/`; record user-visible changes in `CHANGELOG.md` under Unreleased, and new measurements in `docs/research-summary.md`. `tests/unit/harness/documented-workflow.test.ts` parses the browser-journey check in `README.md` and `docs/product-review.md` and the review response example in `docs/product-review.md`; keep them valid when editing.
+
+## Conduct and security
+
+Contributors follow the [code of conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately as described in the [security policy](SECURITY.md), not in a public issue.

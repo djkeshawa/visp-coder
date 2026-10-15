@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { ok } from "../../../../src/core/result.js";
-import { readCriticBudgetHistory } from "../../../../src/workflow/product/critic-budget-history.js";
+import { readCriticBudgetHistory } from "../../../../src/workflow/product/critic/critic-budget-history.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 
 it("reads a beta.3-shaped source-only failure without rewriting its historical spending record", async () => {

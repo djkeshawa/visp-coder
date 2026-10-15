@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import { sha256 } from "../../../../src/core/hash.js";
 import { runProductCapture } from "../../../../src/workflow/evidence/product-capture.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
 import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { runProductNext } from "../../../../src/workflow/product/status.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";

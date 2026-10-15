@@ -1,20 +1,17 @@
-import { evidenceApplies, productCaptureRunSchema } from "./evidence-references.js";
+import { validCaptureRuns } from "./capture-run-model.js";
+import { evidenceApplies } from "./evidence-references.js";
 import type { ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
 
-export { OBSERVATION_REVIEW_INSTRUCTIONS } from "./review-instructions.js";
+export { OBSERVATION_REVIEW_INSTRUCTIONS } from "./review/review-instructions.js";
 
 /** Labels describe recorded operations, never inferred game states or quality. */
 export function observationSequence(record: ProductRecord, subject: string, slice?: ProductSlice) {
-  const runs = record.state.captureRuns
-    .flatMap((input) => {
-      const run = productCaptureRunSchema.safeParse(input);
-      return run.success &&
-        evidenceApplies(record, subject, run.data) &&
-        (!slice || !run.data.task || run.data.task === slice.id)
-        ? [run.data]
-        : [];
-    })
+  const runs = validCaptureRuns(record)
+    .filter(
+      (run) =>
+        evidenceApplies(record, subject, run) && (!slice || !run.task || run.task === slice.id),
+    )
     .reverse();
   runs.sort((a, b) => Number(a.status === "completed") - Number(b.status === "completed"));
   const viewportKey = (viewport: { width: number; height: number }) =>

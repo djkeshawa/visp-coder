@@ -14,7 +14,7 @@ import {
 import {
   type CriticSelection,
   criticSelection,
-} from "../../../../src/workflow/product/critic-store.js";
+} from "../../../../src/workflow/product/critic/critic-store.js";
 import { runProductWork } from "../../../../src/workflow/product/index.js";
 import { candidateSourcePaths } from "../../../../src/workflow/product/source-inputs.js";
 import * as subjects from "../../../../src/workflow/product/subject.js";

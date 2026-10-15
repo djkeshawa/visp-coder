@@ -6,9 +6,9 @@ import {
   CRITIC_INSTRUCTIONS,
   criticConfigSchema,
   UNDERSTANDING_CRITIC_INSTRUCTIONS,
-} from "../workflow/product/critic-model.js";
+} from "../workflow/product/critic/critic-model.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS } from "../workflow/product/observation-preview.js";
-import { VISUAL_REVIEW_INSTRUCTIONS } from "../workflow/product/review-instructions.js";
+import { VISUAL_REVIEW_INSTRUCTIONS } from "../workflow/product/review/review-instructions.js";
 import {
   COMPARISON_POLICY,
   type PreparedComparison,

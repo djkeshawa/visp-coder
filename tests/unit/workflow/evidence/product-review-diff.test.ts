@@ -1,15 +1,15 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { independentSources } from "../../../../src/workflow/product/independent-sources.js";
 import { runProductWork, updateProductBrief } from "../../../../src/workflow/product/index.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
-import { deliveredSourceEvidence } from "../../../../src/workflow/product/review-source-delivery.js";
+import { independentSources } from "../../../../src/workflow/product/review/independent-sources.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
+import { deliveredSourceEvidence } from "../../../../src/workflow/product/review/review-source-delivery.js";
 import {
   independentReviewerContext,
   productReviewerContext,
-} from "../../../../src/workflow/product/reviewer-handoff.js";
+} from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
 const projects: Awaited<ReturnType<typeof productWorkspace>>[] = [];
@@ -74,7 +74,7 @@ it("delivers the small late hunk of a Django-sized file first and accepts its se
   });
   await w.write("django/db/models/sql/query.py", query.replace("lhs + rhs", "lhs * rhs"));
   await w.write("tests/queries/test_query.py", test.replace("== 3", "== 2"));
-  const diffModule = await import("../../../../src/workflow/product/review-diff.js");
+  const diffModule = await import("../../../../src/workflow/product/review/review-diff.js");
   const legacy = vi.spyOn(diffModule, "reviewDiffSource").mockResolvedValue(undefined);
   const before = await preparedPacket(w);
   legacy.mockRestore();
@@ -167,7 +167,7 @@ it("splits a bounded diff fairly across files and names omitted hunk ranges", as
 it("keeps greenfield packet bytes identical to delivery without a diff source", async () => {
   const w = await setup({}, true);
   await w.write("src/value.mjs", "export const value = 2;\n");
-  const diffModule = await import("../../../../src/workflow/product/review-diff.js");
+  const diffModule = await import("../../../../src/workflow/product/review/review-diff.js");
   const legacy = vi.spyOn(diffModule, "reviewDiffSource").mockResolvedValue(undefined);
   const before = (await preparedPacket(w)).text;
   legacy.mockRestore();

@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
 import {
   runProductAccept,
   runProductDone,

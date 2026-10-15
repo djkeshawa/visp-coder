@@ -1,18 +1,21 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
-import { criticPacket } from "../../../../src/workflow/product/critic-packet.js";
-import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
-import { independentReviewTemplate } from "../../../../src/workflow/product/independent-review.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
+import { criticPacket } from "../../../../src/workflow/product/critic/critic-packet.js";
+import {
+  criticSelection,
+  readCriticState,
+} from "../../../../src/workflow/product/critic/critic-store.js";
 import { runProductVerify, runProductWork } from "../../../../src/workflow/product/index.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS } from "../../../../src/workflow/product/observation-preview.js";
+import { independentReviewTemplate } from "../../../../src/workflow/product/review/independent-review.js";
 import {
   CRITIC_INSTRUCTIONS,
   productReviewInstructions,
-} from "../../../../src/workflow/product/review-instructions.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
-import { runProductReviewerHandoff } from "../../../../src/workflow/product/reviewer-handoff.js";
+} from "../../../../src/workflow/product/review/review-instructions.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
+import { runProductReviewerHandoff } from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import { recordedProductJourney } from "../../support/product-journey.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
@@ -175,6 +178,45 @@ it("asks for one optional finish finding that can never fail an outcome", () => 
     "Finish findings are always required: false; never mark one required and never let one fail an outcome.",
   );
   expect(productReviewInstructions()).not.toContain("judge finish once");
+});
+
+it("requires what the request names to be recognizable in the images, unlike finish", () => {
+  const visual = productReviewInstructions({ visual: true });
+  expect(visual).toContain(
+    "Recognizability is not finish and overrides the finish rule: every object or subject the request names for a picture or screen to show, and every concrete look it names (named colours or palette, a named art style such as pixel art, voxel or isometric, a viewpoint), must be recognizable",
+  );
+  // "A clean, modern design" or "a polished game" is never a required, outcome-failing finding.
+  expect(visual).toContain(
+    "evaluative words (modern, clean, beautiful, polished) stay finish or advisory",
+  );
+  // Finish no longer lists what the recognizability rule makes required.
+  expect(visual).toContain(
+    "for what the request describes (materials or texture, depth, visible feedback for hits or changes)",
+  );
+  expect(visual).not.toContain("recognizable objects");
+  expect(visual).toContain(
+    "missing, hidden behind something else, cut off, or reads as something different is a departure from the request",
+  );
+  expect(visual).toContain("do not mark an outcome that covers it satisfied");
+  // A named real thing is recognized by its parts: in six benchmark runs reviewers who saw a
+  // controller with no two-tone shell, shoulder buttons or logo called it "generic" as an optional
+  // finding, and the blind judge marked each missing part down.
+  expect(visual).toContain(
+    "A real thing it names for a picture or scene to depict (a product or model, vehicle, animal, building, landmark) is recognized by its identifying parts and colouring",
+  );
+  // One finding per thing, so missing parts cannot fill every finding slot.
+  expect(visual).toContain("report one required finding per thing, naming every such part");
+  // A style the request names may leave parts or colours out on purpose.
+  expect(visual).toContain(
+    "left out by a style the request names (a minimalist logo, an icon, a silhouette), stays finish while the thing stays recognizable, and colours or a style the request names override the real thing's",
+  );
+  expect(visual).toContain("Only what the request names counts:");
+  // Ordinary apps name no visual subjects: the rule adds nothing for their controls.
+  expect(visual).toContain(
+    "an app's controls, forms and data tables fall under the criteria above, and polish beyond what the request names stays finish.",
+  );
+  // Without images there is nothing to recognize; code review keeps its own rules.
+  expect(productReviewInstructions()).not.toContain("Recognizability");
 });
 
 it("lets a specific request statement govern a case a general rule also covers", () => {

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { prepareCandidate } from "../../../../src/workflow/product/candidate.js";
-import { criticSelection } from "../../../../src/workflow/product/critic-store.js";
+import { criticSelection } from "../../../../src/workflow/product/critic/critic-store.js";
 import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
@@ -104,7 +104,9 @@ it("stores only hashes for private inputs and image evidence in candidates", asy
 
 it("masks credentials in the request before saving or publishing and tells the caller", async () => {
   const { TestWorkspace } = await import("../../support/workspace.js");
-  const { createProductFeature } = await import("../../../../src/workflow/product/brief.js");
+  const { createProductFeature } = await import(
+    "../../../../src/workflow/product/feature-create.js"
+  );
   const { runProductReport } = await import("../../../../src/workflow/product/status.js");
   project = await TestWorkspace.create();
   await project.installFoundation();

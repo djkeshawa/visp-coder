@@ -1,0 +1,6 @@
+> .visp/hooks/claude-pretooluse.mjs {"session_id":"golden-session","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"visp feature --source-brief - <<'REQUEST'\nShow visp status in the footer.\nREQUEST","run_in_background":true}}
+--- stdout
+
+--- stderr
+
+--- exit 0

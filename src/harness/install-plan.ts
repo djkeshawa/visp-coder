@@ -1,9 +1,10 @@
+import { basename, dirname } from "node:path";
 import { parseDocument } from "yaml";
 import { balancedCritic, type CriticConfig } from "../config/critic.js";
 import { resolveCriticDefault } from "../config/critic-defaults.js";
 import { parseConfig } from "../config/load.js";
 import type { VispConfig } from "../config/schema.js";
-import { type Harness, PROFILES, type Profile } from "../core/constants.js";
+import { DIR, type Harness, PROFILES, type Profile, STATE_DIR } from "../core/constants.js";
 import { vispError } from "../core/errors.js";
 import { run } from "../core/exec.js";
 import { type FileMutation, filePrecondition } from "../core/file-transaction.js";
@@ -37,6 +38,7 @@ import {
   planPreToolUseRegistration,
   planPreToolUseUnregistration,
 } from "./claude-settings.js";
+import { codexRegistrationAdvice, codexRegistrationProblem } from "./codex-mcp-registration.js";
 import { preCommitHookPath } from "./git-hook.js";
 import {
   HOOK_MARKER,
@@ -93,6 +95,7 @@ export async function buildInstallPlan(
     assets: [],
     mutations: [],
     fingerprints: {},
+    created: {},
     removals: [],
     manualSteps: [...harnessPlan.manualSteps, ...criticSetupSteps(critic.value, options.harness)],
     expectedManifest: `${JSON.stringify(manifest.value, null, 2)}\n`,
@@ -335,6 +338,8 @@ async function planPreviousMcpRegistration(
     );
     return ok(undefined);
   }
+  const backup = await planConfigBackup(fs, registration.path, current.value, planned);
+  if (!backup.ok) return backup;
   planned.mutations.push({
     kind: "write",
     path: registration.path,
@@ -343,6 +348,64 @@ async function planPreviousMcpRegistration(
   });
   planned.assets.push({ path: mcpRegistrationLabel(registration.path), status: "removed" });
   return ok(undefined);
+}
+
+/**
+ * The text of a host configuration VISP is about to rewrite, kept under the ignored
+ * `.visp/state/backups/`: MCP configuration can hold tokens, which must not land beside it in
+ * the repository. One copy per distinct text, and only the latest few per file.
+ */
+export async function planConfigBackup(
+  fs: ProjectFileSystem,
+  path: string,
+  text: string | undefined,
+  plan: { readonly mutations: FileMutation[] },
+): Promise<Result<void>> {
+  if (text === undefined || text.trim() === "") return ok(undefined);
+  const directory = dirname(`${STATE_DIR}/${DIR.state}/backups/${path}`);
+  const prefix = `${basename(path)}.`;
+  const fingerprint = assetFingerprint(text);
+  const listed = await fs.listEntries(directory);
+  if (!listed.ok) return listed;
+  const earlier = listed.value
+    .filter((entry) => entry.type === "file" && entry.name.startsWith(prefix))
+    .map((entry) => entry.name)
+    .sort();
+  if (earlier.some((name) => name.endsWith(`-${fingerprint}`))) return ok(undefined);
+  for (const name of earlier.slice(0, Math.max(0, earlier.length - (KEPT_BACKUPS - 1)))) {
+    const removal = await removalOf(fs, `${directory}/${name}`);
+    if (!removal.ok) return removal;
+    plan.mutations.push(removal.value);
+  }
+  // A sequence number after the newest backup, not the clock, so the same project state always
+  // plans the same backup path (interrupted installs replay their plan).
+  const newest = earlier.map((name) => Number(/^\d+/.exec(name.slice(prefix.length))?.[0] ?? 0));
+  const next = Math.max(0, ...newest) + 1;
+  plan.mutations.push({
+    kind: "write",
+    path: `${directory}/${prefix}${String(next).padStart(13, "0")}-${fingerprint}`,
+    content: text,
+    expectedBefore: { existed: false },
+  });
+  return ok(undefined);
+}
+
+/** Backups kept per host configuration file. */
+const KEPT_BACKUPS = 5;
+
+export async function removalOf(
+  fs: ProjectFileSystem,
+  path: string,
+): Promise<Result<FileMutation>> {
+  const content = await fs.readBytes(path);
+  if (!content.ok) return content;
+  const metadata = await fs.readMetadata(path);
+  if (!metadata.ok) return metadata;
+  return ok({
+    kind: "remove",
+    path,
+    expectedBefore: filePrecondition(content.value, metadata.value?.mode),
+  });
 }
 
 async function planPreviousClaudeRegistration(
@@ -391,7 +454,7 @@ async function planManifest(
   manifest: AssetManifest,
   plan: InstallPlan,
 ): Promise<Result<void>> {
-  const next: AssetManifest = { ...manifest, ...plan.fingerprints };
+  const next: AssetManifest = { ...manifest, ...plan.created, ...plan.fingerprints };
   for (const path of plan.removals) delete next[path];
   const current = await fs.readTextIfExists(paths.assetManifest);
   if (!current.ok) return current;
@@ -607,6 +670,7 @@ async function planClaudeHook(
   const backup = await planSettingsBackup(fs, registration.value, current.value, plan);
   if (!backup.ok) return backup;
   if (registration.value.content !== undefined) {
+    recordCreated(plan, CLAUDE_SETTINGS_FILE, current.value, registration.value.content);
     plan.mutations.push({
       kind: "write",
       path: CLAUDE_SETTINGS_FILE,
@@ -746,50 +810,95 @@ async function planMcp(
   if (!registration.ok) return registration;
   plan.mcp = registration.value.status;
   plan.mcpConfigFile = path;
-  if (registration.value.status === "malformed" || registration.value.status === "customized") {
-    if (options.harness === "codex") {
-      plan.manualSteps.push(
-        `${path} could not be merged; add [mcp_servers.visp] manually or rerun visp install --no-mcp. Other installation assets will still be installed.`,
-      );
-      return ok(undefined);
-    }
-    return err(
-      vispError(
-        "ARTIFACT_INVALID",
-        registration.value.status === "malformed"
-          ? `${path} is not a safely mergeable MCP configuration; it was left unchanged`
-          : `${path} contains a customized VISP registration that was left unchanged`,
-        {
-          recovery:
-            registration.value.status === "malformed"
-              ? `Repair ${path} or rerun visp install --no-mcp; --force never replaces unparseable configuration`
-              : `Review ${path}, then rerun visp install --force to replace only the VISP registration`,
-        },
-      ),
-    );
-  }
+  const { status } = registration.value;
+  if (status === "malformed" || status === "customized")
+    return unmergedMcp(path, status, options.harness, plan, registration.value.unreadable);
   if (registration.value.content !== undefined) {
-    plan.mutations.push({
-      kind: "write",
+    recordCreated(plan, path, current.value, registration.value.content);
+    const written = await planConfigWrite(
+      fs,
       path,
-      content: registration.value.content,
-      expectedBefore: filePrecondition(current.value),
-    });
+      current.value,
+      registration.value.content,
+      plan,
+    );
+    if (!written.ok) return written;
   }
-  if (options.harness === "cursor") {
-    const old = await fs.readTextIfExists(".mcp.json");
-    if (!old.ok) return old;
-    const removal = planMcpUnregistration(old.value, "claude-code");
-    if (removal.status === "removed" && removal.content !== undefined) {
-      plan.mutations.push({
-        kind: "write",
-        path: ".mcp.json",
-        content: removal.content,
-        expectedBefore: filePrecondition(old.value),
-      });
-      plan.assets.push({ path: ".mcp.json (old VISP registration)", status: "removed" });
-    }
+  return options.harness === "cursor" ? planOldClaudeMcpRemoval(fs, plan) : ok(undefined);
+}
+
+/** Codex's TOML is left for the user with a manual step; a JSON host's install stops. */
+function unmergedMcp(
+  path: string,
+  status: "malformed" | "customized",
+  harness: InstallOptions["harness"],
+  plan: InstallPlan,
+  unreadable?: boolean,
+): Result<void> {
+  if (harness === "codex") {
+    plan.manualSteps.push(
+      status === "customized"
+        ? `${path} ${codexRegistrationProblem(unreadable)}: ${codexRegistrationAdvice(unreadable)}. Other installation assets will still be installed.`
+        : `${path} could not be merged; add [mcp_servers.visp] manually or rerun visp install --no-mcp. Other installation assets will still be installed.`,
+    );
+    return ok(undefined);
   }
+  return err(
+    vispError(
+      "ARTIFACT_INVALID",
+      status === "malformed"
+        ? `${path} is not a safely mergeable MCP configuration; it was left unchanged`
+        : `${path} contains a customized VISP registration that was left unchanged`,
+      {
+        recovery:
+          status === "malformed"
+            ? `Repair ${path} or rerun visp install --no-mcp; --force never replaces unparseable configuration`
+            : `Review ${path}, then rerun visp install --force to replace only the VISP registration`,
+      },
+    ),
+  );
+}
+
+/**
+ * A shared file that install creates is recorded in the manifest, with the text it wrote, so
+ * `visp uninstall` may delete it once nothing else is left in it. A file the project already
+ * had is only ever edited back.
+ */
+function recordCreated(
+  plan: InstallPlan,
+  path: string,
+  before: string | undefined,
+  content: string,
+): void {
+  if (before === undefined || before.trim() === "") plan.created[path] = assetFingerprint(content);
+}
+
+/** Rewrites a host configuration after keeping its previous text. */
+async function planConfigWrite(
+  fs: ProjectFileSystem,
+  path: string,
+  before: string | undefined,
+  content: string,
+  plan: InstallPlan,
+): Promise<Result<void>> {
+  const backup = await planConfigBackup(fs, path, before, plan);
+  if (!backup.ok) return backup;
+  plan.mutations.push({ kind: "write", path, content, expectedBefore: filePrecondition(before) });
+  return ok(undefined);
+}
+
+/** Cursor moved from .mcp.json to .cursor/mcp.json; the old VISP entry goes. */
+async function planOldClaudeMcpRemoval(
+  fs: ProjectFileSystem,
+  plan: InstallPlan,
+): Promise<Result<void>> {
+  const old = await fs.readTextIfExists(".mcp.json");
+  if (!old.ok) return old;
+  const removal = planMcpUnregistration(old.value, "claude-code");
+  if (removal.status !== "removed" || removal.content === undefined) return ok(undefined);
+  const written = await planConfigWrite(fs, ".mcp.json", old.value, removal.content, plan);
+  if (!written.ok) return written;
+  plan.assets.push({ path: ".mcp.json (old VISP registration)", status: "removed" });
   return ok(undefined);
 }
 

@@ -7,16 +7,14 @@ import { parse, stringify } from "yaml";
 import { hashValue } from "../../../../src/core/hash.js";
 import { registerWorkflowTools } from "../../../../src/mcp/tools/workflow.js";
 import { productJourneyKey } from "../../../../src/workflow/evidence/product-journey.js";
-import { describeProductCheck } from "../../../../src/workflow/product/check-command.js";
+import { productCaptureRunSchema } from "../../../../src/workflow/product/capture-run-model.js";
+import { describeProductCheck } from "../../../../src/workflow/product/check/check-command.js";
 import { runProductAccept, runProductDone } from "../../../../src/workflow/product/evidence.js";
-import {
-  currentJourneyFeedback,
-  productCaptureRunSchema,
-} from "../../../../src/workflow/product/evidence-references.js";
+import { currentJourneyFeedback } from "../../../../src/workflow/product/evidence-references.js";
 import { outstandingFeedback } from "../../../../src/workflow/product/feedback.js";
 import { findFunctionalRepair } from "../../../../src/workflow/product/functional-resolution.js";
 import { closedSlice } from "../../../../src/workflow/product/model.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
 import { runProductNext, runProductStatus } from "../../../../src/workflow/product/status.js";
 import { readProductRecord, saveProductState } from "../../../../src/workflow/product/store.js";
 import {

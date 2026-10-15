@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.2/schema.json",
   "files": {
-    "includes": ["src/**/*.ts", "tests/**/*.ts", "ui/src/**/*.ts"]
+    "includes": ["src/**/*.ts", "tests/**/*.ts", "ui/src/**/*.ts", "src/**/*.script.mjs"]
   },
   "formatter": {
     "enabled": true,
@@ -23,7 +23,9 @@
       "complexity": {
         "noExcessiveCognitiveComplexity": {
           "level": "warn",
-          "options": { "maxAllowedComplexity": 15 }
+          "options": {
+            "maxAllowedComplexity": 15
+          }
         }
       }
     }
@@ -34,5 +36,26 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/**/*.script.mjs"],
+      "formatter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      },
+      "linter": {
+        "rules": {
+          "style": {
+            "useTemplate": "off"
+          },
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          }
+        }
+      }
+    }
+  ]
 }

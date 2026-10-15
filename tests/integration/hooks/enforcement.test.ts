@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmod, mkdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -213,6 +213,96 @@ describe("generated hooks", () => {
     expect(decision(callPreToolUse(".visp/drafts/assessment.json"))).toBe("");
   });
 
+  // Workers backgrounded visp done and accept (15 s commands), then waited up to 9 minutes
+  // in polling loops that never ended on their own.
+  it("sends backgrounded VISP workflow commands to the foreground and leaves servers alone", () => {
+    const run = (command: string, background: boolean) => {
+      const output = execFileSync(
+        process.execPath,
+        [join(project.root, ".visp/hooks/claude-pretooluse.mjs")],
+        {
+          cwd: project.root,
+          input: JSON.stringify({
+            tool_name: "Bash",
+            tool_input: { command, ...(background ? { run_in_background: true } : {}) },
+          }),
+          env: { ...project.env(), CLAUDE_PROJECT_DIR: project.root },
+          encoding: "utf8",
+        },
+      );
+      return output ? JSON.parse(output) : {};
+    };
+    const refusal = (verb: string) =>
+      `Run \`visp ${verb}\` by itself in the foreground, not in a loop: repeat it without run_in_background and with timeout 600000. It prints its result and the next step; while a review runs, \`visp next\` waits for it. If the host moves the command to the background, wait for its completion notice, then run \`visp next\`; do not poll with pgrep, tail -f or sleep loops.`;
+    const loopRefusal = (verb: string) =>
+      `Run \`visp ${verb}\` by itself, not in a loop, with the host's maximum shell timeout. It prints its result and the next step; while a review runs, \`visp next\` waits for it. Do not poll with pgrep, tail -f or sleep loops.`;
+    for (const [command, verb] of <const>[
+      ["visp done --feature 001-x --task T001 2>&1", "done"],
+      ["export PATH=/opt/shim:$PATH && visp accept --feature 001-x", "accept"],
+      ["cd /p && /opt/shim/visp next | head -50", "next"],
+      ["cd x && visp done", "done"],
+      ["npx @visporg/visp-coder done", "done"],
+      ["npx -y @visporg/visp-coder@beta verify", "verify"],
+      [`${join(project.root, ".bin/visp")} status`, "status"],
+      ['bash -c "visp done"', "done"],
+      ["sudo visp done", "done"],
+      ["timeout -s KILL 600 visp done", "done"],
+      ["( visp done )", "done"],
+      ["x=$(visp next); echo $x", "next"],
+      // Arithmetic is not a heredoc: the line after it is still a command.
+      ["echo $((1<<2))\nvisp done", "done"],
+      // A loop elsewhere in the line does not make this a loop around visp.
+      ["for f in tests/*.py; do python $f; done && visp verify", "verify"],
+      ["visp done; for f in *.log; do tail -3 $f; done", "done"],
+    ]) {
+      const response = run(command, true);
+      expect(decision(response), command).toBe("deny");
+      expect(response.hookSpecificOutput.permissionDecisionReason, command).toBe(refusal(verb));
+      expect(decision(run(command, false)), command).toBe("");
+    }
+    // A loop around a workflow command waits up to the host's timeout, in the foreground too.
+    for (const [command, verb] of <const>[
+      ["until visp status | grep -q accepted; do sleep 10; done", "status"],
+      ["while true; do visp next; sleep 30; done", "next"],
+      ["watch -n 5 visp status", "status"],
+      ['until [ "$(visp status --json | jq -r .phase)" = accepted ]; do sleep 10; done', "status"],
+      ["until [ `visp status` = ok ]; do sleep 2; done", "status"],
+      ["bash -c 'until visp status; do sleep 1; done'", "status"],
+    ])
+      for (const background of [true, false]) {
+        const response = run(command, background);
+        expect(decision(response), command).toBe("deny");
+        // Codex runs the same hook and has no run_in_background, so a foreground loop's
+        // refusal names no Claude Code setting.
+        expect(response.hookSpecificOutput.permissionDecisionReason, command).toBe(
+          background ? refusal(verb) : loopRefusal(verb),
+        );
+      }
+    // Only visp itself, as the command, counts: not text that mentions it.
+    for (const command of [
+      'echo "visp done"',
+      "grep visp README.md",
+      "grep -rn visp done",
+      "git commit -m 'visp done'",
+      "visp ui --port 4000",
+      "npm run dev",
+      "while pgrep -f node; do sleep 5; done",
+      'git commit -m "fix: make visp done faster"',
+      "echo '$(visp done)'",
+    ])
+      expect(decision(run(command, true)), command).toBe("");
+    // feature keeps writing acceptance tests after it prints the id the worker continues with,
+    // and a request in its heredoc is text, not commands.
+    expect(
+      decision(
+        run(
+          "visp feature \"Build it\" --source-brief - <<'REQUEST'\nBuild it, then show visp status\nvisp done\nREQUEST",
+          true,
+        ),
+      ),
+    ).toBe("");
+  });
+
   // A worker ran rm -rf .visp acceptance to get past a scope error it could not read.
   it("refuses shell commands that would delete VISP state and leaves others to the host", async () => {
     const shell = (command: string) =>
@@ -397,6 +487,165 @@ describe("generated hooks", () => {
       },
     );
     expect(output).toBe("");
+  });
+
+  /**
+   * `.claude/settings.json` is committed; `.visp/hooks/` and `.visp/state/` are not. A fresh
+   * clone runs the committed commands with no script, which must not block every edit, while
+   * deleting the script during an authorized slice must not switch enforcement off.
+   */
+  describe.skipIf(process.platform === "win32")("settings command without the hook script", () => {
+    const script = () => join(project.root, ".visp/hooks/claude-pretooluse.mjs");
+    const authorizations = () => join(project.root, ".visp/state/product-authorizations");
+
+    async function settingsCommand(event: "edit" | "Bash" | "UserPromptSubmit" | "Stop") {
+      const settings = JSON.parse(await project.read(".claude/settings.json")) as {
+        hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]>;
+      };
+      const entries =
+        event === "edit" || event === "Bash" ? settings.hooks.PreToolUse : settings.hooks[event];
+      const matcher =
+        event === "edit" ? "Edit|Write|NotebookEdit" : event === "Bash" ? "Bash" : undefined;
+      const entry = entries?.find((candidate) => candidate.matcher === matcher);
+      if (!entry?.hooks[0]) throw new Error(`no ${event} entry`);
+      return entry.hooks[0].command;
+    }
+
+    async function runSettings(
+      event: "edit" | "Bash" | "UserPromptSubmit" | "Stop",
+      { root = project.root, env = project.env() }: { root?: string; env?: NodeJS.ProcessEnv } = {},
+    ) {
+      const input =
+        event === "edit"
+          ? { hook_event_name: "PreToolUse", tool_input: { file_path: "src/billing/invoice.ts" } }
+          : event === "Bash"
+            ? { hook_event_name: "PreToolUse", tool_input: { command: "ls" } }
+            : { hook_event_name: event, prompt: "hello" };
+      const result = spawnSync("/bin/sh", ["-c", await settingsCommand(event)], {
+        cwd: root,
+        env: { ...env, CLAUDE_PROJECT_DIR: root },
+        input: JSON.stringify(input),
+        encoding: "utf8",
+      });
+      return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    }
+
+    async function withoutScript<T>(action: () => Promise<T>): Promise<T> {
+      await rename(script(), `${script()}.parked`);
+      try {
+        return await action();
+      } finally {
+        await rename(`${script()}.parked`, script());
+      }
+    }
+
+    async function withAuthorizations<T>(
+      replacement: ((path: string) => Promise<void>) | undefined,
+      action: () => Promise<T>,
+    ): Promise<T> {
+      await rename(authorizations(), `${authorizations()}.parked`);
+      try {
+        await replacement?.(authorizations());
+        return await action();
+      } finally {
+        await rm(authorizations(), { recursive: true, force: true });
+        await rename(`${authorizations()}.parked`, authorizations());
+      }
+    }
+
+    const noNode = () => ({ ...project.env(), PATH: "/nonexistent" });
+
+    it("stays silent with no authorization, with or without node", async () => {
+      await withoutScript(() =>
+        withAuthorizations(undefined, async () => {
+          expect(await runSettings("edit")).toEqual({ status: 0, stdout: "", stderr: "" });
+          expect(await runSettings("edit", { env: noNode() })).toEqual({
+            status: 0,
+            stdout: "",
+            stderr: "",
+          });
+        }),
+      );
+    });
+
+    it("refuses an edit while a slice is authorized, with or without node", async () => {
+      await withoutScript(async () => {
+        for (const env of [project.env(), noNode()]) {
+          const result = await runSettings("edit", { env });
+          expect(result.status).toBe(2);
+          expect(result.stdout).toBe("");
+          expect(result.stderr).toContain("visp install --harness claude-code");
+        }
+      });
+    });
+
+    it("runs the script as before when it is present", async () => {
+      const result = await runSettings("edit");
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual(callPreToolUse("src/billing/invoice.ts"));
+      expect(decision(JSON.parse(result.stdout))).toBe("deny");
+    });
+
+    it("leaves prompts, Stop and shell commands alone", async () => {
+      await withoutScript(async () => {
+        for (const event of ["Bash", "UserPromptSubmit", "Stop"] as const)
+          expect(await runSettings(event)).toEqual({ status: 0, stdout: "", stderr: "" });
+      });
+    });
+
+    it("allows edits in a fresh clone that has not run visp install", async () => {
+      const clone = `${project.root}-clone`;
+      execFileSync("git", ["clone", "--quiet", project.root, clone], { env: project.env() });
+      try {
+        await expect(stat(join(clone, ".claude/settings.json"))).resolves.toBeDefined();
+        await expect(stat(join(clone, ".visp/hooks"))).rejects.toThrow();
+        await expect(stat(join(clone, ".visp/state"))).rejects.toThrow();
+        expect(await runSettings("edit", { root: clone })).toEqual({
+          status: 0,
+          stdout: "",
+          stderr: "",
+        });
+      } finally {
+        await rm(clone, { recursive: true, force: true });
+      }
+    });
+
+    it("fails closed when the authorization directory is a link or unreadable", async () => {
+      const elsewhere = `${project.root}-linked-state`;
+      await mkdir(elsewhere, { recursive: true });
+      try {
+        await withoutScript(async () => {
+          await writeFile(join(elsewhere, "001-scoped-work.json"), "{}");
+          await withAuthorizations(
+            (path) => symlink(elsewhere, path, "dir"),
+            async () => expect((await runSettings("edit")).status).toBe(2),
+          );
+          await rm(join(elsewhere, "001-scoped-work.json"));
+          await withAuthorizations(
+            (path) => symlink(elsewhere, path, "dir"),
+            async () => expect((await runSettings("edit")).status).toBe(2),
+          );
+          // Root reads any directory, so the permission case only means something otherwise.
+          if (process.getuid?.() !== 0) {
+            await withAuthorizations(
+              async (path) => {
+                await mkdir(path);
+                await chmod(path, 0o000);
+              },
+              async () => {
+                try {
+                  expect((await runSettings("edit")).status).toBe(2);
+                } finally {
+                  await chmod(authorizations(), 0o755);
+                }
+              },
+            );
+          }
+        });
+      } finally {
+        await rm(elsewhere, { recursive: true, force: true });
+      }
+    });
   });
 
   it("refuses a commit whose staged files are out of scope", async () => {

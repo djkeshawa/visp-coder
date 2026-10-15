@@ -1,0 +1,28 @@
+name: setup
+description: Node, the pinned pnpm, a cached pnpm store and the locked dependencies
+
+inputs:
+  node-version:
+    description: Node.js major version
+    default: "22"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+    - name: Install the pinned package manager
+      shell: bash
+      run: npm install --global pnpm@11.3.0
+    # The store holds the downloaded packages, so a run with an unchanged lockfile skips the downloads.
+    - id: store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-
+    - shell: bash
+      run: pnpm install --frozen-lockfile --prefer-offline

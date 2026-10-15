@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { observationReproductionState } from "../../../../src/workflow/evidence/observations/identity.js";
 import { resolveTaskSelection } from "../../../../src/workflow/evidence/task-selection.js";
 import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
 import { legacyStore } from "../../support/legacy-store.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";

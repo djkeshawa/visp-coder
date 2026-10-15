@@ -3,8 +3,8 @@ import { err, ok } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableExecutions } from "./assessment.js";
 import { prepareCandidate } from "./candidate.js";
-import { criticSelection } from "./critic-store.js";
-import { reviewerHandoffCandidates } from "./reviewer-handoff.js";
+import { criticSelection } from "./critic/critic-store.js";
+import { reviewerHandoffCandidates } from "./review/reviewer-handoff.js";
 import { type ProductSelection, saveProductState } from "./store.js";
 import { productSourceDigest } from "./subject.js";
 

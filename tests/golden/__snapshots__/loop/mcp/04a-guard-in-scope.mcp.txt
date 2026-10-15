@@ -1,0 +1,4 @@
+> visp_guard {"paths":["src/value.mjs"]}
+--- text
+All 1 paths are in scope.
+--- isError false

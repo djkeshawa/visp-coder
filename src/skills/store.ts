@@ -125,6 +125,11 @@ function normalizeLegacyEvidence(record: SkillRecord): SkillRecord {
   };
 }
 
+/** The record with this id, or undefined when the project has none. */
+export function skillRecord(index: SkillIndex, id: string): SkillRecord | undefined {
+  return index.skills.find((skill) => skill.id === id);
+}
+
 export async function upsert(state: WorkspaceState, record: SkillRecord): Promise<Result<void>> {
   return persistSkillRecord(state, record);
 }
@@ -151,7 +156,7 @@ async function persistLocked(
   if (!checked.ok) return checked;
   const path = checkedIndexPath(state);
   if (!path.ok) return path;
-  const previous = index.value.skills.find((skill) => skill.id === record.id);
+  const previous = skillRecord(index.value, record.id);
   if (previous && hashValue(previous) === hashValue(record) && mutations.length === 0)
     return ok(undefined);
   const skills = index.value.skills.filter((skill) => skill.id !== record.id);

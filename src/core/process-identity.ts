@@ -18,3 +18,13 @@ export async function processIdentity(pid: number): Promise<{
     pidNamespace,
   };
 }
+
+/** Whether a process with this pid exists; one owned by another user still counts. */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === "EPERM";
+  }
+}

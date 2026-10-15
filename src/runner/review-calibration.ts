@@ -2,8 +2,8 @@ import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { canonicalJson, hashValue, sha256 } from "../core/hash.js";
-import { criticConfigSchema } from "../workflow/product/critic-model.js";
-import { productReviewInstructions } from "../workflow/product/review-instructions.js";
+import { criticConfigSchema } from "../workflow/product/critic/critic-model.js";
+import { productReviewInstructions } from "../workflow/product/review/review-instructions.js";
 import { readPreparedComparison } from "./comparison.js";
 
 const absolute = z.string().refine(isAbsolute, "Use an absolute file path");

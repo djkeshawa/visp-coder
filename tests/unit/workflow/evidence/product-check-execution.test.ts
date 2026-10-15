@@ -6,16 +6,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { hashValue } from "../../../../src/core/hash.js";
 import { inspectStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
-import { validateProductCheckCommand } from "../../../../src/workflow/product/check-command.js";
+import { validateProductCheckCommand } from "../../../../src/workflow/product/check/check-command.js";
 import {
   executeProductCheck,
   waivedResult,
-} from "../../../../src/workflow/product/check-execution.js";
+} from "../../../../src/workflow/product/check/check-execution.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { executionSchema, productCheckSchema } from "../../../../src/workflow/product/model.js";
-import { failingTests } from "../../../../src/workflow/product/pinned-dispute-model.js";
-import { disputedFailure } from "../../../../src/workflow/product/pinned-disputes.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
+import { failingTests } from "../../../../src/workflow/product/tester/pinned-dispute-model.js";
+import { disputedFailure } from "../../../../src/workflow/product/tester/pinned-disputes.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
@@ -42,6 +42,9 @@ registerHooks({resolve(specifier, context, next) {
   }
   return next(specifier, context);
 }, load(url, context, next) {
+  // The build inlines script sources imported with ?raw as text; do the same from source.
+  if (url.endsWith('?raw') && fileURLToPath(url).startsWith(${JSON.stringify(sourceDirectory)}))
+    return {format:'module', shortCircuit:true, source:'export default ' + JSON.stringify(readFileSync(fileURLToPath(url), 'utf8')) + ';'};
   if (url.endsWith('.ts') && fileURLToPath(url).startsWith(${JSON.stringify(sourceDirectory)}))
     return {format:'module', shortCircuit:true, source:ts.transpileModule(readFileSync(fileURLToPath(url), 'utf8'), {
       compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2023},
@@ -300,6 +303,7 @@ describe("product command check execution boundary", () => {
   it.each([
     ["visp", "capture", "--from", "journey.json"],
     ["pnpm", "exec", "visp", "done"],
+    ["visp", "uninstall"],
     ["npm", "exec", "--", "visp", "review", "--from", "review.json"],
     ["npx", "visp", "verify"],
     [
@@ -330,6 +334,7 @@ describe("product command check execution boundary", () => {
       ["visp", "brief", "--template"],
       ["visp", "review", "--template"],
       ["visp", "install", "--dry-run"],
+      ["visp", "uninstall", "--dry-run"],
       ["node", "test/helper.mjs", "capture"],
       ["pnpm", "test", "--", "--grep", "visp capture"],
     ])

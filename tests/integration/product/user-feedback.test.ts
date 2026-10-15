@@ -9,7 +9,7 @@ import {
   mcpUserFeedbackHost,
   registerUserFeedbackTool,
 } from "../../../src/mcp/tools/user-feedback.js";
-import { runProductCritic } from "../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../src/workflow/product/critic/critic.js";
 import { runJson } from "../../unit/cli/support/cli.js";
 import { productWorkspace } from "../../unit/support/product-workspace.js";
 

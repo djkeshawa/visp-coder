@@ -1,0 +1,174 @@
+{
+  "tool": "visp_work",
+  "ok": true,
+  "data": {
+    "skills": [],
+    "feedbackPlan": {
+      "observationPlan": {
+        "session": "For browser checks: use the same browser session and one journey.actions array. Captures start fresh.",
+        "sequence": [
+          "Real input → assert settled result → input again → assert settled result",
+          "If applicable: reset/cancel pending work → restart → outlive old completion; new state stays intact"
+        ],
+        "probes": [
+          {
+            "kind": "independent-result",
+            "status": "unassessed"
+          }
+        ],
+        "review": "Compare results to independent expectations; explain non-applicability. Full probes: visp review --template."
+      },
+      "nextProbe": {
+        "kind": "independent-result",
+        "when": "The public value is two",
+        "expected": [
+          "The public value is two"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "question": "State the expected result independently of this implementation. Where input should affect the outcome, exercise two inputs with different expected results (for example hit/miss or valid/invalid) and compare actual settled results. Reject decorative controls or canned success. A state flag or matching preview is not an independent oracle. Identify retained expectations or label your expectation agent-proposed. Link capture outcomes when testing a declared promise; an unlinked exploratory hypothesis is informational and may be retired with a reason, while real defects belong in required findings.",
+        "id": "PROBE-<HEX-1>"
+      },
+      "probeResponses": [],
+      "focus": "implement",
+      "trace": {
+        "question": "Which code owns Return the promised value, and which callers and tests will change?",
+        "command": "visp work --feature 001-return-two-from-the-public --task T001",
+        "guidance": "work refreshes the graph and supplies code. Follow the relevant entry point/callers; an empty or partial graph requires direct code inspection, not invented dependencies."
+      },
+      "findings": [],
+      "findingsRemaining": 0,
+      "gaps": [],
+      "gapsRemaining": 0,
+      "nextCheck": "Exercise the next complete behavior, then inspect whether the result fulfills the original request across relevant quality dimensions."
+    },
+    "feature": "001-return-two-from-the-public",
+    "task": "T001",
+    "originalRequest": "Make the public value module return two instead of one.",
+    "objective": "Return the promised value",
+    "outcomes": [
+      {
+        "id": "O001",
+        "kind": "functional",
+        "statement": "The public value is two",
+        "priority": "must",
+        "provenance": "user-stated",
+        "reviewRequired": false,
+        "expectations": []
+      }
+    ],
+    "examples": [],
+    "decisions": [],
+    "uncertainties": [],
+    "scope": {
+      "allowed": [
+        "src/value.mjs",
+        "checks/value.check.mjs"
+      ],
+      "expected": [
+        "src/value.mjs"
+      ],
+      "forbidden": []
+    },
+    "checks": [
+      {
+        "id": "C001",
+        "command": [
+          "node",
+          "checks/value.check.mjs"
+        ],
+        "outcomes": [
+          "O001"
+        ],
+        "files": [
+          "src/value.mjs",
+          "checks/value.check.mjs"
+        ],
+        "environment": "node"
+      }
+    ],
+    "files": [
+      {
+        "path": "checks/value.check.mjs",
+        "content": "import * as product from \"../src/value.mjs\";\nconst name = process.argv[2] ?? \"value\";\nconst expected = name === \"label\" ? \"two\" : 2;\nif (product[name] === expected) console.log(name + \" is \" + expected);\nelse {\n  console.log(\"expected \" + expected + \", got \" + product[name]);\n  process.exitCode = 1;\n}\n",
+        "truncated": false
+      },
+      {
+        "path": "src/value.mjs",
+        "content": "export const value = 1;\n",
+        "truncated": false
+      }
+    ],
+    "graph": [
+      {
+        "kind": "entity",
+        "key": "checks/value.check.mjs#variable:expected",
+        "path": "checks/value.check.mjs",
+        "name": "expected",
+        "detail": "variable",
+        "startLine": 3,
+        "endLine": 3
+      },
+      {
+        "kind": "entity",
+        "key": "src/value.mjs#variable:value",
+        "path": "src/value.mjs",
+        "name": "value",
+        "detail": "variable",
+        "startLine": 1,
+        "endLine": 1
+      }
+    ],
+    "memory": [],
+    "notes": [],
+    "mayEdit": true,
+    "subjectDigest": "<SHA256-1>",
+    "reviewFeedback": [],
+    "acceptanceBaseline": [],
+    "journeyFailures": [],
+    "journeyFeedback": {
+      "runs": [],
+      "omitted": 0
+    },
+    "feedback": [],
+    "budget": {
+      "tokenBudget": 12000,
+      "estimatedTokens": 1458,
+      "status": "within-budget",
+      "omitted": {
+        "files": 0,
+        "graphRows": 0,
+        "memory": 0,
+        "skills": 0,
+        "feedbackCharacters": 0
+      },
+      "sources": [
+        ".visp/features/001-return-two-from-the-public/brief.yaml",
+        ".visp/features/001-return-two-from-the-public/product-state.json",
+        ".visp/memory"
+      ]
+    },
+    "contextId": "<HEX-2>",
+    "next": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001",
+      "action": "implement",
+      "objective": "Return the promised value",
+      "command": "visp done --feature 001-return-two-from-the-public --task T001",
+      "evidence": [
+        "O001: behavior unassessed; review unassessed",
+        "C001: not executed for current product"
+      ],
+      "mayEdit": true
+    }
+  },
+  "nextCommand": "visp_done {\"feature\":\"001-return-two-from-the-public\",\"task\":\"T001\"}",
+  "nextAction": {
+    "tool": "visp_done",
+    "arguments": {
+      "feature": "001-return-two-from-the-public",
+      "task": "T001"
+    }
+  }
+}

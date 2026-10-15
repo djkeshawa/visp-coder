@@ -31,7 +31,7 @@ import {
   semanticObservationHash,
 } from "../../../src/workflow/evidence/observations/freshness.js";
 import { observationReproductionState } from "../../../src/workflow/evidence/observations/identity.js";
-import { digestBytes, imageDimensions } from "../../../src/workflow/evidence/observations/media.js";
+import { imageDimensions } from "../../../src/workflow/evidence/observations/media.js";
 import {
   attachmentStaleReasons,
   type RecordObservationOptions,
@@ -420,7 +420,7 @@ function attachmentSource(
   return ok({
     sourcePath,
     bytes,
-    digest: digestBytes(bytes),
+    digest: sha256(bytes),
     ...(dimensions ? { dimensions } : {}),
   });
 }
@@ -506,7 +506,7 @@ async function readStoredAttachment(
 ): Promise<Result<string | undefined>> {
   const bytes = await state.files.readBytesIfExists(destination);
   if (!bytes.ok) return bytes;
-  return ok(bytes.value ? digestBytes(Buffer.from(bytes.value)) : undefined);
+  return ok(bytes.value ? sha256(Buffer.from(bytes.value)) : undefined);
 }
 
 function receiptAttachment(source: AttachmentSource, storedPath: string): ObservationAttachment {

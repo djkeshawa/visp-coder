@@ -1,9 +1,13 @@
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { applyFileTransaction } from "../../../src/core/file-transaction.js";
 import { err, ok } from "../../../src/core/result.js";
+import { markOwner } from "../../../src/core/stale-temp.js";
+import { runtimeIdentity } from "../../../src/core/version.js";
 import { type Check, type DoctorRuntime, runChecks } from "../../../src/doctor/checks.js";
 import { applyFixes } from "../../../src/doctor/fix.js";
 import { indexRepository } from "../../../src/graph/index.js";
@@ -73,6 +77,57 @@ it("warns when an active browser journey has no available browser", async () => 
   });
 });
 
+it("lists only the other host's files VISP leaves out of the product", async () => {
+  await workspace.destroy();
+  const product = await productWorkspace();
+  workspace = product.workspace;
+  await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+  workspace.commit("configure Claude Code");
+  const revised = await updateProductBrief(await workspace.state(), {
+    brief: {
+      ...product.brief,
+      slices: product.brief.slices.map((slice) => ({
+        ...slice,
+        scope: { ...slice.scope, allowed: [...slice.scope.allowed, "AGENTS.md"] },
+      })),
+    },
+    reason: "The request asks for an AGENTS.md",
+  });
+  expect(revised.ok).toBe(true);
+  await workspace.write("AGENTS.md", "# Requested\n");
+  await workspace.write("GEMINI.md", "# Imported\n");
+  // Committing them would make them product and deleting them removes another app's files.
+  expect(await check("other host files")).toEqual({
+    name: "other host files",
+    status: "ok",
+    detail: "VISP ignores these as product: GEMINI.md; no action needed",
+  });
+});
+
+it("lists another host's files under the light path's catch-all scope", async () => {
+  await workspace.destroy();
+  const product = await productWorkspace();
+  workspace = product.workspace;
+  await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+  workspace.commit("configure Claude Code");
+  const revised = await updateProductBrief(await workspace.state(), {
+    brief: {
+      ...product.brief,
+      slices: product.brief.slices.map((slice) => ({
+        ...slice,
+        scope: { ...slice.scope, allowed: ["**"] },
+      })),
+    },
+    reason: "Work the whole request as one slice",
+  });
+  expect(revised.ok).toBe(true);
+  await workspace.write("AGENTS.md", "# Imported\n");
+  expect(await check("other host files")).toMatchObject({
+    status: "ok",
+    detail: "VISP ignores these as product: AGENTS.md; no action needed",
+  });
+});
+
 it("reports Codex hook trust as unknown until the project and hooks are trusted", async () => {
   await setConfigScalar((await workspace.state()).paths, "harness", "codex");
   const codexHome = join(workspace.root, "codex-home");
@@ -92,6 +147,24 @@ it("reports Codex hook trust as unknown until the project and hooks are trusted"
     ].join("\n"),
   );
   expect(await check("codex hooks trust")).toMatchObject({ status: "ok" });
+});
+
+// A killed reviewer's sign-in copy should not wait for the next review to be removed.
+it("removes a sign-in copy left by a reviewer that has ended only with --fix", async () => {
+  const temporary = join(workspace.root, "tmp-sandbox");
+  const home = join(temporary, "visp-critic-aBc123", "codex-home");
+  await mkdir(home, { recursive: true });
+  await writeFile(join(home, "auth.json"), "{}");
+  const ended = spawnSync(process.execPath, ["-e", "console.log(process.pid)"], {
+    encoding: "utf8",
+  });
+  await markOwner(home, Number(ended.stdout.trim()));
+  vi.stubEnv("TMPDIR", temporary);
+  // Plain doctor reports; it changes nothing on disk.
+  const report = await runChecks(await workspace.state(), healthyDoctorRuntime);
+  expect(existsSync(home)).toBe(true);
+  await applyFixes(await workspace.state(), report.checks, { guardHandshake: healthyGuard });
+  expect(existsSync(home)).toBe(false);
 });
 
 it("repeats the manual activation step for a generic host", async () => {
@@ -148,6 +221,54 @@ describe("the enforcement check", () => {
     await applyFixes(state, [await check("enforcement")], { guardHandshake: healthyGuard });
     expect(await check("enforcement")).toMatchObject({ status: "ok" });
   });
+  // nvm, npx or a local node_modules install the same build at another path.
+  it("counts hooks the same build wrote from another install path as installed", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    await workspace.write("elsewhere/cli.js", await readFile(runtimeIdentity().executable, "utf8"));
+    const elsewhere = join(workspace.root, "elsewhere/cli.js");
+    for (const hook of [CLAUDE_PRE_TOOL_USE_HOOK, ".git/hooks/pre-commit"]) {
+      const path = join(workspace.root, hook);
+      const content = await readFile(path, "utf8");
+      await writeFile(path, content.replaceAll(runtimeIdentity().executable, elsewhere));
+    }
+    expect(await check("enforcement")).toMatchObject({
+      status: "ok",
+      detail: expect.stringContaining("pre-commit"),
+    });
+    // Another build replaced that install: its guard answers are refused, so not healthy.
+    await workspace.write("elsewhere/cli.js", "// another build\n");
+    expect(await check("enforcement")).toMatchObject({ status: "warn" });
+  });
+  // The committed settings still run; without the script they refuse writes only while a
+  // slice may be authorized, which "not installed" would misdescribe.
+  it("names a deleted edit hook script that settings still run, and restores it", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    await rm(join(workspace.root, CLAUDE_PRE_TOOL_USE_HOOK));
+    const result = await check("enforcement");
+    expect(result).toMatchObject({ status: "warn", recovery: "visp doctor --fix" });
+    expect(result.detail).toContain("script missing");
+    expect(result.detail).toContain("refuses writes while a slice is authorized");
+    await applyFixes(await workspace.state(), [result], { guardHandshake: healthyGuard });
+    expect(await check("enforcement")).toMatchObject({ status: "ok" });
+  });
+  // An earlier build's `node … || exit 2` has no fallback: without the script every edit fails.
+  it("says an earlier build's settings command fails every edit without the script", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "claude-code");
+    await installEverything();
+    const path = join(workspace.root, ".claude/settings.json");
+    const settings = JSON.parse(await readFile(path, "utf8"));
+    settings.hooks.PreToolUse[0].hooks[0].command =
+      'node "$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs" || exit 2';
+    await writeFile(path, JSON.stringify(settings));
+    await rm(join(workspace.root, CLAUDE_PRE_TOOL_USE_HOOK));
+    const result = await check("enforcement");
+    expect(result.detail).toContain("earlier VISP command");
+    expect(result.detail).not.toContain("while a slice is authorized");
+    await applyFixes(await workspace.state(), [result], { guardHandshake: healthyGuard });
+    expect(await check("enforcement")).toMatchObject({ status: "ok" });
+  });
   it("detects and repairs a deleted Codex MCP registration", async () => {
     await setConfigScalar((await workspace.state()).paths, "harness", "codex");
     const state = await workspace.state();
@@ -159,6 +280,40 @@ describe("the enforcement check", () => {
     const repairs = await applyFixes(refreshed, [await check("mcp registration")]);
     expect(repairs.some((repair) => repair.done)).toBe(true);
     expect(await check("mcp registration")).toMatchObject({ status: "ok" });
+  });
+
+  // `doctor --fix` cannot rewrite a table VISP did not write, so advising it looped.
+  it("accepts a hand-added Codex MCP table and ends its advice for one it cannot use", async () => {
+    await setConfigScalar((await workspace.state()).paths, "harness", "codex");
+    const state = await workspace.state();
+    const installed = await installHarness(state.paths, { harness: "codex", hooks: [], mcp: true });
+    expect(installed.ok).toBe(true);
+    const config = join(workspace.root, CODEX_CONFIG_FILE);
+    const cli = JSON.stringify(runtimeIdentity().executable);
+    await writeFile(
+      config,
+      `[mcp_servers.visp]\ncommand = "node"\nargs = [${cli}, "serve", "--mcp"]\n`,
+    );
+    expect(await check("mcp registration")).toMatchObject({ status: "ok" });
+
+    await writeFile(config, '[mcp_servers.visp]\ncommand = "visp"\nargs = ["serve", "--mcp"]\n');
+    const result = await check("mcp registration");
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("[mcp_servers.visp]");
+    expect(result.recovery).not.toContain("--fix");
+    expect(result.recovery).toContain(`args = [${cli}, "serve", "--mcp"]`);
+    const repairs = await applyFixes(await workspace.state(), [result]);
+    const detail = repairs.map((repair) => repair.detail).join(" ");
+    expect(detail).not.toContain("add [mcp_servers.visp] manually");
+    expect(detail).toContain(`args = [${cli}, "serve", "--mcp"]`);
+
+    // A table VISP cannot read is not said to start another build.
+    await writeFile(config, '[mcp_servers.visp]\ncommand = "node"\nenv.TOKEN = "x"\n');
+    const unreadable = await check("mcp registration");
+    expect(unreadable.detail).toContain("VISP could not read");
+    expect(unreadable.detail).not.toContain("does not start this VISP build");
+    const repaired = await applyFixes(await workspace.state(), [unreadable]);
+    expect(repaired.map((repair) => repair.detail).join(" ")).toContain("VISP could not read");
   });
 
   it("keeps a project or environment recovery instead of prescribing a global reinstall", async () => {

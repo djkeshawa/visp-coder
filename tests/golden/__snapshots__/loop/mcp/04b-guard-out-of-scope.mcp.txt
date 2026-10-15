@@ -1,0 +1,7 @@
+> visp_guard {"paths":["src/value.mjs","src/other.mjs"]}
+--- text
+Refused: 1 of 2 paths are out of scope.
+  - src/other.mjs is outside the allowed files of T001
+
+Authorized tasks: T001
+--- isError false

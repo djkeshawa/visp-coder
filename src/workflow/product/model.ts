@@ -19,10 +19,29 @@ import { experimentResolutionsSchema } from "./experiment-model.js";
 import { productFeedbackSchema } from "./feedback-model.js";
 import { journeyRetirementSchema } from "./journey-ownership.js";
 import { reproductionSchema } from "./reproduction-model.js";
-import { generatedSourceReferencesSchema } from "./review-delivery-validation.js";
+import { generatedSourceReferencesSchema } from "./review/review-delivery-validation.js";
 import { userFeedbackRecordSchema } from "./user-feedback-model.js";
 
 const id = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/);
+/** An image a check writes, relative to the project root, delivered to the reviewer when it passes. */
+export const checkImagePathSchema = z
+  .string()
+  .regex(
+    /\.(?:png|jpe?g|webp|gif|svg)$/i,
+    "a check image must be a .png, .jpg, .webp, .gif or .svg file",
+  )
+  .refine(
+    (path) => !/^(?:[A-Za-z]:)?[\\/]/.test(path) && !path.split(/[\\/]/).includes(".."),
+    "a check image is a path inside the project",
+  )
+  .refine(
+    (path) =>
+      path
+        .split(/[\\/]/)
+        .find((part) => part && part !== ".")
+        ?.toLowerCase() !== ".visp",
+    "a check image is a product output, not a file under .visp/",
+  );
 const provenance = z.enum(["user-stated", "independent", "agent-proposed", "legacy"]);
 const productOutcomeSchema = z
   .object({
@@ -71,6 +90,7 @@ export const productCheckSchema = z
     timeoutMs: z.number().int().positive().max(3_600_000).optional(),
     environment: z.enum(["node", "browser", "other"]).default("other"),
     environmentVariables: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
+    images: z.array(checkImagePathSchema).min(1).max(4).optional(),
   })
   .strict();
 
@@ -148,6 +168,7 @@ export const productBriefSchema = productBriefFieldsSchema.superRefine((brief, c
   validateBriefIds(brief, context);
   validateBriefReferences(brief, context);
   validateSliceCycles(brief, context);
+  validateImageChecks(brief, context);
 });
 
 /** Authored input exposes the same fields while leaving identifier allocation to VISP. */
@@ -218,6 +239,43 @@ function validateBriefReferences(brief: ProductBrief, context: z.RefinementCtx):
         });
   }
   validateSliceReferences(brief, context);
+}
+
+/**
+ * A check that declares images delivers a picture for review, so how the picture must look is
+ * part of the contract: it covers an experience outcome the reviewer judges from the image.
+ * Technical outcomes alone (the file is written, the grid has a size) cannot fail on a scene
+ * that does not show what the request names.
+ */
+function validateImageChecks(brief: ProductBrief, context: z.RefinementCtx): void {
+  if (brief.incomplete) return;
+  const experiences = new Set(
+    brief.outcomes.filter((entry) => entry.kind === "experience").map((entry) => entry.id),
+  );
+  for (const check of brief.checks)
+    if (check.images?.length && typeof check.command === "object" && !Array.isArray(check.command))
+      context.addIssue({
+        code: "custom",
+        path: ["checks"],
+        message: `${check.id} is a browser journey, whose captures already reach the reviewer; remove its images, which only a command check writes`,
+      });
+    else if (check.images?.length && !check.outcomes.some((outcome) => experiences.has(outcome)))
+      context.addIssue({
+        code: "custom",
+        path: ["checks"],
+        message: `${check.id} declares images, so it must cover an experience outcome: add an outcome with kind: experience naming what the picture must show (each object, subject and concrete look the request names, recognizable), and list its ID in the outcomes of ${check.id}${checkSlices(brief, check.id)}`,
+      });
+}
+
+/** " and of slice T001" for the slices that run a check, so the outcome is reviewed with them. */
+function checkSlices(brief: ProductBrief, check: string): string {
+  const slices = brief.slices
+    .filter((slice) => slice.checks.includes(check))
+    .map((slice) => slice.id);
+  if (!slices.length) return "";
+  const listed =
+    slices.length === 1 ? slices[0] : `${slices.slice(0, -1).join(", ")} and ${slices.at(-1)}`;
+  return ` and of slice${slices.length === 1 ? "" : "s"} ${listed}`;
 }
 
 function validateSliceReferences(brief: ProductBrief, context: z.RefinementCtx): void {
@@ -349,6 +407,13 @@ export function sliceDigest(brief: ProductBrief, slice: ProductSlice): string {
   });
 }
 
+/** A slice that may write a page or component file builds a web UI, observed through journeys. */
+export function hasWebUiScope(slices: readonly ProductSlice[]): boolean {
+  return slices.some((slice) =>
+    slice.scope.allowed.some((path) => /\.(?:html?|jsx|tsx|vue|svelte)$/.test(path)),
+  );
+}
+
 export function checksFor(brief: ProductBrief, slice?: ProductSlice): ProductCheck[] {
   return slice ? brief.checks.filter((check) => slice.checks.includes(check.id)) : brief.checks;
 }
@@ -428,6 +493,8 @@ export const executionSchema = z
     provenance: z.enum(["supervisor-executed", "supervisor-reused"]),
     assertions: z.enum(["agent-reported", "runner-observed"]),
     captureRunId: z.string().optional(),
+    /** Capture IDs of the images a passing command check declared. */
+    checkImages: z.array(z.string()).optional(),
     environmentDigest: z.string().optional(),
     comparisonEnvironment: z.string().optional(),
     reusedEnvironmentFailure: z.boolean().optional(),

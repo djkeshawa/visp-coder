@@ -3,6 +3,7 @@ import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok } from "../../core/result.js";
 import { browserJourneySchema } from "../../testing/browser-journey.js";
+import { cliCommand } from "../next-action.js";
 import { journeyExpectationSchema, journeyOwnershipIndex } from "../product/journey-ownership.js";
 import type { ProductRecord } from "../product/store.js";
 import { productContractDigest } from "../product/subject.js";
@@ -90,7 +91,7 @@ export function recordedReplayRuns(record: ProductRecord, task?: string) {
 }
 
 export function replayCommand(feature: string, runId: string, task?: string) {
-  return `visp capture --feature ${feature}${task ? ` --task ${task}` : ""} --replay=${runId}`;
+  return cliCommand("capture", { feature, task, replay: { joined: runId } });
 }
 
 /** Optional rechecks use recorded actions; no planning document or new completion requirement. */
@@ -130,7 +131,7 @@ export function replaySuggestions(record: ProductRecord, subject: string, task?:
 }
 
 export function replayBatchCommand(feature: string, runId: string, task?: string) {
-  return `visp capture --feature ${feature}${task ? ` --task ${task}` : ""} --replay-batch=${runId}`;
+  return cliCommand("capture", { feature, task, "replay-batch": { joined: runId } });
 }
 
 /** Same route and control targets identify nearby transitions; never invent replacement assertions. */

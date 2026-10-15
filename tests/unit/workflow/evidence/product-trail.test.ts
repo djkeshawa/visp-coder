@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
-import { compactTrail, pruneProductTrail } from "../../../../src/workflow/product/trail.js";
+import { compactTrail } from "../../../../src/workflow/product/trail.js";
+import { pruneProductTrail } from "../../../../src/workflow/product/trail-prune.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";
 
@@ -54,4 +55,29 @@ it("prunes orphan artifacts and preserves candidates referenced by critic histor
   expect(project.git("check-ignore", `${base}/captures/orphan.png`).trim()).toContain(
     "captures/orphan.png",
   );
+});
+
+/**
+ * Capture runs lived twice: in the committed product-state.json, which every reader uses,
+ * and in a git-ignored captures/run-<id>.json that nothing read. Files earlier builds wrote
+ * repeat what the state holds, so pruning removes them even while the run is referenced.
+ */
+it("removes the duplicate run files earlier builds wrote, even for referenced runs", async () => {
+  const setup = await productWorkspace();
+  project = setup.workspace;
+  const base = `.visp/features/${setup.brief.feature}`;
+  const record = await readProductRecord(await project.state());
+  if (!record.ok) throw new Error(record.error.message);
+  const run = { id: "CAPRUN-kept", status: "completed" };
+  const statePath = join(project.root, base, "product-state.json");
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  await project.write(
+    `${base}/product-state.json`,
+    `${JSON.stringify({ ...state, captureRuns: [run], controls: [{ run: "CAPRUN-kept" }] }, null, 2)}\n`,
+  );
+  await project.write(`${base}/captures/run-CAPRUN-kept.json`, JSON.stringify(run));
+  const result = await pruneProductTrail(await project.state());
+  expect(result).toMatchObject({ ok: true, value: { removed: 1, captureRuns: 1 } });
+  const after = await readProductRecord(await project.state());
+  expect(after.ok && after.value.state.captureRuns).toEqual([run]);
 });

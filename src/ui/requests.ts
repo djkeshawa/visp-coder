@@ -1,4 +1,5 @@
 import { ok, type Result } from "../core/result.js";
+import { cliCommand } from "../workflow/next-action.js";
 import { readProductRecord } from "../workflow/product/store.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import type { FeatureSummary, UiNext, UiQuestion, UiRequest, UiRequests } from "./contract.js";
@@ -62,7 +63,7 @@ async function pendingQuestions(
 
 /** The CLI's own spelling, kept next to the server so the page never guesses it. */
 export function replyCommand(feature: string, id: string): string {
-  return `visp critic feedback --feature ${feature} --id ${id} --reply`;
+  return cliCommand("critic", { feature, id, reply: true }, ["feedback"]);
 }
 
 export function nextRequest(feature: FeatureSummary, next: UiNext): UiRequest | undefined {
@@ -75,7 +76,7 @@ export function nextRequest(feature: FeatureSummary, next: UiNext): UiRequest | 
       title: "Review budget spent with findings still open",
       detail:
         "The independent reviewer's findings were not all resolved. Read the handoff and decide what happens next.",
-      command: `visp pr --feature ${feature.id}`,
+      command: cliCommand("pr", { feature: feature.id }),
     };
   if (next.completion === "unresolved-environment")
     return {
@@ -94,7 +95,7 @@ export function nextRequest(feature: FeatureSummary, next: UiNext): UiRequest | 
       title: "Ready for acceptance",
       detail:
         "Every slice is closed. Look over the outcomes and the handoff before the agent accepts the feature.",
-      command: next.command ?? `visp accept --feature ${feature.id}`,
+      command: next.command ?? cliCommand("accept", { feature: feature.id }),
     };
   return undefined;
 }

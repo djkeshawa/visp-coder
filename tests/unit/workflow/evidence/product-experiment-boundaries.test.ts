@@ -14,7 +14,7 @@ import { initialProductState, productBriefSchema } from "../../../../src/workflo
 import {
   validateReviewSelection,
   validateSelectedImages,
-} from "../../../../src/workflow/product/review-selection.js";
+} from "../../../../src/workflow/product/review/review-selection.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 

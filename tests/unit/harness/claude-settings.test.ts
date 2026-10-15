@@ -7,6 +7,7 @@ import { ok } from "../../../src/core/result.js";
 import {
   CLAUDE_SETTINGS_FILE,
   hookCommand,
+  inspectPreToolUseResidue,
   PRE_TOOL_USE_MATCHER,
   planPreToolUseRegistration,
   planPreToolUseUnregistration,
@@ -46,10 +47,40 @@ async function read(): Promise<Settings> {
   return JSON.parse(await readFile(join(root, CLAUDE_SETTINGS_FILE), "utf8"));
 }
 
+const EDIT_COMMAND = [
+  'h="$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs"',
+  'if [ -f "$h" ]; then node "$h" || exit 2; else s="$CLAUDE_PROJECT_DIR/.visp/state"; r=',
+  'for d in "$s" "$s/product-authorizations" "$s/implement-allowed"; do if [ -L "$d" ] || { [ -e "$d" ] && ! { [ -r "$d" ] && [ -x "$d" ]; }; }; then r=1; fi; done',
+  'for m in "$s"/product-authorizations/*.json "$s"/implement-allowed/*.json; do if [ -e "$m" ] || [ -L "$m" ]; then r=1; fi; done',
+  'if [ -n "$r" ]; then echo "visp: .visp/hooks/claude-pretooluse.mjs is missing and a VISP slice may be authorized, so this write was refused. Run visp install --harness claude-code (or visp doctor --fix), then retry. Do not edit .claude/settings.json." >&2; exit 2; fi; fi',
+].join("; ");
+const SESSION_COMMAND =
+  'h="$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs"; [ ! -f "$h" ] || node "$h"';
+
+describe("hookCommand", () => {
+  /**
+   * `.claude/settings.json` is committed but `.visp/hooks/` is not, so a fresh clone runs
+   * these commands with no script. Claude Code runs shell-form hooks with sh, or Git Bash on
+   * Windows, so one POSIX string serves every platform.
+   */
+  it.each(["linux", "darwin", "win32"])("writes the same POSIX command on %s", (platform) => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: platform });
+    try {
+      expect(hookCommand(HOOK_PATH, true)).toBe(EDIT_COMMAND);
+      expect(hookCommand(HOOK_PATH, false)).toBe(SESSION_COMMAND);
+    } finally {
+      if (original) Object.defineProperty(process, "platform", original);
+    }
+  });
+});
+
 describe("registerPreToolUseHook", () => {
   it.skipIf(process.platform === "win32")(
     "turns an unstartable edit hook into a blocking exit, and no other hook",
-    () => {
+    async () => {
+      await mkdir(join(root, ".visp/hooks"), { recursive: true });
+      await writeFile(join(root, HOOK_PATH), "process.exit(0);\n");
       const statusOf = (failClosed: boolean): number | undefined => {
         try {
           execFileSync("/bin/sh", ["-c", hookCommand(HOOK_PATH, failClosed)], {
@@ -427,10 +458,16 @@ describe("session hooks", () => {
   });
 });
 
-// Older builds gave every entry `|| exit 2`; uninstall and reinstall find them by reference.
-describe("entries an older build generated", () => {
+// Older builds ran the script directly, with or without `|| exit 2`, and wrote cmd.exe syntax
+// on Windows; uninstall and reinstall still recognize those entries as their own.
+describe.each([
+  'node "$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs" || exit 2',
+  'node "$CLAUDE_PROJECT_DIR/.visp/hooks/claude-pretooluse.mjs"',
+  'node "%CLAUDE_PROJECT_DIR%\\.visp\\hooks\\claude-pretooluse.mjs" || exit /b 2',
+  'node "%CLAUDE_PROJECT_DIR%\\.visp\\hooks\\claude-pretooluse.mjs"',
+])("entries an older build generated: %s", (command) => {
   const old = (extra: Record<string, unknown> = {}) => ({
-    hooks: [{ type: "command", command: `${hookCommand(HOOK_PATH, false)} || exit 2`, ...extra }],
+    hooks: [{ type: "command", command, ...extra }],
   });
   const legacy = {
     PreToolUse: [
@@ -440,6 +477,29 @@ describe("entries an older build generated", () => {
     UserPromptSubmit: [old()],
     Stop: [old({ timeout: 180 })],
   };
+
+  it("are reported as not current, so doctor sends the project to reinstall", async () => {
+    await write(JSON.stringify({ hooks: legacy }));
+    const result = await preToolUseRegistration(root, HOOK_PATH);
+    expect(result.ok && result.value).toBe("customized");
+  });
+
+  it("are replaced without --force, and the result is current", () => {
+    const planned = planPreToolUseRegistration(JSON.stringify({ hooks: legacy }), HOOK_PATH, false);
+    if (!planned.ok) throw new Error(planned.error.message);
+    expect(planned.value.status).toBe("replaced");
+    const next = JSON.parse(planned.value.content ?? "null") as {
+      hooks: Record<string, HookEntry[]>;
+    };
+    expect(next.hooks.PreToolUse?.[0]?.hooks?.[0]?.command).toBe(EDIT_COMMAND);
+    const again = planPreToolUseRegistration(planned.value.content, HOOK_PATH, false);
+    expect(again.ok && again.value).toEqual({ status: "current" });
+  });
+
+  it("are removable residue when the project switches host", () => {
+    const residue = inspectPreToolUseResidue(JSON.stringify({ hooks: legacy }), HOOK_PATH);
+    expect(residue).toEqual({ exact: true, current: false, customized: false, malformed: false });
+  });
 
   it("are removed on uninstall, with the project's own hooks kept", () => {
     const notify = { hooks: [{ type: "command", command: "./notify.sh" }] };

@@ -58,15 +58,39 @@ export function isDerivedByproduct(path: string): boolean {
  * whatever the configuration blocks. The scope check reads the same snapshot.
  */
 export function byproductProtection(workspace: WorkspaceState, brief?: ProductBrief): string[] {
-  return [
-    ...sourceInputPatterns(workspace, brief),
-    ...(brief?.slices.flatMap((slice) => slice.scope.forbidden) ?? []),
-    ...workspace.config.workflow.blockedPaths.flatMap((rule) => [
-      rule,
-      `${rule}/**`,
-      ...(rule.includes("/") ? [] : [`**/${rule}`, `**/${rule}/**`]),
-    ]),
-  ];
+  const protection = hostFileProtection(workspace, brief);
+  return [...protection.named, ...protection.guarded];
+}
+
+/**
+ * The same protection, split: `named` are the scope, check inputs and forbidden paths, which
+ * protect another host's file only when they name it; `guarded` are blocked paths, which
+ * always do.
+ */
+export function hostFileProtection(
+  workspace: WorkspaceState,
+  brief?: ProductBrief,
+): HostFileProtection {
+  return {
+    named: [
+      ...sourceInputPatterns(workspace, brief),
+      ...(brief?.slices.flatMap((slice) => slice.scope.forbidden) ?? []),
+    ],
+    guarded: blockedPatterns(workspace),
+  };
+}
+
+function blockedPatterns(workspace: WorkspaceState): string[] {
+  return workspace.config.workflow.blockedPaths.flatMap((rule) => [
+    rule,
+    `${rule}/**`,
+    ...(rule.includes("/") ? [] : [`**/${rule}`, `**/${rule}/**`]),
+  ]);
+}
+
+export interface HostFileProtection {
+  readonly named: readonly string[];
+  readonly guarded: readonly string[];
 }
 
 /** Only an untracked, undeclared, unprotected listed path is skipped; tracked files are hashed. */
@@ -76,4 +100,79 @@ export function skippedByproduct(
   protection: readonly string[],
 ): boolean {
   return !tracked && isDerivedByproduct(path) && !matchesAny(path, protection);
+}
+
+/** Instruction and settings files each coding host reads, by the `harness` names visp.yml uses. */
+const HOST_FILES: Record<string, { files: readonly string[]; directories: readonly string[] }> = {
+  "claude-code": { files: ["CLAUDE.md", "CLAUDE.local.md"], directories: [".claude"] },
+  codex: { files: ["AGENTS.md", "AGENTS.override.md"], directories: [".codex", ".agents"] },
+  opencode: { files: ["AGENTS.md", "opencode.json"], directories: [".opencode"] },
+  cursor: { files: ["AGENTS.md", ".cursorrules"], directories: [".cursor"] },
+  copilot: {
+    files: ["AGENTS.md", ".github/copilot-instructions.md"],
+    directories: [".github/instructions"],
+  },
+  gemini: { files: ["GEMINI.md"], directories: [".gemini"] },
+  windsurf: { files: [".windsurfrules"], directories: [".windsurf"] },
+};
+
+function hostFile(
+  path: string,
+  host: { files: readonly string[]; directories: readonly string[] },
+) {
+  return (
+    host.files.includes(path) ||
+    host.directories.some((directory) => path === directory || path.startsWith(`${directory}/`))
+  );
+}
+
+/**
+ * Another coding host's instructions or settings, which the configured host never reads.
+ * A desktop app importing a Claude Code project wrote AGENTS.md, .codex/ and .agents/ into
+ * projects mid-run; as product files they made an acceptance stale and failed `visp done`
+ * with a scope violation the worker could not resolve. Only untracked files are skipped,
+ * never the configured host's own files, which are VISP's enforcement surface, and never a
+ * protected path: one a slice scope or check names (a request to write an AGENTS.md), forbids
+ * or the configuration blocks, so the scope check still sees it. A catch-all or extension
+ * pattern (`**`, the light path's scope, or `*.md`) does not name it.
+ */
+export function foreignHostFile(
+  path: string,
+  tracked: boolean,
+  harness: string,
+  protection: HostFileProtection,
+): boolean {
+  const own = HOST_FILES[harness];
+  if (tracked || !own) return false;
+  const normalized = normalizePath(path);
+  // Most paths are no host's file; the protection patterns are matched only for those that are.
+  const foreign =
+    !hostFile(normalized, own) &&
+    Object.entries(HOST_FILES).some(
+      ([name, host]) => name !== harness && hostFile(normalized, host),
+    );
+  return (
+    foreign &&
+    !matchesAny(path, protection.guarded) &&
+    !protection.named.some((pattern) => namesPath(pattern, normalized))
+  );
+}
+
+// The pattern matches the path through a literal part that is the path or a parent of it:
+// `AGENTS.md`, `.codex/**` and `.codex/` name `.codex/hooks.json`, and a literal after a
+// leading `**/` names the file at any depth; `**` and `*.md` name nothing.
+function namesPath(pattern: string, path: string): boolean {
+  const normalized = normalizePath(pattern).replace(/^(?:\.\/)+/, "");
+  const directory = normalized.endsWith("/");
+  const anywhere = /^(?:\*\*\/)+/.exec(normalized)?.[0] ?? "";
+  const segments = normalized.slice(anywhere.length).replace(/\/$/, "").split("/");
+  const glob = segments.findIndex((segment) => /[*?[\]{}!]/.test(segment));
+  const literal = (glob < 0 ? segments : segments.slice(0, glob)).join("/");
+  if (!literal) return false;
+  const parts = path.split("/");
+  const suffixes = anywhere ? parts.map((_, at) => parts.slice(at).join("/")) : [path];
+  return (
+    suffixes.some((suffix) => suffix === literal || suffix.startsWith(`${literal}/`)) &&
+    matchesAny(path, [directory ? `${normalized}**` : normalized])
+  );
 }

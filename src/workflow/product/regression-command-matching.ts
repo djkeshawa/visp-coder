@@ -1,4 +1,5 @@
 import { basename, dirname, relative, resolve } from "node:path";
+import { normalizePath } from "../../core/patterns.js";
 
 /** Resolve complete arguments, never a basename or a substring of another test label. */
 export function namesExistingTest(command: string, path: string, root: string): boolean {
@@ -98,7 +99,7 @@ function argumentNamesTest(
   if (argument.includes("/") && resolve(directory, argument) === resolve(root, path)) return true;
   if (!/^[\w]+(?:\.[\w]+)+$/.test(argument)) return false;
   for (const moduleRoot of roots) {
-    const local = relative(moduleRoot, resolve(root, path)).replaceAll("\\", "/");
+    const local = normalizePath(relative(moduleRoot, resolve(root, path)));
     if (local.startsWith("../")) continue;
     const module = local.replace(/\.[^/.]+$/, "").replaceAll("/", ".");
     if (module.includes(".") && (argument === module || argument.startsWith(`${module}.`)))

@@ -1,4 +1,5 @@
-import type { UiChange, UiEnvelope, UiError } from "../../src/ui/contract.js";
+import type { UiEnvelope, UiError } from "../../src/ui/contract.js";
+import type { EventStream } from "./live.js";
 
 export type Loaded<T> =
   | { readonly ok: true; readonly data: T }
@@ -46,25 +47,15 @@ export async function load<T>(path: string): Promise<Loaded<T>> {
   };
 }
 
-export type LiveState = "connecting" | "live" | "paused";
-
-/** Change events name what to re-fetch; the page never trusts them for data. */
-export function subscribe(
-  onChange: (change: UiChange) => void,
-  onState: (state: LiveState) => void,
-): () => void {
+/** Opens the server's event stream, as the slice of `EventSource` that `startLive` uses. */
+export function openEvents(): EventStream {
   const source = new EventSource("/api/v1/events", { withCredentials: true });
-  onState("connecting");
-  source.addEventListener("hello", () => onState("live"));
-  source.addEventListener("change", (event) => {
-    try {
-      onChange(JSON.parse((event as MessageEvent<string>).data) as UiChange);
-    } catch {
-      // A malformed event is ignored; the next one or the periodic refresh catches up.
-    }
-  });
-  source.addEventListener("error", () =>
-    onState(source.readyState === EventSource.CLOSED ? "paused" : "connecting"),
-  );
-  return () => source.close();
+  return {
+    addEventListener: (type, listener) =>
+      source.addEventListener(type, (event) => listener(event as MessageEvent<string>)),
+    close: () => source.close(),
+    get readyState() {
+      return source.readyState;
+    },
+  };
 }

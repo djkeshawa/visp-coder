@@ -1,7 +1,6 @@
 import { Command } from "commander";
 import { EXIT, PRODUCT_NAME } from "../../core/constants.js";
 import { vispError } from "../../core/errors.js";
-import { serveStdio } from "../../mcp/server.js";
 import { isJson, options, projectRoot } from "../context.js";
 import { emitError } from "../output.js";
 
@@ -29,6 +28,8 @@ export function serveCommand(): Command {
         return;
       }
 
+      // Loaded here: the MCP SDK is the largest part of the CLI's startup, and only serving needs it.
+      const { serveStdio } = await import("../../mcp/server.js");
       const result = await serveStdio(projectRoot(opts));
       if (!result.ok) {
         process.exitCode = emitError("serve", result.error, { json: isJson(opts) });

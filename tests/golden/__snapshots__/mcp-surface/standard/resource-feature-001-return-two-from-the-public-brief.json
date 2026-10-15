@@ -1,0 +1,9 @@
+{
+  "contents": [
+    {
+      "uri": "visp://feature/001-return-two-from-the-public/brief",
+      "mimeType": "application/json",
+      "text": "{\n  \"version\": 2,\n  \"feature\": \"001-return-two-from-the-public\",\n  \"incomplete\": false,\n  \"originalRequest\": \"Make the public value module return two instead of one.\",\n  \"goal\": \"Return two from the public value module\",\n  \"outcomes\": [\n    {\n      \"id\": \"O001\",\n      \"kind\": \"functional\",\n      \"statement\": \"The public value is two\",\n      \"priority\": \"must\",\n      \"provenance\": \"user-stated\",\n      \"reviewRequired\": false,\n      \"expectations\": []\n    }\n  ],\n  \"examples\": [],\n  \"decisions\": [],\n  \"uncertainties\": [],\n  \"checks\": [\n    {\n      \"id\": \"C001\",\n      \"command\": [\n        \"node\",\n        \"checks/value.check.mjs\"\n      ],\n      \"outcomes\": [\n        \"O001\"\n      ],\n      \"files\": [\n        \"src/value.mjs\",\n        \"checks/value.check.mjs\"\n      ],\n      \"environment\": \"node\"\n    }\n  ],\n  \"slices\": [\n    {\n      \"id\": \"T001\",\n      \"goal\": \"Return the promised value\",\n      \"outcomes\": [\n        \"O001\"\n      ],\n      \"dependsOn\": [],\n      \"scope\": {\n        \"allowed\": [\n          \"src/value.mjs\",\n          \"checks/value.check.mjs\"\n        ],\n        \"expected\": [\n          \"src/value.mjs\"\n        ],\n        \"forbidden\": []\n      },\n      \"checks\": [\n        \"C001\"\n      ],\n      \"approach\": \"\"\n    }\n  ],\n  \"acceptanceBaseline\": []\n}"
+    }
+  ]
+}

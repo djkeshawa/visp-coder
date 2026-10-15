@@ -1,9 +1,3 @@
-import { createHash } from "node:crypto";
-
-export function digestBytes(bytes: Buffer): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 export function imageDimensions(bytes: Buffer): { width: number; height: number } | undefined {
   return (
     pngDimensions(bytes) ?? gifDimensions(bytes) ?? jpegDimensions(bytes) ?? webpDimensions(bytes)

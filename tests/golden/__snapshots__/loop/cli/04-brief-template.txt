@@ -1,0 +1,20 @@
+$ visp brief --template
+--- stdout
+{
+  "version": 2,
+  "feature": "001-return-two-from-the-public",
+  "incomplete": false,
+  "originalRequest": "Make the public value module return two instead of one.",
+  "goal": "Return two from the public value module",
+  "outcomes": [],
+  "examples": [],
+  "decisions": [],
+  "uncertainties": [],
+  "checks": [],
+  "slices": [],
+  "acceptanceBaseline": []
+}
+
+--- stderr
+
+--- exit 0

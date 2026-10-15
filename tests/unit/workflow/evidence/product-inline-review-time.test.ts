@@ -6,17 +6,15 @@ import {
   type CriticPacket,
   type ProductCriticHost,
   runProductCritic,
-} from "../../../../src/workflow/product/critic.js";
+} from "../../../../src/workflow/product/critic/critic.js";
+import { updateProductBrief } from "../../../../src/workflow/product/index.js";
 import {
   inlineReview,
   runProductDoneReviewed,
-} from "../../../../src/workflow/product/done-review.js";
-import {
-  type IndependentTester,
-  inlineTests,
-} from "../../../../src/workflow/product/independent-tests.js";
-import { updateProductBrief } from "../../../../src/workflow/product/index.js";
-import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
+} from "../../../../src/workflow/product/review/done-review.js";
+import type { ProductReviewBundle } from "../../../../src/workflow/product/review/review.js";
+import type { IndependentTester } from "../../../../src/workflow/product/tester/independent-tests-model.js";
+import { inlineTests } from "../../../../src/workflow/product/tester/independent-tests-starters.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { legacyReview } from "../../support/legacy-critic.js";
 import { moduleFeedback } from "../../support/product-feedback.js";

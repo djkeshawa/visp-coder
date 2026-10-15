@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { resolveCommand } from "../core/exec.js";
-import { isBrowserCheckCommand } from "./product/check-command.js";
+import { isBrowserCheckCommand } from "./product/check/check-command.js";
 import type { ProductCheck } from "./product/model.js";
 
 export const CHECK_OUTPUT_GUIDANCE =

@@ -1,19 +1,11 @@
 import type { ExecutionStatus } from "./contract.js";
+import { FAILURE, stripAnsi, ZERO_FAILURES } from "./output-patterns.js";
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences start with ESC.
-const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
-const FAILURE = /\b(?:not ok|fail(?:ed|ure|ing)?|error|assert(?:ion)?(?:error)?)\b|✖|×/i;
-/** Summary lines that name a failure count of zero, such as `ℹ fail 0` or `0 failed`. */
-const ZERO_FAILURES = /\bfail(?:ed|ures?)?\s*[:=]?\s*0\b|\b0\s+fail(?:ed|ures?)?\b/i;
 const PASS_COUNT = /\bpass(?:ed|es)?\s*[:=]?\s*\d+\b|\b\d+\s+pass(?:ed|ing)?\b/i;
 const TEST_COUNT = /\btests?\s*[:=]?\s*\d+\b|\b\d+\s+tests?\b/i;
 /** Status glyphs test runners print before summary lines. */
 const LEADING_GLYPHS = /^[ℹ✔✖✓✗×▶►•#>*-]+\s*/u;
 const HEADLINE_LENGTH = 200;
-
-export function stripAnsi(text: string): string {
-  return text.replace(ANSI, "");
-}
 
 /**
  * The one line a person needs to recognise a run. For a failure, the first line
