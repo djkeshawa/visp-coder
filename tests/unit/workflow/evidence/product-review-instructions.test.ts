@@ -199,12 +199,15 @@ it("requires what the request names to be recognizable in the images, unlike fin
   // controller with no two-tone shell, shoulder buttons or logo called it "generic" as an optional
   // finding, and the blind judge marked each missing part down.
   expect(visual).toContain(
-    "A named real thing (a product, vehicle, animal, building, landmark) is recognized by its identifying parts and colouring",
+    "A real thing it names for a picture or scene to depict (a product or model, vehicle, animal, building, landmark) is recognized by its identifying parts and colouring",
   );
+  // One finding per thing, so missing parts cannot fill every finding slot.
+  expect(visual).toContain("report one required finding per thing, naming every such part");
+  // A style the request names may leave parts or colours out on purpose.
   expect(visual).toContain(
-    "An identifying part that is missing or unrecognizable, so the thing could pass for a generic or different one, is that departure: report it required, naming the parts",
+    "left out by a style the request names (a minimalist logo, an icon, a silhouette), stays finish while the thing stays recognizable, and colours or a style the request names override the real thing's",
   );
-  expect(visual).toContain("A part that is simplified but recognizable stays finish");
+  expect(visual).toContain("Only what the request names counts:");
   // Ordinary apps name no visual subjects: the rule adds nothing for their controls.
   expect(visual).toContain(
     "an app's controls, forms and data tables fall under the criteria above, and polish beyond what the request names stays finish.",
