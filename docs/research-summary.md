@@ -54,6 +54,51 @@ None of the differences is significant (sign tests, p 0.12 to 0.58). Five BMAD r
 
 **The tester matters where the hidden failures are behavioural.** Of 310 pinned tester suites, half failed on their first run, so defects were fixed before `done`. When `claude-exec` was added it started no tester; two catapult runs without one scored 55 (unwinnable levels again) and 68 (time cap), and two with the Claude tester added scored 64 and 66. Replaying review packets with more source, higher effort or a prompt to read more files found no additional hidden defects: the misses (an unwinnable level, a wrong gravity arc, a range corner) needed executed probes, not more reading.
 
+## Quality batches (October 2026)
+
+From October 2026 VISP changes that alter what agents see are measured with paired batches under one fixed configuration (`bench/presets.py` `quality-2026-10`): Claude Haiku 5.5 at high effort as the worker, a VISP-launched Claude Sonnet 5.5 reviewer and tester (`critic.launch: claude-exec`, high effort), a blind Sonnet 5.5 judge of the visual result against a per-task checklist, and a blind Claude Opus 5.5 judge of the produced source (correctness risks, structure, readability, naming, tests, idiom). Both builds run interleaved in one batch, three runs per task each; runs cut short by a usage limit or an API error are discarded and rerun. A candidate passes when no task drops in hidden-check pass rate, judge score, checklist passes or code score, and median wall and idle time are at most 15% worse unless a quality gain pays for it (`bench/report.py`). Three runs per arm is still few: a one-point judge difference in one run moves a task mean by 0.33.
+
+**Integration build against develop (p12, 42 runs).** The build combined images on checks for the reviewer and auto-captured result pictures, the reviewer's recognizability rule, a hook that refuses backgrounded or polled VISP commands, the fresh-clone hook fix, MCP guard parity, and an opt-in `--known` context id for repeat `visp work`, plus refactors with no agent-visible change:
+
+| Task | Hidden | Judge | Checklist | Code | Median wall |
+| --- | --- | --- | --- | --- | --- |
+| voxel-pagoda | – | 8.33 → 8.33 | 7 → 7 | – | 582 → 318 s |
+| rainfall-chart | – | 9.67 → 9.67 | 9 → 9 | – | 199 → 160 s |
+| lighthouse-pixel | – | 7.33 → 7.67 | 9.33 → 10.67 | – | 291 → 306 s |
+| ps5-controller-svg | – | 5.67 → 5.67 | 9.33 → 9.33 | – | 155 → 201 s |
+| slingshot-game | 100% → 100% | 8 → 8.33 | 8 → 8 | 8 → 8 | 1201 → 1410 s |
+| reservations-bundles | 100% → 100% | – | – | 8 → 8 | 156 → 192 s |
+| spreadsheet-extend | 100% → 100% | – | – | 7.33 → 8 | 864 → 645 s |
+
+No task dropped on any quality metric. The time differences have specific causes. On the base build, workers backgrounded `visp done` and waited in self-matching `pgrep` loops (one rainfall run idled 45 minutes; pagoda's median includes 233 s of such waiting). On the new build those reviews finish in the foreground: slingshot ran 8 reviews against 3, and one base slingshot run was never reviewed at all. PS5 workers now write an image check with an experience outcome. The bundles median is noise: its mean fell from 261 to 233 s.
+
+**Single changes (qv, qc), three runs each against the integration build:**
+
+| Change | Task: judge (checklist) or code | Median wall | Kept |
+| --- | --- | --- | --- |
+| Reviewer: a named real thing is recognized by its identifying parts; a missing part is a required finding (two batches, six runs per arm pooled) | ps5 5.5 → 5.67 (element passes 46/60 → 46/60), lighthouse 8.0 → 8.5 (10 → 10.83), voxel 8.33 → 8.33 | ps5 235 → 378 s, then 225 → 197 s; lighthouse 397 → 310 s, then 381 → 407 s | yes |
+| Worker: view the picture against the request before `done` | ps5 5.33 → 5.33, lighthouse 8.33 → 8.33, voxel 8.33 → 8.67 | ps5 +33%, voxel +73% | no |
+| Reviewer: at most one optional maintainability finding | code: reservations-api 8 → 8.33, spreadsheet-cli 8 → 8, slingshot 8 → 7.67 | within noise | no: reviewers never raised one in 17 reviews |
+| After a clean review leaving optional findings on a picture, offer one extra repair round (on top of the parts rule) | against the parts rule alone: ps5 5.33 → 5.33, voxel 8.67 → 8.67, lighthouse 8.33 → 8.33 | ps5 197 → 306 s | no |
+
+**Final build against develop (fin, 42 runs).** The integration build with every change above that was kept (the parts rule included), the refactors, `visp uninstall` and the test-speed work:
+
+| Task | Hidden | Judge | Checklist | Code | Median wall |
+| --- | --- | --- | --- | --- | --- |
+| voxel-pagoda | – | 8.33 → 8.67 | 7 → 7 | – | 380 → 435 s |
+| rainfall-chart | – | 9.67 → 9.67 | 9 → 9 | – | 140 → 164 s |
+| lighthouse-pixel | – | 7.33 → 7.67 | 9.67 → 10.33 | – | 323 → 366 s |
+| ps5-controller-svg | – | 5.33 → 6.33 | 8.67 → 9.67 | – | 158 → 361 s |
+| slingshot-game | 100% → 100% | 7.67 → 8 | 7.67 → 8 | 8 → 7.67 | 1498 → 2025 s |
+| reservations-bundles | 100% → 100% | – | – | 8 → 8 | 173 → 252 s |
+| spreadsheet-extend | 100% → 100% | – | – | 7 → 8 | 727 → 654 s |
+
+The mean visual judge score rose from 7.67 to 8.08 and the mean code score on the code tasks from 7.67 to 7.89; hidden checks were at their maximum in both arms on every task, so this round cannot show an accuracy gain. On develop, reviews were often unavailable (lighthouse 0 of 6 attempts usable, pagoda 2 of 6) because reviewers cited evidence VISP had listed as unavailable; on the final build almost every review ran. The one score that fell, slingshot's code score, comes from a single run that hit the 60-minute cap: after half an hour of its own level searches the worker was routed back and forth between two slices for one finding on a shared file, a routing loop present since October 1 and fixed afterwards (`findingOwner`). Medians rose on most tasks because reviews now complete in the foreground and PS5 runs repair the parts the reviewer requires (one PS5 run went from 5 to 8); the bundles and rainfall means fell (374 → 249 s and 183 → 166 s), where develop's workers idled in polling loops.
+
+A routing loop found in that run was fixed afterwards and checked in a small batch (pp: the final build with and without the fix, slingshot and spreadsheet-extend, three runs each): hidden checks, judge and checklist equal; code scores moved by a third of a point in opposite directions; the loop did not occur in either arm, so the batch shows no effect of the fix either way.
+
+The weakest visual task, the PS5 controller, failed the judge's parts checklist (two-tone shell, shoulder buttons, PS logo, "reads as a PS5 controller"). Before images reached the reviewer it judged from SVG coordinates; with images it filed missing parts as optional style. Asking the reviewer to list and check identifying parts raised the lighthouse score in both batches (the judge's "waves breaking against the rocks" item) but did not move the PS5 score once both batches are counted: the reviewer named missing parts, and Haiku's drawings still lacked the two-tone shell and shoulder buttons. A worker-side checklist and an extra optional repair round added time without a score change. Per-batch differences of 0.33 reversed between batches, so single three-run batches are not enough to call small effects either way.
+
 ## What made the difference
 
 **The harness must launch the critic itself.** In the first weak-agent pilot (Luna at low effort, a sentiment API with 36 hidden tests), bare coding scored 36 and both VISP arms 34: workers never ran a check that covered errors and never delegated review. A critic launched by VISP (`codex exec`, read-only) on the same code reported the two missing 405 responses, acceptance of `NaN` and a request that can hang without `Content-Length`, each with a next check. VISP now launches the reviewer after checks pass (`critic.launch: codex-exec`).
@@ -156,6 +201,8 @@ Every inventory run carried three notes and every spreadsheet run that started a
 Independent studies point the same way: execution feedback against fixed tests is the strongest lever (TDFlow; SWT-bench), self-critique without external signals is weak (Olausson et al., ICLR 2024; Kamoi et al., TACL 2024), passing tests often do not mean mergeable code (PatchDiff; METR 2026), heavy specification documents add large review overhead for small gains, and fewer, smaller tools help (RAG-MCP).
 
 ## Limits and next steps
+
+- The October batches ran three runs per arm; a one-point judge difference in one run moves a task mean by 0.33, and several 0.33 differences reversed between batches. Hidden checks were at their maximum on every task for both builds with the Haiku 5.5 worker, so these tasks no longer measure accuracy differences; harder tasks are needed.
 
 - Three runs per arm on four tasks the authors wrote; differences of one or two checks are within run-to-run noise.
 - The reviewer is a stronger model than the weak worker. Part of VISP's gain may come from that model rather than the loop; a same-model reviewer ablation has not been run.
