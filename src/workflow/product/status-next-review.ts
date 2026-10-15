@@ -2,18 +2,22 @@ import { ok, type Result } from "../../core/result.js";
 import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { applicableReviews, type ProductOutcomeStatus } from "./assessment.js";
-import { type ReviewerCapacity, reviewerCapacity, reviewerHandoff } from "./critic-capacity.js";
+import {
+  type ReviewerCapacity,
+  reviewerCapacity,
+  reviewerHandoff,
+} from "./critic/critic-capacity.js";
 import { latestCurrentJourneys } from "./evidence-references.js";
 import { findingAppliesToSlice, outstandingFeedback, productFeedbackGaps } from "./feedback.js";
 import { functionalRegressionRequirement } from "./functional-regression.js";
 import { findFunctionalRepair } from "./functional-resolution.js";
 import { checksFor, type ProductSlice } from "./model.js";
-import { reviewerRules } from "./pinned-dispute-model.js";
 import { productRefinement } from "./refinement.js";
 import { repairRecheck } from "./repair-recheck.js";
-import { completesFeature } from "./review-selection.js";
+import { completesFeature } from "./review/review-selection.js";
 import type { ProductNext } from "./status.js";
 import type { ProductRecord } from "./store.js";
+import { reviewerRules } from "./tester/pinned-dispute-model.js";
 
 export function repairRoute(
   record: ProductRecord,

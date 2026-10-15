@@ -11,13 +11,12 @@ import {
   failedCheckOwners,
   reviewCorrectionOutcomes,
 } from "./corrections.js";
-import { reviewerHandoff } from "./critic-capacity.js";
+import { reviewerHandoff } from "./critic/critic-capacity.js";
 import { environmentNext } from "./environment.js";
 import { currentFailedJourneys, currentJourneyFailures } from "./evidence-references.js";
 import { withNotObservedAdvice } from "./not-observed-advice.js";
-import { pinnedRoute } from "./pinned-disputes.js";
 import { productRefinement } from "./refinement.js";
-import { unavailableClosedReviewerFindingsNext } from "./reviewer-findings-route.js";
+import { unavailableClosedReviewerFindingsNext } from "./review/reviewer-findings-route.js";
 import type { ProductNext } from "./status.js";
 import { environmentJourneyNext } from "./status-next-journeys.js";
 import { pinnedStep, stuckPinnedStep } from "./status-next-open.js";
@@ -28,6 +27,7 @@ import {
   reviewerState,
 } from "./status-next-review.js";
 import type { ProductRecord } from "./store.js";
+import { pinnedRoute } from "./tester/pinned-disputes.js";
 
 export async function nextClosedProduct(
   workspace: WorkspaceState,

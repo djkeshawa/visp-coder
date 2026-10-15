@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { renderPreToolUseHook } from "../../../src/harness/hooks.js";
-import { TESTER_BROWSER_KIT } from "../../../src/workflow/product/tester-browser-kit.js";
+import { TESTER_BROWSER_KIT } from "../../../src/workflow/product/tester/tester-browser-kit.js";
 
 const directory = mkdtempSync(join(tmpdir(), "visp-script-source-"));
 afterAll(() => rmSync(directory, { recursive: true, force: true }));

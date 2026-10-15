@@ -1,7 +1,7 @@
 import { matchesAny } from "../../core/patterns.js";
 import type { WorkspaceState } from "../state.js";
-import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import { applicableExecutions, applicableReviews } from "./assessment.js";
+import { pinnedAcceptanceChecks } from "./check/acceptance-checks.js";
 import { currentFailedJourneys } from "./evidence-references.js";
 import { findingAppliesToSlice, outstandingFeedback } from "./feedback.js";
 import type { ProductCheck, ProductExecution, ProductSlice } from "./model.js";

@@ -3,7 +3,7 @@ import { productJourneyGaps } from "../evidence/product-journey.js";
 import type { ProductReviewCapture } from "../evidence/product-review.js";
 import type { WorkspaceState } from "../state.js";
 import { captureRunEntries } from "./capture-run-model.js";
-import { isBrowserCheckCommand, productCheckSupportsBehavior } from "./check-command.js";
+import { isBrowserCheckCommand, productCheckSupportsBehavior } from "./check/check-command.js";
 import { currentCoverage, productReviewChallenges } from "./coverage.js";
 import {
   currentJourneyFailures,

@@ -1,7 +1,7 @@
 import { ok, type Result } from "../core/result.js";
 import { feedbackTemplate } from "./product/feedback.js";
 import { assessmentSchema, type ProductBrief } from "./product/model.js";
-import { type ProductReviewBundle, runProductReview } from "./product/review.js";
+import { type ProductReviewBundle, runProductReview } from "./product/review/review.js";
 import { type ProductSelection, readProductBrief } from "./product/store.js";
 import { CHECK_OUTPUT_GUIDANCE } from "./product-output-guidance.js";
 import type { WorkspaceState } from "./state.js";

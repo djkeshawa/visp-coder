@@ -2,17 +2,20 @@ import { writeFile } from "node:fs/promises";
 import { expect, it } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import type { Result } from "../../../../src/core/result.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
-import type { CriticPacket } from "../../../../src/workflow/product/critic-packet.js";
-import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
+import type { CriticPacket } from "../../../../src/workflow/product/critic/critic-packet.js";
+import {
+  criticSelection,
+  readCriticState,
+} from "../../../../src/workflow/product/critic/critic-store.js";
 import {
   runProductVerify,
   runProductWork,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
-import { deliveredReviewEvidenceIds } from "../../../../src/workflow/product/review-context.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
-import type { independentReviewerContext } from "../../../../src/workflow/product/reviewer-handoff.js";
+import { deliveredReviewEvidenceIds } from "../../../../src/workflow/product/review/review-context.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
+import type { independentReviewerContext } from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 

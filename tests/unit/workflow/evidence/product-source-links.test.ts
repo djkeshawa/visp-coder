@@ -5,7 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { applyFileTransaction } from "../../../../src/core/file-transaction.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { prepareCandidate, restoreCandidate } from "../../../../src/workflow/product/candidate.js";
-import { criticSelection } from "../../../../src/workflow/product/critic-store.js";
+import { criticSelection } from "../../../../src/workflow/product/critic/critic-store.js";
 import { runProductNext } from "../../../../src/workflow/product/status.js";
 import { productSourceDigest } from "../../../../src/workflow/product/subject.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";

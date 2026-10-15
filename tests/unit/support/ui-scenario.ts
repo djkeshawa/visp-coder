@@ -1,5 +1,5 @@
 import type { Result } from "../../../src/core/result.js";
-import { runProductCritic } from "../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../src/workflow/product/critic/critic.js";
 import {
   createProductFeature,
   runProductAccept,

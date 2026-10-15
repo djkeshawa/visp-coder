@@ -4,9 +4,9 @@ import {
   type CriticAdapter,
   criticOperationWrites,
   runProductCritic,
-} from "../../workflow/product/critic.js";
-import { configuredCriticLauncher } from "../../workflow/product/critic-exec.js";
-import { rejectedCriticReview } from "../../workflow/product/critic-status.js";
+} from "../../workflow/product/critic/critic.js";
+import { configuredCriticLauncher } from "../../workflow/product/critic/critic-exec.js";
+import { rejectedCriticReview } from "../../workflow/product/critic/critic-status.js";
 import type { UserFeedbackHost } from "../../workflow/product/user-feedback.js";
 import { type GlobalOptions, isJson, mutatingWorkspace, options, workspace } from "../context.js";
 import { readCommandInput } from "../input.js";

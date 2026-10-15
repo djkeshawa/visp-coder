@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProductReviewImage } from "../../../../src/workflow/evidence/product-review.js";
 import type { ProductEvidenceCatalogue } from "../../../../src/workflow/product/evidence-references.js";
 import type { ProductOutcome } from "../../../../src/workflow/product/model.js";
-import { validateAssessments } from "../../../../src/workflow/product/review-validation.js";
+import { validateAssessments } from "../../../../src/workflow/product/review/review-validation.js";
 
 const subject = "a".repeat(64);
 const images: ProductReviewImage[] = ["before", "after"].map((id) => ({

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { invokeCriticOnce } from "../../../../src/workflow/product/critic-invocation.js";
-import type { CriticConfig } from "../../../../src/workflow/product/critic-model.js";
-import type { CriticPacket } from "../../../../src/workflow/product/critic-packet.js";
+import { invokeCriticOnce } from "../../../../src/workflow/product/critic/critic-invocation.js";
+import type { CriticConfig } from "../../../../src/workflow/product/critic/critic-model.js";
+import type { CriticPacket } from "../../../../src/workflow/product/critic/critic-packet.js";
 
 const packet = {} as CriticPacket;
 const config = {} as CriticConfig;

@@ -6,7 +6,7 @@ import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
 import { normalizeBriefInput } from "./brief-aliases.js";
 import { patchProductBrief } from "./brief-patch.js";
-import { planCriticRevision } from "./critic-revision.js";
+import { planCriticRevision } from "./critic/critic-revision.js";
 import {
   closedSlice,
   outcomeDigest,

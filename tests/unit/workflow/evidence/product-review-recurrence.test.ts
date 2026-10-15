@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { productReviewChallenges } from "../../../../src/workflow/product/coverage.js";
 import { initialProductState, productBriefSchema } from "../../../../src/workflow/product/model.js";
 import { productRefinement } from "../../../../src/workflow/product/refinement.js";
-import { productReviewRecurrence } from "../../../../src/workflow/product/review-recurrence.js";
+import { productReviewRecurrence } from "../../../../src/workflow/product/review/review-recurrence.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 
 type Review = ProductRecord["state"]["reviews"][number];

@@ -14,7 +14,7 @@ import { SKILL_STATES } from "../skills/schema.js";
 import { readIndex } from "../skills/store.js";
 import { findTask, type TaskGraph } from "../workflow/artifacts/tasks.js";
 import { foreignHostFile, hostFileProtection } from "../workflow/product/byproducts.js";
-import { describeProductCheck } from "../workflow/product/check-command.js";
+import { describeProductCheck } from "../workflow/product/check/check-command.js";
 import { readProductRecord } from "../workflow/product/store.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import {

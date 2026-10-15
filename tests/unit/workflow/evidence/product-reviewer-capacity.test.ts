@@ -8,13 +8,13 @@ import {
   type CriticPacket,
   type ProductCriticHost,
   runProductCritic,
-} from "../../../../src/workflow/product/critic.js";
-import { reviewerCapacity } from "../../../../src/workflow/product/critic-capacity.js";
+} from "../../../../src/workflow/product/critic/critic.js";
+import { reviewerCapacity } from "../../../../src/workflow/product/critic/critic-capacity.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { outstandingFeedback } from "../../../../src/workflow/product/feedback.js";
 import type { ProductFeedback } from "../../../../src/workflow/product/feedback-model.js";
 import { runProductNext } from "../../../../src/workflow/product/index.js";
-import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../../src/workflow/product/review/review.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { legacyReview } from "../../support/legacy-critic.js";

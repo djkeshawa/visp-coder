@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { syntaxOnlyValidationMode } from "../../../../src/workflow/evidence/command-quality.js";
-import { productCheckSupportsBehavior } from "../../../../src/workflow/product/check-command.js";
+import { productCheckSupportsBehavior } from "../../../../src/workflow/product/check/check-command.js";
 
 describe("validation command quality", () => {
   it("recognizes Node syntax checks without classifying other -c flags", () => {

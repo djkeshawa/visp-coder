@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
 import {
   runProductDone,
   runProductNext,

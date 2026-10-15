@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { parse } from "yaml";
 import { needsBrowser } from "../../../../src/workflow/product/environment.js";
 import { initialProductState, productBriefSchema } from "../../../../src/workflow/product/model.js";
-import { productReviewAgenda } from "../../../../src/workflow/product/review-context.js";
+import { productReviewAgenda } from "../../../../src/workflow/product/review/review-context.js";
 
 const fixture = new URL("../../../fixtures/product-quality/orbital-flock/", import.meta.url);
 it("uses the real brief to schedule early browser capability and critique primary UI usability", async () => {

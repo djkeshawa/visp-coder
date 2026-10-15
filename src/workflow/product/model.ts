@@ -19,7 +19,7 @@ import { experimentResolutionsSchema } from "./experiment-model.js";
 import { productFeedbackSchema } from "./feedback-model.js";
 import { journeyRetirementSchema } from "./journey-ownership.js";
 import { reproductionSchema } from "./reproduction-model.js";
-import { generatedSourceReferencesSchema } from "./review-delivery-validation.js";
+import { generatedSourceReferencesSchema } from "./review/review-delivery-validation.js";
 import { userFeedbackRecordSchema } from "./user-feedback-model.js";
 
 const id = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/);

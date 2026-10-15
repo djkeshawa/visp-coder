@@ -18,7 +18,7 @@ import {
   type ProductCaptureRun,
   validCaptureRuns,
 } from "./capture-run-model.js";
-import { productCheckSupportsBehavior } from "./check-command.js";
+import { productCheckSupportsBehavior } from "./check/check-command.js";
 import { reviewCodeSources } from "./code-context.js";
 import { exploratoryFailureHistory, historicalFailureReferences } from "./exploratory-history.js";
 import { captureSchema, type ProductImageAvailability } from "./images.js";

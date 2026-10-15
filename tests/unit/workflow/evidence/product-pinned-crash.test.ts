@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { failedCheckOwners } from "../../../../src/workflow/product/corrections.js";
-import { runProductDoneReviewed } from "../../../../src/workflow/product/done-review.js";
-import type { IndependentTester } from "../../../../src/workflow/product/independent-tests-model.js";
-import { inlineTests } from "../../../../src/workflow/product/independent-tests-starters.js";
 import { runProductNext } from "../../../../src/workflow/product/index.js";
+import { runProductDoneReviewed } from "../../../../src/workflow/product/review/done-review.js";
+import { readProductRecord, saveProductState } from "../../../../src/workflow/product/store.js";
+import type { IndependentTester } from "../../../../src/workflow/product/tester/independent-tests-model.js";
+import { inlineTests } from "../../../../src/workflow/product/tester/independent-tests-starters.js";
 import {
   crashLine,
   crashNamesProductPath,
@@ -15,8 +16,7 @@ import {
   type PinnedRun,
   persistentPinnedFailure,
   suiteCrashed,
-} from "../../../../src/workflow/product/pinned-dispute-model.js";
-import { readProductRecord, saveProductState } from "../../../../src/workflow/product/store.js";
+} from "../../../../src/workflow/product/tester/pinned-dispute-model.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";

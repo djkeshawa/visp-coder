@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import {
   productCheckGuidance,
   productCheckTemplate,
-} from "../../../../src/workflow/product/check-guidance.js";
+} from "../../../../src/workflow/product/check/check-guidance.js";
 import { productBriefSchema, productCheckSchema } from "../../../../src/workflow/product/model.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { productWorkspace } from "../../support/product-workspace.js";

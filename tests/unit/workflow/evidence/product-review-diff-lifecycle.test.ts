@@ -6,21 +6,24 @@ import { balancedCritic } from "../../../../src/config/critic.js";
 import type { Result } from "../../../../src/core/result.js";
 import { productEvidenceGaps } from "../../../../src/workflow/product/assessment.js";
 import { reviewChangedPaths } from "../../../../src/workflow/product/code-context.js";
-import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
 import {
-  inlineReview,
-  runProductDoneReviewed,
-} from "../../../../src/workflow/product/done-review.js";
+  type CriticPacket,
+  runProductCritic,
+} from "../../../../src/workflow/product/critic/critic.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import { productEvidenceCatalogue } from "../../../../src/workflow/product/evidence-references.js";
-import type { IndependentReview } from "../../../../src/workflow/product/independent-review.js";
 import {
   runProductVerify,
   runProductWork,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
+import {
+  inlineReview,
+  runProductDoneReviewed,
+} from "../../../../src/workflow/product/review/done-review.js";
+import type { IndependentReview } from "../../../../src/workflow/product/review/independent-review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
 import {
   productScopes,
   readProductAuthorization,

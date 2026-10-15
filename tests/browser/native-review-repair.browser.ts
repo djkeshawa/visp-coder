@@ -6,7 +6,7 @@ import { balancedCritic } from "../../src/config/critic.js";
 import { sha256 } from "../../src/core/hash.js";
 import type { Result } from "../../src/core/result.js";
 import { runProductCapture } from "../../src/workflow/evidence/product-capture.js";
-import { type CriticPacket, runProductCritic } from "../../src/workflow/product/critic.js";
+import { type CriticPacket, runProductCritic } from "../../src/workflow/product/critic/critic.js";
 import { currentJourneyFailures } from "../../src/workflow/product/evidence-references.js";
 import {
   runProductAccept,

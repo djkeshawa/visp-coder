@@ -8,7 +8,7 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../../src/workflow/product/index.js";
-import { runProductReviewRequest } from "../../../src/workflow/product/review-request.js";
+import { runProductReviewRequest } from "../../../src/workflow/product/review/review-request.js";
 import { runProductNext } from "../../../src/workflow/product/status.js";
 import { readProductRecord } from "../../../src/workflow/product/store.js";
 import { productWorkspace } from "../../unit/support/product-workspace.js";
@@ -369,7 +369,7 @@ it.runIf(!!developRuntime)(
     const subject = await import("../../../src/workflow/product/subject.js");
     const digest = await subject.productSourceDigest(workspace, record.brief);
     if (!digest.ok) throw new Error(digest.error.message);
-    const current = await import("../../../src/workflow/product/check-execution.js");
+    const current = await import("../../../src/workflow/product/check/check-execution.js");
     const legacy = (await import(/* @vite-ignore */ developRuntime as string)) as typeof current & {
       runProductReviewRequest: typeof runProductReviewRequest;
       saveProductState: typeof import("../../../src/workflow/product/store.js").saveProductState;

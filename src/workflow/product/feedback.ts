@@ -3,7 +3,7 @@ import { hashValue } from "../../core/hash.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { productBehaviorProbes } from "./behavior-probes.js";
 import { validCaptureRuns } from "./capture-run-model.js";
-import { productCheckGuidance } from "./check-guidance.js";
+import { productCheckGuidance } from "./check/check-guidance.js";
 import { environmentRecovery } from "./environment-model.js";
 import {
   ambiguousEvidenceIds,

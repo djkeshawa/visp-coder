@@ -7,7 +7,7 @@ import * as transactions from "../../../src/core/file-transaction.js";
 import { collectMigrationHistory } from "../../../src/migration/history-export.js";
 import { applyMigration, previewMigration } from "../../../src/migration/operations.js";
 import { updateProductBrief } from "../../../src/workflow/product/brief.js";
-import { runProductCritic } from "../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../src/workflow/product/critic/critic.js";
 import { runProductVerify } from "../../../src/workflow/product/evidence.js";
 import { outstandingFeedback } from "../../../src/workflow/product/findings.js";
 import { runProductMigrate } from "../../../src/workflow/product/migration.js";

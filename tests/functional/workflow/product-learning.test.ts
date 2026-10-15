@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import type { SkillRecord } from "../../../src/skills/schema.js";
 import type { ProductWorkContext } from "../../../src/workflow/product/context-types.js";
 import type { ProductState } from "../../../src/workflow/product/model.js";
-import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../src/workflow/product/review/review.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";
 import { productProject, succeeded } from "../support/product.js";
 import type { TestProject } from "../support/project.js";

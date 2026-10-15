@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { sha256 } from "../../../../src/core/hash.js";
-import { independentSources } from "../../../../src/workflow/product/independent-sources.js";
+import { independentSources } from "../../../../src/workflow/product/review/independent-sources.js";
 import type { ProductSource } from "../../../../src/workflow/product/sources.js";
 import { TestWorkspace } from "../../support/workspace.js";
 

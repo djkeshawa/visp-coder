@@ -3,8 +3,8 @@ import { join } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TOOL } from "../../../src/mcp/constants.js";
-import { productCheckTemplate } from "../../../src/workflow/product/check-guidance.js";
-import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
+import { productCheckTemplate } from "../../../src/workflow/product/check/check-guidance.js";
+import type { ProductReviewBundle } from "../../../src/workflow/product/review/review.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";
 import { startProductProject } from "./resource-fixture.js";
 

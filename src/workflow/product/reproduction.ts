@@ -3,7 +3,7 @@ import { vispError } from "../../core/errors.js";
 import { hashValue } from "../../core/hash.js";
 import { err, ok } from "../../core/result.js";
 import type { WorkspaceState } from "../state.js";
-import { requireNoPendingCriticReview } from "./critic-policy.js";
+import { requireNoPendingCriticReview } from "./critic/critic-policy.js";
 import { outstandingFeedback } from "./findings.js";
 import { witnessedFunctionalFailure } from "./functional-resolution.js";
 import { reproductionSchema } from "./reproduction-model.js";

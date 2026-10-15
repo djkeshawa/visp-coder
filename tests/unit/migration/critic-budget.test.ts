@@ -5,9 +5,9 @@ import { balancedCritic } from "../../../src/config/critic.js";
 import * as transactions from "../../../src/core/file-transaction.js";
 import { collectMigrationHistory } from "../../../src/migration/history-export.js";
 import { applyMigration, previewMigration } from "../../../src/migration/operations.js";
-import { runProductCritic } from "../../../src/workflow/product/critic.js";
-import { readCriticBudgetHistory } from "../../../src/workflow/product/critic-budget-history.js";
-import { criticSelection } from "../../../src/workflow/product/critic-store.js";
+import { runProductCritic } from "../../../src/workflow/product/critic/critic.js";
+import { readCriticBudgetHistory } from "../../../src/workflow/product/critic/critic-budget-history.js";
+import { criticSelection } from "../../../src/workflow/product/critic/critic-store.js";
 import { productStatePath } from "../../../src/workflow/product/store.js";
 import { productWorkspace } from "../support/product-workspace.js";
 

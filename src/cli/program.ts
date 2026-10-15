@@ -37,7 +37,7 @@ import { usageCommand } from "./commands/usage.js";
 
 export function buildProgram(
   options: {
-    criticHost?: import("../workflow/product/critic.js").CriticAdapter;
+    criticHost?: import("../workflow/product/critic/critic.js").CriticAdapter;
     signal?: AbortSignal;
     userFeedbackHost?: import("../workflow/product/user-feedback.js").UserFeedbackHost;
   } = {},

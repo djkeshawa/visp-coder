@@ -1,4 +1,4 @@
-import type { CriticPacket } from "../../../src/workflow/product/critic-packet.js";
+import type { CriticPacket } from "../../../src/workflow/product/critic/critic-packet.js";
 import {
   type ProductFeedback,
   QUALITY_DIMENSIONS,

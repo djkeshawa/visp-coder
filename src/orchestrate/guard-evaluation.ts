@@ -10,7 +10,7 @@ import { branchFeatures, branchScopes } from "../workflow/product/branch-scope.j
 import {
   hasPendingCriticReview,
   PENDING_REVIEW_MESSAGE,
-} from "../workflow/product/critic-policy.js";
+} from "../workflow/product/critic/critic-policy.js";
 import { unchangedInheritedPaths } from "../workflow/product/inherited-changes.js";
 import {
   activeBlockedPaths,

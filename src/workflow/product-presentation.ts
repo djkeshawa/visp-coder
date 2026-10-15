@@ -1,5 +1,5 @@
 import { cliCommand } from "./next-action.js";
-import type { ProductReviewBundle } from "./product/review.js";
+import type { ProductReviewBundle } from "./product/review/review.js";
 
 /** A mutation acknowledges new judgments without replaying images and the execution journal. */
 export function productReviewReceipt(bundle: ProductReviewBundle) {

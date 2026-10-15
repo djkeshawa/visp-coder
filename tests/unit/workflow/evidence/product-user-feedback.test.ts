@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
 import { runProductVerify } from "../../../../src/workflow/product/index.js";
 import { runProductNext } from "../../../../src/workflow/product/status.js";
 import { productStatePath, readProductRecord } from "../../../../src/workflow/product/store.js";

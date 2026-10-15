@@ -6,7 +6,7 @@ import {
   type GuardPayload,
   pendingTransactionRefusal,
 } from "../../orchestrate/guard-evaluation.js";
-import { PENDING_REVIEW_MESSAGE } from "../../workflow/product/critic-policy.js";
+import { PENDING_REVIEW_MESSAGE } from "../../workflow/product/critic/critic-policy.js";
 import { TOOL } from "../constants.js";
 import { workspaceFor } from "../context.js";
 import { failure, reply } from "../reply.js";

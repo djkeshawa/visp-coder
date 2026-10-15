@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { ensureProductCheckpoint } from "../../../../src/workflow/product/checkpoint.js";
-import * as handoffs from "../../../../src/workflow/product/reviewer-handoff.js";
+import * as handoffs from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
 let setup: Awaited<ReturnType<typeof productWorkspace>>;

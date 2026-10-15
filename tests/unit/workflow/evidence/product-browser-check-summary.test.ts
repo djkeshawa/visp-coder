@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { browserCheckSummary } from "../../../../src/workflow/product/browser-check-execution.js";
+import { browserCheckSummary } from "../../../../src/workflow/product/check/browser-check-execution.js";
 
 it("puts a bounded failure ahead of capture IDs", () => {
   const summary = JSON.parse(

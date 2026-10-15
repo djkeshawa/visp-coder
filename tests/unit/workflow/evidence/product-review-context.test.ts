@@ -4,8 +4,8 @@ import {
   preferredReviewCaptures,
   previousReviewAssessments,
   productReviewAgenda,
-} from "../../../../src/workflow/product/review-context.js";
-import { independentReviewerContext } from "../../../../src/workflow/product/reviewer-handoff.js";
+} from "../../../../src/workflow/product/review/review-context.js";
+import { independentReviewerContext } from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 

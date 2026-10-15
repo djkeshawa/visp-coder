@@ -6,7 +6,7 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
-import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../../src/workflow/product/review/review.js";
 import { moduleFeedback } from "../../support/product-feedback.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";

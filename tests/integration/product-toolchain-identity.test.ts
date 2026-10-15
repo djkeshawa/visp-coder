@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Result } from "../../src/core/result.js";
-import { executeChecks } from "../../src/workflow/product/check-lifecycle.js";
+import { executeChecks } from "../../src/workflow/product/check/check-lifecycle.js";
 import {
   createProductFeature,
   parseProductBrief,

@@ -18,7 +18,7 @@ import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import type { ProductBrief } from "../../../../src/workflow/product/model.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import {
   productContractDigest,
