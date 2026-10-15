@@ -54,6 +54,34 @@ None of the differences is significant (sign tests, p 0.12 to 0.58). Five BMAD r
 
 **The tester matters where the hidden failures are behavioural.** Of 310 pinned tester suites, half failed on their first run, so defects were fixed before `done`. When `claude-exec` was added it started no tester; two catapult runs without one scored 55 (unwinnable levels again) and 68 (time cap), and two with the Claude tester added scored 64 and 66. Replaying review packets with more source, higher effort or a prompt to read more files found no additional hidden defects: the misses (an unwinnable level, a wrong gravity arc, a range corner) needed executed probes, not more reading.
 
+## Quality batches (October 2026)
+
+From October 2026 VISP changes that alter what agents see are measured with paired batches under one fixed configuration (`bench/presets.py` `quality-2026-10`): Claude Haiku 5.5 at high effort as the worker, a VISP-launched Claude Sonnet 5.5 reviewer and tester (`critic.launch: claude-exec`, high effort), a blind Sonnet 5.5 judge of the visual result against a per-task checklist, and a blind Claude Opus 5.5 judge of the produced source (correctness risks, structure, readability, naming, tests, idiom). Both builds run interleaved in one batch, three runs per task each; runs cut short by a usage limit or an API error are discarded and rerun. A candidate passes when no task drops in hidden-check pass rate, judge score, checklist passes or code score, and median wall and idle time are at most 15% worse unless a quality gain pays for it (`bench/report.py`). Three runs per arm is still few: a one-point judge difference in one run moves a task mean by 0.33.
+
+**Integration build against develop (p12, 42 runs).** The build combined images on checks for the reviewer and auto-captured result pictures, the reviewer's recognizability rule, a hook that refuses backgrounded or polled VISP commands, the fresh-clone hook fix, MCP guard parity, and an opt-in `--known` context id for repeat `visp work`, plus refactors with no agent-visible change:
+
+| Task | Hidden | Judge | Checklist | Code | Median wall |
+| --- | --- | --- | --- | --- | --- |
+| voxel-pagoda | – | 8.33 → 8.33 | 7 → 7 | – | 582 → 318 s |
+| rainfall-chart | – | 9.67 → 9.67 | 9 → 9 | – | 199 → 160 s |
+| lighthouse-pixel | – | 7.33 → 7.67 | 9.33 → 10.67 | – | 291 → 306 s |
+| ps5-controller-svg | – | 5.67 → 5.67 | 9.33 → 9.33 | – | 155 → 201 s |
+| slingshot-game | 100% → 100% | 8 → 8.33 | 8 → 8 | 8 → 8 | 1201 → 1410 s |
+| reservations-bundles | 100% → 100% | – | – | 8 → 8 | 156 → 192 s |
+| spreadsheet-extend | 100% → 100% | – | – | 7.33 → 8 | 864 → 645 s |
+
+No task dropped on any quality metric. The time differences have specific causes. On the base build, workers backgrounded `visp done` and waited in self-matching `pgrep` loops (one rainfall run idled 45 minutes; pagoda's median includes 233 s of such waiting). On the new build those reviews finish in the foreground: slingshot ran 8 reviews against 3, and one base slingshot run was never reviewed at all. PS5 workers now write an image check with an experience outcome. The bundles median is noise: its mean fell from 261 to 233 s.
+
+**Single changes (qv, qc), three runs each against the integration build:**
+
+| Change | Task: judge (checklist) or code | Median wall | Kept |
+| --- | --- | --- | --- |
+| Reviewer: a named real thing is recognized by its identifying parts; a missing part is a required finding | ps5 5.33 → 6.0 (8.67 → 9.67), lighthouse 8.33 → 8.67 (10 → 11), voxel 8.33 → 8.0 (per run 9,8,8 → 8,8,8) | ps5 235 → 378 s, lighthouse 397 → 310 s, voxel 301 → 333 s | confirmation pending |
+| Worker: view the picture against the request before `done` | ps5 5.33 → 5.33, lighthouse 8.33 → 8.33, voxel 8.33 → 8.67 | ps5 +33%, voxel +73% | no |
+| Reviewer: at most one optional maintainability finding | code: reservations-api 8 → 8.33, spreadsheet-cli 8 → 8, slingshot 8 → 7.67 | within noise | no: reviewers never raised one in 17 reviews |
+
+The weakest visual task, the PS5 controller, failed the judge's parts checklist (two-tone shell, shoulder buttons, PS logo, "reads as a PS5 controller"). Before images reached the reviewer it judged from SVG coordinates; with images it filed missing parts as optional style. Asking the reviewer to list and check identifying parts moved the score. A worker-side checklist did not: Haiku looked at its picture and still missed the parts.
+
 ## What made the difference
 
 **The harness must launch the critic itself.** In the first weak-agent pilot (Luna at low effort, a sentiment API with 36 hidden tests), bare coding scored 36 and both VISP arms 34: workers never ran a check that covered errors and never delegated review. A critic launched by VISP (`codex exec`, read-only) on the same code reported the two missing 405 responses, acceptance of `NaN` and a request that can hang without `Content-Length`, each with a next check. VISP now launches the reviewer after checks pass (`critic.launch: codex-exec`).
