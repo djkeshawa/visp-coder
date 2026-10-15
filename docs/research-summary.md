@@ -76,11 +76,12 @@ No task dropped on any quality metric. The time differences have specific causes
 
 | Change | Task: judge (checklist) or code | Median wall | Kept |
 | --- | --- | --- | --- |
-| Reviewer: a named real thing is recognized by its identifying parts; a missing part is a required finding | ps5 5.33 → 6.0 (8.67 → 9.67), lighthouse 8.33 → 8.67 (10 → 11), voxel 8.33 → 8.0 (per run 9,8,8 → 8,8,8) | ps5 235 → 378 s, lighthouse 397 → 310 s, voxel 301 → 333 s | confirmation pending |
+| Reviewer: a named real thing is recognized by its identifying parts; a missing part is a required finding (two batches, six runs per arm pooled) | ps5 5.5 → 5.67 (element passes 46/60 → 46/60), lighthouse 8.0 → 8.5 (10 → 10.83), voxel 8.33 → 8.33 | ps5 235 → 378 s, then 225 → 197 s; lighthouse 397 → 310 s, then 381 → 407 s | yes |
 | Worker: view the picture against the request before `done` | ps5 5.33 → 5.33, lighthouse 8.33 → 8.33, voxel 8.33 → 8.67 | ps5 +33%, voxel +73% | no |
 | Reviewer: at most one optional maintainability finding | code: reservations-api 8 → 8.33, spreadsheet-cli 8 → 8, slingshot 8 → 7.67 | within noise | no: reviewers never raised one in 17 reviews |
+| After a clean review leaving optional findings on a picture, offer one extra repair round (on top of the parts rule) | against the parts rule alone: ps5 5.33 → 5.33, voxel 8.67 → 8.67, lighthouse 8.33 → 8.33 | ps5 197 → 306 s | no |
 
-The weakest visual task, the PS5 controller, failed the judge's parts checklist (two-tone shell, shoulder buttons, PS logo, "reads as a PS5 controller"). Before images reached the reviewer it judged from SVG coordinates; with images it filed missing parts as optional style. Asking the reviewer to list and check identifying parts moved the score. A worker-side checklist did not: Haiku looked at its picture and still missed the parts.
+The weakest visual task, the PS5 controller, failed the judge's parts checklist (two-tone shell, shoulder buttons, PS logo, "reads as a PS5 controller"). Before images reached the reviewer it judged from SVG coordinates; with images it filed missing parts as optional style. Asking the reviewer to list and check identifying parts raised the lighthouse score in both batches (the judge's "waves breaking against the rocks" item) but did not move the PS5 score once both batches are counted: the reviewer named missing parts, and Haiku's drawings still lacked the two-tone shell and shoulder buttons. A worker-side checklist and an extra optional repair round added time without a score change. Per-batch differences of 0.33 reversed between batches, so single three-run batches are not enough to call small effects either way.
 
 ## What made the difference
 
