@@ -4,7 +4,7 @@ import type { Result } from "../../../../src/core/result.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { TestWorkspace } from "../../support/workspace.js";
 

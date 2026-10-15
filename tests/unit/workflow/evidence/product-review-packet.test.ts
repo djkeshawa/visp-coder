@@ -2,12 +2,12 @@ import { expect, it } from "vitest";
 import { sha256 } from "../../../../src/core/hash.js";
 import { ok } from "../../../../src/core/result.js";
 import { reviewCodeSources } from "../../../../src/workflow/product/code-context.js";
-import { independentSources } from "../../../../src/workflow/product/independent-sources.js";
 import {
   executionSchema,
   initialProductState,
   productBriefSchema,
 } from "../../../../src/workflow/product/model.js";
+import { independentSources } from "../../../../src/workflow/product/review/independent-sources.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
@@ -191,7 +191,7 @@ it.each([0, 2000])(
       "../../../../src/workflow/product/index.js"
     );
     const { runProductReviewRequest } = await import(
-      "../../../../src/workflow/product/review-request.js"
+      "../../../../src/workflow/product/review/review-request.js"
     );
     const p = await productWorkspace();
     try {
@@ -258,7 +258,7 @@ it.each([
   ["./tests/check.sh"],
 ])("finds empty-file-list verifier entries through %j", async (...command) => {
   const { reviewCheckPaths } = await import(
-    "../../../../src/workflow/product/review-check-context.js"
+    "../../../../src/workflow/product/review/review-check-context.js"
   );
   const { productCheckSchema } = await import("../../../../src/workflow/product/model.js");
   const { workspace, snapshot } = fixture({
@@ -318,7 +318,7 @@ it.each([
       sources.find((source) => source.reference === "tests/other.test.ts")?.coreOutcomes,
     ).toEqual(["O001"]);
     const { reviewCheckPaths } = await import(
-      "../../../../src/workflow/product/review-check-context.js"
+      "../../../../src/workflow/product/review/review-check-context.js"
     );
     expect(await reviewCheckPaths(workspace, wrappedBrief.checks, snapshot)).toEqual([
       "tests/api/retirement.test.ts",
@@ -425,7 +425,7 @@ it("prioritizes documents changed under the slice's authorization in prepared pa
     "../../../../src/workflow/product/index.js"
   );
   const { runProductReviewRequest } = await import(
-    "../../../../src/workflow/product/review-request.js"
+    "../../../../src/workflow/product/review/review-request.js"
   );
   const workspace = await TestWorkspace.create({
     "test/docs.test.mjs":
@@ -593,7 +593,7 @@ it("resolves unchanged product entry and transitive dependencies from executed v
 
 it("compacts identical verifier excerpts and check output while retaining their separate identities", async () => {
   const { deliveredSources } = await import(
-    "../../../../src/workflow/product/review-source-delivery.js"
+    "../../../../src/workflow/product/review/review-source-delivery.js"
   );
   const verifier = "test('retired', () => assert.equal(retire(), 410));\n".repeat(100);
   const sources = ["A", "B"].flatMap((id) => [
@@ -648,7 +648,7 @@ it("keeps changed implementation core when source scope hints do not identify it
 
 it("delivers full core whenever it fits the serialized budget without reserving an unnecessary gap", async () => {
   const { deliveredSources } = await import(
-    "../../../../src/workflow/product/review-source-delivery.js"
+    "../../../../src/workflow/product/review/review-source-delivery.js"
   );
   const text = `function core() { return '${"x".repeat(31500)}'; }`;
   const source = {
@@ -731,7 +731,7 @@ it("retains observed verifier candidates with nonstandard filenames and disclose
 
 it("keeps failed receipts linked to their failure source when stdout matches a passing receipt", async () => {
   const { deliveredSourceEvidence } = await import(
-    "../../../../src/workflow/product/review-source-delivery.js"
+    "../../../../src/workflow/product/review/review-source-delivery.js"
   );
   const sources = ["failed", "passed"].map((status) => ({
     id: `CHECK-${status}`,
@@ -774,7 +774,7 @@ it("prepares a review when a check reads a non-UTF-8 fixture file", async () => 
     "../../../../src/workflow/product/index.js"
   );
   const { runProductReviewRequest } = await import(
-    "../../../../src/workflow/product/review-request.js"
+    "../../../../src/workflow/product/review/review-request.js"
   );
   const p = await productWorkspace();
   try {

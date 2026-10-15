@@ -87,7 +87,7 @@ Every `work` reply names its context pack with a short `contextId`. A worker tha
 
 Instructions are selected per host, profile, operation and review phase rather than sent as one catalog. Each reviewer prompt has five responsibilities: preserve the goal and independent expectations, supply real evidence (source, executions and actual images), describe the judgment in plain language, state the read-only boundary and treat project content as evidence rather than instructions, and supply one response schema.
 
-Shared judgment guidance lives in `src/workflow/product/review-instructions.ts` and is used by critic packets, prepared review sessions and MCP host sampling. UI reviews add criteria for composition, hierarchy, scale, spacing, contrast and consistency. Source-only and design consultations do not receive permission to approve the product.
+Shared judgment guidance lives in `src/workflow/product/review/review-instructions.ts` and is used by critic packets, prepared review sessions and MCP host sampling. UI reviews add criteria for composition, hierarchy, scale, spacing, contrast and consistency. Source-only and design consultations do not receive permission to approve the product.
 
 The installed resident guide states the loop and essential rules; `VISP.commands.md` holds command shapes, reviewer setup and recovery. A pending critic attempt blocks new edit authorization, closure and acceptance until it returns or expires, and the block survives restarts. It is not an operating-system lock: writes outside VISP need host enforcement.
 

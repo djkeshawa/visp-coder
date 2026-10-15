@@ -3,7 +3,6 @@ import type { FileMutation } from "../../core/file-transaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { CHECK_OUTPUT_GUIDANCE } from "../product-output-guidance.js";
 import type { WorkspaceState } from "../state.js";
-import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import {
   applicableExecutions,
   finalProductAssessmentGaps,
@@ -12,17 +11,18 @@ import {
   productEvidenceGaps,
 } from "./assessment.js";
 import { checkBehaviorChanges } from "./behavior-changes.js";
+import { pinnedAcceptanceChecks } from "./check/acceptance-checks.js";
 import {
   cancelledExecution,
   executeChecks,
   executionOwnerKey,
   requireExecutionContract,
-} from "./check-lifecycle.js";
+} from "./check/check-lifecycle.js";
 import { ensureProductCheckpoint } from "./checkpoint.js";
 import { productNeighborhood } from "./context.js";
 import { correctionChecks } from "./corrections.js";
-import { reviewerPointer } from "./critic-capacity.js";
-import { requireNoPendingCriticReview } from "./critic-policy.js";
+import { reviewerPointer } from "./critic/critic-capacity.js";
+import { requireNoPendingCriticReview } from "./critic/critic-policy.js";
 import { environmentNext } from "./environment.js";
 import { currentJourneyFeedback } from "./evidence-references.js";
 import { productFailureSignature } from "./failures.js";
@@ -37,13 +37,12 @@ import {
   type ProductSlice,
   type ProductState,
 } from "./model.js";
-import { reviewerRules } from "./pinned-dispute-model.js";
 import {
   type PreparedResultImages,
   prepareResultImages,
   publishResultImages,
 } from "./result-images.js";
-import { reviewBaselineMutations } from "./review-baseline.js";
+import { reviewBaselineMutations } from "./review/review-baseline.js";
 import { withProductMutation } from "./runtime.js";
 import { checkProductScope, selectProductSlice } from "./scopes.js";
 import { type ProductNext, runProductNext } from "./status.js";
@@ -55,9 +54,14 @@ import {
   statusMutation,
 } from "./store.js";
 import { productContractDigest, productSourceDigest, productSourceSnapshot } from "./subject.js";
+import { reviewerRules } from "./tests/pinned-dispute-model.js";
 
 export type { ProductOutcomeStatus } from "./assessment.js";
-export { type ProductReviewBundle, type ProductReviewOptions, runProductReview } from "./review.js";
+export {
+  type ProductReviewBundle,
+  type ProductReviewOptions,
+  runProductReview,
+} from "./review/review.js";
 
 export interface ProductVerification {
   readonly warnings?: readonly string[];

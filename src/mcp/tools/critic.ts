@@ -3,9 +3,9 @@ import {
   type CriticAdapter,
   criticOperationWrites,
   runProductCritic,
-} from "../../workflow/product/critic.js";
-import { criticRequestSchema } from "../../workflow/product/critic-model.js";
-import { rejectedCriticReview } from "../../workflow/product/critic-status.js";
+} from "../../workflow/product/critic/critic.js";
+import { criticRequestSchema } from "../../workflow/product/critic/critic-model.js";
+import { rejectedCriticReview } from "../../workflow/product/critic/critic-status.js";
 import { mutatingWorkspaceFor, workspaceFor } from "../context.js";
 import { mcpCriticHost } from "../critic-host.js";
 import { failure } from "../reply.js";

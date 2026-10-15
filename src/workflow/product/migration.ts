@@ -29,8 +29,8 @@ import type { WorkspaceState } from "../state.js";
 import {
   type CriticBudgetMigration,
   planCriticBudgetMigration,
-} from "./critic-budget-migration.js";
-import { requireNoPendingCriticReview } from "./critic-policy.js";
+} from "./critic/critic-budget-migration.js";
+import { requireNoPendingCriticReview } from "./critic/critic-policy.js";
 import {
   type FindingIdentityMigration,
   planFindingIdentityMigration,

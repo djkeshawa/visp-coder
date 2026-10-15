@@ -1,5 +1,5 @@
 import { afterEach, it } from "vitest";
-import { saveTestsRecord } from "../../src/workflow/product/independent-tests-record.js";
+import { saveTestsRecord } from "../../src/workflow/product/tests/independent-tests-record.js";
 import { BRIEF, GOAL, GoldenProject, REQUEST, Recorder } from "./support/project.js";
 
 /**

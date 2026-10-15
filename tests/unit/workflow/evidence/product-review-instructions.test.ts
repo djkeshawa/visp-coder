@@ -1,18 +1,21 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
-import { criticPacket } from "../../../../src/workflow/product/critic-packet.js";
-import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
-import { independentReviewTemplate } from "../../../../src/workflow/product/independent-review.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
+import { criticPacket } from "../../../../src/workflow/product/critic/critic-packet.js";
+import {
+  criticSelection,
+  readCriticState,
+} from "../../../../src/workflow/product/critic/critic-store.js";
 import { runProductVerify, runProductWork } from "../../../../src/workflow/product/index.js";
 import { OBSERVATION_REVIEW_INSTRUCTIONS } from "../../../../src/workflow/product/observation-preview.js";
+import { independentReviewTemplate } from "../../../../src/workflow/product/review/independent-review.js";
 import {
   CRITIC_INSTRUCTIONS,
   productReviewInstructions,
-} from "../../../../src/workflow/product/review-instructions.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
-import { runProductReviewerHandoff } from "../../../../src/workflow/product/reviewer-handoff.js";
+} from "../../../../src/workflow/product/review/review-instructions.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
+import { runProductReviewerHandoff } from "../../../../src/workflow/product/review/reviewer-handoff.js";
 import { recordedProductJourney } from "../../support/product-journey.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 

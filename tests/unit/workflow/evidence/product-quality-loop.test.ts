@@ -145,7 +145,7 @@ describe("integrated quality feedback", () => {
   it("routes explicit dispatch through the shared operation and retains an unavailable CLI adapter", async () => {
     const project = await fixture();
     const { runProductReviewRequest, validateProductReviewRequest } = await import(
-      "../../../../src/workflow/product/review-request.js"
+      "../../../../src/workflow/product/review/review-request.js"
     );
     expect(validateProductReviewRequest({ dispatch: true, handoff: true }).ok).toBe(false);
     expect(validateProductReviewRequest({ feedback: {}, assessments: undefined }).ok).toBe(false);

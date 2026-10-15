@@ -7,12 +7,12 @@ import { launchesReviewer } from "../../../../src/config/critic.js";
 import {
   claudeExecCriticHost,
   configuredCriticLauncher,
-} from "../../../../src/workflow/product/critic-exec.js";
+} from "../../../../src/workflow/product/critic/critic-exec.js";
 import {
   configuredReviewStarter,
   reviewWaitMs,
-} from "../../../../src/workflow/product/done-review.js";
-import { reviewerRules } from "../../../../src/workflow/product/pinned-dispute-model.js";
+} from "../../../../src/workflow/product/review/done-review.js";
+import { reviewerRules } from "../../../../src/workflow/product/tests/pinned-dispute-model.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 
 const work: string[] = [];

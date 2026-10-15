@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { productObservationSummary } from "../../../../src/workflow/evidence/observations-reader.js";
-import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../../src/workflow/product/review/review.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
 let project: Awaited<ReturnType<typeof productWorkspace>> | undefined;

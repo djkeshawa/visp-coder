@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Profile } from "../../core/constants.js";
-import type { CriticAdapter } from "../../workflow/product/critic.js";
+import type { CriticAdapter } from "../../workflow/product/critic/critic.js";
 import { MINIMAL_TOOLS } from "../constants.js";
 import { registerCaptureTools } from "./capture.js";
 import { registerCriticTool } from "./critic.js";

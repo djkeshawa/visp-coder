@@ -9,14 +9,12 @@ import {
   CORE_SCOPE_FILE_LIMIT,
   coreReviewPaths,
 } from "../../../../src/workflow/product/core-review-sources.js";
-import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
 import {
-  inlineReview,
-  runProductDoneReviewed,
-} from "../../../../src/workflow/product/done-review.js";
+  type CriticPacket,
+  runProductCritic,
+} from "../../../../src/workflow/product/critic/critic.js";
 import { runProductDone } from "../../../../src/workflow/product/evidence.js";
 import { productEvidenceCatalogue } from "../../../../src/workflow/product/evidence-references.js";
-import { independentSources } from "../../../../src/workflow/product/independent-sources.js";
 import {
   createProductFeature,
   runProductVerify,
@@ -24,13 +22,18 @@ import {
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
 import type { ProductCheck } from "../../../../src/workflow/product/model.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
-import { deliveredReviewEvidenceIds } from "../../../../src/workflow/product/review-context.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
+import {
+  inlineReview,
+  runProductDoneReviewed,
+} from "../../../../src/workflow/product/review/done-review.js";
+import { independentSources } from "../../../../src/workflow/product/review/independent-sources.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
+import { deliveredReviewEvidenceIds } from "../../../../src/workflow/product/review/review-context.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
 import {
   deliveredSources,
   REVIEW_SOURCE_BUDGET,
-} from "../../../../src/workflow/product/review-source-delivery.js";
+} from "../../../../src/workflow/product/review/review-source-delivery.js";
 import type { ProductSource } from "../../../../src/workflow/product/sources.js";
 import { type ProductRecord, readProductRecord } from "../../../../src/workflow/product/store.js";
 import { productSourceDigest } from "../../../../src/workflow/product/subject.js";

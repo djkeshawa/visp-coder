@@ -6,9 +6,9 @@ import { ok } from "../../core/result.js";
 import { isApplicationSource } from "../../graph/coverage-notes.js";
 import { isIndexableProjectPath } from "../../graph/paths.js";
 import type { WorkspaceState } from "../state.js";
-import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import { productBehaviorProbes } from "./behavior-probes.js";
-import { isBrowserCheckCommand } from "./check-command.js";
+import { pinnedAcceptanceChecks } from "./check/acceptance-checks.js";
+import { isBrowserCheckCommand } from "./check/check-command.js";
 import { type CoreReviewPaths, coreReviewPaths } from "./core-review-sources.js";
 import {
   latestExecutionsByOwner,
@@ -16,9 +16,9 @@ import {
   type ProductExecution,
   type ProductSlice,
 } from "./model.js";
-import { reviewCheckPaths, reviewCheckResult } from "./review-check-context.js";
-import { reviewDiffSource } from "./review-diff.js";
-import { reviewExcerpt } from "./review-excerpts.js";
+import { reviewCheckPaths, reviewCheckResult } from "./review/review-check-context.js";
+import { reviewDiffSource } from "./review/review-diff.js";
+import { reviewExcerpt } from "./review/review-excerpts.js";
 import { readProductAuthorizationBaseline } from "./scopes.js";
 import { BROAD_SCOPE_SOURCE_ID, type ProductSource } from "./sources.js";
 import type { ProductRecord } from "./store.js";

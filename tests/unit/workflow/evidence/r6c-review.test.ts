@@ -4,20 +4,20 @@ import { sha256 } from "../../../../src/core/hash.js";
 import type { Result } from "../../../../src/core/result.js";
 import { ok } from "../../../../src/core/result.js";
 import { reviewCodeSources } from "../../../../src/workflow/product/code-context.js";
-import type { CriticPacket } from "../../../../src/workflow/product/critic-packet.js";
-import { independentSources } from "../../../../src/workflow/product/independent-sources.js";
+import type { CriticPacket } from "../../../../src/workflow/product/critic/critic-packet.js";
 import {
   runProductVerify,
   runProductWork,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
 import { initialProductState, productBriefSchema } from "../../../../src/workflow/product/model.js";
-import { deliveredEvidenceIdsSchema } from "../../../../src/workflow/product/review-delivery-validation.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
+import { independentSources } from "../../../../src/workflow/product/review/independent-sources.js";
+import { deliveredEvidenceIdsSchema } from "../../../../src/workflow/product/review/review-delivery-validation.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
 import {
   deliveredSources,
   reviewPacketBudgetGap,
-} from "../../../../src/workflow/product/review-source-delivery.js";
+} from "../../../../src/workflow/product/review/review-source-delivery.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
@@ -231,9 +231,9 @@ it.each(["native", "legacy-native", "attached"])(
   "%s critic refuses citation of a candidate trimmed from its packet",
   async (transport) => {
     const { balancedCritic } = await import("../../../../src/config/critic.js");
-    const { runProductCritic } = await import("../../../../src/workflow/product/critic.js");
+    const { runProductCritic } = await import("../../../../src/workflow/product/critic/critic.js");
     const { criticSelection, readCriticState } = await import(
-      "../../../../src/workflow/product/critic-store.js"
+      "../../../../src/workflow/product/critic/critic-store.js"
     );
     const p = await productWorkspace({ critic: true });
     try {
@@ -361,7 +361,7 @@ it.each(["native", "legacy-native", "attached"])(
           },
         ];
         const { criticStateSchema } = await import(
-          "../../../../src/workflow/product/critic-model.js"
+          "../../../../src/workflow/product/critic/critic-model.js"
         );
         expect(criticStateSchema.safeParse(oldState).success).toBe(true);
         if (transport === "legacy-native")
@@ -411,7 +411,7 @@ it("retains unchanged scoped implementation even when the check executes that fi
 
 it("retains execution summaries when their truncated target does not contain the full output", async () => {
   const { deliveredSourceEvidence } = await import(
-    "../../../../src/workflow/product/review-source-delivery.js"
+    "../../../../src/workflow/product/review/review-source-delivery.js"
   );
   const source = {
     id: "CHECK-one",
@@ -470,9 +470,9 @@ it("enforces both record and serialized bounds on new delivered-ID metadata", ()
 
 it("rejects an oversized final packet before reserving or invoking an attached review", async () => {
   const { balancedCritic } = await import("../../../../src/config/critic.js");
-  const { runProductCritic } = await import("../../../../src/workflow/product/critic.js");
+  const { runProductCritic } = await import("../../../../src/workflow/product/critic/critic.js");
   const { criticSelection, readCriticState } = await import(
-    "../../../../src/workflow/product/critic-store.js"
+    "../../../../src/workflow/product/critic/critic-store.js"
   );
   const p = await productWorkspace({ critic: true });
   try {
@@ -643,7 +643,7 @@ it("bounds actual formatted packet text and only excludes image data", () => {
 
 it("applies final source limits to the manual reviewer handoff", async () => {
   const { runProductReviewerHandoff } = await import(
-    "../../../../src/workflow/product/reviewer-handoff.js"
+    "../../../../src/workflow/product/review/reviewer-handoff.js"
   );
   const p = await productWorkspace();
   try {

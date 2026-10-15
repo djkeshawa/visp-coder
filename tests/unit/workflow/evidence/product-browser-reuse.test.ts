@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { reusableRun } from "../../../../src/workflow/product/browser-check-execution.js";
+import { reusableRun } from "../../../../src/workflow/product/check/browser-check-execution.js";
 
 const run = (overrides: Record<string, unknown> = {}) => ({
   id: "CAPRUN-1",

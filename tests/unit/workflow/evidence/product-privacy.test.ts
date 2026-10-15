@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
 import { prepareCandidate } from "../../../../src/workflow/product/candidate.js";
-import { criticSelection } from "../../../../src/workflow/product/critic-store.js";
+import { criticSelection } from "../../../../src/workflow/product/critic/critic-store.js";
 import { runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";

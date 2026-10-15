@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { reviewExcerpt } from "../../../../src/workflow/product/review-excerpts.js";
+import { reviewExcerpt } from "../../../../src/workflow/product/review/review-excerpts.js";
 
 const fixture = new URL("../../../fixtures/product-quality/flockshot/", import.meta.url);
 describe("behavior-focused source delivery", () => {

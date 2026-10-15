@@ -3,7 +3,7 @@ import { evidenceApplies } from "./evidence-references.js";
 import type { ProductSlice } from "./model.js";
 import type { ProductRecord } from "./store.js";
 
-export { OBSERVATION_REVIEW_INSTRUCTIONS } from "./review-instructions.js";
+export { OBSERVATION_REVIEW_INSTRUCTIONS } from "./review/review-instructions.js";
 
 /** Labels describe recorded operations, never inferred game states or quality. */
 export function observationSequence(record: ProductRecord, subject: string, slice?: ProductSlice) {

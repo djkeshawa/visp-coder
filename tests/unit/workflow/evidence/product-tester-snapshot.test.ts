@@ -7,7 +7,7 @@ import {
   captureTesterSnapshot,
   inTesterSnapshot,
   type TesterSnapshot,
-} from "../../../../src/workflow/product/tester-snapshot.js";
+} from "../../../../src/workflow/product/tests/tester-snapshot.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 
 let project: Awaited<ReturnType<typeof productWorkspace>>;

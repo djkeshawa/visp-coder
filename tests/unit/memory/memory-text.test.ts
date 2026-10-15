@@ -5,7 +5,7 @@ import {
   CRITIC_INSTRUCTIONS,
   SOURCE_ADVICE_INSTRUCTIONS,
   UNDERSTANDING_CRITIC_INSTRUCTIONS,
-} from "../../../src/workflow/product/review-instructions.js";
+} from "../../../src/workflow/product/review/review-instructions.js";
 
 const NOTE = "Items hold at most 10,000 units.";
 const LATER = ["a1b2c3d Raise the item limit to 50000 units", "e4f5a6b Show item counts"];

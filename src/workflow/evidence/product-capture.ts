@@ -6,8 +6,8 @@ import {
   cancelledExecution,
   mergeCaptureState,
   requireExecutionContract,
-} from "../product/check-lifecycle.js";
-import { criticRouteCommand } from "../product/critic-guidance.js";
+} from "../product/check/check-lifecycle.js";
+import { criticRouteCommand } from "../product/critic/critic-guidance.js";
 import { supportedHostCaptureRecovery } from "../product/environment-model.js";
 import { inspectProductImages } from "../product/images.js";
 import { productObservationPlan } from "../product/observation-plan.js";

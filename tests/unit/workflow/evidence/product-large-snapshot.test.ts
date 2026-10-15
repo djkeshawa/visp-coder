@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { prepareCandidate } from "../../../../src/workflow/product/candidate.js";
-import { criticSelection } from "../../../../src/workflow/product/critic-store.js";
+import { criticSelection } from "../../../../src/workflow/product/critic/critic-store.js";
 import { productSourceSnapshot } from "../../../../src/workflow/product/subject.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 

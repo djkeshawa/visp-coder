@@ -8,7 +8,7 @@ import { GUARD_PROTOCOL_VERSION } from "../../../src/core/constants.js";
 import { applyFileTransaction } from "../../../src/core/file-transaction.js";
 import type { Result } from "../../../src/core/result.js";
 import { registerScopeTools } from "../../../src/mcp/tools/scope.js";
-import { runProductCritic } from "../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../src/workflow/product/critic/critic.js";
 import { runProductVerify } from "../../../src/workflow/product/index.js";
 import { runProductWork } from "../../../src/workflow/product/work.js";
 import { runJson } from "../cli/support/cli.js";

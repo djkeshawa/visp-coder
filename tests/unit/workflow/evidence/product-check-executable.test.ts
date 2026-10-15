@@ -8,8 +8,8 @@ import {
   missingAlias,
   resolvesOnPath,
   uninstalledAlias,
-} from "../../../../src/workflow/product/check-executable.js";
-import { executeProductCheck } from "../../../../src/workflow/product/check-execution.js";
+} from "../../../../src/workflow/product/check/check-executable.js";
+import { executeProductCheck } from "../../../../src/workflow/product/check/check-execution.js";
 import { environmentNext } from "../../../../src/workflow/product/environment.js";
 import { type ProductBrief, productCheckSchema } from "../../../../src/workflow/product/model.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";

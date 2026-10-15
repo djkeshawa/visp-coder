@@ -3,20 +3,7 @@ import { fromUnknown, vispError } from "../../core/errors.js";
 import { parseFeatureStart } from "../../core/input.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { BRIEF_INPUT_HELP } from "../../harness/command-guide.js";
-import { productCheckTemplate } from "../../workflow/product/check-guidance.js";
-import {
-  configuredReviewStarter,
-  reviewWaitMs,
-  runProductAcceptReviewed,
-  runProductDoneReviewed,
-  runProductNextAfterReview,
-} from "../../workflow/product/done-review.js";
-import {
-  beginFeatureTester,
-  createProductFeatureChecked,
-  writeConfiguredTests,
-} from "../../workflow/product/independent-tests.js";
-import { configuredTestsStarter } from "../../workflow/product/independent-tests-starters.js";
+import { productCheckTemplate } from "../../workflow/product/check/check-guidance.js";
 import {
   readProductBrief,
   runProductContext,
@@ -29,11 +16,24 @@ import {
   updateProductBrief,
 } from "../../workflow/product/index.js";
 import {
+  configuredReviewStarter,
+  reviewWaitMs,
+  runProductAcceptReviewed,
+  runProductDoneReviewed,
+  runProductNextAfterReview,
+} from "../../workflow/product/review/done-review.js";
+import {
   parseReviewSubmission,
   runProductReviewRequest,
   validateProductReviewRequest,
-} from "../../workflow/product/review-request.js";
-import { testsWaitMs } from "../../workflow/product/tester-session.js";
+} from "../../workflow/product/review/review-request.js";
+import {
+  beginFeatureTester,
+  createProductFeatureChecked,
+  writeConfiguredTests,
+} from "../../workflow/product/tests/independent-tests.js";
+import { configuredTestsStarter } from "../../workflow/product/tests/independent-tests-starters.js";
+import { testsWaitMs } from "../../workflow/product/tests/tester-session.js";
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {

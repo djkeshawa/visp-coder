@@ -11,7 +11,7 @@ import { previewMigration } from "../../../../src/migration/operations.js";
 import { runProductCapture } from "../../../../src/workflow/evidence/product-capture.js";
 import { runProductControl } from "../../../../src/workflow/evidence/product-control.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
 import {
   runProductAccept,
   runProductDone,
@@ -19,8 +19,8 @@ import {
 } from "../../../../src/workflow/product/evidence.js";
 import { createProductFeature } from "../../../../src/workflow/product/feature-create.js";
 import { runProductReproduction } from "../../../../src/workflow/product/reproduction.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
-import { prepareReviewSession } from "../../../../src/workflow/product/review-session.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
+import { prepareReviewSession } from "../../../../src/workflow/product/review/review-session.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { runProductUserFeedback } from "../../../../src/workflow/product/user-feedback.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";

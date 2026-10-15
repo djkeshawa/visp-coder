@@ -7,7 +7,7 @@ import { runProductCapture } from "../../src/workflow/evidence/product-capture.j
 import { currentFailedJourneys } from "../../src/workflow/product/evidence-references.js";
 import type { ExperimentResolution } from "../../src/workflow/product/experiment-model.js";
 import { createProductFeature, updateProductBrief } from "../../src/workflow/product/index.js";
-import { runProductReviewRequest } from "../../src/workflow/product/review-request.js";
+import { runProductReviewRequest } from "../../src/workflow/product/review/review-request.js";
 import { readProductRecord } from "../../src/workflow/product/store.js";
 import { TestWorkspace } from "../unit/support/workspace.js";
 

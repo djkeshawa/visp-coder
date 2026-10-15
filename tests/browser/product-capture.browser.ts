@@ -6,7 +6,7 @@ import { sha256 } from "../../src/core/hash.js";
 import type { Result } from "../../src/core/result.js";
 import { productReply } from "../../src/mcp/tools/workflow.js";
 import { runProductCapture } from "../../src/workflow/evidence/product-capture.js";
-import { runProductReview } from "../../src/workflow/product/review.js";
+import { runProductReview } from "../../src/workflow/product/review/review.js";
 import { readProductRecord } from "../../src/workflow/product/store.js";
 import { productWorkspace } from "../unit/support/product-workspace.js";
 

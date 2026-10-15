@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ProductBrief, ProductState } from "../../../src/workflow/product/model.js";
-import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../src/workflow/product/review/review.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";
 import { productProject, succeeded } from "../support/product.js";
 import type { TestProject } from "../support/project.js";

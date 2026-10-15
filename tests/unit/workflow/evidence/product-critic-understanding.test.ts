@@ -4,8 +4,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import type { Result } from "../../../../src/core/result.js";
 import * as probe from "../../../../src/testing/browser-capability.js";
-import { type CriticPacket, runProductCritic } from "../../../../src/workflow/product/critic.js";
-import { criticUnderstanding } from "../../../../src/workflow/product/critic-understanding.js";
+import {
+  type CriticPacket,
+  runProductCritic,
+} from "../../../../src/workflow/product/critic/critic.js";
+import { criticUnderstanding } from "../../../../src/workflow/product/critic/critic-understanding.js";
 import { outstandingFeedback } from "../../../../src/workflow/product/feedback.js";
 import {
   runProductAccept,
@@ -16,8 +19,8 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../../../src/workflow/product/index.js";
-import type { ProductReviewBundle } from "../../../../src/workflow/product/review.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
+import type { ProductReviewBundle } from "../../../../src/workflow/product/review/review.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
 import { readProductAuthorization } from "../../../../src/workflow/product/scopes.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { legacyReview } from "../../support/legacy-critic.js";
@@ -424,7 +427,9 @@ it("accepts focused advice without category declarations and preserves findings 
     ok: true,
     value: { action: "worker", callsUsed: 1 },
   });
-  const { criticResponseSchema } = await import("../../../../src/workflow/product/critic-model.js");
+  const { criticResponseSchema } = await import(
+    "../../../../src/workflow/product/critic/critic-model.js"
+  );
   const finding = {
     dimension: "experience",
     problem: "Inspect an actual mismatch",
@@ -442,7 +447,7 @@ it("accepts focused advice without category declarations and preserves findings 
       },
     }).success,
   ).toBe(false);
-  const { nativePacket } = await import("../../../../src/workflow/product/critic-native.js");
+  const { nativePacket } = await import("../../../../src/workflow/product/critic/critic-native.js");
   expect(
     nativePacket(
       {
@@ -714,7 +719,9 @@ it("keeps the final call after validated example revisions and never treats old 
 it("aborts a brief revision without changing brief or authorization when critic history is malformed", async () => {
   value(await configure());
   const before = await record();
-  const { criticSelection } = await import("../../../../src/workflow/product/critic-store.js");
+  const { criticSelection } = await import(
+    "../../../../src/workflow/product/critic/critic-store.js"
+  );
   const selection = value(await criticSelection(await setup.workspace.state(), { task: "T001" }));
   const { writeFile } = await import("node:fs/promises");
   await writeFile(selection.path, "malformed");
@@ -730,7 +737,7 @@ it("aborts a brief revision without changing brief or authorization when critic 
 
 it("invalidates visual slice review identity when design changes without turning a style choice into protected intent", async () => {
   const { sliceDigest } = await import("../../../../src/workflow/product/model.js");
-  const { criticIntent } = await import("../../../../src/workflow/product/critic-store.js");
+  const { criticIntent } = await import("../../../../src/workflow/product/critic/critic-store.js");
   const brief = {
     ...setup.brief,
     outcomes: [

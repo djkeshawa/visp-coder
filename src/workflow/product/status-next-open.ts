@@ -1,21 +1,20 @@
 import { ok, type Result } from "../../core/result.js";
 import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
-import { pinnedAcceptanceChecks } from "./acceptance-checks.js";
 import {
   applicableExecutions,
   applicableReviews,
   outcomeStatuses,
   productEvidenceGaps,
 } from "./assessment.js";
+import { pinnedAcceptanceChecks } from "./check/acceptance-checks.js";
 import { sliceExecutionCheckIds } from "./corrections.js";
 import { environmentNext } from "./environment.js";
 import { latestCurrentJourneys } from "./evidence-references.js";
 import { productFeedbackGaps } from "./feedback.js";
 import { firstDoneAdvice, withFirstDoneAdvice } from "./first-done-advice.js";
 import { closedSlice, type ProductSlice } from "./model.js";
-import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./pinned-disputes.js";
-import { unavailableReviewerFindingsNext } from "./reviewer-findings-route.js";
+import { unavailableReviewerFindingsNext } from "./review/reviewer-findings-route.js";
 import { readProductAuthorization } from "./scopes.js";
 import type { ProductNext } from "./status.js";
 import { failedJourneyNext } from "./status-next-journeys.js";
@@ -30,6 +29,7 @@ import {
   unreproducedFindings,
 } from "./status-next-review.js";
 import type { ProductRecord } from "./store.js";
+import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./tests/pinned-disputes.js";
 
 export async function nextOpenSlice(
   workspace: WorkspaceState,

@@ -16,7 +16,7 @@ import { privatePath } from "../../core/redaction.js";
 import { err, ok, type Result } from "../../core/result.js";
 import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
-import { type CriticSelection, recordGuards } from "./critic-store.js";
+import { type CriticSelection, recordGuards } from "./critic/critic-store.js";
 import type { ProductSlice } from "./model.js";
 import { checkProductScope } from "./scopes.js";
 import { readSourceEntry, sourceEntryHash, sourceEntryMutation } from "./source-entry.js";

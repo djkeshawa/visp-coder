@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { reachesModel, runCodexStructured } from "./critic-exec.js";
+import { reachesModel, runCodexStructured } from "./critic/critic-exec.js";
 import type { RuleExtractor } from "./project-rules.js";
 
 /**

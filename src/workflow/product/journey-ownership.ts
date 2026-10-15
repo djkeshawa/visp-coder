@@ -2,7 +2,7 @@ import { z } from "zod";
 import { hashValue } from "../../core/hash.js";
 import { type BrowserJourney, browserJourneySchema } from "../../testing/browser-journey.js";
 import { productJourneyKey } from "../evidence/product-journey.js";
-import { isBrowserCheckCommand } from "./check-command.js";
+import { isBrowserCheckCommand } from "./check/check-command.js";
 import { outstandingFeedback } from "./findings.js";
 import type { ProductRecord } from "./store.js";
 

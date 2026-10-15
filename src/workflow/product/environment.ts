@@ -3,7 +3,7 @@ import { probeBrowserCapability } from "../../testing/browser-capability.js";
 import { BrowserUnavailableError } from "../../testing/chrome-transport.js";
 import type { WorkspaceState } from "../state.js";
 import { executionRecovery } from "./browser-recovery.js";
-import { isBrowserCheckCommand } from "./check-command.js";
+import { isBrowserCheckCommand } from "./check/check-command.js";
 import {
   type BrowserCapability,
   browserExecutionEnvironmentIdentity,

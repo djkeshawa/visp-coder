@@ -5,7 +5,7 @@ import {
   describeProductCheck,
   isBrowserCheckCommand,
   productCheckSupportsBehavior,
-} from "./check-command.js";
+} from "./check/check-command.js";
 import { type RepairEnvironmentChange, repairEnvironments } from "./comparison-environment.js";
 import { evidenceApplies, latestCurrentJourneys } from "./evidence-references.js";
 import type { ProductExecution } from "./model.js";

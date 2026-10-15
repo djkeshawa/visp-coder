@@ -16,17 +16,17 @@ import { fitProductContext } from "./context-budget.js";
 import { queryCurrentProductPaths } from "./context-graph.js";
 import type { ProductWorkContext } from "./context-types.js";
 import { correctionChecks, failedCheckOwners } from "./corrections.js";
-import { reviewerPointer } from "./critic-capacity.js";
+import { reviewerPointer } from "./critic/critic-capacity.js";
 import { currentJourneyFailures, currentJourneyFeedback } from "./evidence-references.js";
 import { productFeedbackPlan } from "./feedback.js";
 import { productInputWarnings } from "./input-warnings.js";
 import { checksFor, type ProductSlice } from "./model.js";
-import { reviewerRules } from "./pinned-dispute-model.js";
 import { type ProjectRule, readProjectRules } from "./project-rules.js";
-import { reviewExcerpt } from "./review-excerpts.js";
+import { reviewExcerpt } from "./review/review-excerpts.js";
 import { productSkills } from "./skills.js";
 import { briefPath, type ProductRecord, productStatePath } from "./store.js";
 import { productContractDigest, productSourceDigest } from "./subject.js";
+import { reviewerRules } from "./tests/pinned-dispute-model.js";
 import { userFeedbackPlan } from "./user-feedback.js";
 
 export async function buildProductContext(

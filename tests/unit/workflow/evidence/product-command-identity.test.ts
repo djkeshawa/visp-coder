@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import * as executables from "../../../../src/core/command-executable.js";
-import { executeProductCheck } from "../../../../src/workflow/product/check-execution.js";
+import { executeProductCheck } from "../../../../src/workflow/product/check/check-execution.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
 import { productSourceSnapshot } from "../../../../src/workflow/product/subject.js";
 import { productWorkspace } from "../../support/product-workspace.js";

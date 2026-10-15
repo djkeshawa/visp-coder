@@ -7,19 +7,17 @@ import { err, ok, type Result } from "../../core/result.js";
 import { requireImplementationFoundation } from "../gates/readiness.js";
 import type { WorkspaceState } from "../state.js";
 import { updateProductBrief } from "./brief.js";
-import { validateProductCheckCommand } from "./check-command.js";
-import { uninstalledAlias } from "./check-executable.js";
+import { validateProductCheckCommand } from "./check/check-command.js";
+import { uninstalledAlias } from "./check/check-executable.js";
 import { buildProductContext } from "./context.js";
 import { planContext } from "./context-delivery.js";
 import type { ProductWorkContext } from "./context-types.js";
 import { correctionReasons } from "./corrections.js";
-import { requireNoPendingCriticReview } from "./critic-policy.js";
-import { criticUnderstanding } from "./critic-understanding.js";
+import { requireNoPendingCriticReview } from "./critic/critic-policy.js";
+import { criticUnderstanding } from "./critic/critic-understanding.js";
 import { prepareWorkEnvironment } from "./environment.js";
 import { firstDoneAdvice, withFirstDoneAdvice } from "./first-done-advice.js";
 import { currentHostSession } from "./host-prompts.js";
-import { independentTestsBeforeWork } from "./independent-tests.js";
-import type { TestsStarter } from "./independent-tests-model.js";
 import {
   checksFor,
   closedSlice,
@@ -48,6 +46,8 @@ import {
   statusMutation,
 } from "./store.js";
 import { productSourceDigest, productSourceSnapshot } from "./subject.js";
+import { independentTestsBeforeWork } from "./tests/independent-tests.js";
+import type { TestsStarter } from "./tests/independent-tests-model.js";
 
 export type { ProductWorkContext } from "./context-types.js";
 

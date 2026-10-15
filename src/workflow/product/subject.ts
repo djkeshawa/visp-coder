@@ -24,8 +24,8 @@ import {
   hostFileProtection,
   skippedByproduct,
 } from "./byproducts.js";
-import { isBrowserCheckCommand } from "./check-command.js";
-import { declaredCheckImages } from "./check-image-paths.js";
+import { isBrowserCheckCommand } from "./check/check-command.js";
+import { declaredCheckImages } from "./check/check-image-paths.js";
 import { inheritedPaths } from "./inherited-record.js";
 import { type ProductBrief, type ProductCheck, type ProductSlice, sliceDigest } from "./model.js";
 import { workingSourceIdentity } from "./source-git.js";

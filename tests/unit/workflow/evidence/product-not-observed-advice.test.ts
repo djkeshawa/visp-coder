@@ -8,7 +8,7 @@ import { registerEvidenceTools } from "../../../../src/mcp/tools/evidence.js";
 import { registerWorkflowTools } from "../../../../src/mcp/tools/workflow.js";
 import type { ProductExecution } from "../../../../src/workflow/product/model.js";
 import { withNotObservedAdvice } from "../../../../src/workflow/product/not-observed-advice.js";
-import { runProductReview } from "../../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../../src/workflow/product/review/review.js";
 import type { ProductNext } from "../../../../src/workflow/product/status.js";
 import { readProductRecord, saveProductState } from "../../../../src/workflow/product/store.js";
 import {

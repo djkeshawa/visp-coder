@@ -7,7 +7,6 @@ import { environmentNext, needsBrowser } from "./environment.js";
 import { browserCapabilityApplies } from "./environment-model.js";
 import { closedSlice, type ProductSlice } from "./model.js";
 import { withNotObservedAdvice } from "./not-observed-advice.js";
-import { reviewerRules } from "./pinned-dispute-model.js";
 import {
   withRegressionScopeAdvice,
   withRegressionScopeAdviceResult,
@@ -18,6 +17,7 @@ import { historicalAcceptanceNext, type ProductIdentity } from "./status-history
 import { nextClosedProduct } from "./status-next-closed.js";
 import { nextOpenSlice } from "./status-next-open.js";
 import type { ProductRecord, ProductSelection } from "./store.js";
+import { reviewerRules } from "./tests/pinned-dispute-model.js";
 
 export async function nextFromRecord(
   workspace: WorkspaceState,

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { earlierAssertionResults } from "../../../../src/workflow/product/review-check-output.js";
+import { earlierAssertionResults } from "../../../../src/workflow/product/review/review-check-output.js";
 
 it("retains named unittest, TAP and pinned results before verbose log tails", () => {
   const text = [

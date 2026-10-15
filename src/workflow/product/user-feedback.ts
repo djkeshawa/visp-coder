@@ -3,7 +3,7 @@ import { fromUnknown, vispError } from "../../core/errors.js";
 import { err, ok } from "../../core/result.js";
 import { cliCommand } from "../next-action.js";
 import type { WorkspaceState } from "../state.js";
-import { observedProduct } from "./critic-status.js";
+import { observedProduct } from "./critic/critic-status.js";
 import type { ProductSlice } from "./model.js";
 import { withProductMutation } from "./runtime.js";
 import { selectProductSlice } from "./scopes.js";

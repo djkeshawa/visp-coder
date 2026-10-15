@@ -6,9 +6,9 @@ import { runProductCapture } from "../../src/workflow/evidence/product-capture.j
 import { runProductCaptureAction } from "../../src/workflow/evidence/product-capture-actions.js";
 import { updateProductBrief } from "../../src/workflow/product/brief.js";
 import { productCaptureRunSchema } from "../../src/workflow/product/capture-run-model.js";
-import { isBrowserCheckCommand } from "../../src/workflow/product/check-command.js";
+import { isBrowserCheckCommand } from "../../src/workflow/product/check/check-command.js";
 import { createProductFeature } from "../../src/workflow/product/feature-create.js";
-import { runProductReview } from "../../src/workflow/product/review.js";
+import { runProductReview } from "../../src/workflow/product/review/review.js";
 import { runProductNext } from "../../src/workflow/product/status.js";
 import { readProductRecord } from "../../src/workflow/product/store.js";
 import { runProductWork } from "../../src/workflow/product/work.js";
@@ -202,7 +202,9 @@ it("keeps a failed pointer control unresolved when keyboard completion succeeds"
 
 it("reconciles a corrected declared text assertion without changing the outcome or product", async () => {
   const { runProductVerify } = await import("../../src/workflow/product/index.js");
-  const { runProductReviewRequest } = await import("../../src/workflow/product/review-request.js");
+  const { runProductReviewRequest } = await import(
+    "../../src/workflow/product/review/review-request.js"
+  );
   const workspace = await TestWorkspace.create({
     "index.html": html.replace("textContent='Complete'", "textContent='Complete · saved'"),
   });

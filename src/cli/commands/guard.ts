@@ -10,7 +10,7 @@ import {
   type GuardRequest,
   pendingTransactionRefusal,
 } from "../../orchestrate/guard-evaluation.js";
-import { PENDING_REVIEW_MESSAGE } from "../../workflow/product/critic-policy.js";
+import { PENDING_REVIEW_MESSAGE } from "../../workflow/product/critic/critic-policy.js";
 import { productScopes as authorizedScopes } from "../../workflow/product/scopes.js";
 import type { WorkspaceState } from "../../workflow/state.js";
 import {

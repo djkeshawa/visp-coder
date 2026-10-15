@@ -9,7 +9,7 @@ import {
   validateProductFeedback,
 } from "../../../../src/workflow/product/feedback.js";
 import { initialProductState, parseProductBrief } from "../../../../src/workflow/product/model.js";
-import { reviewExcerpt } from "../../../../src/workflow/product/review-excerpts.js";
+import { reviewExcerpt } from "../../../../src/workflow/product/review/review-excerpts.js";
 import type { ProductRecord } from "../../../../src/workflow/product/store.js";
 import { productContractDigest } from "../../../../src/workflow/product/subject.js";
 

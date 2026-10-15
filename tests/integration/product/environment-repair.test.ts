@@ -13,7 +13,7 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../../src/workflow/product/index.js";
-import { runProductReview } from "../../../src/workflow/product/review.js";
+import { runProductReview } from "../../../src/workflow/product/review/review.js";
 import { readProductRecord } from "../../../src/workflow/product/store.js";
 import { runJson } from "../../unit/cli/support/cli.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";

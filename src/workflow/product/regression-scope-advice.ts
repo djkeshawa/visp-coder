@@ -3,7 +3,7 @@ import { ok, type Result } from "../../core/result.js";
 import { isApplicationSource } from "../../graph/coverage-notes.js";
 import { type GraphStore, isTestPath, openProjectStore } from "../../graph/index.js";
 import type { WorkspaceState } from "../state.js";
-import { describeProductCheck } from "./check-command.js";
+import { describeProductCheck } from "./check/check-command.js";
 import { observedProductGraphCurrency } from "./context-graph.js";
 import type { ProductSlice } from "./model.js";
 import { namesExistingTest } from "./regression-command-matching.js";

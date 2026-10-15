@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { reachesModel, runCodexStructured } from "./critic-exec.js";
+import { reachesModel, runCodexStructured } from "./critic/critic-exec.js";
 
 /** Chooses, from recorded notes, the ones a new request must stay consistent with. */
 export type MemoryGate = (

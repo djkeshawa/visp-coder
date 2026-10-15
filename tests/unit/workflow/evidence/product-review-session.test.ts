@@ -1,13 +1,13 @@
 import { readFile, rm } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { runProductVerify, runProductWork } from "../../../../src/workflow/product/index.js";
 import {
   independentJudgments,
   independentReviewSchema,
-} from "../../../../src/workflow/product/independent-review.js";
-import { runProductVerify, runProductWork } from "../../../../src/workflow/product/index.js";
-import { deliveredReviewEvidenceIds } from "../../../../src/workflow/product/review-context.js";
-import { runProductReviewRequest } from "../../../../src/workflow/product/review-request.js";
+} from "../../../../src/workflow/product/review/independent-review.js";
+import { deliveredReviewEvidenceIds } from "../../../../src/workflow/product/review/review-context.js";
+import { runProductReviewRequest } from "../../../../src/workflow/product/review/review-request.js";
 import { readProductRecord, saveProductState } from "../../../../src/workflow/product/store.js";
 import { productSourceDigest } from "../../../../src/workflow/product/subject.js";
 import { recordedProductJourney } from "../../support/product-journey.js";

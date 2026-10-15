@@ -13,13 +13,13 @@ export {
   type CriticPacket,
   type ProductCriticHost,
   runProductCritic,
-} from "./critic.js";
+} from "./critic/critic.js";
 export {
   type CriticConfig,
   criticConfigSchema,
   criticRequestSchema,
   criticResponseSchema,
-} from "./critic-model.js";
+} from "./critic/critic-model.js";
 export {
   type ProductOutcomeStatus,
   type ProductReviewBundle,
@@ -57,10 +57,10 @@ export {
   reviewerContextSchema,
 } from "./model.js";
 export { reproductionRequestSchema, runProductReproduction } from "./reproduction.js";
-export { runProductReviewRequest } from "./review-request.js";
-export { reviewJudgmentsSchema } from "./review-session.js";
-export { productReviewSubmissionSchema } from "./review-submission-model.js";
-export { runProductReviewerHandoff } from "./reviewer-handoff.js";
+export { runProductReviewRequest } from "./review/review-request.js";
+export { reviewJudgmentsSchema } from "./review/review-session.js";
+export { productReviewSubmissionSchema } from "./review/review-submission-model.js";
+export { runProductReviewerHandoff } from "./review/reviewer-handoff.js";
 export { productScopes } from "./scopes.js";
 export {
   hasProductFeature,

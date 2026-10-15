@@ -1,8 +1,11 @@
 import { expect, it } from "vitest";
 import { balancedCritic } from "../../../../src/config/critic.js";
 import type { Result } from "../../../../src/core/result.js";
-import { runProductCritic } from "../../../../src/workflow/product/critic.js";
-import { criticSelection, readCriticState } from "../../../../src/workflow/product/critic-store.js";
+import { runProductCritic } from "../../../../src/workflow/product/critic/critic.js";
+import {
+  criticSelection,
+  readCriticState,
+} from "../../../../src/workflow/product/critic/critic-store.js";
 import {
   runProductVerify,
   runProductWork,

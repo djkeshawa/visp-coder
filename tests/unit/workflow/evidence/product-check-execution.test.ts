@@ -6,16 +6,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { hashValue } from "../../../../src/core/hash.js";
 import { inspectStateLock } from "../../../../src/core/state-lock.js";
 import { updateProductBrief } from "../../../../src/workflow/product/brief.js";
-import { validateProductCheckCommand } from "../../../../src/workflow/product/check-command.js";
+import { validateProductCheckCommand } from "../../../../src/workflow/product/check/check-command.js";
 import {
   executeProductCheck,
   waivedResult,
-} from "../../../../src/workflow/product/check-execution.js";
+} from "../../../../src/workflow/product/check/check-execution.js";
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { executionSchema, productCheckSchema } from "../../../../src/workflow/product/model.js";
-import { failingTests } from "../../../../src/workflow/product/pinned-dispute-model.js";
-import { disputedFailure } from "../../../../src/workflow/product/pinned-disputes.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
+import { failingTests } from "../../../../src/workflow/product/tests/pinned-dispute-model.js";
+import { disputedFailure } from "../../../../src/workflow/product/tests/pinned-disputes.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";

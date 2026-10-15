@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import { registerTools } from "../../../src/mcp/tools/index.js";
 import type { ProductBrief } from "../../../src/workflow/product/index.js";
-import type { ProductReviewBundle } from "../../../src/workflow/product/review.js";
+import type { ProductReviewBundle } from "../../../src/workflow/product/review/review.js";
 import { runJson } from "../../unit/cli/support/cli.js";
 import { moduleFeedback } from "../../unit/support/product-feedback.js";
 import { TestWorkspace } from "../../unit/support/workspace.js";

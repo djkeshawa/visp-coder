@@ -4,10 +4,7 @@ import { z } from "zod";
 import { vispError } from "../../core/errors.js";
 import { featureIdSchema, parseFeatureStart, taskIdSchema } from "../../core/input.js";
 import type { Result } from "../../core/result.js";
-import { productCheckTemplate } from "../../workflow/product/check-guidance.js";
-import { runProductNextAfterReview } from "../../workflow/product/done-review.js";
-import { createProductFeatureWithTests } from "../../workflow/product/independent-tests.js";
-import { configuredTestsStarter } from "../../workflow/product/independent-tests-starters.js";
+import { productCheckTemplate } from "../../workflow/product/check/check-guidance.js";
 import {
   readProductBrief,
   runProductContext,
@@ -15,8 +12,11 @@ import {
   runProductWork,
   updateProductBrief,
 } from "../../workflow/product/index.js";
+import { runProductNextAfterReview } from "../../workflow/product/review/done-review.js";
 import type { ProductSelection } from "../../workflow/product/store.js";
-import { testsWaitMs } from "../../workflow/product/tester-session.js";
+import { createProductFeatureWithTests } from "../../workflow/product/tests/independent-tests.js";
+import { configuredTestsStarter } from "../../workflow/product/tests/independent-tests-starters.js";
+import { testsWaitMs } from "../../workflow/product/tests/tester-session.js";
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {

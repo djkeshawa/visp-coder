@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   codexExecCriticHost,
   runCodexStructured,
-} from "../../../../src/workflow/product/critic-exec.js";
+} from "../../../../src/workflow/product/critic/critic-exec.js";
 
 const config = {
   harness: "codex" as const,
