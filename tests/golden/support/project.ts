@@ -11,7 +11,7 @@ import { registerTools } from "../../../src/mcp/tools/index.js";
 import { outstandingFeedback } from "../../../src/workflow/product/findings.js";
 import { runProductNext } from "../../../src/workflow/product/status.js";
 import { type ProductRecord, readProductRecord } from "../../../src/workflow/product/store.js";
-import { readTestsRecord } from "../../../src/workflow/product/tests/independent-tests-record.js";
+import { readTestsRecord } from "../../../src/workflow/product/tester/independent-tests-record.js";
 import { type CliResult, runCli } from "../../unit/cli/support/cli.js";
 import { TestWorkspace } from "../../unit/support/workspace.js";
 import { type FakeModels, modelCallTranscript, testerSuite } from "./fake-models.js";

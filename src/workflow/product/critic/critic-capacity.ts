@@ -1,7 +1,7 @@
 import { CRITIC_CALL_TIMEOUT_MS, CRITIC_MAX_CALLS } from "../../../config/critic.js";
 import { cliCommand } from "../../next-action.js";
 import type { WorkspaceState } from "../../state.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
 import {
   featureCriticBudgetGap,
   featureCriticCapacity,

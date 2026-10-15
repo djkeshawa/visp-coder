@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TESTER_BROWSER_KIT } from "../../src/workflow/product/tests/tester-browser-kit.js";
+import { TESTER_BROWSER_KIT } from "../../src/workflow/product/tester/tester-browser-kit.js";
 
 interface Page {
   evaluate(code: unknown, ...args: unknown[]): Promise<unknown>;

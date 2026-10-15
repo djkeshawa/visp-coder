@@ -17,7 +17,7 @@ import { historicalAcceptanceNext, type ProductIdentity } from "./status-history
 import { nextClosedProduct } from "./status-next-closed.js";
 import { nextOpenSlice } from "./status-next-open.js";
 import type { ProductRecord, ProductSelection } from "./store.js";
-import { reviewerRules } from "./tests/pinned-dispute-model.js";
+import { reviewerRules } from "./tester/pinned-dispute-model.js";
 
 export async function nextFromRecord(
   workspace: WorkspaceState,

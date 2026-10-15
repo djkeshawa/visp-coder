@@ -42,7 +42,7 @@ import {
   WAIVED_TESTS_ENV,
   type Waivers,
   waivedFailure,
-} from "../tests/pinned-dispute-model.js";
+} from "../tester/pinned-dispute-model.js";
 import { productVerifierDigest } from "../verifier-identity.js";
 import { executeBrowserCheck } from "./browser-check-execution.js";
 import {

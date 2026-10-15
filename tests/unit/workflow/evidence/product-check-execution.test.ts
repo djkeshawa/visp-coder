@@ -14,8 +14,8 @@ import {
 import { runProductDone, runProductVerify } from "../../../../src/workflow/product/evidence.js";
 import { executionSchema, productCheckSchema } from "../../../../src/workflow/product/model.js";
 import { readProductRecord } from "../../../../src/workflow/product/store.js";
-import { failingTests } from "../../../../src/workflow/product/tests/pinned-dispute-model.js";
-import { disputedFailure } from "../../../../src/workflow/product/tests/pinned-disputes.js";
+import { failingTests } from "../../../../src/workflow/product/tester/pinned-dispute-model.js";
+import { disputedFailure } from "../../../../src/workflow/product/tester/pinned-disputes.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import { productWorkspace } from "../../support/product-workspace.js";
 import type { TestWorkspace } from "../../support/workspace.js";

@@ -27,7 +27,7 @@ import {
   reviewerState,
 } from "./status-next-review.js";
 import type { ProductRecord } from "./store.js";
-import { pinnedRoute } from "./tests/pinned-disputes.js";
+import { pinnedRoute } from "./tester/pinned-disputes.js";
 
 export async function nextClosedProduct(
   workspace: WorkspaceState,

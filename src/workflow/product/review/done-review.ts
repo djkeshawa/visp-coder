@@ -23,8 +23,8 @@ import { type ProductRecord, type ProductSelection, readProductRecord } from "..
 import {
   type AcceptanceProgress,
   acceptanceProgress,
-} from "../tests/independent-tests-progress.js";
-import type { PinnedDispute } from "../tests/pinned-dispute-model.js";
+} from "../tester/independent-tests-progress.js";
+import type { PinnedDispute } from "../tester/pinned-dispute-model.js";
 import {
   type DisputeInput,
   type DisputeOutcome,
@@ -39,7 +39,7 @@ import {
   ranPinned,
   refreshDisputes,
   rulingCurrent,
-} from "../tests/pinned-disputes.js";
+} from "../tester/pinned-disputes.js";
 import { completesFeature } from "./review-selection.js";
 
 export interface DoneCriticSummary {

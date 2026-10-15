@@ -8,9 +8,9 @@ import { unchangedInheritedPaths } from "../inherited-changes.js";
 import { checksFor, latestExecutionsByOwner, type ProductExecution } from "../model.js";
 import type { ProductNext } from "../status.js";
 import type { ProductRecord } from "../store.js";
-import type { IndependentTestsRecord } from "../tests/independent-tests-model.js";
-import { readTestsRecord } from "../tests/independent-tests-record.js";
-import { TESTER_ACTIVITY_FILE, testerNetworkCommands } from "../tests/tester-activity.js";
+import type { IndependentTestsRecord } from "../tester/independent-tests-model.js";
+import { readTestsRecord } from "../tester/independent-tests-record.js";
+import { TESTER_ACTIVITY_FILE, testerNetworkCommands } from "../tester/tester-activity.js";
 
 /**
  * One document a human reviewer can act on: the request, what was promised, what changed,

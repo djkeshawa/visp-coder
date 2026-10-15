@@ -15,7 +15,7 @@ export interface ProductContextContent {
     { ok: true }
   >["value"];
   /** Acceptance tests an independent tester wrote from the original request. */
-  readonly independentTests?: import("./tests/independent-tests-model.js").IndependentTestsSummary;
+  readonly independentTests?: import("./tester/independent-tests-model.js").IndependentTestsSummary;
   readonly userFeedback?: ReturnType<typeof import("./user-feedback.js").userFeedbackPlan>;
   readonly feedbackPlan?: ReturnType<typeof productFeedbackPlan>;
   readonly feature: string;

@@ -17,7 +17,7 @@ import { repairRecheck } from "./repair-recheck.js";
 import { completesFeature } from "./review/review-selection.js";
 import type { ProductNext } from "./status.js";
 import type { ProductRecord } from "./store.js";
-import { reviewerRules } from "./tests/pinned-dispute-model.js";
+import { reviewerRules } from "./tester/pinned-dispute-model.js";
 
 export function repairRoute(
   record: ProductRecord,

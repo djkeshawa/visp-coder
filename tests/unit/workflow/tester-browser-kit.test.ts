@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { environmentOnly } from "../../../src/workflow/product/tests/pinned-dispute-model.js";
+import { environmentOnly } from "../../../src/workflow/product/tester/pinned-dispute-model.js";
 import {
   TESTER_BROWSER_KIT,
   testerBrowserKitLines,
   testerOwnContent,
   withTesterBrowserKit,
-} from "../../../src/workflow/product/tests/tester-browser-kit.js";
+} from "../../../src/workflow/product/tester/tester-browser-kit.js";
 
 const run = promisify(execFile);
 const root = process.cwd();

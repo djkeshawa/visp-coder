@@ -4,7 +4,7 @@ import { productInputTemplate } from "../../product-inputs.js";
 import { productReviewReceipt } from "../../product-presentation.js";
 import type { WorkspaceState } from "../../state.js";
 import type { ProductFeedbackHost } from "../host-feedback.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
 import { independentJudgments, independentReviewSchema } from "./independent-review.js";
 import { type ProductReviewOptions, runProductReview } from "./review.js";
 import type { DeliveredReviewEvidence } from "./review-delivery-validation.js";

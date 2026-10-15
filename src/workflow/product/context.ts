@@ -26,7 +26,7 @@ import { reviewExcerpt } from "./review/review-excerpts.js";
 import { productSkills } from "./skills.js";
 import { briefPath, type ProductRecord, productStatePath } from "./store.js";
 import { productContractDigest, productSourceDigest } from "./subject.js";
-import { reviewerRules } from "./tests/pinned-dispute-model.js";
+import { reviewerRules } from "./tester/pinned-dispute-model.js";
 import { userFeedbackPlan } from "./user-feedback.js";
 
 export async function buildProductContext(

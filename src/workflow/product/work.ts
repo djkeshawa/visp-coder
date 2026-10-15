@@ -46,8 +46,8 @@ import {
   statusMutation,
 } from "./store.js";
 import { productSourceDigest, productSourceSnapshot } from "./subject.js";
-import { independentTestsBeforeWork } from "./tests/independent-tests.js";
-import type { TestsStarter } from "./tests/independent-tests-model.js";
+import { independentTestsBeforeWork } from "./tester/independent-tests.js";
+import type { TestsStarter } from "./tester/independent-tests-model.js";
 
 export type { ProductWorkContext } from "./context-types.js";
 

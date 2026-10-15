@@ -20,7 +20,7 @@ import {
   readProductRecord,
 } from "../store.js";
 import { productContractDigest } from "../subject.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
 import { planCriticBudgetMutation } from "./critic-budget.js";
 import { type CriticPhase, type CriticState, criticStateSchema } from "./critic-model.js";
 

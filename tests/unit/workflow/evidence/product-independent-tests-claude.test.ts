@@ -6,17 +6,17 @@ import { parse, stringify } from "yaml";
 import {
   independentTestsBeforeWork,
   writeConfiguredTests,
-} from "../../../../src/workflow/product/tests/independent-tests.js";
-import { writeIndependentTests } from "../../../../src/workflow/product/tests/independent-tests-run.js";
+} from "../../../../src/workflow/product/tester/independent-tests.js";
+import { writeIndependentTests } from "../../../../src/workflow/product/tester/independent-tests-run.js";
 import {
   configuredTestsStarter,
   inlineTests,
-} from "../../../../src/workflow/product/tests/independent-tests-starters.js";
+} from "../../../../src/workflow/product/tester/independent-tests-starters.js";
 import {
   claudeTester,
   testerCli,
   testsWaitMs,
-} from "../../../../src/workflow/product/tests/tester-session.js";
+} from "../../../../src/workflow/product/tester/tester-session.js";
 import { runProductWork } from "../../../../src/workflow/product/work.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 import { productWorkspace } from "../../support/product-workspace.js";

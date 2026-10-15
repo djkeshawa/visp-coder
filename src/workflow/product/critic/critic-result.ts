@@ -15,8 +15,8 @@ import {
 } from "../review/review-delivery-validation.js";
 import { runProductReviewRequest } from "../review/review-request.js";
 import { productSourceDigest } from "../subject.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
-import { applyDisputeRulings } from "../tests/pinned-disputes.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
+import { applyDisputeRulings } from "../tester/pinned-disputes.js";
 import type { ProductCriticHost } from "./critic.js";
 import {
   type CriticAdapterCall,

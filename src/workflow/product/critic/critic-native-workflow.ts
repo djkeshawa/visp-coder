@@ -4,7 +4,7 @@ import { cliCommand } from "../../next-action.js";
 import type { WorkspaceState } from "../../state.js";
 import { reviewerHandoffCandidates } from "../review/reviewer-handoff.js";
 import { withProductMutation } from "../runtime.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
 import {
   featureCriticBudgetGap,
   featureCriticCapacity,

@@ -54,7 +54,7 @@ import {
   statusMutation,
 } from "./store.js";
 import { productContractDigest, productSourceDigest, productSourceSnapshot } from "./subject.js";
-import { reviewerRules } from "./tests/pinned-dispute-model.js";
+import { reviewerRules } from "./tester/pinned-dispute-model.js";
 
 export type { ProductOutcomeStatus } from "./assessment.js";
 export {

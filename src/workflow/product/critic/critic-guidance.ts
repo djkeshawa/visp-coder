@@ -2,7 +2,7 @@ import { ok, type Result } from "../../../core/result.js";
 import { cliCommand } from "../../next-action.js";
 import type { WorkspaceState } from "../../state.js";
 import type { ProductNext } from "../status.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
 import { criticStatus } from "./critic-status.js";
 
 /** Criticism supplements baseline navigation; availability never becomes a product gate. */

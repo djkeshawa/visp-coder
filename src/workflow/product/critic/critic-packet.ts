@@ -25,7 +25,7 @@ import {
   independentReviewerContext,
   type reviewerHandoffCandidates,
 } from "../review/reviewer-handoff.js";
-import { disputePacketEntries, type PacketDispute } from "../tests/pinned-disputes.js";
+import { disputePacketEntries, type PacketDispute } from "../tester/pinned-disputes.js";
 import type { CriticPhase, CriticState } from "./critic-model.js";
 import type { CriticSelection } from "./critic-store.js";
 

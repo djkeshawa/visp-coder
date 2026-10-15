@@ -14,7 +14,7 @@ import {
 } from "../workflow/product/model.js";
 import { type ProductNext, runProductNext, runProductStatus } from "../workflow/product/status.js";
 import { type ProductRecord, readProductRecord } from "../workflow/product/store.js";
-import { readTestsRecord } from "../workflow/product/tests/independent-tests-record.js";
+import { readTestsRecord } from "../workflow/product/tester/independent-tests-record.js";
 import type { WorkspaceState } from "../workflow/state.js";
 import { activityFor } from "./activity.js";
 import { listCaptures } from "./captures.js";

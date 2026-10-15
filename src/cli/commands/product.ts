@@ -31,9 +31,9 @@ import {
   beginFeatureTester,
   createProductFeatureChecked,
   writeConfiguredTests,
-} from "../../workflow/product/tests/independent-tests.js";
-import { configuredTestsStarter } from "../../workflow/product/tests/independent-tests-starters.js";
-import { testsWaitMs } from "../../workflow/product/tests/tester-session.js";
+} from "../../workflow/product/tester/independent-tests.js";
+import { configuredTestsStarter } from "../../workflow/product/tester/independent-tests-starters.js";
+import { testsWaitMs } from "../../workflow/product/tester/tester-session.js";
 import { compactProductReply } from "../../workflow/product-compact-text.js";
 import { PRODUCT_BRIEF_ENTRY_GUIDE, productInputTemplate } from "../../workflow/product-inputs.js";
 import {

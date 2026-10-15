@@ -36,7 +36,7 @@ import {
   productSourceDigest,
   productSourceSnapshot,
 } from "../subject.js";
-import { readTestsRecord } from "../tests/independent-tests-record.js";
+import { readTestsRecord } from "../tester/independent-tests-record.js";
 import { assembleReviewBundle } from "./review-bundle.js";
 import {
   previousReviewAssessments,
@@ -66,7 +66,7 @@ export interface ProductReviewOptions extends ProductSelection {
   readonly experimentResolutions?: unknown;
 }
 export interface ProductReviewBundle {
-  readonly ambiguities?: readonly import("../tests/request-ambiguities.js").RequestAmbiguity[];
+  readonly ambiguities?: readonly import("../tester/request-ambiguities.js").RequestAmbiguity[];
   readonly observationSequence?: ReturnType<typeof observationSequence>;
   readonly policyVersion: typeof PRODUCT_REVIEW_POLICY;
   readonly feedbackPlan: ReturnType<typeof productFeedbackPlan>;

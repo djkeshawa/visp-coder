@@ -16,8 +16,8 @@ import { generatedSourceReferences } from "../review/review-delivery-validation.
 import { reviewerHandoffCandidates } from "../review/reviewer-handoff.js";
 import type { ProductRecord } from "../store.js";
 import { productImplementationDigest } from "../subject.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
-import { disputeSetKey, disputeState } from "../tests/pinned-disputes.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
+import { disputeSetKey, disputeState } from "../tester/pinned-disputes.js";
 import {
   featureCriticBudgetGap,
   featureCriticCapacity,

@@ -12,7 +12,7 @@ import {
   configuredReviewStarter,
   reviewWaitMs,
 } from "../../../../src/workflow/product/review/done-review.js";
-import { reviewerRules } from "../../../../src/workflow/product/tests/pinned-dispute-model.js";
+import { reviewerRules } from "../../../../src/workflow/product/tester/pinned-dispute-model.js";
 import type { WorkspaceState } from "../../../../src/workflow/state.js";
 
 const work: string[] = [];

@@ -18,7 +18,7 @@ import { observationSequence } from "../observation-preview.js";
 import { reproductionContextDigest } from "../reproduction-bindings.js";
 import type { ProductRecord } from "../store.js";
 import { productContractDigest } from "../subject.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
 import type { ProductReviewOptions } from "./review.js";
 import { preferredReviewCaptures } from "./review-context.js";
 

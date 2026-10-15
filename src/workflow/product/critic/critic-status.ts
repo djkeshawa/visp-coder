@@ -10,7 +10,7 @@ import { captureSchema } from "../images.js";
 import type { ProductSlice, ProductState } from "../model.js";
 import type { ProductRecord } from "../store.js";
 import { productSourceDigest } from "../subject.js";
-import { reviewerRules } from "../tests/pinned-dispute-model.js";
+import { reviewerRules } from "../tester/pinned-dispute-model.js";
 import {
   featureCriticBudgetGap,
   featureCriticCapacity,

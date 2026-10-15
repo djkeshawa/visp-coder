@@ -29,7 +29,7 @@ import {
   unreproducedFindings,
 } from "./status-next-review.js";
 import type { ProductRecord } from "./store.js";
-import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./tests/pinned-disputes.js";
+import { type PinnedRoute, pinnedHandoff, pinnedRoute } from "./tester/pinned-disputes.js";
 
 export async function nextOpenSlice(
   workspace: WorkspaceState,
