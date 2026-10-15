@@ -14,18 +14,14 @@ import {
 import { reviewerHandoff } from "./critic/critic-capacity.js";
 import { environmentNext } from "./environment.js";
 import { currentFailedJourneys, currentJourneyFailures } from "./evidence-references.js";
+import { requiredFindingOwner } from "./findings.js";
 import { withNotObservedAdvice } from "./not-observed-advice.js";
 import { productRefinement } from "./refinement.js";
 import { unavailableClosedReviewerFindingsNext } from "./review/reviewer-findings-route.js";
 import type { ProductNext } from "./status.js";
 import { environmentJourneyNext } from "./status-next-journeys.js";
 import { pinnedStep, stuckPinnedStep } from "./status-next-open.js";
-import {
-  exhaustedNext,
-  type ReviewerState,
-  requiredFindings,
-  reviewerState,
-} from "./status-next-review.js";
+import { exhaustedNext, type ReviewerState, reviewerState } from "./status-next-review.js";
 import type { ProductRecord } from "./store.js";
 import { pinnedRoute } from "./tester/pinned-disputes.js";
 
@@ -139,10 +135,10 @@ function closedProductCorrection(
         (run) => run.task === slice.id && run.failure?.kind === "behavior",
       ),
     ) ??
+    // A finding naming outcomes of several slices goes to one owner, never the first in order.
+    requiredFindingOwner(record) ??
     record.brief.slices.find(
-      (slice) =>
-        reviewCorrectionOutcomes(record, slice, subject).length > 0 ||
-        requiredFindings(record, slice).length > 0,
+      (slice) => reviewCorrectionOutcomes(record, slice, subject).length > 0,
     ) ??
     failures
       .map((execution) => failedCheckOwners(record, execution))

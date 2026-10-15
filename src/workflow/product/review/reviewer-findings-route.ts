@@ -5,7 +5,8 @@ import { pinnedAcceptanceChecks } from "../check/acceptance-checks.js";
 import { currentProductFailures, sliceExecutionCheckIds } from "../corrections.js";
 import { type ReviewerCapacity, reviewerHandoff } from "../critic/critic-capacity.js";
 import { currentJourneyFailures } from "../evidence-references.js";
-import { findingAppliesToSlice, outstandingFeedback } from "../feedback.js";
+import { outstandingFeedback } from "../feedback.js";
+import { findingOwner, requiredFindingOwner } from "../findings.js";
 import { closedSlice, type ProductSlice } from "../model.js";
 import type { ProductNext } from "../status.js";
 import type { ProductRecord } from "../store.js";
@@ -23,10 +24,7 @@ export function unavailableClosedReviewerFindingsNext(
     currentJourneyFailures(record, subject).length
   )
     return undefined;
-  const findings = outstandingFeedback(record).filter((finding) => finding.required);
-  const slice = record.brief.slices.find((entry) =>
-    findings.some((finding) => findingAppliesToSlice(finding, entry)),
-  );
+  const slice = requiredFindingOwner(record);
   return slice
     ? unavailableReviewerFindingsNext(workspace, record, slice, subject, capacity)
     : undefined;
@@ -70,11 +68,16 @@ export function unavailableReviewerFindingsNext(
   };
 }
 
-/** A feature-level PR must not skip another slice's untouched findings or stale checks. */
+/**
+ * A feature-level PR must not skip another slice's untouched findings or stale checks. Each
+ * finding belongs to one slice, so a repair is never undone by its own check going stale.
+ */
 function requiredFindingScopes(workspace: WorkspaceState, record: ProductRecord, subject: string) {
   const required = outstandingFeedback(record).filter((finding) => finding.required);
   return record.brief.slices.flatMap((slice) => {
-    const findings = required.filter((finding) => findingAppliesToSlice(finding, slice));
+    const findings = required.filter(
+      (finding) => findingOwner(finding, record.brief.slices)?.id === slice.id,
+    );
     if (!findings.length) return [];
     const productFindings = findings.some((finding) => finding.phase === "product");
     const latest = record.state.reviews.findLast(
