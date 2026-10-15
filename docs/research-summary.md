@@ -81,6 +81,20 @@ No task dropped on any quality metric. The time differences have specific causes
 | Reviewer: at most one optional maintainability finding | code: reservations-api 8 → 8.33, spreadsheet-cli 8 → 8, slingshot 8 → 7.67 | within noise | no: reviewers never raised one in 17 reviews |
 | After a clean review leaving optional findings on a picture, offer one extra repair round (on top of the parts rule) | against the parts rule alone: ps5 5.33 → 5.33, voxel 8.67 → 8.67, lighthouse 8.33 → 8.33 | ps5 197 → 306 s | no |
 
+**Final build against develop (fin, 42 runs).** The integration build with every change above that was kept (the parts rule included), the refactors, `visp uninstall` and the test-speed work:
+
+| Task | Hidden | Judge | Checklist | Code | Median wall |
+| --- | --- | --- | --- | --- | --- |
+| voxel-pagoda | – | 8.33 → 8.67 | 7 → 7 | – | 380 → 435 s |
+| rainfall-chart | – | 9.67 → 9.67 | 9 → 9 | – | 140 → 164 s |
+| lighthouse-pixel | – | 7.33 → 7.67 | 9.67 → 10.33 | – | 323 → 366 s |
+| ps5-controller-svg | – | 5.33 → 6.33 | 8.67 → 9.67 | – | 158 → 361 s |
+| slingshot-game | 100% → 100% | 7.67 → 8 | 7.67 → 8 | 8 → 7.67 | 1498 → 2025 s |
+| reservations-bundles | 100% → 100% | – | – | 8 → 8 | 173 → 252 s |
+| spreadsheet-extend | 100% → 100% | – | – | 7 → 8 | 727 → 654 s |
+
+The mean visual judge score rose from 7.67 to 8.08 and the mean code score on the code tasks from 7.67 to 7.89; hidden checks were at their maximum in both arms on every task, so this round cannot show an accuracy gain. On develop, reviews were often unavailable (lighthouse 0 of 6 attempts usable, pagoda 2 of 6) because reviewers cited evidence VISP had listed as unavailable; on the final build almost every review ran. The one score that fell, slingshot's code score, comes from a single run that hit the 60-minute cap: after half an hour of its own level searches the worker was routed back and forth between two slices for one finding on a shared file, a routing loop present since October 1 and fixed afterwards (`findingOwner`). Medians rose on most tasks because reviews now complete in the foreground and PS5 runs repair the parts the reviewer requires (one PS5 run went from 5 to 8); the bundles and rainfall means fell (374 → 249 s and 183 → 166 s), where develop's workers idled in polling loops.
+
 The weakest visual task, the PS5 controller, failed the judge's parts checklist (two-tone shell, shoulder buttons, PS logo, "reads as a PS5 controller"). Before images reached the reviewer it judged from SVG coordinates; with images it filed missing parts as optional style. Asking the reviewer to list and check identifying parts raised the lighthouse score in both batches (the judge's "waves breaking against the rocks" item) but did not move the PS5 score once both batches are counted: the reviewer named missing parts, and Haiku's drawings still lacked the two-tone shell and shoulder buttons. A worker-side checklist and an extra optional repair round added time without a score change. Per-batch differences of 0.33 reversed between batches, so single three-run batches are not enough to call small effects either way.
 
 ## What made the difference
