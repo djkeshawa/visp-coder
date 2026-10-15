@@ -95,6 +95,8 @@ No task dropped on any quality metric. The time differences have specific causes
 
 The mean visual judge score rose from 7.67 to 8.08 and the mean code score on the code tasks from 7.67 to 7.89; hidden checks were at their maximum in both arms on every task, so this round cannot show an accuracy gain. On develop, reviews were often unavailable (lighthouse 0 of 6 attempts usable, pagoda 2 of 6) because reviewers cited evidence VISP had listed as unavailable; on the final build almost every review ran. The one score that fell, slingshot's code score, comes from a single run that hit the 60-minute cap: after half an hour of its own level searches the worker was routed back and forth between two slices for one finding on a shared file, a routing loop present since October 1 and fixed afterwards (`findingOwner`). Medians rose on most tasks because reviews now complete in the foreground and PS5 runs repair the parts the reviewer requires (one PS5 run went from 5 to 8); the bundles and rainfall means fell (374 → 249 s and 183 → 166 s), where develop's workers idled in polling loops.
 
+A routing loop found in that run was fixed afterwards and checked in a small batch (pp: the final build with and without the fix, slingshot and spreadsheet-extend, three runs each): hidden checks, judge and checklist equal; code scores moved by a third of a point in opposite directions; the loop did not occur in either arm, so the batch shows no effect of the fix either way.
+
 The weakest visual task, the PS5 controller, failed the judge's parts checklist (two-tone shell, shoulder buttons, PS logo, "reads as a PS5 controller"). Before images reached the reviewer it judged from SVG coordinates; with images it filed missing parts as optional style. Asking the reviewer to list and check identifying parts raised the lighthouse score in both batches (the judge's "waves breaking against the rocks" item) but did not move the PS5 score once both batches are counted: the reviewer named missing parts, and Haiku's drawings still lacked the two-tone shell and shoulder buttons. A worker-side checklist and an extra optional repair round added time without a score change. Per-batch differences of 0.33 reversed between batches, so single three-run batches are not enough to call small effects either way.
 
 ## What made the difference
@@ -199,6 +201,8 @@ Every inventory run carried three notes and every spreadsheet run that started a
 Independent studies point the same way: execution feedback against fixed tests is the strongest lever (TDFlow; SWT-bench), self-critique without external signals is weak (Olausson et al., ICLR 2024; Kamoi et al., TACL 2024), passing tests often do not mean mergeable code (PatchDiff; METR 2026), heavy specification documents add large review overhead for small gains, and fewer, smaller tools help (RAG-MCP).
 
 ## Limits and next steps
+
+- The October batches ran three runs per arm; a one-point judge difference in one run moves a task mean by 0.33, and several 0.33 differences reversed between batches. Hidden checks were at their maximum on every task for both builds with the Haiku 5.5 worker, so these tasks no longer measure accuracy differences; harder tasks are needed.
 
 - Three runs per arm on four tasks the authors wrote; differences of one or two checks are within run-to-run noise.
 - The reviewer is a stronger model than the weak worker. Part of VISP's gain may come from that model rather than the loop; a same-model reviewer ablation has not been run.
